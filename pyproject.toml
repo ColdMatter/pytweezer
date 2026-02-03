@@ -32,7 +32,7 @@ tifffile = "^2026.1.28"
 diffractio = "^1.0.0"
 pillow = "^12.1.0"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 # --- Jupyter Stack ---
 # (Usually you only need ipykernel/widgets, the rest are pulled in automatically)
 ipykernel = "=6.28.0"
