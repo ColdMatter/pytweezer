@@ -1,0 +1,44 @@
+[tool.poetry]
+name = "pytweezer"
+version = "0.1.0"
+description = ""
+authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "=3.11.4"
+
+# --- Core Data Science & Math ---
+numpy = "=1.26.4"
+pandas = "=2.2.2"
+scipy = "=1.13.1"
+
+
+# --- Visualization ---
+matplotlib = "=3.8.4"
+
+# --- Hardware & Automation ---
+pyvisa = "=1.14.1"
+pylablib = "=1.4.3"
+
+# --- Utilities & Networking ---
+rich = "=13.9.4"
+paramiko = "=3.4.1"     # SSH client
+
+# --- Qt Stuff ---
+PyQt5 = "=5.15.10"
+PyQt5-qt5 = "=5.15.2"
+tifffile = "^2026.1.28"
+diffractio = "^1.0.0"
+pillow = "^12.1.0"
+
+[tool.poetry.dev-dependencies]
+# --- Jupyter Stack ---
+# (Usually you only need ipykernel/widgets, the rest are pulled in automatically)
+ipykernel = "=6.28.0"
+ipywidgets = "=8.1.5"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
