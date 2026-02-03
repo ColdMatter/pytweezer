@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "pytweezer"
 version = "0.2.0"
-description = ""
+description = "Pytweezer package"
 authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
 readme = "README.md"
 
