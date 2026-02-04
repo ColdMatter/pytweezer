@@ -6,7 +6,7 @@ authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "=3.11.4"
+python = "^3.11.4"
 
 # --- Core Data Science & Math ---
 numpy = "=1.26.4"
