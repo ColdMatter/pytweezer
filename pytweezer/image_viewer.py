@@ -11,11 +11,10 @@ from PyQt5.QtCore import Qt
 # inside your poll_images function:
 
 ZMQ_PORT = 5555
-GROUP_SIZE = 3
 
 
 class StackedViewer(QWidget):
-    def __init__(self, subscriber, group_size=GROUP_SIZE):
+    def __init__(self, subscriber, group_size=2):
         super().__init__()
         self.subscriber = subscriber
         self.group_size = group_size
