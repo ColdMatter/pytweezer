@@ -1,4 +1,5 @@
 import sys
+from matplotlib import image
 import zmq
 import json
 import numpy as np
@@ -6,6 +7,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QScrollArea, QLa
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import QTimer
 from PyQt5.QtCore import Qt
+import pyqtgraph
 
 
 # inside your poll_images function:
@@ -27,13 +29,20 @@ class StackedViewer(QWidget):
         self.stack_layout.setContentsMargins(5, 5, 5, 5)
         self.stack_layout.setSpacing(5)
 
+        self.image_views = []
+
+        for _ in range(group_size):
+            image_view = pyqtgraph.ImageView()
+            self.image_views.append(image_view)
+            self.stack_layout.addWidget(image_view)
+
+        # Scroll area to make the stack scrollable
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setWidget(self.stack_widget)
 
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
         layout.addWidget(self.scroll)
-        self.setLayout(layout)
 
         # store images until a full group is ready
         self.buffer = []
@@ -63,11 +72,6 @@ class StackedViewer(QWidget):
 
     def show_group(self, group):
         """Display a group of images stacked vertically, auto-resized to fit."""
-        # clear previous stack
-        for i in reversed(range(self.stack_layout.count())):
-            widget = self.stack_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
 
         if not group:
             return
@@ -77,34 +81,16 @@ class StackedViewer(QWidget):
         per_image_height = total_height // len(group)
         viewport_width = self.scroll.viewport().width()
 
-        for arr in group:
-            h, w, c = arr.shape
-            qimg = QImage(arr.data, w, h, c * w, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qimg)
-
-            # scale to fit width and per-image height
-            scaled_pixmap = pixmap.scaled(
-                viewport_width,
-                per_image_height,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-
-            label = QLabel()
-            label.setPixmap(scaled_pixmap)
-            label.setAlignment(Qt.AlignCenter)
-            self.stack_layout.addWidget(label)
-
-        # scroll to bottom (optional, for latest group)
-        self.scroll.verticalScrollBar().setValue(
-            self.scroll.verticalScrollBar().maximum()
-        )
+        for i, arr in enumerate(group):
+            self.image_views[i].setImage(arr)
+            self.image_views[i].setFixedHeight(per_image_height)
+            self.image_views[i].setFixedWidth(viewport_width)
 
 
-def run_viewer(group_size):
+def run_viewer(group_size, port=ZMQ_PORT):
     context = zmq.Context()
     subscriber = context.socket(zmq.SUB)
-    subscriber.connect(f"tcp://127.0.0.1:{ZMQ_PORT}")
+    subscriber.connect(f"tcp://127.0.0.1:{port}")
     subscriber.setsockopt_string(zmq.SUBSCRIBE, "")
 
     app = QApplication(sys.argv)
@@ -114,4 +100,4 @@ def run_viewer(group_size):
 
 
 if __name__ == "__main__":
-    run_viewer()
+    run_viewer(group_size=2, port=ZMQ_PORT)
