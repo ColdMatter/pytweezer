@@ -71,29 +71,31 @@ class PhaseMaskGenerator:
         return mask, [ypos, xpos]
 
 
-    def generate_weighted_square_array(self, weights, spacing):
+    def generate_weighted_square_array(self, weights, spacing, pad = 1):
         """
         Generates a weighted mask indicating where the tweezers should be and
         how strong they should be.
         Returns both the full 2D array and a list of the specific (y, x) indices.
         """
-        mask = np.zeros((self.Ny, self.Nx))
+        dim = weights.shape
+        mask = np.zeros((self.Ny*pad, self.Nx*pad))
         
-        spacing_pix_x = round(spacing / self.dx_f)
-        spacing_pix_y = round(spacing / self.dy_f)
+        spacing_pix_x = int(spacing*pad / self.dx_f)
+        spacing_pix_y = int(spacing*pad / self.dy_f)
 
-        xspan = (weights.shape[1] - 1) * spacing_pix_x
-        yspan = (weights.shape[0] - 1) * spacing_pix_y
+        xspan = (dim[1] - 1) * spacing_pix_x
+        yspan = (dim[0] - 1) * spacing_pix_y
 
-        xpos = np.linspace((self.Nx - xspan)//2, (self.Nx + xspan)//2, weights.shape[1])
-        ypos = np.linspace((self.Ny - yspan)//2, (self.Ny + yspan)//2, weights.shape[0])
+        xpos = np.linspace((self.Nx*pad - xspan)//2, (self.Nx*pad + xspan)//2, dim[1])
+        ypos = np.linspace((self.Ny*pad - yspan)//2, (self.Ny*pad + yspan)//2, dim[0])
 
         mask[np.array(ypos, dtype=int)[:, None], np.array(xpos, dtype=int)] = weights
 
         print(f"--- Target Generation ---")
-        print(f"Grid: {weights.shape[0]}x{weights.shape[1]}")
-        print(f"Spacing x: {spacing} um ({spacing_pix_x:.2f} pixels = {spacing_pix_x*self.dx_f:.4f} um)")
-        print(f"Spacing y: {spacing} um ({spacing_pix_y:.2f} pixels = {spacing_pix_y*self.dy_f:.4f} um)")
+        print(f"Grid: {dim[0]}x{dim[1]}")
+        print(f"Padding: x{pad}")
+        print(f"Spacing x: {spacing} um ({spacing_pix_x:.2f} pixels = {spacing_pix_x*self.dx_f/pad:.4f} um)")
+        print(f"Spacing y: {spacing} um ({spacing_pix_y:.2f} pixels = {spacing_pix_y*self.dy_f/pad:.4f} um)")
                     
         return mask, [ypos, xpos]
     
@@ -149,12 +151,14 @@ class PhaseMaskGenerator:
         """
         return 1 - np.std(matrix)/matrix.mean()
 
-    def run_wgs(self, target, indices, max_iter = 100, init_phase_sigma = 2*np.pi):
+    def run_wgs(self, target, indices, max_iter = 100, init_phase_sigma = 2*np.pi, pm_slm = 'random', pm_foc = 'random'):
         img_target = target / target.sum()
         beam = self.generate_source_amplitude()
 
-        pm_slm = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in SLM plane - unconstrained, let freely evolve
-        pm_foc = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in Fourier plane - unconstrained, let freely evolve
+        if pm_slm == 'random':
+            pm_slm = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in SLM plane - unconstrained, let freely evolve
+        if pm_foc == 'random':
+            pm_foc = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in Fourier plane - unconstrained, let freely evolve
         am_slm = np.sqrt(beam)                                      # Amplitude pattern in SLM plane - fixed incident Gaussian beam
         am_foc = np.sqrt(target)                                    # Amplitude pattern in Fourier plane - desired pattern, enforced
         field_slm = am_slm * np.exp(pm_slm * 1j)                    # Complex field pattern in SLM plane
