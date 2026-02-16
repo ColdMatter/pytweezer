@@ -57,5 +57,6 @@ def GetMarlinImage():
     except PermissionError:
         print("Windows blocked the file copy. Check Sharing permissions.")
 
+    sleep(2)
     img = np.asarray(Image.open(destination))
     return img
