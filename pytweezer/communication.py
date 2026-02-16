@@ -1,89 +1,18 @@
-from paramiko import SSHClient, SFTPClient, AutoAddPolicy
+import shutil
 import os
 import socket
 import numpy as np
 from PIL import Image
 from time import sleep
 
-def MeadowSFTPTransferDirectory(source_dir, target_dir):
-    meadowhost = '155.198.206.58'
-    username = 'marlin'
-    password = 'UltraCold59e'
-    meadowSSH = SSHClient()
-    meadowSSH.set_missing_host_key_policy(AutoAddPolicy())
-    meadowSSH.connect(meadowhost, username=username, password=password)
-    meadowSFTP = meadowSSH.open_sftp()
-    for item in os.listdir(source_dir):
-        if os.path.isfile(os.path.join(source_dir, item)):
-            meadowSFTP.put(os.path.join(source_dir, item), '%s/%s' % (target_dir, item))
-            print(f'File {target_dir + str(item)} transferred.')
-        else:
-            meadowSFTP.mkdir(os.path.join(target_dir, item))
-            print(f'Directory {target_dir + str(item)} created.')
-            SFTP_transfer_directory(sftpclient, os.path.join(source_dir, item), os.path.join(target_dir, item))
-
-def GetMarlinImage(num_images = 10):
-    marlinhost = '155.198.206.58'
-    username = 'marlin'
-    password = 'UltraCold59e'
-    local_path ="C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MarlinController\\Images\\"
-    remote_path = "C:\\Users\\BvSsh_VirtualUsers\\marlin\\"
-
-    # Open SSH connection
-    marlinSSH = SSHClient()
-    marlinSSH.set_missing_host_key_policy(AutoAddPolicy())
-    marlinSSH.connect(marlinhost, username=username, password=password)
-    marlinSFTP = marlinSSH.open_sftp()
-    print('SSH and SFTP connection established.')
-
-    # Execute SSH command to trigger camera - print process output
-    cmd = f"cd marlin; .venv\\Scripts\\activate; python marlin_image.py {num_images}" 
-    stdin, stdout, stderror = marlinSSH.exec_command(cmd)
-    print(stdout.read().decode())
-
-    # Execute SFTP file transfer of image from remote to local
-    filename = 'marlin_image.tiff'
-    marlinSFTP.get(remote_path + filename, local_path + filename)
-    print('Marlin image transfer complete.')
-
-    # Close SSH connection
-    marlinSSH.close()
-
-    img = np.asarray(Image.open(local_path + filename))
-    return img
-
-def UpdateMarlinScript():
-    marlinhost = '155.198.206.58'
-    username = 'marlin'
-    password = 'UltraCold59e'
-    local_path ="C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MarlinController\\Array Monitor\\"
-    remote_path = "C:\\Users\\BvSsh_VirtualUsers\\marlin\\"
-
-    # Open SSH connection
-    marlinSSH = SSHClient()
-    marlinSSH.set_missing_host_key_policy(AutoAddPolicy())
-    marlinSSH.connect(marlinhost, username=username, password=password)
-    marlinSFTP = marlinSSH.open_sftp()
-    print('SSH and SFTP connection established.')
-
-    # Execute SFTP file transfer of image from remote to local
-    filename = 'marlin_image.py'
-    marlinSFTP.put(local_path + filename, remote_path + filename)
-    print('Marlin script transfer complete.')
-
 def MeadowTransferPhasemask():
-    meadowhost = '155.198.206.58'
-    username = 'marlin'
-    password = 'UltraCold59e'
-    meadowSSH = SSHClient()
-    meadowSSH.set_missing_host_key_policy(AutoAddPolicy())
-    meadowSSH.connect(meadowhost, username=username, password=password)
-    meadowSFTP = meadowSSH.open_sftp()
-    source_dir = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MeadowController\\phasemasks\\"
-    target_dir = "C:\\Program Files\\Meadowlark Optics\\Blink 1920 HDMI\\SLMController\\"
-    filename = "phasemask.bmp"
-    meadowSFTP.put(source_dir+filename, target_dir+filename)
-    meadowSSH.close()
+    source = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MeadowController\\phasemasks\\phasemask.bmp"
+    destination = r"\\PH-NFITCH-2\SLMController\phasemask.bmp"
+    try:
+        shutil.copy(source, destination)
+        print("File copied successfully via SMB.")
+    except PermissionError:
+        print("Windows blocked the file copy. Check Sharing permissions.")
 
 def MeadowSendCommand(command):
     SERVER_IP = '155.198.206.58'  # Replace with Computer A's IP
@@ -108,7 +37,26 @@ def MeadowSendCommand(command):
                 s.connect((SERVER_IP, PORT))
                 s.sendall(command.encode('utf-8'))
                 print("Command SHUTDOWN sent. Shutting down Meadow server. WARNING: connection will be severed. Server must be restarted locally.")
+            elif command == "GETIMAGE":
+                s.connect((SERVER_IP, PORT))
+                s.sendall(command.encode('utf-8'))
+                print("Command GETIMAGE sent. Acquiring Marlin image.")
             else:
                 print("Unknown command. Command not sent.")
     except Exception as e:
         print(f"Failed to send command '{command}': {e}")
+
+def GetMarlinImage():
+    destination = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MarlinController\\Images\\"
+    source = "\\PH-NFITCH-2\\SLMController\\"
+    filename = "marlin_image.tiff"
+
+    MeadowSendCommand('GETIMAGE')
+    try:
+        shutil.copy(source + filename, destination + filename)
+        print("Marlin image acquired.")
+    except PermissionError:
+        print("Windows blocked the file copy. Check Sharing permissions.")
+
+    img = np.asarray(Image.open(destination + filename))
+    return img
