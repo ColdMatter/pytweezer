@@ -155,9 +155,9 @@ class PhaseMaskGenerator:
         img_target = target / target.sum()
         beam = self.generate_source_amplitude()
 
-        if pm_slm == 'random':
+        if isinstance(pm_slm, str):
             pm_slm = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in SLM plane - unconstrained, let freely evolve
-        if pm_foc == 'random':
+        if isinstance(pm_foc, str):
             pm_foc = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in Fourier plane - unconstrained, let freely evolve
         am_slm = np.sqrt(beam)                                      # Amplitude pattern in SLM plane - fixed incident Gaussian beam
         am_foc = np.sqrt(target)                                    # Amplitude pattern in Fourier plane - desired pattern, enforced
@@ -195,13 +195,15 @@ class PhaseMaskGenerator:
         print(f"Final Correlation: {corr[-1]*100:.4f} %    Final Uniformity: {cvar[-1]*100:.4f} %")
         return pm_slm, pm_foc, [corr, mse, cvar]
     
-    def run_wgs_pad(self, target, indices, max_iter = 100, init_phase_sigma = 2*np.pi):
+    def run_wgs_pad(self, target, indices, max_iter = 100, init_phase_sigma = 2*np.pi, pm_slm = 'random', pm_foc = 'random'):
         Ny_pad, Nx_pad = target.shape
         img_target = target / target.sum()
         beam = self.generate_source_amplitude()
 
-        pm_slm = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in SLM plane - unconstrained, let freely evolve
-        pm_foc = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in Fourier plane - unconstrained, let freely evolve
+        if isinstance(pm_slm, str):
+            pm_slm = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in SLM plane - unconstrained, let freely evolve
+        if isinstance(pm_foc, str):
+            pm_foc = np.random.normal(0, init_phase_sigma, size=(self.Ny, self.Nx))  # Phase pattern in Fourier plane - unconstrained, let freely evolve
         am_slm = np.sqrt(beam)                                      # Amplitude pattern in SLM plane - fixed incident Gaussian beam
         am_foc = np.sqrt(target)                                    # Amplitude pattern in Fourier plane - desired pattern, enforced
         field_slm = am_slm * np.exp(pm_slm * 1j)                    # Complex field pattern in SLM plane
