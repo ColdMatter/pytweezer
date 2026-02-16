@@ -47,16 +47,15 @@ def MeadowSendCommand(command):
         print(f"Failed to send command '{command}': {e}")
 
 def GetMarlinImage():
-    destination = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MarlinController\\Images\\"
-    source = "\\PH-NFITCH-2\\SLMController\\"
-    filename = "marlin_image.tiff"
+    destination = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MarlinController\\Images\\marlin_image.tiff"
+    source = r"\\PH-NFITCH-2\SLMController\marlin_image.tiff"
 
     MeadowSendCommand('GETIMAGE')
     try:
-        shutil.copy(source + filename, destination + filename)
+        shutil.copy(source, destination)
         print("Marlin image acquired.")
     except PermissionError:
         print("Windows blocked the file copy. Check Sharing permissions.")
 
-    img = np.asarray(Image.open(destination + filename))
+    img = np.asarray(Image.open(destination))
     return img
