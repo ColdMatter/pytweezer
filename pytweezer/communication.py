@@ -50,13 +50,12 @@ def GetMarlinImage():
     destination = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MarlinController\\Images\\marlin_image.tiff"
     source = r"\\PH-NFITCH-2\SLMController\marlin_image.tiff"
 
-    MeadowSendCommand('GETIMAGE')
+    comm.MeadowSendCommand('GETIMAGE')
     try:
         shutil.copy(source, destination)
         print("Marlin image acquired.")
     except PermissionError:
         print("Windows blocked the file copy. Check Sharing permissions.")
-
-    sleep(5)
-    img = np.asarray(Image.open(destination))
+    sleep(2)
+    img = np.asarray(Image.open(source))
     return img
