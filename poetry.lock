@@ -2532,6 +2532,52 @@ pygments = ">=2.13.0,<3.0.0"
 jupyter = ["ipywidgets (>=7.5.1,<9)"]
 
 [[package]]
+name = "rocket-fft"
+version = "0.3.1"
+description = "Rocket-FFT extends Numba by scipy.fft and numpy.fft"
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "rocket_fft-0.3.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:c6ed81e31d0bd3da443275ede8297d25ad7bf3f8c7b30dc575070207a284352a"},
+    {file = "rocket_fft-0.3.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:a9b33da732b7128c5af0d3941b6445a014f6142b09f8af29b6526b1c55246000"},
+    {file = "rocket_fft-0.3.1-cp310-cp310-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c18b56c48fa0855c22bb38cffa9f05187c31e66275f8f68a30621afe4cd8eda5"},
+    {file = "rocket_fft-0.3.1-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7febf94854a1f128962984f7e1b694778b38b5f841d6f868a7b2142bf9f28fa7"},
+    {file = "rocket_fft-0.3.1-cp310-cp310-win_amd64.whl", hash = "sha256:f8d1357e3373d0bd2a84162e653640252b47fd6ad7e32e111c9eed12f4bb925a"},
+    {file = "rocket_fft-0.3.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:43145d0ff69c88fec886af069b6f9886fe834fc17566c731de8ade3d8dfcfaf4"},
+    {file = "rocket_fft-0.3.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:7f50f967a4ebdc88184d259c242474837d6c38c41b1e2fd09bffa08639d9b7a3"},
+    {file = "rocket_fft-0.3.1-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:6b94ff9502f63515bebfa2bce319db6dd00d02031e1cef8441a4dded728d7c4d"},
+    {file = "rocket_fft-0.3.1-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d0e9f0f03416d276f023f50744f5cef9f750b3b830d6e1edd340db623ff5ca6d"},
+    {file = "rocket_fft-0.3.1-cp311-cp311-win_amd64.whl", hash = "sha256:8173cd4ed9d464b2e789d2303a5f7953980bde8237c60af2fc6204b82addeec5"},
+    {file = "rocket_fft-0.3.1-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:89be2e23812678ef7afdc793682e9aef4afbd7a0a30041cb292f02c73d62a0a9"},
+    {file = "rocket_fft-0.3.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:0de1a8841638e3091ef774d9304a6427801fd06dd29e6d2baacd17bac65eb9f3"},
+    {file = "rocket_fft-0.3.1-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:46970c0dcc70bd9c365d6a9f4a235edec2e8eaad628097c0e21d920669e25abe"},
+    {file = "rocket_fft-0.3.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7d64c9fc81206f2c77f74f68761f54ac6f1ebe4c8840f0ef9795c28ab229463f"},
+    {file = "rocket_fft-0.3.1-cp312-cp312-win_amd64.whl", hash = "sha256:05afc9805cfb97b330417b4bfcd435aace98dff2fc479bfbcb4ac4568f56ec51"},
+    {file = "rocket_fft-0.3.1-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:3fa706995cebcc7bff41894e23323d2a221906454d21cb12fed97833b0f7433e"},
+    {file = "rocket_fft-0.3.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:4a50609003f944aea1b8000a19f9b9cf9cbaaa5e4726e5aefaccccd1cfd81a99"},
+    {file = "rocket_fft-0.3.1-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5906c6517fc87295a1d142c7e6ebd1c55e057f6ee4c605549bbcecacab83774f"},
+    {file = "rocket_fft-0.3.1-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9d830aacc34d65b28daab715aa4a90d98489e89a48c2836039982f18ba1e2db3"},
+    {file = "rocket_fft-0.3.1-cp313-cp313-win_amd64.whl", hash = "sha256:97452673ea99b907c75c99c4046d5297ea01778a6e74cb51ba515c01e3e5e5d7"},
+    {file = "rocket_fft-0.3.1-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:284db6f40d33c3d4c7a4fef1682938b7a432ca921273d7d19e868118538d8ac4"},
+    {file = "rocket_fft-0.3.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:d332e4ce3e4b3fcddb2a0ef0aa8337b8ab9d847d119aac470d03c7f28cbeb762"},
+    {file = "rocket_fft-0.3.1-cp314-cp314-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:65a7577d7f3b4e3672de179f91fee8339211b3f5ae13eef1b30cb6a318f0308c"},
+    {file = "rocket_fft-0.3.1-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:97614dbebb2686a644bbf6c6f8a6198f063052f4c88901d0ca2808536c2e83cc"},
+    {file = "rocket_fft-0.3.1-cp314-cp314-win_amd64.whl", hash = "sha256:3ce880c2317790410d4593d46b3a947a371abd98fc14a8ac6431694b68dfaacc"},
+    {file = "rocket_fft-0.3.1-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:91dadd8bf03d5bc3cecbec170b1dea0fa6d9b17847993b5bd8ea78f1b2ef2dfa"},
+    {file = "rocket_fft-0.3.1-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:d3c47057ffe8df942b988ded32b2f2b02ade9098d5d59085571d10c0af486309"},
+    {file = "rocket_fft-0.3.1-cp39-cp39-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5ca7e29cf6166d61a8cbc0c20f7a114df7079c4910996410b3e4bb0b61224ffa"},
+    {file = "rocket_fft-0.3.1-cp39-cp39-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:18e840f251795f882eb2388655c4e70721b52a1c6b72bf841d74a779d87b9cac"},
+    {file = "rocket_fft-0.3.1-cp39-cp39-win_amd64.whl", hash = "sha256:5da5666dc9ee77c2831ef718e80e9172144a57543c70d3b4f8f1495655f70393"},
+    {file = "rocket_fft-0.3.1.tar.gz", hash = "sha256:ddc902a361099aff9fc02fe9ea3b0d036c2f67f93df356c2b754f7627d7fa4f4"},
+]
+
+[package.dependencies]
+numba = ">=0.60.0"
+
+[package.extras]
+dev = ["pytest (>=8.4.2)", "scipy (>=1.13.1)"]
+
+[[package]]
 name = "rpyc"
 version = "6.0.2"
 description = "Remote Python Call (RPyC) is a transparent and symmetric distributed computing library"
