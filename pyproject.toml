@@ -24,22 +24,23 @@ pylablib = "=1.4.3"
 # --- Utilities & Networking ---
 rich = "=13.9.4"
 paramiko = "=3.4.1"     # SSH client
+tifffile = "^2026.1.28"
+diffractio = "^1.0.0"
+pillow = "^12.1.0"
+pyzmq = "^27.1.0"
 
 # --- Qt Stuff ---
 PyQt5 = "=5.15.10"
 PyQt5-qt5 = "=5.15.2"
-tifffile = "^2026.1.28"
-diffractio = "^1.0.0"
-pillow = "^12.1.0"
 
-# [tool.poetry.group.dev.dependencies]
-# # --- Jupyter Stack ---
-# # (Usually you only need ipykernel/widgets, the rest are pulled in automatically)
+
+# --- Jupyter Support ---
 ipykernel = "=6.28.0"
 ipywidgets = "=8.1.5"
 tqdm = "^4.67.3"
 h5py = "^3.15.1"
 rocket-fft = "^0.3.1"
+
 
 
 
