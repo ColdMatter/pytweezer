@@ -50,7 +50,7 @@ def GetMarlinImage():
     destination = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MarlinController\\Images\\marlin_image.tiff"
     source = r"\\PH-NFITCH-2\SLMController\marlin_image.tiff"
 
-    comm.MeadowSendCommand('GETIMAGE')
+    self.MeadowSendCommand('GETIMAGE')
     try:
         shutil.copy(source, destination)
         print("Marlin image acquired.")
