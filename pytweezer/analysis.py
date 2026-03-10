@@ -900,5 +900,5 @@ class TweezerExperimentAnalysis:
         plt.xlabel('Tweezer Power')
         plt.ylabel('Loading Probability')
 
-    def test_update():
+    def test_update(self):
         print(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
