@@ -851,7 +851,7 @@ class TweezerExperimentAnalysis:
                 if len(trap_photon_rates_2_postselected) != 0:
                     survival_probabilities[i, j] = len(trap_photon_rates_2_postselected[trap_photon_rates_2_postselected > threshold_2]) / len(trap_photon_rates_2_postselected)
                 else:
-                    survival_probabilities[i, j] = 0.0
+                    survival_probabilities[i, j] = np.nan
 
             survival_probabilities = survival_probabilities.ravel()
             individual_survival_prob_list.append(survival_probabilities)
