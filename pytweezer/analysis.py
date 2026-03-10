@@ -13,6 +13,7 @@ from time import sleep
 import matplotlib.patches as patches
 from rich.progress import track
 from scipy.special import erf
+import datetime
 
 cloudpath = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\"
 tweezer_img_source_dir = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\HamCamImages\\"
@@ -898,3 +899,6 @@ class TweezerExperimentAnalysis:
         plt.legend()
         plt.xlabel('Tweezer Power')
         plt.ylabel('Loading Probability')
+
+    def test_update():
+        print(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
