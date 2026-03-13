@@ -7,6 +7,8 @@ import pathlib
 import time
 import json
 import sys
+
+import numpy as np
 from pytweezer.configuration.device_db import device_db
 
 # NOTE: these imports will only work with the pythonnet package
@@ -27,8 +29,25 @@ EXPERIMENTS_FILE = CONFIG_DIR + "/experiments.json"
 
 class ExperimentHandler:
 
-    def __init__(self, motmaster_interface):
-        self.motmaster_interface = motmaster_interface
+    def __init__(self):
+        self.motmaster_interface = MotMasterInterface()
+        
+    def set_scan_parameters(self, scan_param, scan_vals):
+        self.scan_param = scan_param
+        self.scan_vals = scan_vals
+        
+    def set_scan_linear(self, scan_param, start, stop, n_points, randomize=False):
+        scan_vals = np.linspace(start, stop, n_points)
+        if randomize:
+            np.random.shuffle(scan_vals)
+        self.set_scan_parameters(scan_param, scan_vals)
+        
+        
+    def set_scan_centered(self, scan_param, center, span, n_points, randomize=False):
+        start = center - span/2
+        stop = center + span/2
+        self.set_scan_linear(scan_param, start, stop, n_points, randomize=randomize)
+    
 
     def run_experiment(self, experiment):
         with open(EXPERIMENTS_FILE, "r") as f:
@@ -38,10 +57,13 @@ class ExperimentHandler:
         experiment_class = getattr(experiment_module, experiment_config["class"])
         experiment_instance: Experiment = experiment_class(self.motmaster_interface)
         experiment_instance.build()
-        experiment_instance.pre_run()
-        experiment_instance.run()
-        experiment_instance.post_run()
+        for scan_val in self.scan_vals:
+            # set scan val here
+            experiment_instance.pre_run()
+            experiment_instance.run()
+            experiment_instance.post_run()
         experiment_instance.cleanup()
+        
 
 
 class MotMasterInterface:
@@ -125,6 +147,9 @@ class MotMasterInterface:
         except Exception as e:
             print(f"Error starting MotMaster experiment {self.script}: {e}")
         return None
+    
+    def get_params(self):
+        return dict(self.motmaster.GetParameters())
 
 
 class Experiment:
@@ -246,7 +271,7 @@ class Experiment:
 #             analysis_results=analysis_results,
 #             zips=zips
 #         )
-
+motmaster_interface
 #     def inject(self):
 #         """move images from the temp folder to the zip"""
 #         zip_no = self.analyser.get_next_zipno()
