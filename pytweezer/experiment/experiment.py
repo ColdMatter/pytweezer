@@ -64,6 +64,21 @@ class ExperimentHandler:
             experiment_instance.post_run()
         experiment_instance.cleanup()
         
+    def check_param_in_device_db(self, experiment, param):
+        # check if the parameter is in the motmaster dictionary
+        for device in experiment.devices.keys():
+            if param in experiment.devices[device]["parameters"]:
+                return device
+        return False
+    
+    def set_scan_value(self, experiment, param, value):
+        if device_name := self.check_param_in_device_db(experiment, param):
+            device = experiment.devices[device_name]
+            setattr(device, param, value)
+        elif param in self.motmaster_interface.get_params():
+            self.motmaster_interface.parameter_dictionary[param] = value
+        else:
+            raise ValueError(f"Parameter {param} not found in device database or MotMaster parameters")
 
 
 class MotMasterInterface:
@@ -159,6 +174,7 @@ class Experiment:
         self._device_db = device_db
         print(f"Loaded device database: {self._device_db}")
         self.devices = {}
+        self.device_params = []
         self._motmaster_interface = motmaster_interface
         self._motmaster_interface.set_motmaster_experiment(self.motmaster_script)
         self._motmaster_interface.set_motmaster_dictionary()
@@ -271,7 +287,7 @@ class Experiment:
 #             analysis_results=analysis_results,
 #             zips=zips
 #         )
-motmaster_interface
+
 #     def inject(self):
 #         """move images from the temp folder to the zip"""
 #         zip_no = self.analyser.get_next_zipno()
