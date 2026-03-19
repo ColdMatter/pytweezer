@@ -9,7 +9,7 @@ import json
 import sys
 
 import numpy as np
-from pytweezer.configuration.device_db import device_db
+from configuration.device_db import device_db
 
 # NOTE: these imports will only work with the pythonnet package
 try:
@@ -56,7 +56,7 @@ class ExperimentHandler:
         experiment_module = importlib.import_module(experiment_config["module"])
         experiment_class = getattr(experiment_module, experiment_config["class"])
         experiment_instance: Experiment = experiment_class(self.motmaster_interface)
-        experiment_instance.build()
+        experiment_instance._start_build()
         for scan_val in self.scan_vals:
             # set scan val here
             experiment_instance.pre_run()
@@ -64,22 +64,6 @@ class ExperimentHandler:
             experiment_instance.post_run()
         experiment_instance.cleanup()
         
-    def check_param_in_device_db(self, experiment, param):
-        # check if the parameter is in the motmaster dictionary
-        for device in experiment.devices.keys():
-            if param in experiment.devices[device]["parameters"]:
-                return device
-        return False
-    
-    def set_scan_value(self, experiment, param, value):
-        if device_name := self.check_param_in_device_db(experiment, param):
-            device = experiment.devices[device_name]
-            setattr(device, param, value)
-        elif param in self.motmaster_interface.get_params():
-            self.motmaster_interface.parameter_dictionary[param] = value
-        else:
-            raise ValueError(f"Parameter {param} not found in device database or MotMaster parameters")
-
 
 class MotMasterInterface:
     def __init__(self, interval: Union[int, float] = 0.1) -> None:
@@ -170,14 +154,67 @@ class MotMasterInterface:
 class Experiment:
     motmaster_script: Optional[str] = None
 
-    def __init__(self, motmaster_interface: MotMasterInterface):
+    def __init__(self, props, motmaster_interface: Optional[MotMasterInterface] = None):
         self._device_db = device_db
         print(f"Loaded device database: {self._device_db}")
         self.devices = {}
-        self.device_params = []
+        self.arguments = {}
+        self._props = props
         self._motmaster_interface = motmaster_interface
-        self._motmaster_interface.set_motmaster_experiment(self.motmaster_script)
-        self._motmaster_interface.set_motmaster_dictionary()
+        if self.motmaster_script is not None and self._motmaster_interface is None:
+            raise ValueError("MotMaster interface is required when a script is specified.")
+        if self._motmaster_interface is not None:
+            self._motmaster_interface.set_motmaster_experiment(self.motmaster_script)
+            self._motmaster_interface.set_motmaster_dictionary()
+            self.mm_params = {}
+            
+    def _start_build(self):
+        if self.motmaster_script is not None:
+            for param_name in self._motmaster_interface.parameter_dictionary.keys():
+                self.setattr_mm_param(param_name)
+                
+    def _start_run(self, task=None):
+        """
+        start a single run
+        """
+        # change to __enter__ ???
+        global globaltime
+        global starttime
+        global _experiment
+        _experiment = self
+        self._name = self.name
+        self._starttime = time.time()
+        run = self._props.get('_totalrun', 0)
+        self._props.set('_totalrun', run + 1)
+        if task is None:
+            task = self._props.get('/Experiments/_task')
+        globaltime = 0
+        starttime = time.time()
+        self._publish_startvalues(task)
+        self.pre_run()
+        self.run()
+        self.post_run()
+        self._endtime = time.time()
+        self._publish_endvalues()
+        
+    def _publish_startvalues(self, task):
+        """send basic information about experiment started to data channel
+        """
+        if not hasattr(self, 'exp_name'):
+            self.exp_name = self._name
+        info = {'_starttime': self._starttime, '_run': self._run, '_repetition': self._repetition, '_task': task,
+                '_name': self._name, '_exp_name': self.exp_name, "mm_script": self.motmaster_script}
+        arguments = dict((arg.name, arg.value) for arg in self._arguments.values())
+        mm_params = dict((param.name, param.value) for param in self.mm_params.values())
+        info.update(arguments)
+        info.update(mm_params)
+        self._dataq.send(info, channel='.start')
+
+    def _publish_endvalues(self):
+        info = {'_endtime': self._endtime}
+        self._dataq.send(info, channel='.end')
+
+            
 
     def build(self):
         """
@@ -189,7 +226,9 @@ class Experiment:
         """
         This method is called before each run, e.g. for reinitialising devices.
         """
-        pass
+        if self.motmaster_script is not None:
+            for param_name, param in self.mm_params.items():
+                self._motmaster_interface.parameter_dictionary[param_name] = param.value
 
     def run(self):
         """
@@ -232,72 +271,106 @@ class Experiment:
         setattr(self, device_name, device_instance)
         self.devices[device_name] = device_instance
         return device_instance
+    
+              
+    def setattr_mm_param(self, param_name):
+        """Create an attribute for a MotMaster parameter, which can be modified by the user in the GUI."""
+        if self._motmaster_interface is None:
+            raise ValueError("MotMaster interface is not set.")
+        param_type = type(self._motmaster_interface.parameter_dictionary[param_name])
+        if param_type == int:
+            param = NumberValue(name=param_name, ndecimals=0, step=1, value=self._motmaster_interface.parameter_dictionary[param_name], minval=-1E6, maxval=1E6)
+        elif param_type == float:
+            param = NumberValue(name=param_name, ndecimals=3, step=0.001, value=self._motmaster_interface.parameter_dictionary[param_name], minval=-1E6, maxval=1E6)
+        elif param_type == bool:
+            param = BoolValue(name=param_name, value=self._motmaster_interface.parameter_dictionary[param_name])
+        elif param_type == str:
+            param = StringCombo(name=param_name, stringlist=[self._motmaster_interface.parameter_dictionary[param_name]])
+        else:            
+            raise ValueError(f"Unsupported parameter type {param_type} for parameter {param_name}")
+        setattr(self, param_name, param)
+        self.mm_params[param_name] = param
+        
+    def setattr_argument(self, name, arg):
+        """
+        Create a user-controllable attribute
+        The user will have an element in the GUI he can modify
+
+        Args:
+            name: (str)
+                Name of the attribute. You can address the attribute via ``self.myname``
+            argtype: (class)
+                Currently only NumberValue is available
+
+        Example::
+
+            self.setattr_argument("Nr_Ablation_Pulses", NumberValue(ndecimals=0, step=1,value=20))
+        """
+        setattr(self, name, arg)
+        self.arguments[name] = arg
 
 
-# class Experiment:
 
-#     def __init__(
-#         self,
-#         experiment_runner,
-#         script: str,
-#         camera: ImagEMX2Camera,
-#         analyser: TweezerExperimentAnalysis,
-#         n_images: int = 2,
-#         analysis_funcs: Optional[list[Callable]] = None,
-#     ):
-#         self.experiment_runner = experiment_runner
-#         self.script = script
-#         self.cam = camera
-#         self.n_images = n_images
-#         self.analyser = analyser
-#         self.analysis_funcs = analysis_funcs or []
+class NumberValue:
+    """ floating point argument for experiment window
 
-#     def setup_camera(self, n_frames):
-#         self.cam.setup_acquisition("snap", nframes=n_frames)
-#         self.cam.start_acquisition()
+        Args:
 
-#     def do_analysis(self, imgs):
-#         results = []
-#         for analysis_func in self.analysis_funcs:
-#             result = analysis_func(imgs)
-#             results.append(result)
-#         return results
+            name: (str)
+                name of the argument
+            ndecimals: (int)
+                number of decimals e.g. 2 means 0.01
+            step:   (float)
+                step size of the spin box
+            value:  (float)
+                default value
+            minval: (float)
+                minimum value
+            maxval: (float)
+                maximum value
+            tooltip: (str)
+                tooltip
 
-#     def run(self, scan_param, scan_vals, n_repeats: int = 1, save: bool = True):
+    """
+    __argtype__ = 'NumberValue'
 
-#         self.cam.setup_acquisition("snap", nframes=n_repeats * self.n_images)
-#         for i in tqdm(range(len(scan_vals)), desc="Experiment Scan"):
-#             scan_val = scan_vals[i]
-#             self.cam.start_acquisition()
-#             self.experiment_runner.scan_motmaster_paramter(
-#                 self.script, scan_param, scan_val, interations=n_repeats, save=save
-#             )
-#             imgs = self.cam.acquire_n_frames(n_repeats * self.n_images, autosave=True)
-#             start_zip = self.inject()
-#             zips = [start_zip + j for j in range(len(scan_vals))]
+    def __init__(self, name='No name', ndecimals=0, step=1, value=42, minval=0, maxval=1E6, **kwargs):
+        self.__dict__.update(kwargs)
+        self.name = name
+        self.step = step
+        self.ndecimals = ndecimals
+        self.value = value
+        self.minval = minval
+        self.maxval = maxval
 
 
-#         time.sleep(0.1)
-#         analysis_results = self.do_analysis(imgs)
-#         return Result(
-#             rid=get_rid(),
-#             scan_param=scan_param,
-#             scan_vals=scan_vals,
-#             images=imgs,
-#             analysis_results=analysis_results,
-#             zips=zips
-#         )
+class StringCombo:
+    """String choice argument for expeirment window. """
+    __argtype__ = 'StringCombo'
 
-#     def inject(self):
-#         """move images from the temp folder to the zip"""
-#         zip_no = self.analyser.get_next_zipno()
-#         if self.n_images == 1:
-#             self.analyser.tweezer_inject(zip_no)
-#         elif self.n_images == 2:
-#             self.analyser.tweezer_inject_double(zip_no)
-#         else:
-#             raise ValueError("We haven't written the injection code for more than 2 images per scan yet.")
-#         return zip_no
+    def __init__(self, name='Noname', stringlist=['']):
+        '''
+        stringlist: list of strings from which the user can choose
+        name:       name of the argument
+        '''
+        self.name = name
+        self.stringlist = stringlist
+        self.value = stringlist[0]
+
+
+class BoolValue:
+    """Boolean argument for experiment window. """
+    __argtype__ = 'BoolValue'
+
+    def __init__(self, name='Noname', value=False):
+        '''
+        name: str
+            name of the argument
+        value: bool
+            value of the argument
+        '''
+        self.name = name
+        self.value = value
 
 
 def get_rid():

@@ -1,0 +1,11 @@
+{
+    "New Tab #0": [
+        {
+            "type": "Group",
+            "nextBox": "end loop",
+            "name": "New Tab #0",
+            "maxCon": 0,
+            "maxConCheck": false
+        }
+    ]
+}

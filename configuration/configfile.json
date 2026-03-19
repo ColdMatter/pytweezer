@@ -1,0 +1,57 @@
+{
+    "GUI": {
+        "Browser": {
+            "active": true,
+            "script": "../pytweezer/GUI/bali_browser.py"
+        }
+    },
+    "Servers": {
+        "Imagehub": {
+            "active": true,
+            "pub": "ipc:///tmp/imagepub",
+            "script": "../pytweezer/servers/xsub_xpub.py",
+            "sub": "ipc:///tmp/imagesub"
+        },
+        "Commandhub": {
+            "active": true,
+            "pub": "ipc:///tmp/controlpub",
+            "script": "../pytweezer/servers/xsub_xpub.py",
+            "sub": "ipc:///tmp/controlsub"
+        },
+        "Datahub": {
+            "active": true,
+            "pub": "ipc:///tmp/datapub",
+            "script": "../pytweezer/servers/xsub_xpub.py",
+            "sub": "ipc:///tmp/datasub"
+        },
+        "Propertyhub": {
+            "active": true,
+            "pub": "ipc:///tmp/propertypub",
+            "script": "../pytweezer/servers/xsub_xpub.py",
+            "sub": "ipc:///tmp/propertysub"
+        },
+        "Messagehub": {
+            "active": true,
+            "pub": "ipc:///tmp/messagepub",
+            "script": "../pytweezer/servers/xsub_xpub.py",
+            "sub": "ipc:///tmp/messagesub"
+        },
+        "Propertylogger": {
+            "active": true,
+            "script": "../pytweezer/servers/propertylogger.py",
+            "rep": "ipc:///tmp/propertyrep"
+        },
+        "Datalogger": {
+            "active": true,
+            "script": "../pytweezer/servers/datalogger.py"
+        },
+        "Imagelogger": {
+            "active": true,
+            "script": "../pytweezer/servers/imagelogger.py"
+        },
+        "Elephant": {
+            "active": false,
+            "script": "../pytweezer/GUI/mighty.py"
+        }
+    }
+}
