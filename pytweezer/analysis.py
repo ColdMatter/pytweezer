@@ -13,6 +13,7 @@ from time import sleep
 import matplotlib.patches as patches
 from rich.progress import track
 from scipy.special import erf
+import datetime
 
 cloudpath = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\"
 tweezer_img_source_dir = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\HamCamImages\\"
@@ -852,9 +853,8 @@ class TweezerExperimentAnalysis:
                     survival_probabilities[i, j] = len(trap_photon_rates_2_postselected[trap_photon_rates_2_postselected > threshold_2]) / len(trap_photon_rates_2_postselected)
                 else:
                     survival_probabilities[i, j] = np.nan
+
             survival_probabilities = survival_probabilities.ravel()
-            survival_probabilities = survival_probabilities[~np.isnan(survival_probabilities)]
-            
             individual_survival_prob_list.append(survival_probabilities)
             survival_prob_list.append(survival_probabilities.mean())
             survival_prob_err_list.append(survival_probabilities.std())
@@ -899,3 +899,6 @@ class TweezerExperimentAnalysis:
         plt.legend()
         plt.xlabel('Tweezer Power')
         plt.ylabel('Loading Probability')
+
+    def test_update(self):
+        print(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
