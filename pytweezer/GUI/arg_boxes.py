@@ -19,7 +19,7 @@ class FloatBox(FloatManager):
         super().__init__(props, parent, parName=kwargs['name'], **kwargs)
 
     def updateValue(self, value):
-        '''Update the corresponding argument in BaliExperiment
+        '''Update the corresponding argument in experiment
 
         Args:
             value:(type needs to correspont the to the argument type it represents
@@ -43,7 +43,7 @@ class BoolBox(BoolManager):
     '''
 
     def updateValue(self, value):
-        '''Update the corresponding argument in BaliExperiment
+        '''Update the corresponding argument in experiment
 
         Args:
             value:(type needs to correspont the to the argument type it represents
@@ -71,7 +71,7 @@ class ComboBox(ComboManager):
     '''
 
     def updateValue(self, value):
-        '''Update the corresponding argument in BaliExperiment
+        '''Update the corresponding argument in experiment
 
         Args:
             value:(type needs to correspont the to the argument type it represents

@@ -2,7 +2,7 @@ from os.path import isfile
 
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtGui import *
-from PyQt5.QtWidgets import QFileDialog, QListWidget, QListWidgetItem
+from PyQt5.QtWidgets import QApplication, QFileDialog, QListWidget, QListWidgetItem
 import pyqtgraph as pg
 import pyqtgraph.parametertree.parameterTypes as pTypes
 from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
@@ -10,9 +10,9 @@ from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, reg
 from math import *
 import numpy as np
 
-from pytweezer.servers import Properties,balipath,send_error,send_info
+from pytweezer.servers import Properties,tweezerpath,send_error,send_info
 from pytweezer.GUI.table_parameter import *
-from pytweezer.GUI.pytweezerQt import BWidget
+from pytweezer.GUI.pytweezerQt import BMainWindow, BWidget
 from PyQt5 import QtWidgets
 
 import traceback
@@ -210,7 +210,7 @@ class TreeEdit():
 
 ## Create tree of Parameter objects
 class PropEdit(BWidget):
-    def __init__(self,subtree='/',parent=None):
+    def __init__(self,subtree='/',parent=None, ):
         """GUI Window for the property tree
 
         :subtree : (string)
@@ -281,7 +281,7 @@ class PropEdit(BWidget):
     def save(self):
         ''' save the current properties to a file'''
         fname = QFileDialog.getSaveFileName(self, 'Save into file',
-            balipath+'/configuration/user',"json dictionaries (*.json)")[0]
+            tweezerpath+'/configuration/user',"json dictionaries (*.json)")[0]
         #ensure fname ends with .json
         if fname[-5:]!='.json':
             fname=fname+'.json'
@@ -295,7 +295,7 @@ class PropEdit(BWidget):
             print_error('property_editor.py: saving file failed', 'error')
 
     def load(self):
-        fname = QFileDialog.getOpenFileName(self,'Load Properties',balipath+'/configuration/user','json dictionaries, (*.json)')[0]
+        fname = QFileDialog.getOpenFileName(self,'Load Properties',tweezerpath+'/configuration/user','json dictionaries, (*.json)')[0]
         if fname[-5:]!='.json':
             fname=fname+'.json'
         #print(fname)
@@ -419,12 +419,26 @@ class PropSelector(BWidget):
             self.keyList = keys
         self.updateKeys()
 
-## Start Qt event loop unless running in interactive mode or using pyside.
+# ## Start Qt event loop unless running in interactive mode or using pyside.
+# if __name__ == '__main__':
+#     import sys
+
+#     pp=PropEdit(name='Property Editor')
+#     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+#         QtWidgets.QApplication.instance().exec_()
+#     else:
+#         print('sys.flag.interactive ',sys.flag.interactive, 'hasattr(OtCore)',hasattr(OtCore,'PYQT_VERSION'))
+
+def main():
+    app = QApplication(sys.argv)
+    Win = PropEdit()
+    Win.show()
+    app.exec_()
+
+
+# Start Qt event loop unless running in interactive mode or using pyside.
 if __name__ == '__main__':
     import sys
 
-    pp=PropEdit()
     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
-        QtWidgets.QApplication.instance().exec_()
-    else:
-        print('sys.flag.interactive ',sys.flag.interactive, 'hasattr(OtCore)',hasattr(OtCore,'PYQT_VERSION'))
+        main()

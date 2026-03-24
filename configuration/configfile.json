@@ -2,7 +2,23 @@
     "GUI": {
         "Browser": {
             "active": true,
-            "script": "../pytweezer/GUI/bali_browser.py"
+            "script": "../pytweezer/GUI/tweezer_browser.py"
+        },
+        "StreamMonitor": {
+            "active": false,
+            "script": "../pytweezer/GUI/streammonitor.py"
+        },
+        "H5 Manager": {
+            "active" : true,
+            "script": "../pytweezer/GUI/h5storage.py"
+        },
+        "Property_Editor": {
+            "active": true,
+            "script": "../pytweezer/GUI/property_editor.py"
+        },
+        "Live Plot": {
+            "active": true,
+            "script": "../pytweezer/GUI/viewers/live_plot.py"
         }
     },
     "Servers": {
@@ -52,6 +68,12 @@
         "Elephant": {
             "active": false,
             "script": "../pytweezer/GUI/mighty.py"
+        }
+    },
+    "Viewer": {
+        "DummyViewer": {
+            "active": true,
+            "script": "../pytweezer/GUI/viewers/image_group.py"
         }
     }
 }

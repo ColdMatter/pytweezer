@@ -1,0 +1,83 @@
+{
+    "next_rid": 11,
+    "Servers": {
+        "ProperyLogger": {
+            "check_interval": 10,
+            "logginginterval[s]": 1
+        },
+        "CameraHub": {},
+        "ImageStream": {
+            "active": {}
+        },
+        "DataStream": {
+            "active": {
+                "Experiment.start": {
+                    "timestamp": 1774254828.3560092,
+                    "parts": 2
+                },
+                "Experiment.end": {
+                    "timestamp": 1774254221.1686928,
+                    "parts": 2
+                }
+            },
+            "maxStreamInactive[s]": 1000
+        }
+    },
+    "Cameras": {
+        "auto_force_ip": false
+    },
+    "BaliBrowser": {
+        "Looper": {
+            "datastreams": [
+                ""
+            ],
+            "keyList": [
+                "_starttime",
+                "_run",
+                "_repetition",
+                "_task",
+                "_name",
+                "_exp_name",
+                "mm_script",
+                "number"
+            ]
+        },
+        "experiments_dir": "/home/twalker/RbCaF/pytweezer/pytweezer/experiments",
+        "testval": 3,
+        "testlist": [],
+        "Geometry": [
+            1283,
+            6,
+            631,
+            1043
+        ],
+        "OpenWindows": [
+            "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/dummy.py"
+        ],
+        "dummy": {
+            "Geo": [
+                105,
+                11,
+                1042,
+                501
+            ],
+            "minimized": false
+        },
+        "scans": {},
+        "number": 4.0,
+        "last_set": "number: 4.0",
+        "ExperimentQ": {
+            "current_scan": []
+        },
+        "_totalrun": 1
+    },
+    "Experiments": {
+        "_task": 16,
+        "DummyExperiment": {
+            "scans": {},
+            "number": 0,
+            "last_set": "number: 0.0",
+            "_totalrun": 8
+        }
+    }
+}

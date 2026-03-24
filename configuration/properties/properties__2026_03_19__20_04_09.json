@@ -1,0 +1,36 @@
+{
+    "next_rid": 11,
+    "Servers": {
+        "ProperyLogger": {
+            "check_interval": 10,
+            "logginginterval[s]": 1
+        },
+        "CameraHub": {},
+        "ImageStream": {
+            "active": {}
+        },
+        "DataStream": {
+            "active": {}
+        }
+    },
+    "Cameras": {
+        "auto_force_ip": false
+    },
+    "BaliBrowser": {
+        "Looper": {
+            "datastreams": [
+                ""
+            ]
+        },
+        "experiments_dir": "/home/twalker/RbCaF/pytweezer/experiments",
+        "testval": 3,
+        "testlist": [],
+        "Geometry": [
+            100,
+            100,
+            1458,
+            564
+        ],
+        "OpenWindows": []
+    }
+}

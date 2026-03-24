@@ -44,6 +44,7 @@ termcolor = "^3.3.0"
 qscintilla = "^2.14.1"
 pyperclip = "^1.11.0"
 uncertainties = "^3.2.3"
+imageio = "^2.37.3"
 
 
 

@@ -3,12 +3,12 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import Qt
 from pytweezer import *
-from pytweezer.servers import Properties, balipath, PropertyAttribute
+from pytweezer.servers import Properties, tweezerpath, PropertyAttribute
 from pytweezer.GUI.property_editor import PropEdit
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
 from pytweezer.servers.datamgr import DataSummary, SingleDataSummary, SingleImageSummary
 from pytweezer.servers import send_info
-from pytweezer.servers import balipath
+from pytweezer.servers import tweezerpath
 import subprocess
 import os
 import time
@@ -37,16 +37,16 @@ class H5StorageGui(BWidget):
         self.storageGUI = H5StorageDataMgr(self._props)
         self.plottingGUI = H5DataPlotter(self._props, self.storageGUI)
 
-        self.layout = QVBoxLayout()
+        self.qlayout = QVBoxLayout()
         tabs = QTabWidget()
-        self.layout.addWidget(tabs)
+        self.qlayout.addWidget(tabs)
         tabs.addTab(self.storageGUI, 'Select Data')
         tabs.addTab(self.plottingGUI, 'Plot Data')
 
         tabs.setCurrentIndex(self._currentIndex)
         tabs.currentChanged.connect(self.updateSelectedTab)
 
-        self.setLayout(self.layout)
+        self.setLayout(self.qlayout)
         saveBtn = QPushButton('Save')
         saveBtn.clicked.connect(self.storageGUI.savetoFile)
         clearBtn = QPushButton('Clear')
@@ -56,7 +56,7 @@ class H5StorageGui(BWidget):
         bottomline.addWidget(self.storageGUI.foldernameLEd)
         bottomline.addWidget(saveBtn)
         bottomline.addWidget(clearBtn)
-        self.layout.addLayout(bottomline)
+        self.qlayout.addLayout(bottomline)
 
         # self.resize(250, 150)
         # self.move(300, 300)
@@ -91,7 +91,7 @@ class BinningWidget(QFrame):
         self.binMode.addItem('Binning according to bins below')
         closeBtn = QPushButton('')
         closeBtn.setMaximumWidth(20)
-        closeBtn.setIcon(QtGui.QIcon(balipath + '/pytweezer/icons/terminate.png'))
+        closeBtn.setIcon(QtGui.QIcon(icon_path+'terminate.png'))
         closeBtn.clicked.connect(self._close)
         self.binEdit = QLineEdit('np.linspace(1,20,7)')
         self.binEdit.hide()
@@ -255,7 +255,7 @@ class FitParameters(QFrame):
         self.function_text = QLabel('')
         layout.addWidget(self.function_text, 1, 0, 1, 4)
         self.setLayout(layout)
-        self.layout = layout
+        self.qlayout = layout
         self.parnames = []
         self.fixbuttons = []
         self.startvalues = []
@@ -276,14 +276,14 @@ class FitParameters(QFrame):
         self.function_text.setText(fitinfo['function_text'])
         for i in range(len(fitinfo['par_names']) - len(self.parnames)):  ## create missing lines
             self.parnames.append(QLabel(''))
-            self.layout.addWidget(self.parnames[-1], len(self.parnames) + 1, 0)
+            self.qlayout.addWidget(self.parnames[-1], len(self.parnames) + 1, 0)
             self.fixbuttons.append(QPushButton('lock'))
             self.fixbuttons[-1].setCheckable(True)
-            self.layout.addWidget(self.fixbuttons[-1], len(self.fixbuttons) + 1, 1)
+            self.qlayout.addWidget(self.fixbuttons[-1], len(self.fixbuttons) + 1, 1)
             self.startvalues.append(QLineEdit(''))
-            self.layout.addWidget(self.startvalues[-1], len(self.startvalues) + 1, 2)
+            self.qlayout.addWidget(self.startvalues[-1], len(self.startvalues) + 1, 2)
             self.fitresults.append(QLabel('0'))
-            self.layout.addWidget(self.fitresults[-1], len(self.fitresults) + 1, 3)
+            self.qlayout.addWidget(self.fitresults[-1], len(self.fitresults) + 1, 3)
 
         self.parnames_str = []
         for i, parname in enumerate(fitinfo['par_names']):
@@ -356,7 +356,7 @@ class FittingWidget(QFrame):
         self.fitMode.currentTextChanged.connect(self.fitfunctionChanged)
         closeBtn = QPushButton('')
         closeBtn.setMaximumWidth(20)
-        closeBtn.setIcon(QtGui.QIcon(balipath + '/pytweezer/icons/terminate.png'))
+        closeBtn.setIcon(QtGui.QIcon(icon_path + 'terminate.png'))
         closeBtn.clicked.connect(self._clos)
         fitBtn = QPushButton('fit')  # manually trigger fit (e.g. if you have changed startvalues)
         fitBtn.clicked.connect(self._refit)
@@ -653,7 +653,7 @@ class FilterWidget(QWidget):
         self.condition = QLineEdit()
         hidebutton = QPushButton('')
         hidebutton.setMaximumWidth(20)
-        hidebutton.setIcon(QtGui.QIcon(balipath + '/pytweezer/icons/terminate.png'))
+        hidebutton.setIcon(QtGui.QIcon(icon_path + 'terminate.png'))
 
         self.setToolTip('Condition e.g. >0')
         layout = QHBoxLayout()
@@ -936,14 +936,14 @@ class H5DataPlotter(QWidget):
         self.keylist = ['--None--']
         self.sourcelist = ['--Combined--']
 
-        self.layout = QGridLayout()
+        self.qlayout = QGridLayout()
 
-        # win = pg.GraphicsWindow(title = "Basic plotting examples")  # deprecated
+        # win = pg.GraphicsLayoutWidget(title = "Basic plotting examples")  # deprecated
         win = pg.GraphicsLayoutWidget(title="Basic plotting examples")
         win.setWindowTitle('pyqtgraph example: Plotting')
         self.plotItem = pg.PlotItem()
         win.addItem(self.plotItem)
-        self.layout.addWidget(win, 0, 0)
+        self.qlayout.addWidget(win, 0, 0)
 
         self.dataSelector = DataSelectorItem()
 
@@ -956,7 +956,7 @@ class H5DataPlotter(QWidget):
         for i, widget in enumerate(self.yAxisSelectors):
             layout_selector.addWidget(widget, i + 2, 1)
 
-        self.layout.addLayout(layout_selector, 0, 1)
+        self.qlayout.addLayout(layout_selector, 0, 1)
 
         exportlayout = QHBoxLayout()
 
@@ -974,11 +974,11 @@ class H5DataPlotter(QWidget):
         # add ability to load stored settings for the axes
         config_select_button = QPushButton('Select configuration')
         config_select_button.clicked.connect(self.storeConfiguration)
-        # self.layout.addWidget(config_select_button, 2, 1)
+        # self.qlayout.addWidget(config_select_button, 2, 1)
 
-        self.layout.setColumnStretch(0, 20)
-        self.layout.setColumnStretch(1, 10)
-        self.setLayout(self.layout)
+        self.qlayout.setColumnStretch(0, 20)
+        self.qlayout.setColumnStretch(1, 10)
+        self.setLayout(self.qlayout)
 
         # start update timer
         timer = QtCore.QTimer(self)
@@ -1087,7 +1087,7 @@ class H5DataPlotter(QWidget):
 
         now = datetime.datetime.now()
         now = now.strftime("%Y_%m_%d_%Hh%Mm%Ss")
-        savefile = balipath + '/images/' + now + '.png'
+        savefile = tweezerpath + '/images/' + now + '.png'
         print(savefile)
         fig.savefig(savefile)
         plt.show()
@@ -1099,7 +1099,7 @@ class H5DataPlotter(QWidget):
         fig, ax = self.gen_export_plot()
         now = datetime.datetime.now()
         now = now.strftime("%Y_%m_%d_%Hh%Mm%Ss")
-        savefile = balipath + '/images/' + now + '.pdf'
+        savefile = tweezerpath + '/images/' + now + '.pdf'
         fig.savefig(savefile)
         call([self._viewer, savefile])
 
@@ -1107,7 +1107,7 @@ class H5DataPlotter(QWidget):
 class H5StorageDataMgr(QWidget):
     _h5file = PropertyAttribute('h5file', 'Set Filename')  # filename of the h5 file
     _imagestreams = PropertyAttribute('imagestreams', [])
-    _datapath = PropertyAttribute('path', balipath)
+    _datapath = PropertyAttribute('path', tweezerpath)
     _singleDataStreams = PropertyAttribute('Singledatastreams', [])
 
     def __init__(self, props, parent=None):

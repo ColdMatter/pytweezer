@@ -1,6 +1,6 @@
 
 from PyQt5.QtWidgets import *
-from pytweezer.servers import Properties,balipath,PropertyAttribute
+from pytweezer.servers import Properties,tweezerpath,PropertyAttribute
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QKeyEvent

@@ -12,7 +12,7 @@ from os.path import isfile
 from os import listdir, remove
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.servers.configreader import ConfigReader
-from pytweezer.servers import balipath
+from pytweezer.servers import tweezerpath
 import subprocess
 from pytweezer.analysis.print_messages import print_error
 import signal
@@ -44,7 +44,7 @@ class SingleProcess(QFrame):
         layout.addWidget(startButton)
         killButton=QPushButton('')
         killButton.setMaximumWidth(20)
-        killButton.setIcon(QtGui.QIcon(balipath+'/pytweezer/icons/terminate.png'))
+        killButton.setIcon(QtGui.QIcon(icon_path+'terminate.png'))
         killButton.clicked.connect(self.terminateProcess)
         layout.addWidget(killButton)
         self.setLayout(layout)
@@ -140,9 +140,10 @@ class SingleProcess(QFrame):
         if self.process is not None:
             self.process.terminate()
             try:
-                self.process.wait(timeout=5)
-            except:
+                self.process.wait(timeout=1)
+            except Exception as e:
                 print_error('process termination failed killing process {0}'.format(self.processname), 'error')
+                print(e)
                 self.process.kill()
             if self.process.poll()==-15:
                 self.startButton.setStyleSheet("color: gray")
@@ -183,7 +184,7 @@ class ProcessManager(BWidget):
                     tooltip = None
                     if 'tooltip' in param:
                         tooltip = param['tooltip']
-                    process = SingleProcess(balipath + '/bin/' + param['script'], name,
+                    process = SingleProcess(tweezerpath + '/bin/' + param['script'], name,
                                             param['active'], category+'/', tooltip=tooltip)
                     line=line+1
                     layout.addWidget(process,line,cnum)
@@ -280,6 +281,7 @@ def main():
 
 ## Start Qt event loop unless running in interactive mode or using pyside.
 if __name__ == '__main__':
+    print(icon_path)
     import sys
     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
         main()

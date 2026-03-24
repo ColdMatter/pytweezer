@@ -1,6 +1,6 @@
 device_db = {
     "dummy_camera": {
-        "module": "pytweezer.experiment.dummy",
+        "module": "pytweezer.experiment.dummy_drivers",
         "class": "DummyCamera",
         "parameters": {
             "mode": "test",
@@ -8,7 +8,7 @@ device_db = {
         }
     },
     "dummy_synth": {
-        "module": "pytweezer.experiment.dummy",
+        "module": "pytweezer.experiment.dummy_drivers",
         "class": "DummySynth",
         "parameters": {
             "frequency": 1e9,

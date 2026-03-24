@@ -16,15 +16,16 @@ from PyQt5.QtCore import Qt, QTimer, QEvent, QTime, QDate, QDateTime
 from pytweezer.servers import Properties, PropertyAttribute
 from pytweezer.servers.clients import DataClient
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
-from pytweezer.GUI.prepstation import PrepStation
-from pytweezer.servers import balipath
-from pytweezer.GUI.browser_workers import Worker
+from pytweezer.GUI.browser.prepstation import PrepStation
+from pytweezer.servers import tweezerpath
+from pytweezer.GUI.browser.browser_workers import Worker
 from pytweezer.GUI.models import PrepModel
 from pytweezer.GUI.qled import LedIndicator
 from pytweezer.GUI.pytweezerQt import SearchComboBox
 from pytweezer.analysis.print_messages import print_error
 
 from functools import partial
+icon_path = tweezerpath + '/pytweezer/GUI/icons/'
 
 propName = 'BaliBrowser/Looper'
 _props = Properties(propName)
@@ -42,7 +43,7 @@ class Looper(QGroupBox):
         self.parent = parent
         self.browser = parent
         self._task = self.browser._task
-        self.loopDir = balipath + '/configuration/loops'
+        self.loopDir = tweezerpath + '/configuration/loops'
         self.prepList = self.browser.prepStation.prepList
         self.keyList = PropertyAttribute('keyList', [], parent=self)
         self.dataManager = DataManager(self.keyList, self.props)
@@ -50,17 +51,17 @@ class Looper(QGroupBox):
         self.groupDict = {}
         self.loopManager = LoopManager(self.browser, self.props, parent=self)
 
-        self.layout = QVBoxLayout()
-        self.layout.setAlignment(Qt.AlignTop)
+        self.qlayout = QVBoxLayout()
+        self.qlayout.setAlignment(Qt.AlignTop)
 
         self.buttonLayout = QHBoxLayout()
         self.create_buttons()
-        self.layout.addLayout(self.buttonLayout)
+        self.qlayout.addLayout(self.buttonLayout)
 
         self.tabWidget = LoopTabWidget(self)
-        self.layout.addWidget(self.tabWidget)
+        self.qlayout.addWidget(self.tabWidget)
 
-        self.setLayout(self.layout)
+        self.setLayout(self.qlayout)
 
         self.autoTerminating = False
         self.temrinationTimer = QtCore.QTimer()
@@ -86,12 +87,12 @@ class Looper(QGroupBox):
 
     def create_buttons(self):
         runButton = QPushButton('')
-        runButton.setIcon(QtGui.QIcon(balipath+'/pytweezer/icons/run.svg'))
+        runButton.setIcon(QtGui.QIcon(icon_path + 'run.svg'))
         runButton.clicked.connect(self.loopManager.run_loop)
         self.buttonLayout.addWidget(runButton)
 
         terminateButton = QPushButton('')
-        terminateButton.setIcon(QtGui.QIcon(balipath+'/pytweezer/icons/terminate.svg'))
+        terminateButton.setIcon(QtGui.QIcon(icon_path + 'terminate.svg'))
         terminateButton.clicked.connect(self.loopManager.terminate)
         self.buttonLayout.addWidget(terminateButton)
 
@@ -130,7 +131,7 @@ class Looper(QGroupBox):
         if not, a file is created based on the current date and time.
         """
         if auto:
-            fullDir = balipath + '/configuration/'
+            fullDir = tweezerpath + '/configuration/'
             path = fullDir + 'loopfile.json'
         else:
             dateDir = datetime.today().strftime('%Y_%m_%d')
@@ -158,7 +159,7 @@ class Looper(QGroupBox):
         called with auto=True on browser startup to get looplist.
         """
         if auto:
-            filepath = balipath + '/configuration/loopfile.json'
+            filepath = tweezerpath + '/configuration/loopfile.json'
             if not os.path.exists(filepath):
                 print_error("Looper: loopfile not found", 'warning')
                 self.add_tab()
@@ -376,7 +377,7 @@ class LoopGroup(QFrame):
         self._props = parent._props
         self.props = self._props
         self.baustelle = Baustelle(self.browser, self.props, parent=self)  # the loop builder
-        self.layout = QVBoxLayout()
+        self.qlayout = QVBoxLayout()
 
         self.buttonLayout = QHBoxLayout()
         self.create_buttons()
@@ -385,9 +386,9 @@ class LoopGroup(QFrame):
         self.scrollArea.setWidgetResizable(True)
         self.scrollArea.setWidget(self.baustelle)
 
-        self.layout.addLayout(self.buttonLayout)
-        self.layout.addWidget(self.scrollArea)
-        self.setLayout(self.layout)
+        self.qlayout.addLayout(self.buttonLayout)
+        self.qlayout.addWidget(self.scrollArea)
+        self.setLayout(self.qlayout)
 
         self.conRuns = 0
         self.conCheck = False
@@ -448,11 +449,11 @@ class Baustelle(QWidget):
         self.browser = browser
         self._task = self.browser._task
         self.props = props
-        self.loopDir = balipath + '/configuration/loops'
-        self.layout = QVBoxLayout()
-        self.layout.setAlignment(Qt.AlignTop)
+        self.loopDir = tweezerpath + '/configuration/loops'
+        self.qlayout = QVBoxLayout()
+        self.qlayout.setAlignment(Qt.AlignTop)
         self.add_group_item()
-        self.setLayout(self.layout)
+        self.setLayout(self.qlayout)
 
     def update_keylist(self):
         """list of labels of streamed data"""
@@ -478,12 +479,12 @@ class Baustelle(QWidget):
 
     def add_group_item(self):
         self.groupItem = GroupItem(parent=self)
-        self.layout.addWidget(self.groupItem)
+        self.qlayout.addWidget(self.groupItem)
         self.groupItemList.append(self.groupItem)
 
     def add_item(self, item):
-        # self.layout.addWidget(item)
-        self.layout.insertWidget(len(self.groupItemList)-1, item)
+        # self.qlayout.addWidget(item)
+        self.qlayout.insertWidget(len(self.groupItemList)-1, item)
         self.groupItemList.insert(-1, item)
         self.update_idx()
         self.looper.update_loop_file()
@@ -498,7 +499,7 @@ class Baustelle(QWidget):
         """
         creates a json file of the current loop. if auto, this goes to the looplist. if not, a browser window opens.
         """
-        configDir = balipath + '/configuration/'
+        configDir = tweezerpath + '/configuration/'
         if auto:
             fullDir = configDir
             path = fullDir + 'looplist_' + self.groupName + '.json'
@@ -524,7 +525,7 @@ class Baustelle(QWidget):
         called with auto=True on browser startup to get looplist.
         """
         if auto:
-            filepath = balipath + '/configuration/looplist.json'
+            filepath = tweezerpath + '/configuration/looplist.json'
             if not os.path.exists(filepath):
                 return
         else:
@@ -589,9 +590,9 @@ class LoopItem(QFrame):
         self.conRuns = 0
         self.maxConCheck = False
         self.maxCon = 0
-        self.layout = QGridLayout()
-        self.layout.setAlignment(Qt.AlignLeft)
-        self.setLayout(self.layout)
+        self.qlayout = QGridLayout()
+        self.qlayout.setAlignment(Qt.AlignLeft)
+        self.setLayout(self.qlayout)
         self.hidx = 0  # widgets added to the item layout from left to right by incrementing the hidx.
 
     def create_widgets(self):
@@ -606,19 +607,19 @@ class LoopItem(QFrame):
         self.delButton.clicked.connect(self.delete_item)
 
         self.upButton = QPushButton()
-        self.upButton.setIcon(QtGui.QIcon(balipath+'/pytweezer/icons/up_arrow.svg'))
+        self.upButton.setIcon(QtGui.QIcon(icon_path + 'up_arrow.svg'))
         self.upButton.clicked.connect(self.move_up)
 
         self.downButton = QPushButton()
-        self.downButton.setIcon(QtGui.QIcon(balipath + '/pytweezer/icons/down_arrow.svg'))
+        self.downButton.setIcon(QtGui.QIcon(icon_path + 'down_arrow.svg'))
         self.downButton.clicked.connect(self.move_down)
 
     def add_widget(self, widget, label):
         """convenience function for adding widgets to QGridLayout with labels"""
         label = QLabel(label)
         label.setStyleSheet("font-weight: bold")
-        self.layout.addWidget(label, 0, self.hidx)
-        self.layout.addWidget(widget, 1, self.hidx)
+        self.qlayout.addWidget(label, 0, self.hidx)
+        self.qlayout.addWidget(widget, 1, self.hidx)
         self.hidx += 1
 
     def move_up(self):
@@ -679,8 +680,6 @@ class LoopItem(QFrame):
     def led_off(self):
         self.led.setChecked(False)
 
-    def update_browser_task(self):
-        self.browser.update_exp_window_task()
 
     # sometimes for convenience we call a method from all loop items, even if not implemented
     # this saves having to check the type of every loop item. therefore we define the methods here
@@ -735,18 +734,18 @@ class TaskItem(LoopItem):
         self.taskNr = taskNr
         self.task = self.prepList[taskNr] if self.prepList else {}
         self.init_ui()
-        self.setLayout(self.layout)
+        self.setLayout(self.qlayout)
 
     def init_ui(self):
 
         self.create_widgets()
         self.create_task_widgets()
 
-        self.layout.addWidget(self.idxLabel, 0, self.hidx)
-        self.layout.addWidget(self.led, 1, self.hidx)
+        self.qlayout.addWidget(self.idxLabel, 0, self.hidx)
+        self.qlayout.addWidget(self.led, 1, self.hidx)
         self.hidx += 1
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
         self.hidx += 1
 
         self.add_widget(self.nrBox,'Task:')
@@ -756,10 +755,10 @@ class TaskItem(LoopItem):
         self.expLabel.setText((self.task.get('expName')))
         self.add_widget(self.expLabel, 'Experiment:')
 
-        self.layout.setColumnStretch(self.hidx, 1)
+        self.qlayout.setColumnStretch(self.hidx, 1)
         self.hidx += 1
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
         self.hidx += 1
 
         self.add_widget(self.totalRunsBox, 'Run:')
@@ -767,7 +766,7 @@ class TaskItem(LoopItem):
         self.add_widget(self.maxRunsCheck, 'Check?')
         self.add_widget(self.maxRunsBox, 'Max:')
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
         self.hidx += 1
 
         self.add_widget(self.conRunsBox, 'Consecutive:')
@@ -775,13 +774,13 @@ class TaskItem(LoopItem):
         self.add_widget(self.maxConCheck, 'Check?')
         self.add_widget(self.maxConBox, 'Max consecutive:')
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
         self.hidx += 1
 
         self.add_widget(self.delButton, '')
 
-        self.layout.addWidget(self.upButton, 0, self.hidx)
-        self.layout.addWidget(self.downButton, 1, self.hidx)
+        self.qlayout.addWidget(self.upButton, 0, self.hidx)
+        self.qlayout.addWidget(self.downButton, 1, self.hidx)
 
     def create_task_widgets(self):
         self.nrBox = QComboBox()  # select a task from its preplist index
@@ -810,9 +809,9 @@ class TaskItem(LoopItem):
         """
         self._task.value += 1
         newTaskNr = self._task.value
-        taskDict = self.task.copy()
-        taskDict['experiment'] = get_experiment(taskDict['filepath'], self.browser)
-        signals.addItem.emit(newTaskNr, taskDict)
+        task_dict = self.task.copy()
+        task_dict['experiment'] = get_experiment(task_dict['filepath'], self.browser)
+        signals.addItem.emit(newTaskNr, task_dict)
 
     def end_run(self):
         """increments run number and consecutive runs if applicable"""
@@ -942,43 +941,43 @@ class ListItem(TaskItem):
         self.create_task_widgets()
         self.create_list_widgets()
         self.update_nr_box()
-        self.layout.addWidget(self.led, 1, self.hidx)
+        self.qlayout.addWidget(self.led, 1, self.hidx)
 
-        self.layout.addWidget(self.idxLabel, 0, self.hidx)
+        self.qlayout.addWidget(self.idxLabel, 0, self.hidx)
         self.hidx += 1
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 3, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 3, self.hidx)
         self.hidx += 1
 
-        self.layout.addWidget(self.listButton, 2, self.hidx)
+        self.qlayout.addWidget(self.listButton, 2, self.hidx)
         self.add_widget(self.nrBox, 'Current:')
-        self.layout.addWidget(self.expLabel, 2, self.hidx)
+        self.qlayout.addWidget(self.expLabel, 2, self.hidx)
         self.add_widget(self.taskLabel, 'Label:')
 
-        self.layout.setColumnStretch(self.hidx, 1)
+        self.qlayout.setColumnStretch(self.hidx, 1)
         self.hidx += 1
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 3, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 3, self.hidx)
         self.hidx += 1
 
         self.add_widget(self.totalRunsBox, 'Run:')
         self.add_widget(self.maxRunsCheck, 'Check?')
         self.add_widget(self.maxRunsBox, 'Max:')
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 3, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 3, self.hidx)
         self.hidx += 1
 
         self.add_widget(self.conRunsBox, 'Consecutive:')
         self.add_widget(self.maxConCheck, 'Check?')
         self.add_widget(self.maxConBox, 'Max consecutive:')
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 3, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 3, self.hidx)
         self.hidx += 1
 
         self.add_widget(self.delButton, '')
 
-        self.layout.addWidget(self.upButton, 0, self.hidx)
-        self.layout.addWidget(self.downButton, 1, self.hidx)
+        self.qlayout.addWidget(self.upButton, 0, self.hidx)
+        self.qlayout.addWidget(self.downButton, 1, self.hidx)
 
     def create_list_widgets(self):
         self.listButton = QPushButton("Edit List")
@@ -998,13 +997,13 @@ class ListItem(TaskItem):
         task = self.taskList[self.currentTaskIndex]
         self._task.value += 1
         newTaskNr = self._task.value
-        taskDict = task.copy()
-        experiment = get_experiment(taskDict['filepath'], self.browser)
-        taskDict['experiment'] = experiment
+        task_dict = task.copy()
+        experiment = get_experiment(task_dict['filepath'], self.browser)
+        task_dict['experiment'] = experiment
         if not experiment:
             print_error('Looper: experiment missing!', 'error')
             self.terminate()
-        signals.addItem.emit(newTaskNr, taskDict)
+        signals.addItem.emit(newTaskNr, task_dict)
 
     def end_run(self):
         if (self.loopManager.lastGroupName == self.group.groupName) and (self.loopManager.lastTaskIndex == self.idx):
@@ -1101,41 +1100,41 @@ class ConditionalItem(LoopItem):
         self.create_widgets()
         self.create_cond_widgets()
 
-        self.layout.addWidget(self.idxLabel, 0, self.hidx)
-        self.layout.addWidget(self.led, 1, self.hidx)
+        self.qlayout.addWidget(self.idxLabel, 0, self.hidx)
+        self.qlayout.addWidget(self.led, 1, self.hidx)
         self.hidx += 1
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
         self.hidx += 1
 
-        self.layout.addWidget(QLabel("If"), 0, 2)
-        self.layout.addWidget(self.dataBox, 0, 3)
-        self.layout.addWidget(self.compBox, 0, 4)
-        self.layout.addWidget(self.valBox, 0, 5)
-        self.layout.addWidget(self.parsedBox, 0, 6)
+        self.qlayout.addWidget(QLabel("If"), 0, 2)
+        self.qlayout.addWidget(self.dataBox, 0, 3)
+        self.qlayout.addWidget(self.compBox, 0, 4)
+        self.qlayout.addWidget(self.valBox, 0, 5)
+        self.qlayout.addWidget(self.parsedBox, 0, 6)
 
-        self.layout.addWidget(QLabel("go to"), 1, 2)
-        self.layout.addWidget(self.ifBox, 1, 3)
-        self.layout.addWidget(QLabel("else"), 1, 4)
-        self.layout.addWidget(self.elseBox, 1, 5)
+        self.qlayout.addWidget(QLabel("go to"), 1, 2)
+        self.qlayout.addWidget(self.ifBox, 1, 3)
+        self.qlayout.addWidget(QLabel("else"), 1, 4)
+        self.qlayout.addWidget(self.elseBox, 1, 5)
 
         self.hidx = 7
 
-        self.layout.setColumnStretch(self.hidx, 1)
+        self.qlayout.setColumnStretch(self.hidx, 1)
 
         self.hidx += 1
         self.descriptionTextEdit = QTextEdit('')
         self.descriptionTextEdit.setFixedWidth(500)
-        self.layout.addWidget(self.descriptionTextEdit, 0, self.hidx, 2, 1)
+        self.qlayout.addWidget(self.descriptionTextEdit, 0, self.hidx, 2, 1)
 
         self.hidx += 1
-        self.layout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
         self.hidx += 1
 
         self.add_widget(self.delButton, '')
 
-        self.layout.addWidget(self.upButton, 0, self.hidx)
-        self.layout.addWidget(self.downButton, 1, self.hidx)
+        self.qlayout.addWidget(self.upButton, 0, self.hidx)
+        self.qlayout.addWidget(self.downButton, 1, self.hidx)
 
     def run(self, signals):
         self.loopManager.lastIndex = self.loopManager.currentItem
@@ -1298,11 +1297,11 @@ class GroupItem(LoopItem):
     def init_ui(self):
         self.create_widgets()
         self.create_group_widgets()
-        self.layout.addWidget(self.idxLabel, 0, self.hidx)
-        self.layout.addWidget(self.led, 1, self.hidx)
+        self.qlayout.addWidget(self.idxLabel, 0, self.hidx)
+        self.qlayout.addWidget(self.led, 1, self.hidx)
         self.hidx += 1
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
         self.hidx += 1
 
         self.add_widget(self.conRunsBox, 'Consecutive:')
@@ -1310,15 +1309,15 @@ class GroupItem(LoopItem):
         self.add_widget(self.maxConBox, 'Max consecutive:')
         self.hidx += 1
 
-        self.layout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(VLine(), 0, self.hidx, 2, self.hidx)
         self.hidx += 1
-        self.layout.addWidget(QLabel('Go to box:'), 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(QLabel('Go to box:'), 0, self.hidx, 2, self.hidx)
         self.hidx += 15
 
         self.groupBox = QComboBox()
         self.update_boxes()
         self.groupBox.currentIndexChanged.connect(self.update_loop_file)
-        self.layout.addWidget(self.groupBox, 0, self.hidx, 2, self.hidx)
+        self.qlayout.addWidget(self.groupBox, 0, self.hidx, 2, self.hidx)
 
     def update_boxes(self):
         text = self.groupBox.currentText()
@@ -1394,14 +1393,14 @@ class LoopSubMgr(QWidget):
     """GUI for editing datastream subscriptions"""
     def __init__(self, parent = None):
         super().__init__(parent)
-        self.layout = QVBoxLayout()
+        self.qlayout = QVBoxLayout()
         self._props = _props
         self.parent = parent
         self.dataClient = parent.dataClient
         self.editor = SubscriptionEditor(self._props, 'Data', propprefix='')
         self.editor.subscriptionsChanged.connect(self.update_subscriptions)
-        self.layout.addWidget(self.editor)
-        self.setLayout(self.layout)
+        self.qlayout.addWidget(self.editor)
+        self.setLayout(self.qlayout)
 
     def update_subscriptions(self):
         self.streamNames = self._props.get('datastreams', [''])
@@ -1437,7 +1436,7 @@ class PrepBox(PrepStation):
         self.prepList = browser.prepStation.prepList
         self.set_model()
         self.parent = parent
-        self.layout.setDirection(2)
+        self.qlayout.setDirection(2)
 
     def init_ui(self):
         pushButton = QPushButton('Push Selected')
@@ -1448,7 +1447,7 @@ class PrepBox(PrepStation):
         unpackButton.clicked.connect(self.unpack_selection)
         self.buttonLayout.addWidget(unpackButton)
 
-        self.layout.addLayout(self.buttonLayout)
+        self.qlayout.addLayout(self.buttonLayout)
 
     def init_table_actions(self):
         push_action = QAction("Add to List", self.table)
@@ -1533,7 +1532,7 @@ class ListBox(PrepStation):
         self.prepList = self.taskList
         self.set_model()
         self.parent = parent
-        self.layout.setDirection(2)
+        self.qlayout.setDirection(2)
 
     def init_ui(self):
         moveUpButton = QPushButton('Move Up')
@@ -1546,7 +1545,7 @@ class ListBox(PrepStation):
         moveDownButton.setShortcut("PgDown")
         self.buttonLayout.addWidget(moveDownButton)
 
-        self.layout.addLayout(self.buttonLayout)
+        self.qlayout.addLayout(self.buttonLayout)
 
     def init_table_actions(self):
         view_action = QAction("View", self.table)
@@ -1564,7 +1563,7 @@ class ListBox(PrepStation):
     def set_model(self):
         self.tableModel = PrepModel(self.taskList)
         self.table.setModel(self.tableModel)
-        self.layout.addWidget(self.table)
+        self.qlayout.addWidget(self.table)
 
         cw = QtGui.QFontMetrics(self.font()).averageCharWidth()
         h = self.table.horizontalHeader()

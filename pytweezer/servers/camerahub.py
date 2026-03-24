@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import QFileDialog
 
 import pytweezer
 #from pytweezer.drivers.blackfly import Blackfly
-from pytweezer.servers import Properties, balipath, PropertyAttribute, DataClient, ImageClient, CommandClient
+from pytweezer.servers import Properties, tweezerpath, PropertyAttribute, DataClient, ImageClient, CommandClient
 
 
 try:
@@ -152,7 +152,6 @@ class CamServer():
             serial    : Serial number of the camera
         '''
         name = name.split('/')[-1]
-        # set up pytweezer environment
         self.imstream = ImageClient(name)
         self.cmdstream = CommandClient(name)
         self.cmdstream.subscribe(name)
@@ -624,12 +623,12 @@ class CameraGUI(BMainWindow):
         self.mainWidget = QWidget()
         # self.mainWidget.setStyleSheet("CameraGUI {background-color: rgb(195,205,230);color:blue; margin:0px; border:5px solid rgb(0, 0, 80);} ")
 
-        self.layout = QHBoxLayout()
+        self.qlayout = QHBoxLayout()
         for cam in self._cam_serials.keys():
             camWidget = CamWidget(cam, parent=self)
             self.camWidgets[cam] = camWidget
-            self.layout.addWidget(camWidget)
-        self.mainWidget.setLayout(self.layout)
+            self.qlayout.addWidget(camWidget)
+        self.mainWidget.setLayout(self.qlayout)
         self.setCentralWidget(self.mainWidget)
         # self.mainWidget.setAttribute(QtCore.Qt.WA_StyledBackground)
 

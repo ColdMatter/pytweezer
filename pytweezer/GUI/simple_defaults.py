@@ -7,12 +7,15 @@ from pytweezer.servers import *
 from pytweezer.GUI.pytweezerQt import BMainWindow
 from pytweezer.analysis.print_messages import print_error
 
+icon_path = tweezerpath + '/pytweezer/GUI/icons/'
+
 class DefaultExp(Experiment):
     ''' an experiment structure containing all attributes.
 
     '''
     def build(self):
-        self.setattr_argument("count", NumberValue(ndecimals=0, step=1,value=1))
+        # self.setattr_argument("count", NumberValue(ndecimals=0, step=1,value=1))
+        self.setattr_argument("count", NumberValue, ndecimals=0, step=1,value=1)
         groups={'ungrouped':[]}  #contains the grouping of the experiment
         hidden=[]
         for k,v in self._device_db.items():
@@ -83,7 +86,7 @@ class IntManager(BasicManager):
         props:(Properties)
             handle for the properties
 
-        exp:(BaliExperiment)
+        exp:(experiment)
             pointing to the experiment
 
         parname:(str
@@ -136,7 +139,7 @@ class BoolManager(QCheckBox):
             pointing to the properties
 
     KWArgs:
-        exp:(Baliexperiment)
+        exp:(experiment)
             handle for the experiment
         parName:(str)
             parameter Name
@@ -183,6 +186,7 @@ class FloatManager(IntManager):
             self.spin.setSuffix(' '+self.unit)
         self.spin.setSingleStep(self.step)
         if self._props:
+            print(self.parName)
             val=self._props.get(self.parName,self.default_value)     #the values in properties are in SI units. Non SI only on disp
         else:
             val = self.default_value
@@ -300,7 +304,7 @@ class SimpleDefaults(QFrame):
 def main():
     qApp = QApplication(sys.argv)
     icon = QtGui.QIcon()
-    icon.addFile('../pytweezer/icons/pytweezer_simple_default_icon.svg')
+    icon.addFile(icon_path + 'pytweezer_simple_default_icon.svg')
     qApp.setWindowIcon(icon)
     Win = SimpleDefaults()
     Win.show()

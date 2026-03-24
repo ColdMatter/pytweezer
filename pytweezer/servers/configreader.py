@@ -10,7 +10,7 @@ Readin configuration file and startup values for Properties
 import os
 import json
 
-balipath=os.path.realpath(os.path.dirname(os.path.abspath(__file__)) +'/../..')
+tweezerpath=os.path.realpath(os.path.dirname(os.path.abspath(__file__)) +'/../..')
 configpath=os.path.realpath(os.path.dirname(os.path.abspath(__file__)) +'/../../configuration/')
 configfilename=configpath+'/configfile.json'
 propertyfilename=configpath+'/properties/properties.json'

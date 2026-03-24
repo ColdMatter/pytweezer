@@ -16,13 +16,13 @@ from PyQt5.QtWidgets import *
 import PyQt5.QtCore as Qt
 from PyQt5 import QtCore
 from pytweezer import *
-from pytweezer.servers import Properties,balipath,PropertyAttribute,DataClient
+from pytweezer.servers import Properties,tweezerpath,PropertyAttribute,DataClient
 from pytweezer.servers import send_info,send_error
 from pytweezer.GUI.editor_sequencer import CodeEditorParser,CodeEditor
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.simple_defaults import BasicManager,FloatManager,BoolManager,ComboManager
 from pytweezer.GUI.helper_workers import Worker
-from pytweezer.experiment.baliexperiment import NumberValue
+from pytweezer.experiment.experiment import NumberValue
 
 from functools import partial
 
