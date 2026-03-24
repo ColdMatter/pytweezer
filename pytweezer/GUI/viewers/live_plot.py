@@ -20,8 +20,7 @@ class PlotDataEditor(QWidget):
             props:    link to property class
             parent:   see QWidget for information
         """
-        super().__init__()
-        self.parent = parent
+        super().__init__(parent=parent)
         self.data=data
         self.props=props
         layout=QVBoxLayout()
@@ -52,9 +51,9 @@ class PlotDataEditor(QWidget):
     def updateDatachannel(self,s):
         dataname = s.split(':')[0]
         self.props.set('ydata', [dataname])
-        self.parent.dataname = dataname
-        if 'lplot' in self.parent.__dict__.keys():
-            self.parent.lplot.name = dataname
+        self.parent().dataname = dataname
+        if 'lplot' in self.parent().__dict__.keys():
+            self.parent().lplot.name = dataname
 
 class ScrollPlot(pg.PlotItem):
     ''' plot subscribes to channels and updates '''

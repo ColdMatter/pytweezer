@@ -2,7 +2,7 @@ from PyQt5 import QtGui, QtCore,QtWidgets
 from PyQt5.QtWidgets import *
 import PyQt5.QtCore as Qt
 from pytweezer import *
-from pytweezer.servers import Properties,PropertyAttribute
+from pytweezer.servers import Properties,PropertyAttribute, tweezerpath, icon_path
 from pytweezer.servers.configreader import ConfigReader
 from pytweezer.GUI.viewers.image_monitor import ImageDisplay
 from pytweezer.GUI.viewers.updating_plot import LivePlot
@@ -22,8 +22,8 @@ class ImageWindow(BMainWindow):
     def __init__(self,name,parent=None):
         super().__init__(name,parent)
         type(self)._displayname  = PropertyAttribute('ImageDisplay',self._name+'/Viewer')
-        type(self)._topPlotterName = PropertyAttribute('Plottertop',self._name+'/Plotline')
-        type(self)._rightPlotterName= PropertyAttribute('Plotterright',self._name+'/Plotcol')
+        # type(self)._topPlotterName = PropertyAttribute('Plottertop',self._name+'/Plotline')
+        # type(self)._rightPlotterName= PropertyAttribute('Plotterright',self._name+'/Plotcol')
         type(self)._parameterBoxName= PropertyAttribute('Parameterbox',self._name+'/ParBox')
         type(self)._imDataBoxName= PropertyAttribute('ImageDataBox',self._name+'/ImDatBox')
         type(self)._propBoxName= PropertyAttribute('PropDataBox',self._name+'/PropBox')
@@ -35,6 +35,7 @@ class ImageWindow(BMainWindow):
         self.statusBar().showMessage('Ready')
         self.createDockWidgets()
         self.image = ImageDisplay(self._displayname, parent=self)
+        # add LUT for ImageDisplay
         self.setCentralWidget(self.image)
         #self.image.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Expanding)
         #self.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Expanding)
@@ -45,18 +46,19 @@ class ImageWindow(BMainWindow):
 
 
     def createDockWidgets(self):
-        linedock=QDockWidget(self._topPlotterName,self)
-        self.lineplot=LivePlot(self._topPlotterName)
-        linedock.setWidget(self.lineplot)
-        self.lineplot.setSizeHint(700,200)
-        self.linedock=linedock
-        self.addDockWidget(Qt.Qt.TopDockWidgetArea,linedock)
-        self.linedock.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Minimum)
+        # linedock=QDockWidget(self._topPlotterName,self)
+        # self.lineplot=LivePlot(self._topPlotterName)
+        # linedock.setWidget(self.lineplot)
+        # self.lineplot.setSizeHint(700,200)
+        # self.linedock=linedock
+        # self.addDockWidget(Qt.Qt.TopDockWidgetArea,linedock)
+        # self.linedock.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Minimum)
 
-        fileselectorDock=QDockWidget(self._rightPlotterName,self)
-        self.colplot=LivePlot(self._rightPlotterName)
-        fileselectorDock.setWidget(self.colplot)
-        self.addDockWidget(Qt.Qt.RightDockWidgetArea,fileselectorDock)
+        # fileselectorDock=QDockWidget(self._rightPlotterName,self)
+        # self.colplot=LivePlot(self._rightPlotterName)
+        # fileselectorDock.setWidget(self.colplot)
+        # self.addDockWidget(Qt.Qt.RightDockWidgetArea,fileselectorDock)
+        
 
         dock=QDockWidget("Image Info", self)
         dockWidget = QFrame()
@@ -68,6 +70,7 @@ class ImageWindow(BMainWindow):
         #dock=QDockWidget(self._imDataBoxName,self)
         self.imDataBox=ImageDataBox(self._imDataBoxName)
         dockLayout.addWidget(self.imDataBox)
+
 
         self.propBox=CamPropsBox(self._propBoxName)
         dockLayout.addWidget(self.propBox)
@@ -81,9 +84,9 @@ class ImageWindow(BMainWindow):
 
 def main(name):
     app = QtWidgets.QApplication(sys.argv)
-    icon = QtGui.QIcon()
-    icon.addFile('../pytweezer/icons/pytweezer_viewer_icon.svg')
-    app.setWindowIcon(icon)
+    # icon = QtGui.QIcon()
+    # icon.addFile(icon_path + 'pytweezer_viewer_icon.svg')
+    # app.setWindowIcon(icon)
     Win = ImageWindow(name)
     Win.show()
     app.exec_()

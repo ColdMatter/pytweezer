@@ -6,10 +6,9 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QTableView, QPushButton, QAbstractItemView, QAction, QHBoxLayout, QVBoxLayout
 from PyQt5.QtWidgets import QHeaderView, QGroupBox, QDialog
 
-from pytweezer.servers import Properties, tweezerpath, PropertyAttribute, DataClient
+from pytweezer.servers import Properties, tweezerpath, icon_path, PropertyAttribute, DataClient
 from pytweezer.GUI.models import ScheduleModel, PrepModel
 
-icon_path = tweezerpath + '/pytweezer/GUI/icons/'
 
 class ExperimentQ(QGroupBox):
     """

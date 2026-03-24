@@ -1,3 +1,5 @@
+from typing import Any
+
 import zmq
 import sys
 
@@ -54,7 +56,7 @@ def run_server(name):
 
 def event_monitor(monitor: zmq.Socket, name, pub_sub) -> None:
     while monitor.poll():
-        evt: Dict[str, Any] = {}
+        evt: dict[str, Any] = {}
         mon_evt = recv_monitor_message(monitor)
         evt.update(mon_evt)
         evt['description'] = EVENT_MAP[evt['event']]

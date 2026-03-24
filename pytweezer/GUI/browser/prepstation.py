@@ -13,11 +13,10 @@ from PyQt5.QtCore import QDateTime
 import pytweezer
 from pytweezer.analysis.floating_point_arithmetics import round_floating_prec
 from pytweezer.analysis.print_messages import print_error
-from pytweezer.servers import tweezerpath
+from pytweezer.servers import tweezerpath, icon_path
 from pytweezer.GUI.models import PrepModel
 from pytweezer.GUI.arg_boxes import FloatBox, BoolBox, ComboBox
 
-icon_path = tweezerpath + '/pytweezer/GUI/icons/'
 
 class PrepStation(QGroupBox):
     """
@@ -153,8 +152,8 @@ class PrepStation(QGroupBox):
         self.adjustSize()
 
     def load_previous(self):
-        if os.path.exists(tweezerpath+'/configuration/tweezer_browser/prepfile/prepfile.json'):
-            with open(tweezerpath+'/configuration/tweezer_browser/prepfile/prepfile.json') as f:
+        if os.path.exists(tweezerpath+'/configuration/tweezer_browser/prepfile.json'):
+            with open(tweezerpath+'/configuration/tweezer_browser/prepfile.json') as f:
                 prepList = json.load(f)
                 for d in prepList:
                     args_round = {}
@@ -270,7 +269,7 @@ class PrepStation(QGroupBox):
                 pass
 
     def update_prep_file(self):
-        with open(tweezerpath+'/configuration/tweezer_browser/prepfile/prepfile.json', 'w') as f:
+        with open(tweezerpath+'/configuration/tweezer_browser/prepfile.json', 'w') as f:
             json.dump(self.prepList, f, indent=4)
             
 
@@ -330,7 +329,6 @@ class PrepStation(QGroupBox):
 class ExpEditWindow(QDialog):
     def __init__(self, taskList, parent=None):
         super().__init__(parent)
-        self.parent = parent
         self.browser = parent.browser
         self.props = parent.browser.props
         self.taskList = taskList
@@ -370,14 +368,13 @@ class ExpEditWindow(QDialog):
             if box.checkBox.isChecked():
                 for task in self.taskList:
                     task['args'][box.widget.name] = box.widget.value
-        self.parent.update_prep_file()
+        self.parent().update_prep_file()
         self.accept()
 
 
 class ParViewWindow(QDialog):
     def __init__(self, task, parent=None):
         super().__init__(parent)
-        self.parent = parent
         self.browser = parent.browser
         self.props = parent.browser.props
         self.task = task

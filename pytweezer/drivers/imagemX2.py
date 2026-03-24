@@ -169,7 +169,9 @@ class ImagEMX2Camera:
             "task": task,
             "run": run,
             "rep": rep,
-            "index": index
+            "index": index,
+            "_imageresolution" : [1,1],
+            "_offset": [0,0]
         }  # TODO all cam settings
 
         self.imstream.send(im, info)

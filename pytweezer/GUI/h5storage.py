@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import Qt
 from pytweezer import *
-from pytweezer.servers import Properties, tweezerpath, PropertyAttribute
+from pytweezer.servers import Properties, tweezerpath,  icon_path, PropertyAttribute
 from pytweezer.GUI.property_editor import PropEdit
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
 from pytweezer.servers.datamgr import DataSummary, SingleDataSummary, SingleImageSummary

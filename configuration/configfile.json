@@ -19,43 +19,47 @@
         "Live Plot": {
             "active": true,
             "script": "../pytweezer/GUI/viewers/live_plot.py"
+        },
+        "Analysis Manager": {
+            "active": true,
+            "script": "../pytweezer/GUI/analysismanager.py"
         }
     },
     "Servers": {
         "Imagehub": {
             "active": true,
-            "pub": "ipc:///tmp/imagepub",
+            "pub": "tcp://localhost:1111",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "ipc:///tmp/imagesub"
+            "sub": "tcp://localhost:2101"
         },
         "Commandhub": {
             "active": true,
-            "pub": "ipc:///tmp/controlpub",
+            "pub": "tcp://localhost:1112",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "ipc:///tmp/controlsub"
+            "sub": "tcp://localhost:2102"
         },
         "Datahub": {
             "active": true,
-            "pub": "ipc:///tmp/datapub",
+            "pub": "tcp://localhost:1113",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "ipc:///tmp/datasub"
+            "sub": "tcp://localhost:2103"
         },
         "Propertyhub": {
             "active": true,
-            "pub": "ipc:///tmp/propertypub",
+            "pub": "tcp://localhost:1114",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "ipc:///tmp/propertysub"
+            "sub": "tcp://localhost:2104"
         },
         "Messagehub": {
             "active": true,
-            "pub": "ipc:///tmp/messagepub",
+            "pub": "tcp://localhost:1115",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "ipc:///tmp/messagesub"
+            "sub": "tcp://localhost:2105"
         },
         "Propertylogger": {
             "active": true,
             "script": "../pytweezer/servers/propertylogger.py",
-            "rep": "ipc:///tmp/propertyrep"
+            "rep": "tcp://localhost:3106"
         },
         "Datalogger": {
             "active": true,

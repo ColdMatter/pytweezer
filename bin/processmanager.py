@@ -12,7 +12,7 @@ from os.path import isfile
 from os import listdir, remove
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.servers.configreader import ConfigReader
-from pytweezer.servers import tweezerpath
+from pytweezer.servers import tweezerpath, icon_path
 import subprocess
 from pytweezer.analysis.print_messages import print_error
 import signal

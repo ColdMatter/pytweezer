@@ -3,11 +3,10 @@ from PyQt5.QtWidgets import *
 import PyQt5.QtCore as Qt
 from pytweezer.experiment.experiment import Experiment, NumberValue
 from pytweezer.servers import Properties,PropertyAttribute
-from pytweezer.servers import *
+from pytweezer.servers import tweezerpath, icon_path
 from pytweezer.GUI.pytweezerQt import BMainWindow
 from pytweezer.analysis.print_messages import print_error
 
-icon_path = tweezerpath + '/pytweezer/GUI/icons/'
 
 class DefaultExp(Experiment):
     ''' an experiment structure containing all attributes.

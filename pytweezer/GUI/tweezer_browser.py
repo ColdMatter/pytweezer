@@ -22,7 +22,7 @@ from PyQt5.QtCore import QThreadPool, Qt, QDateTime, QEvent
 import pytweezer
 from pytweezer.analysis.floating_point_arithmetics import round_floating_prec
 from pytweezer.experiment.experiment import Experiment
-from pytweezer.servers import Properties, tweezerpath, PropertyAttribute, DataClient
+from pytweezer.servers import Properties, tweezerpath, icon_path, PropertyAttribute, DataClient
 from pytweezer.servers import send_info, send_error
 from pytweezer.GUI.browser.editor_sequencer import CodeEditorParser, CodeEditor
 from pytweezer.GUI.arg_boxes import FloatBox, BoolBox, ComboBox
@@ -36,7 +36,6 @@ from bin.processmanager import backup_file
 
 from pytweezer.experiment.dummy_drivers import DummyMotMasterInterface
 
-icon_path = tweezerpath + '/pytweezer/GUI/icons/'
 
 class BaliBrowser(QMainWindow):
     """
@@ -85,7 +84,7 @@ class BaliBrowser(QMainWindow):
         # /home/bali/scripts/pytweezer/configuration/tweezer_browser/prepfile/prepfile.json
 
         path = tweezerpath+'/configuration/browser/'
-        for fname in ['loopfile.json', 'prepfile.json']:
+        for fname in ['loopfile_backups/loopfile.json', 'prepfile_backups/prepfile.json']:
             backup_file(path, fname)
         # TODO: Auto-load last backup when crashed while restart
         # TODO: call close event at restart

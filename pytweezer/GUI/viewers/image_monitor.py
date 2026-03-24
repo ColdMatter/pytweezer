@@ -58,7 +58,6 @@ class ImageDisplay(QWidget):
         self.name = name
         self.imDataDict = {}
         self.imgresolution = [1, 1]
-        self.parent = parent
         super().__init__(parent)
         btn = QPushButton("SaveImage")
         layout = QVBoxLayout()
@@ -93,7 +92,11 @@ class ImageDisplay(QWidget):
         plot.setLabel("left", text="y", units="m")
         plot.setLabel("bottom", text="x", units="m")
         ii = pg.ImageItem(imgdata)
-        self.image = ii
+        self.image_item = ii
+        # add a LUT to the image display
+        lut = pg.HistogramLUTItem()
+        lut.setImageItem(ii)
+        win.addItem(lut)
         ii.setRect(PyQt5.QtCore.QRect(0, 0, imgdata.shape[1], imgdata.shape[0]))
         ii.setLookupTable(cmap.getLookupTable())
         print(cmap.getLookupTable())
@@ -138,11 +141,12 @@ class ImageDisplay(QWidget):
             print("new data")
             while self.imgstream.has_new_data():
                 msg, head, imgdata = self.imgstream.recv()
-                self.image.setImage(
-                    imgdata, autoLevels=False, levels=(0, self._maxlevels)
+                print(f"msg: {msg}, head: {head}")
+                self.image_item.setImage(
+                    imgdata, autoLevels=True
                 )
                 # self.image.setImage(imgdata, autoLevels=True, levels=(0, self._maxlevels))
-                self.image.resetTransform()
+                self.image_item.resetTransform()
                 try:
                     self.imgresolution = head["_imgresolution"]
                     offset = np.array(head["_offset"]) * np.array(self.imgresolution)
@@ -151,7 +155,7 @@ class ImageDisplay(QWidget):
                     offset = [0, 0]
 
                 h, w = imgdata.shape
-                self.image.setRect(
+                self.image_item.setRect(
                     QtCore.QRectF(
                         offset[0],
                         offset[1],
@@ -170,7 +174,7 @@ class ImageDisplay(QWidget):
                 self.imDataDict["imMean"] = imMean
                 nDead = len(np.where(img_flat > 0.9 * self._maxlevels)[0])
                 self.imDataDict["nDead"] = nDead
-                self.parent.imDataBox.setNewData(self.imDataDict)
+                self.parent().imDataBox.setNewData(self.imDataDict)
         self.update_mask()
 
     def update_mask(self):

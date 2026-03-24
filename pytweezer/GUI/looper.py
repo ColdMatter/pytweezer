@@ -17,7 +17,7 @@ from pytweezer.servers import Properties, PropertyAttribute
 from pytweezer.servers.clients import DataClient
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
 from pytweezer.GUI.browser.prepstation import PrepStation
-from pytweezer.servers import tweezerpath
+from pytweezer.servers import tweezerpath, icon_path
 from pytweezer.GUI.browser.browser_workers import Worker
 from pytweezer.GUI.models import PrepModel
 from pytweezer.GUI.qled import LedIndicator
@@ -25,7 +25,6 @@ from pytweezer.GUI.pytweezerQt import SearchComboBox
 from pytweezer.analysis.print_messages import print_error
 
 from functools import partial
-icon_path = tweezerpath + '/pytweezer/GUI/icons/'
 
 propName = 'BaliBrowser/Looper'
 _props = Properties(propName)
@@ -40,7 +39,7 @@ class Looper(QGroupBox):
         super().__init__(title, parent)
         self.props = _props
         self._props = _props
-        self.parent = parent
+        # self.parent = parent
         self.browser = parent
         self._task = self.browser._task
         self.loopDir = tweezerpath + '/configuration/loops'
@@ -573,7 +572,6 @@ class LoopItem(QFrame):
         self.itemType = None
         self.setFrameShape(QFrame.Panel | QFrame.Sunken)
         self.setLineWidth(3)
-        self.parent = parent
         self.browser = parent.browser
         self.looper = parent.looper
         self.group = parent.group
@@ -643,11 +641,11 @@ class LoopItem(QFrame):
         they are then removed from and reinserted into the command list
         TODO: click and drag?"""
         # TODO: This doesn't move items of lists within the Baustelle
-        widgetItem = self.parent.layout.takeAt(oldIdx)
-        self.parent.layout.insertWidget(newIdx, widgetItem.widget())
+        widgetItem = self.parent().layout().takeAt(oldIdx)
+        self.parent().layout().insertWidget(newIdx, widgetItem.widget())
         self.idx = newIdx
         self.groupItemList.insert(newIdx, self.groupItemList.pop(oldIdx))
-        self.parent.update_idx() # when a task moves, the labels of the other tasks need to be updated
+        self.parent().update_idx() # when a task moves, the labels of the other tasks need to be updated
         self.update_loop_file()
 
     def update_idx_label(self):
@@ -659,11 +657,11 @@ class LoopItem(QFrame):
         deleting widgets in pyqt is difficult and prone to errors. this function likely has some overkill.
         """
         self.groupItemList.remove(self)  # remove the item from the command list
-        self.parent.layout.removeWidget(self)  # remove the item widget from the layout
+        self.parent().layout().removeWidget(self)  # remove the item widget from the layout
         for i, item in enumerate(self.groupItemList):  # update labels
             item.idx = i
             item.update_idx_label()
-        self.parent.children().remove(self)  # remove the item widget from the layout again, but different?
+        self.parent().children().remove(self)  # remove the item widget from the layout again, but different?
         self.deleteLater()  # remove the widget from memory, later ??
         self.update_loop_file()
 
@@ -1435,7 +1433,6 @@ class PrepBox(PrepStation):
         self.main = False
         self.prepList = browser.prepStation.prepList
         self.set_model()
-        self.parent = parent
         self.qlayout.setDirection(2)
 
     def init_ui(self):
@@ -1488,10 +1485,10 @@ class PrepBox(PrepStation):
 
     def push(self, task):
         if isinstance(task, list):
-            self.parent.listBox.taskList.extend(task)  # layoutChanged only emitted once
+            self.parent().listBox.taskList.extend(task)  # layoutChanged only emitted once
         else:
-            self.parent.listBox.taskList.append(task)
-        self.parent.listBox.tableModel.layoutChanged.emit()
+            self.parent().listBox.taskList.append(task)
+        self.parent().listBox.tableModel.layoutChanged.emit()
 
     def unpack(self, task):
         nRuns = task['nRuns']

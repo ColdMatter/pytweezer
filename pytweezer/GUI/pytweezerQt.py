@@ -116,7 +116,6 @@ class SearchLineEdit(QLineEdit):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.parent = parent
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Escape:
