@@ -38,6 +38,7 @@ Classes
 """
 
 import sys
+import os
 sys.path.append('../')
 sys.path.append('../../')
 from pytweezer.servers import zmqcontext
@@ -48,6 +49,13 @@ import numpy
 import json
 from pytweezer.servers.configreader import ConfigReader
 import numpy as np
+
+
+def _resolve_connect_endpoint(endpoint: str, server_ip: str | None) -> str:
+    if server_ip is None or not endpoint.startswith('tcp://'):
+        return endpoint
+    _prefix, port = endpoint.rsplit(':', 1)
+    return f"tcp://{server_ip}:{port}"
 
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -60,7 +68,7 @@ class NpEncoder(json.JSONEncoder):
         return super(NpEncoder, self).default(obj)
 
 class GenericClient():
-    def __init__(self,name='noname',recvtimeout=1000,subscribe=None):
+    def __init__(self,name='noname',recvtimeout=1000,subscribe=None,server_ip=None):
         ''' send or receive data over balis ZMQ ports
         standardizes datatransfer and connects to sockets according to the central configuration
         Use this class for small (<10k) datasets this data will be logged stored etc,
@@ -73,6 +81,7 @@ class GenericClient():
                 time in ms the receive should wait for a timeout
         '''
         self.name=name
+        self.server_ip = server_ip if server_ip is not None else os.getenv('PYTWEEZER_SERVER_IP')
         self.subscriptions=[]
         # initialize sockets
         self.pub_socket = zmqcontext.socket(zmq.PUB)
@@ -194,8 +203,8 @@ class DataClient(GenericClient):
 
     def _connect(self):
         conf=ConfigReader.getConfiguration()
-        imgsub=conf['Servers']['Datahub']['pub']
-        imgpub=conf['Servers']['Datahub']['sub']
+        imgsub=_resolve_connect_endpoint(conf['Servers']['Datahub']['pub'], self.server_ip)
+        imgpub=_resolve_connect_endpoint(conf['Servers']['Datahub']['sub'], self.server_ip)
         self.pub_socket.connect(imgpub)
         self.sub_socket.connect(imgsub)
 
@@ -210,8 +219,8 @@ class CommandClient(DataClient):
             super().__init__(name,**kwargs)
     def _connect(self):
             conf=ConfigReader.getConfiguration()
-            imgsub=conf['Servers']['Commandhub']['pub']
-            imgpub=conf['Servers']['Commandhub']['sub']
+            imgsub=_resolve_connect_endpoint(conf['Servers']['Commandhub']['pub'], self.server_ip)
+            imgpub=_resolve_connect_endpoint(conf['Servers']['Commandhub']['sub'], self.server_ip)
             self.pub_socket.connect(imgpub)
             self.sub_socket.connect(imgsub)
     def send(self,cmd='',data={},A=None, flags=0,copy=True,track=False,prefix=None):
@@ -235,8 +244,8 @@ class ImageClient(DataClient):
 
         def _connect(self):
             conf=ConfigReader.getConfiguration()
-            imgsub=conf['Servers']['Imagehub']['pub']
-            imgpub=conf['Servers']['Imagehub']['sub']
+            imgsub=_resolve_connect_endpoint(conf['Servers']['Imagehub']['pub'], self.server_ip)
+            imgpub=_resolve_connect_endpoint(conf['Servers']['Imagehub']['sub'], self.server_ip)
             self.pub_socket.connect(imgpub)
             self.sub_socket.connect(imgsub)
 

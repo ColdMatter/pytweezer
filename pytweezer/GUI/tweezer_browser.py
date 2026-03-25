@@ -1,7 +1,9 @@
 import os
+import argparse
 import importlib.util
 import inspect
 import traceback
+import sys
 
 import numpy as np
 import json
@@ -17,7 +19,7 @@ from PyQt5.QtWidgets import QMdiSubWindow, QLabel, QCompleter
 from PyQt5.QtWidgets import QSizePolicy, QComboBox, QGridLayout, QDialogButtonBox
 from PyQt5.QtWidgets import QMenu, QCheckBox, QLineEdit, QDoubleSpinBox
 from PyQt5.QtWidgets import QFileDialog, QSplitter, QDateTimeEdit
-from PyQt5.QtCore import QThreadPool, Qt, QDateTime, QEvent
+from PyQt5.QtCore import QThreadPool, Qt, QDateTime, QEvent, QCoreApplication
 
 import pytweezer
 from pytweezer.analysis.floating_point_arithmetics import round_floating_prec
@@ -29,10 +31,15 @@ from pytweezer.GUI.arg_boxes import FloatBox, BoolBox, ComboBox
 from pytweezer.GUI.browser.experiment_manager import ExperimentManager
 from pytweezer.GUI.browser.prepstation import PrepStation
 from pytweezer.GUI.looper import Looper
-from pytweezer.GUI.browser.experiment_queue import ExperimentQ
+from pytweezer.GUI.browser.experiment_queue import ExperimentQ, QueueRole
 from pytweezer.GUI.pytweezerQt import SearchComboBox
 from pytweezer.analysis.print_messages import print_error
 from bin.processmanager import backup_file
+from pytweezer.GUI.models import ScheduleModel
+from pytweezer.servers.model_sync.client import ModelClient
+from pytweezer.servers.model_sync.server import ModelServer
+from pytweezer.servers.command.client import CommandClient as QueueCommandClient
+from pytweezer.servers.command.server import CommandServer
 
 from pytweezer.experiment.dummy_drivers import DummyMotMasterInterface
 
@@ -48,22 +55,87 @@ class BaliBrowser(QMainWindow):
     """
     experimentOpened = QtCore.pyqtSignal()
 
-    def __init__(self):
+    def __init__(
+        self,
+        server_ip=None,
+        queue_role='master',
+        model_rep_port=5560,
+        model_pub_port=5561,
+        command_port=5562,
+        headless_master=False,
+    ):
         super().__init__()
-        self.props = Properties('BaliBrowser')
+        self.props = Properties('BaliBrowser', server_ip=server_ip)
         self._name = 'BaliBrowser'
         self._props = self.props
         self._task = PropertyAttribute('/Experiments/_task', 0, parent=self)
+        self.server_ip = server_ip
+        self.queue_role = queue_role.lower()
+        self.model_rep_port = model_rep_port
+        self.model_pub_port = model_pub_port
+        self.command_port = command_port
+        self.headless_master = headless_master
         self.paramDir = tweezerpath + '/configuration/tweezer_browser/experiment_params'  # path for storing parameters
         self.motmaster_interface = DummyMotMasterInterface()
+        self.model_server = None
+        self.model_client = None
+        self.command_server = None
+        self.command_client = None
 
         self.threadPool = QThreadPool.globalInstance()
         self.threadPool.setMaxThreadCount(3)
+
+        if self.queue_role == 'master':
+            queue_model = ScheduleModel({})
+            self.model_server = ModelServer(
+                rep_endpoint=f'tcp://*:{self.model_rep_port}',
+                pub_endpoint=f'tcp://*:{self.model_pub_port}',
+            )
+            self.model_server.register('schedule', queue_model, key_type=int)
+            self.model_server.start()
+
+            self.queue = ExperimentQ(self, role=QueueRole.SERVER)
+            self.queue.set_model(queue_model)
+            self.expManager = ExperimentManager(browser=self)
+
+            self.command_server = CommandServer(endpoint=f'tcp://*:{self.command_port}')
+            self.command_server.register('pause', self.expManager.pause)
+            self.command_server.register('restart', self.expManager.restart_queue)
+            self.command_server.register('terminate_all', self.expManager.terminate_all)
+            self.command_server.start()
+        else:
+            if not self.server_ip:
+                raise ValueError('server_ip is required when queue_role is client')
+
+            self.model_client = ModelClient(
+                model=ScheduleModel({}),
+                model_name='schedule',
+                key_type=int,
+                server_ip=self.server_ip,
+                rep_port=self.model_rep_port,
+                pub_port=self.model_pub_port,
+            )
+            self.model_client.start()
+            self.command_client = QueueCommandClient(
+                server_ip=self.server_ip,
+                port=self.command_port,
+            )
+            self.command_client.start()
+
+            self.queue = ExperimentQ(
+                self,
+                model_client=self.model_client,
+                command_client=self.command_client,
+                role=QueueRole.CLIENT,
+            )
+            self.expManager = None
+
         self.fileSelector = BaliFileSelector(self)
-        self.queue = ExperimentQ(self)
-        self.expManager = ExperimentManager(browser=self)
         self.prepStation = PrepStation(browser=self)
         self.looper = Looper(parent=self)
+
+        if self.queue_role == 'master' and self.headless_master:
+            return
 
         self.init_ui()
         g = self.geometry()
@@ -88,6 +160,15 @@ class BaliBrowser(QMainWindow):
             backup_file(path, fname)
         # TODO: Auto-load last backup when crashed while restart
         # TODO: call close event at restart
+
+        if self.command_client is not None:
+            self.command_client.stop()
+        if self.model_client is not None:
+            self.model_client.stop()
+        if self.command_server is not None:
+            self.command_server.stop()
+        if self.model_server is not None:
+            self.model_server.stop()
 
         super().closeEvent(event)
 
@@ -512,15 +593,15 @@ class ExperimentWindow(QWidget):
         self.setup_scan()
         self._task.value += 1  # #increase global task number
         task, task_dict = self.setup_task_dict()
-        task_dict['experiment'] = self.experiment
         print_error('\ntweezer_browser.py - submit_to_queue(): Submitted task dict:\n{0}\n'.format(task_dict), 'weak')
-        self.queue.tableModel[task] = task_dict
+        self.queue.add_task(task, task_dict)
         self.check_defaults(None)
+        return task
 
     def submit_next(self):
         """submits the experiment to the experiment queue with highest priority """
-        self.submit_to_queue()
-        self.queue.tableModel[self._task.value]['priority'] = 1000  # 1000 is the biggest number I could think of
+        task = self.submit_to_queue()
+        self.queue.set_task_field(task, 'priority', 1000)  # 1000 is the biggest number I could think of
         self.check_defaults(None)
 
     def submit_to_prepper(self):
@@ -1016,13 +1097,31 @@ def filepath_split(filepath):
     return path, ext, name, filename
 
 
-def main():
-    qApp = QApplication(sys.argv)
-    icon = QtGui.QIcon()
-    icon.addFile(icon_path+'pytweezer_experiment_browser_icon.svg')
-    qApp.setWindowIcon(icon)
-    Win = BaliBrowser()
-    Win.show()
+def main(
+    server_ip=None,
+    queue_role='master',
+    model_rep_port=5560,
+    model_pub_port=5561,
+    command_port=5562,
+    headless_master=False,
+):
+    if queue_role == 'master' and headless_master:
+        qApp = QCoreApplication(sys.argv)
+    else:
+        qApp = QApplication(sys.argv)
+        icon = QtGui.QIcon()
+        icon.addFile(icon_path+'pytweezer_experiment_browser_icon.svg')
+        qApp.setWindowIcon(icon)
+    Win = BaliBrowser(
+        server_ip=server_ip,
+        queue_role=queue_role,
+        model_rep_port=model_rep_port,
+        model_pub_port=model_pub_port,
+        command_port=command_port,
+        headless_master=headless_master,
+    )
+    if not (queue_role == 'master' and headless_master):
+        Win.show()
     sys._excepthook = sys.excepthook
 
     sys.excepthook = exception_hook
@@ -1043,7 +1142,49 @@ def exception_hook(exctype, value, traceback):
 
 # Start Qt event loop unless running in interactive mode or using pyside.
 if __name__ == '__main__':
-    import sys
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument('instance_name', nargs='?', default=None)
+    parser.add_argument(
+        '--queue-role',
+        choices=['master', 'client'],
+        default=os.getenv('PYTWEEZER_QUEUE_ROLE', 'master'),
+        help='master runs ExperimentManager + servers, client runs remote UI',
+    )
+    parser.add_argument(
+        '--server-ip',
+        default=os.getenv('PYTWEEZER_SERVER_IP'),
+        help='master server IP/hostname (required for client role)',
+    )
+    parser.add_argument(
+        '--model-rep-port',
+        type=int,
+        default=int(os.getenv('PYTWEEZER_MODEL_REP_PORT', '5560')),
+        help='model sync REP port',
+    )
+    parser.add_argument(
+        '--model-pub-port',
+        type=int,
+        default=int(os.getenv('PYTWEEZER_MODEL_PUB_PORT', '5561')),
+        help='model sync PUB port',
+    )
+    parser.add_argument(
+        '--command-port',
+        type=int,
+        default=int(os.getenv('PYTWEEZER_COMMAND_PORT', '5562')),
+        help='command server port',
+    )
+    parser.add_argument(
+        '--headless-master',
+        action='store_true',
+        help='run master queue services without creating the browser GUI',
+    )
+    args = parser.parse_args()
     if (sys.flags.interactive != 1) or not hasattr(Qt, 'PYQT_VERSION'):
-        main()
+        main(
+            server_ip=args.server_ip,
+            queue_role=args.queue_role,
+            model_rep_port=args.model_rep_port,
+            model_pub_port=args.model_pub_port,
+            command_port=args.command_port,
+            headless_master=args.headless_master,
+        )

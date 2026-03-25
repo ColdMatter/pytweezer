@@ -1,9 +1,12 @@
 import numpy as np
 import time
+import importlib.util
+import inspect
 
 from pytweezer.GUI.browser.browser_workers import Worker
 from PyQt5.QtCore import QDateTime
 from pytweezer.analysis.print_messages import print_error
+from pytweezer.experiment.experiment import Experiment
 
 
 class ExperimentManager:
@@ -33,6 +36,24 @@ class ExperimentManager:
         self.running = False  # tells the queue whether an experiment is currently running
         self.taskNr = 0
 
+    def _load_experiment_from_task(self, task_dict):
+        filepath = task_dict.get('filepath')
+        if not filepath:
+            raise ValueError('Task has no filepath field')
+
+        spec = importlib.util.spec_from_file_location(filepath, filepath)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            mro = inspect.getmro(obj)
+            if len(mro) > 1 and inspect.getmro(obj)[1].__name__ == 'Experiment':
+                experiment = obj(self.browser.props, self.browser.motmaster_interface)
+                experiment.build()
+                return experiment
+
+        raise ValueError(f'No Experiment subclass found in {filepath}')
+
     def run(self, taskNr, progress_callback=None):
         """
         Handles the running of experiment tasks
@@ -43,7 +64,7 @@ class ExperimentManager:
         task_dict = self.expDict[taskNr]
         self.taskNr = taskNr
         self.name = task_dict['expName'] + ' ' + task_dict['label']
-        self.experiment = task_dict['experiment']
+        self.experiment = self._load_experiment_from_task(task_dict)
         self.arg_dict = task_dict['args']
         self.n_runs = task_dict['nRuns']
         self.scan_pars = task_dict['scanpars']
@@ -91,9 +112,9 @@ class ExperimentManager:
             if self.terminated:
                 return  # pass back to the main loop to terminate the task
             if self.n_runs > 1:
-                self.expDict[self.taskNr]['status'] = 'Scanning'
+                self.queue.set_task_field(self.taskNr, 'status', 'Scanning')
             else:
-                self.expDict[self.taskNr]['status'] = 'Running'
+                self.queue.set_task_field(self.taskNr, 'status', 'Running')
 
             for i, parname in enumerate(self.scan_pars):  # modify value(s) for scan
                 if parname != '--NONE--':
@@ -109,10 +130,11 @@ class ExperimentManager:
         """Pauses or unpauses the experiment."""
         if self.running:
             if self.paused:
-                self.expDict[self.taskNr]['status'] = 'Running'
+                self.queue.set_task_field(self.taskNr, 'status', 'Running')
             else:
-                self.expDict[self.taskNr]['status'] = 'Paused'
+                self.queue.set_task_field(self.taskNr, 'status', 'Paused')
         self.paused = not self.paused
+        self.browser.props.set('/ExperimentQ/paused', self.paused)
         self.queueWorker.signals.tableUpdate.emit()
 
     def start_queue(self):
@@ -155,7 +177,7 @@ class ExperimentManager:
             except Exception as e:
                 print_error('Task {} failed with error: {}'.format(nextTaskNr, e), 'error')
                 self.running = False
-                self.expDict[nextTaskNr]['status'] = 'Failed'
+                self.queue.set_task_field(nextTaskNr, 'status', 'Failed')
                 self.queueWorker.signals.tableUpdate.emit()
                 i += 1
                 raise
@@ -179,7 +201,7 @@ class ExperimentManager:
     def terminate_experiment(self):
         """Graceful termination of the experiment. Allows current run to finish."""
         print('Terminating experiment')
-        self.expDict[self.taskNr]['status'] = 'Terminating'
+        self.queue.set_task_field(self.taskNr, 'status', 'Terminating')
         self.running = False
         self.queueWorker.signals.tableUpdate.emit()
         time.sleep(0.1)  # just to give the table time to display. Can be shortened or taken out.
@@ -198,7 +220,7 @@ class ExperimentManager:
         # print('_task:', self._props.get('/Experiments/_task', 0))
         self.running = True
         if self.paused:
-            self.expDict[self.taskNr]['status'] = 'Paused'
+            self.queue.set_task_field(self.taskNr, 'status', 'Paused')
             self.queueWorker.signals.update_ui.emit()
         # self.experiment.start_measurement()
 
@@ -207,9 +229,9 @@ class ExperimentManager:
         self.experiment.cleanup()
         # print('\n\033[1mExperimentQ: task {} ({}) completed\n\033[0m'.format(self.taskNr, self.name))
         print_error('ExperimentQ: task {} ({}) completed'.format(self.taskNr, self.name), 'bold')
-        self.expDict[self.taskNr]['status'] = 'Done'
+        self.queue.set_task_field(self.taskNr, 'status', 'Done')
         time.sleep(0.1)  # just to give the table time to display. Can be shortened or taken out.
-        del self.queue.tableModel[self.taskNr]
+        self.queue.delete_task(self.taskNr)
         self.running = False
 
     def set_dict(self, name, value):
@@ -222,11 +244,20 @@ class ExperimentManager:
     def set_run_nr(self, value):
         """Sets the experiment run number and updates the table."""
         self.experiment._run = value
-        self.expDict[self.taskNr]['run'] = value
+        self.queue.set_task_field(self.taskNr, 'run', value)
         self.queueWorker.signals.update_ui.emit()
 
     def set_rep_nr(self, value):
         """Sets the experiment repetition number and updates the table."""
         self.experiment._repetition = value
-        self.expDict[self.taskNr]['repetition'] = value
+        self.queue.set_task_field(self.taskNr, 'repetition', value)
         self.queueWorker.signals.update_ui.emit()
+
+    def terminate_all(self):
+        for task_nr in list(self.queue.tableModel.row_to_key):
+            self.queue.set_task_field(task_nr, 'terminated', True)
+            self.queue.set_task_field(task_nr, 'status', 'Termination Pending')
+
+    def restart_queue(self):
+        if not self.queueRunning:
+            self.start_queue()

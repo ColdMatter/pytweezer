@@ -2,7 +2,7 @@
     "GUI": {
         "Browser": {
             "active": true,
-            "script": "../pytweezer/GUI/tweezer_browser.py"
+            "script": "../pytweezer/GUI/tweezer_browser.py --queue-role client --server-ip localhost"
         },
         "StreamMonitor": {
             "active": false,
@@ -60,6 +60,10 @@
             "active": true,
             "script": "../pytweezer/servers/propertylogger.py",
             "rep": "tcp://localhost:3106"
+        },
+        "QueueMaster": {
+            "active": true,
+            "script": "../pytweezer/GUI/tweezer_browser.py --queue-role master --headless-master"
         },
         "Datalogger": {
             "active": true,

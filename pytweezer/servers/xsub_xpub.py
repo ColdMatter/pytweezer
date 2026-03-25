@@ -1,18 +1,13 @@
 from typing import Any
 
-import zmq
-import sys
-
-sys.path.append('../../')
-sys.path.append('../')
-from pytweezer import *
-import json
 import argparse
-from pytweezer.servers.configreader import ConfigReader
+import os
 import threading
+
+import zmq
 from zmq.utils.monitor import recv_monitor_message
-from pytweezer.analysis.print_messages import print_error
-import time
+
+from pytweezer.servers.configreader import ConfigReader
 
 EVENT_MAP = {}
 # print("Event names:")
@@ -23,39 +18,64 @@ for name in dir(zmq):
         EVENT_MAP[value] = name
 
 
-def run_server(name):
+def _resolve_bind_endpoint(endpoint: str, bind_ip: str | None) -> str:
+    """
+    Replace the host in a tcp://host:port endpoint with bind_ip.
+
+    Example:
+        endpoint = tcp://localhost:1114
+        bind_ip  = 0.0.0.0
+        result   = tcp://0.0.0.0:1114
+    """
+    if bind_ip is None or not endpoint.startswith("tcp://"):
+        return endpoint
+    _prefix, port = endpoint.rsplit(":", 1)
+    return f"tcp://{bind_ip}:{port}"
+
+
+def run_server(name, bind_ip=None):
+    if bind_ip is None:
+        bind_ip = os.getenv('PYTWEEZER_BIND_IP')
     conf = ConfigReader.getConfiguration()
     name = name.split('/')[-1]
-    pubbinding = conf['Servers'][name]['pub']
-    subbinding = conf['Servers'][name]['sub']
+    pubbinding = _resolve_bind_endpoint(conf['Servers'][name]['pub'], bind_ip)
+    subbinding = _resolve_bind_endpoint(conf['Servers'][name]['sub'], bind_ip)
     #print(name + " starting on")
     #print('XSUB: ', subbinding)
     #print('XPUB: ', pubbinding)
     context = zmq.Context()
     sock_sub = context.socket(zmq.XSUB)
     sock_pub = context.socket(zmq.XPUB)
+    sock_sub.setsockopt(zmq.LINGER, 0)
+    sock_pub.setsockopt(zmq.LINGER, 0)
+    sock_pub.setsockopt(zmq.XPUB_VERBOSE, 1)
     sock_sub.bind(subbinding)
     sock_pub.bind(pubbinding)
 
     pub_mon = sock_pub.get_monitor_socket()
-    pub_mon_thread = threading.Thread(target=event_monitor, args=(pub_mon, name, 'PUB'))
+    pub_mon_thread = threading.Thread(
+        target=event_monitor, args=(pub_mon, name, 'PUB'), daemon=True
+    )
     pub_mon_thread.start()
     sub_mon = sock_sub.get_monitor_socket()
-    sub_mon_thread = threading.Thread(target=event_monitor, args=(sub_mon, name, 'SUB'))
+    sub_mon_thread = threading.Thread(
+        target=event_monitor, args=(sub_mon, name, 'SUB'), daemon=True
+    )
     sub_mon_thread.start()
 
-    # run server forever
-    zmq.proxy(sock_sub, sock_pub)
-
-    # clean up(never reached)
-    print("server {} cleanup was reached, the comment on line 30 lied".format(name))
-    sock_sub.close()
-    sock_pub.close()
-    context.term()
+    try:
+        # run server forever
+        zmq.proxy(sock_sub, sock_pub)
+    finally:
+        sock_sub.close()
+        sock_pub.close()
+        context.term()
 
 
 def event_monitor(monitor: zmq.Socket, name, pub_sub) -> None:
-    while monitor.poll():
+    while True:
+        if not monitor.poll(timeout=1000):
+            continue
         evt: dict[str, Any] = {}
         mon_evt = recv_monitor_message(monitor)
         evt.update(mon_evt)
@@ -74,6 +94,11 @@ def event_monitor(monitor: zmq.Socket, name, pub_sub) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('name', nargs=1, help='name of this program instance')
+    parser.add_argument(
+        '--bind-ip',
+        default=None,
+        help='optional bind host override for tcp endpoints, e.g. 0.0.0.0',
+    )
     args = parser.parse_args()
     name = args.name[0]
-    run_server(name)
+    run_server(name, bind_ip=args.bind_ip)

@@ -191,9 +191,8 @@ class PrepStation(QGroupBox):
             else:
                 self.prepList[row]['status'] = 'Waiting'
         task_dict = self.prepList[row].copy()
-        task_dict['experiment'] = get_experiment(task_dict['filepath'], self.browser)
         print_error('\nprepstation.py - push_row(): Submitted task dict:\n{0}\n'.format(task_dict), 'weak')
-        self.queue.tableModel[newTaskNr] = task_dict
+        self.queue.add_task(newTaskNr, task_dict)
         self.update_prep_file()
 
     def push_first(self):

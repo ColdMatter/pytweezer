@@ -14,6 +14,7 @@ from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.servers.configreader import ConfigReader
 from pytweezer.servers import tweezerpath, icon_path
 import subprocess
+import shlex
 from pytweezer.analysis.print_messages import print_error
 import signal
 from pytweezer.servers import Properties
@@ -134,7 +135,8 @@ class SingleProcess(QFrame):
     def startProcess(self):
         self.terminateProcess()
         print_error('processmanager.py - startProcess(): Starting {0}.'.format(self.processname), 'bold')
-        self.process = subprocess.Popen(['python3', self.script, self.category+self.processname])
+        script_parts = shlex.split(self.script)
+        self.process = subprocess.Popen(['python3', *script_parts, self.category + self.processname])
 
     def terminateProcess(self):
         if self.process is not None:
