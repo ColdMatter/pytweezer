@@ -103,15 +103,20 @@ class MotMasterInterface:
         return None
 
     def start_motmaster_experiment(
-        self,
+        self, parameters: Optional[dict] = None
     ):
         if self.script is None:
             raise ValueError(
                 "MotMaster script not set. Please call set_motmaster_experiment first."
             )
         try:
-
-            self.motmaster.Go()
+            if parameters is not None:
+                pars_csdict = Dictionary[String, Object]()
+                for key, value in parameters.items():
+                    pars_csdict[key] = value
+                self.motmaster.Go(pars_csdict)
+            else:
+                self.motmaster.Go()
             time.sleep(self.interval)
         except Exception as e:
             print(f"Error starting MotMaster experiment {self.script}: {e}")
