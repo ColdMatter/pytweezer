@@ -745,6 +745,91 @@ class OptimisationBasedPhasemaskGenerator:
         
         return pm_slm, [w_n, theta_n, x_n, y_n, array_shape], [uniformity_history, minmax_history, mse_history, trap_weights]
 
+    def superposition_optimization_gpu(self, target, max_iter=30, damping=0.4, verbose=True):
+        """
+        Optimizes a phasemask for a discrete array of optical tweezers using 
+        the weighted superposition method, accelerated by the GPU using CuPy.
+        """
+        try:
+            import cupy as cp
+        except ImportError:
+            raise ImportError("CuPy is required for GPU acceleration. Please install it (e.g., 'pip install cupy-cuda11x' or 'pip install cupy').")
+            
+        print("--- Starting GPU Superposition Phase Retrieval ---")
+        start_time = time.time()
+
+        # 2. Setup SLM Physical Coordinates
+        x_slm = cp.linspace(-self.Lx_slm/2, self.Lx_slm/2, self.Nx)
+        y_slm = cp.linspace(-self.Ly_slm/2, self.Ly_slm/2, self.Ny)
+
+        # 3. Setup Illumination Beam (Gaussian)
+        am_slm = cp.asarray(self.generate_source_amplitude())
+
+        # 4. Define Target Trap Coordinates
+        w_n, theta_n, x_n, y_n, array_shape = target
+        
+        # Move variables to GPU
+        w_n_cp = cp.asarray(w_n)
+        theta_n_cp = cp.asarray(theta_n)
+        x_n_cp = cp.asarray(x_n)
+        y_n_cp = cp.asarray(y_n)
+        target_0_cp = cp.asarray(target[0])
+        
+        # Pre-calculations
+        k = 2 * np.pi / (self.lam * self.f_um)
+
+        X_phase = cp.exp(1j * k * x_n_cp[:, None] * x_slm[None, :]) # Shape: (N_traps, Nx)
+        Y_phase = cp.exp(1j * k * y_n_cp[:, None] * y_slm[None, :]) # Shape: (N_traps, Ny)
+        X_phase_conj = cp.conj(X_phase)
+        Y_phase_conj = cp.conj(Y_phase)
+
+        uniformity_history = []
+        minmax_history = []
+        mse_history = []
+        for iteration in range(max_iter):
+            
+            # Step A: Generate the Superposition Complex Field (Vectorized)
+            C_n = w_n_cp * cp.exp(1j * theta_n_cp)
+            Y_term = Y_phase * C_n[:, None]   # Shape: (N_traps, Ny)
+            U_tot = Y_term.T @ X_phase      # Shape: (Ny, N_traps) @ (N_traps, Nx) -> (Ny, Nx)
+            pm_slm = cp.angle(U_tot)
+            
+            # Step B: Evaluate Exact Intensity at Target Sites (Vectorized)
+            U_slm = am_slm * cp.exp(1j * pm_slm)
+            U_foc_n = U_slm @ X_phase_conj.T # Shape: (Ny, Nx) @ (Nx, N_traps) -> (Ny, N_traps)
+            U_foc = cp.sum(Y_phase_conj * U_foc_n.T, axis=1) # Shape: (N_traps,)
+            I_foc = cp.abs(U_foc)**2
+                
+            # Step C: Calculate Metrics
+            I_foc_masked = I_foc[target_0_cp > 0]
+            uniformity = 1 - (I_foc_masked.std() / I_foc_masked.mean()) # 1.0 is perfect uniformity
+            uniformity_history.append(float(uniformity))
+            
+            I_foc_norm = I_foc / I_foc.sum()
+            target_norm = target_0_cp / target_0_cp.sum()
+            mse = cp.mean((I_foc_norm - target_norm)**2)
+            mse_history.append(float(mse))
+            
+            minmax_ratio = I_foc_masked.min() / I_foc_masked.max()
+            minmax_history.append(float(minmax_ratio))
+            
+            # Step D: Update Weights
+            update_ratio = (target_norm / I_foc_norm)**damping
+            w_n_cp = w_n_cp * update_ratio
+            
+            # Update the target phases to match the simulated arriving field
+            theta_n_cp = cp.angle(U_foc)
+            
+            if verbose:
+                if iteration % 10 == 0:
+                    print(f"Iteration {iteration:03d} | Mean-Squared Error: {float(mse):.2e} | Uniformity: {float(uniformity)*100:.2f}% | Min/Max ratio: {float(minmax_ratio):.3f}")
+
+        trap_weights = I_foc.reshape(array_shape)
+        print(f"Iteration {iteration:03d} | Mean-Squared Error: {float(mse):.2e} | Uniformity: {float(uniformity)*100:.2f}% | Min/Max ratio: {float(minmax_ratio):.3f}")
+        print(f"Optimization finished in {time.time() - start_time:.2f} seconds.")
+        
+        return cp.asnumpy(pm_slm), [cp.asnumpy(w_n_cp), cp.asnumpy(theta_n_cp), x_n, y_n, array_shape], [uniformity_history, minmax_history, mse_history, cp.asnumpy(trap_weights)]
+
     def zernike_superposition_optimisation_v0(self, target, target_zernike, max_iter=30, damping=0.4):
         """
         Optimizes a phasemask for a discrete array of optical tweezers using
@@ -1063,4 +1148,3 @@ class ZernikeCalibrator:
                 
         return z_pred
     
-
