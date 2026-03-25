@@ -36,6 +36,15 @@ class MotMasterClient:
 	def __exit__(self, exc_type, exc, tb) -> None:
 		self.close()
 
+	def __getattr__(self, name: str):
+		if name.startswith("_"):
+			raise AttributeError(name)
+
+		def remote_method(*args, **kwargs):
+			return self.call_interface(name, *args, **kwargs)
+
+		return remote_method
+
 	def send_command(
 		self,
 		payload: dict[str, Any],
@@ -58,6 +67,37 @@ class MotMasterClient:
 			finally:
 				socket.close()
 		raise RuntimeError("Unreachable state in send_command")
+
+	def call_interface(
+		self,
+		method: str,
+		*args,
+		timeout_ms: int | None = None,
+		retries: int = 0,
+		**kwargs,
+	) -> dict[str, Any]:
+		payload: dict[str, Any] = {
+			"command": "call_interface",
+			"method": method,
+			"args": list(args),
+			"kwargs": kwargs,
+		}
+		return self.send_command(payload, timeout_ms=timeout_ms, retries=retries)
+
+	def call_method_by_command(
+		self,
+		method: str,
+		*args,
+		timeout_ms: int | None = None,
+		retries: int = 0,
+		**kwargs,
+	) -> dict[str, Any]:
+		payload: dict[str, Any] = {
+			"command": method,
+			"args": list(args),
+			"kwargs": kwargs,
+		}
+		return self.send_command(payload, timeout_ms=timeout_ms, retries=retries)
 
 	def ping(self) -> dict[str, Any]:
 		return self.send_command({"command": "ping"})
@@ -98,6 +138,21 @@ class MotMasterClient:
 
 	def set_trigger_mode(self, value: bool) -> dict[str, Any]:
 		return self.send_command({"command": "set_trigger_mode", "value": value})
+
+	def save_pattern_info(
+		self,
+		save_folder: str,
+		file_tag: str,
+		task_nr: int,
+	) -> dict[str, Any]:
+		return self.send_command(
+			{
+				"command": "save_pattern_info",
+				"save_folder": save_folder,
+				"file_tag": file_tag,
+				"task_nr": task_nr,
+			}
+		)
 
 
 def probe_server(host: str = "127.0.0.1", port: int = 5557, timeout_ms: int = 1200) -> bool:
@@ -155,6 +210,22 @@ def main() -> None:
 		default=None,
 		help="Set trigger mode (0 or 1)",
 	)
+	parser.add_argument(
+		"--save-folder",
+		default=None,
+		help="Folder path for save_pattern_info",
+	)
+	parser.add_argument(
+		"--file-tag",
+		default=None,
+		help="File tag for save_pattern_info",
+	)
+	parser.add_argument(
+		"--task-nr",
+		type=int,
+		default=None,
+		help="Task number for save_pattern_info",
+	)
 	args = parser.parse_args()
 
 	try:
@@ -189,6 +260,22 @@ def main() -> None:
 			if args.trigger_mode is not None:
 				responses.append(
 					("set_trigger_mode", client.set_trigger_mode(bool(args.trigger_mode)))
+				)
+
+			if (
+				args.save_folder is not None
+				and args.file_tag is not None
+				and args.task_nr is not None
+			):
+				responses.append(
+					(
+						"save_pattern_info",
+						client.save_pattern_info(
+							args.save_folder,
+							args.file_tag,
+							args.task_nr,
+						),
+					)
 				)
 
 			responses.extend([

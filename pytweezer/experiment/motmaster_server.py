@@ -252,6 +252,13 @@ class  DummyMotMasterInterface(MotMasterInterface):
         print("DummyMotMasterInterface: disconnect called, but no connection to close.")
         return None
 
+    def save_pattern_info(self, save_folder, file_tag, task_nr):
+        print(
+            "DummyMotMasterInterface: save_pattern_info called "
+            f"(save_folder={save_folder}, file_tag={file_tag}, task_nr={task_nr})"
+        )
+        return None
+
 
 class MotMasterCommandServer:
     def __init__(
@@ -272,6 +279,33 @@ class MotMasterCommandServer:
 
     def _run_experiment(self, parameters: Optional[dict] = None) -> None:
         self.interface.start_motmaster_experiment(parameters=parameters)
+
+    def _invoke_interface_method(
+        self,
+        method_name: str,
+        args: Optional[list] = None,
+        kwargs: Optional[dict] = None,
+    ):
+        if not isinstance(method_name, str) or not method_name:
+            raise ValueError("'method' must be a non-empty string")
+        if method_name.startswith("_"):
+            raise ValueError("Calling private methods is not allowed")
+
+        if args is None:
+            args = []
+        if kwargs is None:
+            kwargs = {}
+
+        if not isinstance(args, list):
+            raise ValueError("'args' must be a list when provided")
+        if not isinstance(kwargs, dict):
+            raise ValueError("'kwargs' must be a dictionary when provided")
+
+        method = getattr(self.interface, method_name, None)
+        if method is None or not callable(method):
+            raise ValueError(f"Interface method '{method_name}' not found")
+
+        return method(*args, **kwargs)
 
     def _handle_request(self, request: dict) -> dict:
         command = request.get("command")
@@ -329,6 +363,27 @@ class MotMasterCommandServer:
             self.interface.set_trigger_mode(value)
             return {"ok": True, "command": command, "value": value}
 
+        if command == "save_pattern_info":
+            save_folder = request.get("save_folder")
+            file_tag = request.get("file_tag")
+            task_nr = request.get("task_nr")
+
+            if not isinstance(save_folder, str) or not save_folder:
+                raise ValueError("'save_folder' must be a non-empty string")
+            if not isinstance(file_tag, str) or not file_tag:
+                raise ValueError("'file_tag' must be a non-empty string")
+            if not isinstance(task_nr, int):
+                raise ValueError("'task_nr' must be an integer")
+
+            self.interface.save_pattern_info(save_folder, file_tag, task_nr)
+            return {
+                "ok": True,
+                "command": command,
+                "save_folder": save_folder,
+                "file_tag": file_tag,
+                "task_nr": task_nr,
+            }
+
         if command == "start_experiment":
             parameters = request.get("parameters")
             if parameters is not None and not isinstance(parameters, dict):
@@ -357,9 +412,46 @@ class MotMasterCommandServer:
                 "has_parameters": parameters is not None,
             }
 
+        if command == "call_interface":
+            method_name = request.get("method")
+            args = request.get("args")
+            kwargs = request.get("kwargs")
+
+            result = self._invoke_interface_method(
+                method_name=method_name,
+                args=args,
+                kwargs=kwargs,
+            )
+            return {
+                "ok": True,
+                "command": command,
+                "method": method_name,
+                "result": result,
+            }
+
         if command == "shutdown":
             self._running = False
             return {"ok": True, "command": command}
+
+        if isinstance(command, str) and not command.startswith("_"):
+            payload = dict(request)
+            payload.pop("command", None)
+            args = payload.pop("args", [])
+            kwargs = payload.pop("kwargs", {})
+            if payload:
+                kwargs = {**payload, **kwargs}
+
+            result = self._invoke_interface_method(
+                method_name=command,
+                args=args,
+                kwargs=kwargs,
+            )
+            return {
+                "ok": True,
+                "command": "interface_method",
+                "method": command,
+                "result": result,
+            }
 
         raise ValueError(f"Unknown command '{command}'")
 
