@@ -9,6 +9,7 @@ import threading
 import numpy as np
 import zmq
 import pythonnet
+import numbers
 
 # NOTE: these imports will only work with the pythonnet package
 try:
@@ -16,6 +17,7 @@ try:
     from System.Collections.Generic import Dictionary  # type: ignore
     from System import String, Object  # type: ignore
     from System import Activator   # type: ignore
+    from System import Int32  # type: ignore
 except Exception as e:
     print(f"Error: {e} encountered, probably no pythonnet")
 
@@ -95,13 +97,14 @@ class MotMasterInterface:
         # for key, value in default_parameters.items():
         #     self.parameter_dictionary[key] = value
 
-    def set_motmaster_dictionary(self):
-        d = self.get_params()
-        pars = Dictionary[String, Object]()
-        for key, value in d.items():
-            pars[key] = value
-        self.parameter_dictionary = pars
-        return None
+    def python_to_cs_dict(self, parameters: dict):
+        pars_csdict = Dictionary[String, Object]()
+        for key, value in parameters.items():
+            if isinstance(value, numbers.Integral):
+                value = Int32(value)
+            pars_csdict[key] = value
+        return pars_csdict
+
 
     def start_motmaster_experiment(
         self, parameters: Optional[dict] = None
@@ -112,9 +115,7 @@ class MotMasterInterface:
             )
         try:
             if parameters is not None:
-                pars_csdict = Dictionary[String, Object]()
-                for key, value in parameters.items():
-                    pars_csdict[key] = value
+                pars_csdict = self.python_to_cs_dict(parameters)
                 self.motmaster.Go(pars_csdict)
             else:
                 self.motmaster.Go()
