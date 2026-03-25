@@ -1,6 +1,6 @@
 import argparse
 import json
-from typing import Any
+from typing import Any, Optional
 
 import zmq
 
@@ -74,8 +74,11 @@ class MotMasterClient:
 	def get_params(self) -> dict[str, Any]:
 		return self.send_command({"command": "get_params"})
 
-	def start_experiment(self) -> dict[str, Any]:
-		return self.send_command({"command": "start_experiment"})
+	def start_experiment(self, parameters: Optional[dict] = None) -> dict[str, Any]:
+		payload = {"command": "start_experiment"}
+		if parameters is not None:
+			payload["parameters"] = parameters
+		return self.send_command(payload)
 
 	def shutdown_server(self) -> dict[str, Any]:
 		return self.send_command({"command": "shutdown"})

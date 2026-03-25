@@ -152,6 +152,7 @@ class  DummyMotMasterInterface(MotMasterInterface):
     
     def start_motmaster_experiment(
         self,
+        parameters: Optional[dict] = None,
     ):
         print(f"DummyMotMasterInterface: start_motmaster_experiment called with script '{self.script}', but no experiment started.")
         return None
@@ -182,8 +183,8 @@ class MotMasterCommandServer:
         self._running = False
         self._experiment_thread: Optional[threading.Thread] = None
 
-    def _run_experiment(self) -> None:
-        self.interface.start_motmaster_experiment()
+    def _run_experiment(self, parameters: Optional[dict] = None) -> None:
+        self.interface.start_motmaster_experiment(parameters=parameters)
 
     def _handle_request(self, request: dict) -> dict:
         command = request.get("command")
@@ -214,6 +215,10 @@ class MotMasterCommandServer:
             return {"ok": True, "command": command, "params": self.interface.get_params()}
 
         if command == "start_experiment":
+            parameters = request.get("parameters")
+            if parameters is not None and not isinstance(parameters, dict):
+                raise ValueError("'parameters' must be a dictionary when provided")
+
             if self._experiment_thread and self._experiment_thread.is_alive():
                 return {
                     "ok": False,
@@ -224,6 +229,7 @@ class MotMasterCommandServer:
 
             self._experiment_thread = threading.Thread(
                 target=self._run_experiment,
+                args=(parameters,),
                 name="motmaster-start-experiment",
                 daemon=True,
             )
@@ -233,6 +239,7 @@ class MotMasterCommandServer:
                 "command": command,
                 "script": self.interface.script,
                 "started": True,
+                "has_parameters": parameters is not None,
             }
 
         if command == "shutdown":
