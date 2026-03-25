@@ -3,18 +3,22 @@ import time
 from typing import Optional, Union
 import json
 import pathlib
+import subprocess
 import sys
 import threading
 
 import numpy as np
 import zmq
+import pythonnet
+import numbers
 
 # NOTE: these imports will only work with the pythonnet package
 try:
     import clr
-    from System.Collections.Generic import Dictionary
-    from System import String, Object
-    from System import Activator
+    from System.Collections.Generic import Dictionary  # type: ignore
+    from System import String, Object  # type: ignore
+    from System import Activator   # type: ignore
+    from System import Int32  # type: ignore
 except Exception as e:
     print(f"Error: {e} encountered, probably no pythonnet")
 
@@ -29,16 +33,75 @@ class MotMasterInterface:
     def __init__(self, interval: Union[int, float] = 0.1) -> None:
         with open(PROPERTIES_FILE, "r") as f:
             self.config = json.load(f)
-        self.root = pathlib.Path(self.config["script_root_path"])
+        self.script_root = pathlib.Path(self.config["script_root_path"])
         self.interval = interval
         self.motmaster = None
         self.script = None
+        self.script_path = None
 
     def _add_ref(self, path: str) -> None:
         _path = pathlib.Path(path)
         sys.path.append(_path.parent)
         clr.AddReference(path)
         return None
+
+    def _is_process_running(self, process_name: str) -> bool:
+        try:
+            if sys.platform.startswith("win"):
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                output = result.stdout.lower()
+                return (
+                    result.returncode == 0
+                    and process_name.lower() in output
+                    and "no tasks are running" not in output
+                )
+
+            result = subprocess.run(
+                ["pgrep", "-f", process_name],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0 and bool(result.stdout.strip())
+        except Exception:
+            return False
+
+    def _start_process(self, exe_path: str) -> None:
+        subprocess.Popen(
+            [exe_path],
+            cwd=str(pathlib.Path(exe_path).parent),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def _ensure_motmaster_running(
+        self,
+        exe_path: str,
+        startup_timeout: float = 15.0,
+        poll_interval: float = 0.5,
+    ) -> None:
+        process_name = pathlib.Path(exe_path).name
+        if self._is_process_running(process_name):
+            return None
+
+        print(f"MOTMaster process '{process_name}' not found. Starting it now...")
+        self._start_process(exe_path)
+
+        deadline = time.time() + startup_timeout
+        while time.time() < deadline:
+            if self._is_process_running(process_name):
+                print(f"MOTMaster process '{process_name}' is running.")
+                return None
+            time.sleep(poll_interval)
+
+        raise RuntimeError(
+            f"Timed out waiting for process '{process_name}' to start from '{exe_path}'."
+        )
 
     def connect(self) -> None:
         for path in self.config["dll_paths"].values():
@@ -48,9 +111,10 @@ class MotMasterInterface:
                 for path in path_info.values():
                     self._add_ref(path)
             elif key == "motmaster":
+                self._ensure_motmaster_running(path_info["exe_path"])
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import MOTMaster
+                    import MOTMaster  # type: ignore
 
                     self.motmaster = Activator.GetObject(
                         MOTMaster.Controller, path_info["remote_path"]
@@ -61,7 +125,7 @@ class MotMasterInterface:
             elif key == "caf_hardware_controller":
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import MoleculeMOTHadwareControl
+                    import MoleculeMOTHadwareControl  # type: ignore
 
                     self.hardware_controller = Activator.GetObject(
                         MoleculeMOTHadwareControl.Controller, path_info["remote_path"]
@@ -78,9 +142,9 @@ class MotMasterInterface:
         script: str,
     ):
         self.script = script
-        path = str(self.root.joinpath(f"{script}.cs"))
+        self.script_path = str(self.script_root.joinpath(f"{script}.cs"))
         try:
-            self.motmaster.SetScriptPath(path)
+            self.motmaster.SetScriptPath(self.script_path)
             print(f"MotMaster script set to {script}.")
         except Exception as e:
             print(f"Error: {e} encountered")
@@ -94,24 +158,28 @@ class MotMasterInterface:
         # for key, value in default_parameters.items():
         #     self.parameter_dictionary[key] = value
 
-    def set_motmaster_dictionary(self):
-        d = self.get_params()
-        pars = Dictionary[String, Object]()
-        for key, value in d.items():
-            pars[key] = value
-        self.parameter_dictionary = pars
-        return None
+    def python_to_cs_dict(self, parameters: dict):
+        pars_csdict = Dictionary[String, Object]()
+        for key, value in parameters.items():
+            if isinstance(value, numbers.Integral):
+                value = Int32(value)
+            pars_csdict[key] = value
+        return pars_csdict
+
 
     def start_motmaster_experiment(
-        self,
+        self, parameters: Optional[dict] = None
     ):
         if self.script is None:
             raise ValueError(
                 "MotMaster script not set. Please call set_motmaster_experiment first."
             )
         try:
-
-            self.motmaster.Go()
+            if parameters is not None:
+                pars_csdict = self.python_to_cs_dict(parameters)
+                self.motmaster.Go(pars_csdict)
+            else:
+                self.motmaster.Go()
             time.sleep(self.interval)
         except Exception as e:
             print(f"Error starting MotMaster experiment {self.script}: {e}")
@@ -119,6 +187,31 @@ class MotMasterInterface:
 
     def get_params(self):
         return dict(self.motmaster.GetParameters())
+
+    def get_params_csdict(self):
+        return self.motmaster.GetParameters()
+
+    def set_run_until_stopped(self, value: bool):
+        self.motmaster.SetRunUntilStopped(value)
+    
+    def set_iterations(self, iterations: int):
+        self.motmaster.SetIterations(iterations)
+
+    def set_save_toggle(self, save: bool):
+        self.motmaster.SaveToggle(save)
+
+    def set_trigger_mode(self, value: bool):
+        self.motmaster.SetTriggered(value)
+        
+    def save_pattern_info(self, save_folder, file_tag, task_nr):
+        """Save pattern information to files. calls saveToFiles from MMDataIOHelper"""
+        if self.script is None:
+            raise ValueError(
+                "MotMaster script not set. Please call set_motmaster_experiment first."
+            )
+        self.motmaster.ioHelper.saveToFiles(file_tag, save_folder, task_nr, self.script_path)
+
+
     
 class  DummyMotMasterInterface(MotMasterInterface):
     
@@ -146,6 +239,7 @@ class  DummyMotMasterInterface(MotMasterInterface):
     
     def start_motmaster_experiment(
         self,
+        parameters: Optional[dict] = None,
     ):
         print(f"DummyMotMasterInterface: start_motmaster_experiment called with script '{self.script}', but no experiment started.")
         return None
@@ -156,6 +250,13 @@ class  DummyMotMasterInterface(MotMasterInterface):
     
     def disconnect(self) -> None:
         print("DummyMotMasterInterface: disconnect called, but no connection to close.")
+        return None
+
+    def save_pattern_info(self, save_folder, file_tag, task_nr):
+        print(
+            "DummyMotMasterInterface: save_pattern_info called "
+            f"(save_folder={save_folder}, file_tag={file_tag}, task_nr={task_nr})"
+        )
         return None
 
 
@@ -176,8 +277,35 @@ class MotMasterCommandServer:
         self._running = False
         self._experiment_thread: Optional[threading.Thread] = None
 
-    def _run_experiment(self) -> None:
-        self.interface.start_motmaster_experiment()
+    def _run_experiment(self, parameters: Optional[dict] = None) -> None:
+        self.interface.start_motmaster_experiment(parameters=parameters)
+
+    def _invoke_interface_method(
+        self,
+        method_name: str,
+        args: Optional[list] = None,
+        kwargs: Optional[dict] = None,
+    ):
+        if not isinstance(method_name, str) or not method_name:
+            raise ValueError("'method' must be a non-empty string")
+        if method_name.startswith("_"):
+            raise ValueError("Calling private methods is not allowed")
+
+        if args is None:
+            args = []
+        if kwargs is None:
+            kwargs = {}
+
+        if not isinstance(args, list):
+            raise ValueError("'args' must be a list when provided")
+        if not isinstance(kwargs, dict):
+            raise ValueError("'kwargs' must be a dictionary when provided")
+
+        method = getattr(self.interface, method_name, None)
+        if method is None or not callable(method):
+            raise ValueError(f"Interface method '{method_name}' not found")
+
+        return method(*args, **kwargs)
 
     def _handle_request(self, request: dict) -> dict:
         command = request.get("command")
@@ -207,7 +335,60 @@ class MotMasterCommandServer:
         if command == "get_params":
             return {"ok": True, "command": command, "params": self.interface.get_params()}
 
+        if command == "set_run_until_stopped":
+            value = request.get("value")
+            if not isinstance(value, bool):
+                raise ValueError("'value' must be a boolean for set_run_until_stopped")
+            self.interface.set_run_until_stopped(value)
+            return {"ok": True, "command": command, "value": value}
+
+        if command == "set_iterations":
+            iterations = request.get("iterations")
+            if not isinstance(iterations, int):
+                raise ValueError("'iterations' must be an integer for set_iterations")
+            self.interface.set_iterations(iterations)
+            return {"ok": True, "command": command, "iterations": iterations}
+
+        if command == "set_save_toggle":
+            save = request.get("save")
+            if not isinstance(save, bool):
+                raise ValueError("'save' must be a boolean for set_save_toggle")
+            self.interface.set_save_toggle(save)
+            return {"ok": True, "command": command, "save": save}
+
+        if command == "set_trigger_mode":
+            value = request.get("value")
+            if not isinstance(value, bool):
+                raise ValueError("'value' must be a boolean for set_trigger_mode")
+            self.interface.set_trigger_mode(value)
+            return {"ok": True, "command": command, "value": value}
+
+        if command == "save_pattern_info":
+            save_folder = request.get("save_folder")
+            file_tag = request.get("file_tag")
+            task_nr = request.get("task_nr")
+
+            if not isinstance(save_folder, str) or not save_folder:
+                raise ValueError("'save_folder' must be a non-empty string")
+            if not isinstance(file_tag, str) or not file_tag:
+                raise ValueError("'file_tag' must be a non-empty string")
+            if not isinstance(task_nr, int):
+                raise ValueError("'task_nr' must be an integer")
+
+            self.interface.save_pattern_info(save_folder, file_tag, task_nr)
+            return {
+                "ok": True,
+                "command": command,
+                "save_folder": save_folder,
+                "file_tag": file_tag,
+                "task_nr": task_nr,
+            }
+
         if command == "start_experiment":
+            parameters = request.get("parameters")
+            if parameters is not None and not isinstance(parameters, dict):
+                raise ValueError("'parameters' must be a dictionary when provided")
+
             if self._experiment_thread and self._experiment_thread.is_alive():
                 return {
                     "ok": False,
@@ -218,6 +399,7 @@ class MotMasterCommandServer:
 
             self._experiment_thread = threading.Thread(
                 target=self._run_experiment,
+                args=(parameters,),
                 name="motmaster-start-experiment",
                 daemon=True,
             )
@@ -227,11 +409,49 @@ class MotMasterCommandServer:
                 "command": command,
                 "script": self.interface.script,
                 "started": True,
+                "has_parameters": parameters is not None,
+            }
+
+        if command == "call_interface":
+            method_name = request.get("method")
+            args = request.get("args")
+            kwargs = request.get("kwargs")
+
+            result = self._invoke_interface_method(
+                method_name=method_name,
+                args=args,
+                kwargs=kwargs,
+            )
+            return {
+                "ok": True,
+                "command": command,
+                "method": method_name,
+                "result": result,
             }
 
         if command == "shutdown":
             self._running = False
             return {"ok": True, "command": command}
+
+        if isinstance(command, str) and not command.startswith("_"):
+            payload = dict(request)
+            payload.pop("command", None)
+            args = payload.pop("args", [])
+            kwargs = payload.pop("kwargs", {})
+            if payload:
+                kwargs = {**payload, **kwargs}
+
+            result = self._invoke_interface_method(
+                method_name=command,
+                args=args,
+                kwargs=kwargs,
+            )
+            return {
+                "ok": True,
+                "command": "interface_method",
+                "method": command,
+                "result": result,
+            }
 
         raise ValueError(f"Unknown command '{command}'")
 
