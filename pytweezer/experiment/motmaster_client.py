@@ -83,6 +83,22 @@ class MotMasterClient:
 	def shutdown_server(self) -> dict[str, Any]:
 		return self.send_command({"command": "shutdown"})
 
+	def set_run_until_stopped(self, value: bool) -> dict[str, Any]:
+		return self.send_command(
+			{"command": "set_run_until_stopped", "value": value}
+		)
+
+	def set_iterations(self, iterations: int) -> dict[str, Any]:
+		return self.send_command(
+			{"command": "set_iterations", "iterations": iterations}
+		)
+
+	def set_save_toggle(self, save: bool) -> dict[str, Any]:
+		return self.send_command({"command": "set_save_toggle", "save": save})
+
+	def set_trigger_mode(self, value: bool) -> dict[str, Any]:
+		return self.send_command({"command": "set_trigger_mode", "value": value})
+
 
 def probe_server(host: str = "127.0.0.1", port: int = 5557, timeout_ms: int = 1200) -> bool:
 	try:
@@ -112,6 +128,33 @@ def main() -> None:
 		action="store_true",
 		help="Only verify server reachability using ping",
 	)
+	parser.add_argument(
+		"--run-until-stopped",
+		type=int,
+		choices=[0, 1],
+		default=None,
+		help="Set run-until-stopped mode (0 or 1)",
+	)
+	parser.add_argument(
+		"--iterations",
+		type=int,
+		default=None,
+		help="Set iteration count before starting experiment",
+	)
+	parser.add_argument(
+		"--save-toggle",
+		type=int,
+		choices=[0, 1],
+		default=None,
+		help="Set save toggle (0 or 1)",
+	)
+	parser.add_argument(
+		"--trigger-mode",
+		type=int,
+		choices=[0, 1],
+		default=None,
+		help="Set trigger mode (0 or 1)",
+	)
 	args = parser.parse_args()
 
 	try:
@@ -125,10 +168,34 @@ def main() -> None:
 				("ping", client.ping()),
 				("get_status", client.get_status()),
 				("set_script", client.set_script(args.script)),
+			]
+
+			if args.run_until_stopped is not None:
+				responses.append(
+					(
+						"set_run_until_stopped",
+						client.set_run_until_stopped(bool(args.run_until_stopped)),
+					)
+				)
+
+			if args.iterations is not None:
+				responses.append(("set_iterations", client.set_iterations(args.iterations)))
+
+			if args.save_toggle is not None:
+				responses.append(
+					("set_save_toggle", client.set_save_toggle(bool(args.save_toggle)))
+				)
+
+			if args.trigger_mode is not None:
+				responses.append(
+					("set_trigger_mode", client.set_trigger_mode(bool(args.trigger_mode)))
+				)
+
+			responses.extend([
 				("get_params", client.get_params()),
 				("start_experiment", client.start_experiment()),
 				("get_status", client.get_status()),
-			]
+			])
 
 			if args.shutdown:
 				responses.append(("shutdown", client.shutdown_server()))
