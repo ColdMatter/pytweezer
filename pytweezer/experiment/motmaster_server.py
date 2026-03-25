@@ -182,6 +182,21 @@ class MotMasterCommandServer:
     def _handle_request(self, request: dict) -> dict:
         command = request.get("command")
 
+        if command == "ping":
+            return {"ok": True, "command": command, "status": "alive"}
+
+        if command == "get_status":
+            experiment_running = bool(
+                self._experiment_thread and self._experiment_thread.is_alive()
+            )
+            return {
+                "ok": True,
+                "command": command,
+                "server_running": self._running,
+                "experiment_running": experiment_running,
+                "script": self.interface.script,
+            }
+
         if command == "set_script":
             script = request.get("script")
             if not script:
@@ -255,7 +270,7 @@ class MotMasterCommandServer:
 
 
 def run_motmaster_command_server(
-    host: str = "localhost", port: int = 5557, interval: Union[int, float] = 0.1, simulate: bool = False
+    host: str = "0.0.0.0", port: int = 5557, interval: Union[int, float] = 0.1, simulate: bool = False
 ) -> None:
     if simulate:
         interface = DummyMotMasterInterface(interval=interval)
@@ -271,7 +286,11 @@ def run_motmaster_command_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run MotMaster ZeroMQ command server")
-    parser.add_argument("--host", default="localhost", help="Host interface to bind")
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Host interface to bind (use 0.0.0.0 for remote clients)",
+    )
     parser.add_argument("--port", type=int, default=5557, help="TCP port to bind")
     parser.add_argument(
         "--simulate",

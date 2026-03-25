@@ -21,9 +21,9 @@ def probe_server(address: str, timeout_ms: int = 1200) -> bool:
 	socket.connect(address)
 
 	try:
-		socket.send_json({"command": "get_params"})
+		socket.send_json({"command": "ping"})
 		response = socket.recv_json()
-		return isinstance(response, dict)
+		return isinstance(response, dict) and response.get("ok") is True
 	except Exception:
 		return False
 	finally:
@@ -70,6 +70,11 @@ def main() -> None:
 		default=None,
 		help="Working directory when launching server locally",
 	)
+	parser.add_argument(
+		"--test-connection",
+		action="store_true",
+		help="Only verify server reachability using ping (does not use MotMaster)",
+	)
 	args = parser.parse_args()
 
 	address = f"tcp://{args.host}:{args.port}"
@@ -82,10 +87,18 @@ def main() -> None:
 	socket.connect(address)
 
 	try:
+		if args.test_connection:
+			ok = probe_server(address)
+			print(json.dumps({"ok": ok, "command": "ping", "address": address}))
+			return
+
 		commands = [
+			{"command": "ping"},
+			{"command": "get_status"},
 			{"command": "set_script", "script": args.script},
 			{"command": "get_params"},
 			{"command": "start_experiment"},
+			{"command": "get_status"},
 		]
 
 		if args.shutdown:
