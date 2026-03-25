@@ -126,6 +126,22 @@ class MotMasterInterface:
 
     def get_params(self):
         return dict(self.motmaster.GetParameters())
+
+    def get_params_csdict(self):
+        return self.motmaster.GetParameters()
+
+    def set_run_until_stopped(self, value: bool):
+        self.motmaster.SetRunUntilStopped(value)
+    
+    def set_iterations(self, iterations: int):
+        self.motmaster.SetIterations(iterations)
+
+    def set_save_toggle(self, save: bool):
+        self.motmaster.SaveToggle(save)
+
+    def set_trigger_mode(self, value: bool):
+        self.motmaster.SetTriggered(value)
+
     
 class  DummyMotMasterInterface(MotMasterInterface):
     
@@ -214,6 +230,34 @@ class MotMasterCommandServer:
 
         if command == "get_params":
             return {"ok": True, "command": command, "params": self.interface.get_params()}
+
+        if command == "set_run_until_stopped":
+            value = request.get("value")
+            if not isinstance(value, bool):
+                raise ValueError("'value' must be a boolean for set_run_until_stopped")
+            self.interface.set_run_until_stopped(value)
+            return {"ok": True, "command": command, "value": value}
+
+        if command == "set_iterations":
+            iterations = request.get("iterations")
+            if not isinstance(iterations, int):
+                raise ValueError("'iterations' must be an integer for set_iterations")
+            self.interface.set_iterations(iterations)
+            return {"ok": True, "command": command, "iterations": iterations}
+
+        if command == "set_save_toggle":
+            save = request.get("save")
+            if not isinstance(save, bool):
+                raise ValueError("'save' must be a boolean for set_save_toggle")
+            self.interface.set_save_toggle(save)
+            return {"ok": True, "command": command, "save": save}
+
+        if command == "set_trigger_mode":
+            value = request.get("value")
+            if not isinstance(value, bool):
+                raise ValueError("'value' must be a boolean for set_trigger_mode")
+            self.interface.set_trigger_mode(value)
+            return {"ok": True, "command": command, "value": value}
 
         if command == "start_experiment":
             parameters = request.get("parameters")
