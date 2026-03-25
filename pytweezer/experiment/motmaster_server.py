@@ -8,13 +8,14 @@ import threading
 
 import numpy as np
 import zmq
+import pythonnet
 
 # NOTE: these imports will only work with the pythonnet package
 try:
     import clr
-    from System.Collections.Generic import Dictionary
-    from System import String, Object
-    from System import Activator
+    from System.Collections.Generic import Dictionary  # type: ignore
+    from System import String, Object  # type: ignore
+    from System import Activator   # type: ignore
 except Exception as e:
     print(f"Error: {e} encountered, probably no pythonnet")
 
@@ -50,7 +51,7 @@ class MotMasterInterface:
             elif key == "motmaster":
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import MOTMaster
+                    import MOTMaster  # type: ignore
 
                     self.motmaster = Activator.GetObject(
                         MOTMaster.Controller, path_info["remote_path"]
@@ -61,7 +62,7 @@ class MotMasterInterface:
             elif key == "caf_hardware_controller":
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import MoleculeMOTHadwareControl
+                    import MoleculeMOTHadwareControl  # type: ignore
 
                     self.hardware_controller = Activator.GetObject(
                         MoleculeMOTHadwareControl.Controller, path_info["remote_path"]
