@@ -6,7 +6,7 @@ authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11.4"
+python = ">=3.11.4,<3.14"
 
 # --- Core Data Science & Math ---
 numpy = "=1.26.4"
@@ -45,6 +45,18 @@ qscintilla = "^2.14.1"
 pyperclip = "^1.11.0"
 uncertainties = "^3.2.3"
 imageio = "^2.37.3"
+zmq = "^0.0.0"
+
+# --- Utilities & Networking ---
+pydantic = "=2.10.5"
+# rich = "=13.9.4"
+# paramiko = "=3.4.1"     # SSH client
+# rpyc = "=5.3.0"
+# plumbum = "=1.8.3"
+pythonnet = "=3.0.5"    # .NET integration
+# wakepy = "=0.9.1"       # from pip section
+# iso8601 = "=2.1.0"      # from pip section
+
 
 
 

@@ -4,7 +4,8 @@ from diffractio import mm, um, np, plt, degrees
 from diffractio.scalar_masks_XY import Scalar_mask_XY
 from diffractio.scalar_sources_XY import Scalar_source_XY
 from PIL import Image
-
+import json
+import time
 
 class PhaseMaskGenerator:
     def __init__(self,
@@ -479,5 +480,587 @@ class PhaseMaskGenerator:
         # Broadcasting magic:
         # (H,W) + (H,W) * (N,1,1) -> (N,H,W)
         return phasemask_init + dphi * steps
+    
+############################################################################################################################################################################################################
+
+def get_zernike_polynomial(noll_index, rho, theta, mask):
+    """
+    Returns the Zernike polynomial evaluated on the rho, theta grid 
+    for a given Noll index.
+    
+    Includes the standard normalization constants so that the RMS 
+    value of each polynomial over the unit disk is 1.
+    """
+    if noll_index == 1:
+        # Piston
+        Z = np.ones_like(rho)
+    elif noll_index == 2:
+        # Tip (X Tilt)
+        Z = 2 * rho * np.cos(theta)
+    elif noll_index == 3:
+        # Tilt (Y Tilt)
+        Z = 2 * rho * np.sin(theta)
+    elif noll_index == 4:
+        # Defocus
+        Z = np.sqrt(3) * (2 * rho**2 - 1)
+    elif noll_index == 5:
+        # Oblique Astigmatism
+        Z = np.sqrt(6) * rho**2 * np.sin(2 * theta)
+    elif noll_index == 6:
+        # Vertical Astigmatism
+        Z = np.sqrt(6) * rho**2 * np.cos(2 * theta)
+    elif noll_index == 7:
+        # Vertical Coma
+        Z = np.sqrt(8) * (3 * rho**3 - 2 * rho) * np.sin(theta)
+    elif noll_index == 8:
+        # Horizontal Coma
+        Z = np.sqrt(8) * (3 * rho**3 - 2 * rho) * np.cos(theta)
+    elif noll_index == 9:
+        # Vertical Trefoil
+        Z = np.sqrt(8) * rho**3 * np.sin(3 * theta)
+    elif noll_index == 10:
+        # Oblique Trefoil
+        Z = np.sqrt(8) * rho**3 * np.cos(3 * theta)
+    elif noll_index == 11:
+        # Primary Spherical Aberration
+        Z = np.sqrt(5) * (6 * rho**4 - 6 * rho**2 + 1)
+    elif noll_index == 12:
+        # Secondary Vertical Astigmatism
+        Z = np.sqrt(10) * (4 * rho**4 - 3 * rho**2) * np.cos(2 * theta)
+    elif noll_index == 13:
+        # Secondary Oblique Astigmatism
+        Z = np.sqrt(10) * (4 * rho**4 - 3 * rho**2) * np.sin(2 * theta)
+    else:
+        raise ValueError(f"Noll index {noll_index} is not implemented in this basic dictionary.")
+        
+    return Z * mask
+
+
+class OptimisationBasedPhasemaskGenerator:
+    def __init__(self,
+                 wavelength_um=0.852,
+                 focal_length_mm=10.0,
+                 slm_pitch_um=8,
+                 slm_res=(1200,1920),
+                 input_beam_waist_mm=9.6):
+        
+        self.lam = wavelength_um
+        self.f_mm = focal_length_mm
+        self.f_um = focal_length_mm * 1000
+        self.dx_slm = slm_pitch_um
+        self.Ny, self.Nx = slm_res
+        self.w0_mm = input_beam_waist_mm
+        self.w0_um = input_beam_waist_mm * 1000
+        self.Lx_slm = self.Nx * self.dx_slm # In units of um
+        self.Ly_slm = self.Ny * self.dx_slm # In units of um
+        self.dx_f = (self.lam * self.f_um) / self.Lx_slm # In units of um
+        self.dy_f = (self.lam * self.f_um) / self.Ly_slm # In units of um
+        self.Lx_foc = self.Nx * self.dx_f
+        self.Ly_foc = self.Ny * self.dy_f
+
+        print(f"--- System Configuration ---")
+        print(f"SLM Plane Width: {self.Lx_slm/1000:.2f} mm")
+        print(f"SLM Plane Height: {self.Ly_slm/1000:.2f} mm")
+        print(f"Focal Plane Resolution x (pixel size): {self.dx_f:.4f} um")
+        print(f"Focal Plane Resolution y (pixel size): {self.dy_f:.4f} um")
+        print(f"Focal Plane Width: {self.Lx_foc:.2f} um")
+        print(f"Focal Plane Height: {self.Ly_foc:.2f} um")
+
+    def generate_source_amplitude(self):
+        """Generates Gaussian input beam amplitude."""
+        x = np.linspace(-self.Lx_slm/2, self.Lx_slm/2, self.Nx)
+        y = np.linspace(-self.Ly_slm/2, self.Ly_slm/2, self.Ny)
+        X, Y = np.meshgrid(x, y)
+        R2 = X**2 + Y**2
+        return np.exp(- R2 / (2*(self.w0_um/2.355)**2))
+    
+    def generate_weighted_array(self, weights, spacing, init_phase_randomness=1.0):
+        """
+        Generates a weighted mask indicating where the tweezers should be and
+        how strong they should be.
+        Returns both the full 2D array and a list of the specific (y, x) indices.
+        """
+        dim = weights.shape
+        xspan = (dim[1] - 1) * spacing
+        yspan = (dim[0] - 1) * spacing
+        xpos = np.linspace(-(xspan)/2, (xspan)/2, dim[1])
+        ypos = np.linspace(-(yspan)/2, (yspan)/2, dim[0])
+        Xpos, Ypos = np.meshgrid(xpos, ypos)
+        Xn, Yn = Xpos.flatten(), Ypos.flatten()
+        Wn = weights.flatten()
+        Thetan = np.random.rand(len(Wn)) * init_phase_randomness * 2 * np.pi
+
+        print(f"--- Target Generation ---")
+        print(f"Grid: {dim[0]}x{dim[1]}")
+        print(f"Spacing: {spacing} um")
+                    
+        return [Wn, Thetan, Xn, Yn, dim]
+    
+    def generate_zernike_phasemask(self, zernike_coeffs, wrap=False):
+        """
+        Generates a 2D Zernike correction phasemask defined on the SLM plane.
+        
+        Parameters:
+        -----------
+        settings : dict
+            Must contain 'slm_shape' (Ny, Nx) and 'pixel_pitch' (p).
+        zernike_coeffs : dict
+            A dictionary mapping the Noll Index (int) to its coefficient (float).
+            Example: {4: 1.5, 8: -0.5} applies 1.5 rads of Defocus and -0.5 rads of Horizontal Coma.
+            
+        Returns:
+        --------
+        total_phase : np.ndarray
+            The 2D phase mask in radians to be applied to the SLM.
+        """
+        # 1. Setup SLM Coordinates (Centered at 0)
+        x_slm = np.linspace(-self.Lx_slm/2, self.Lx_slm/2, self.Nx)
+        y_slm = np.linspace(-self.Ly_slm/2, self.Ly_slm/2, self.Ny)
+        X_slm, Y_slm = np.meshgrid(x_slm, y_slm)
+        R_max = np.sqrt(self.Lx_slm**2 + self.Ly_slm**2) / 2.0
+        rho = np.sqrt(X_slm**2 + Y_slm**2) / R_max
+        theta = np.arctan2(Y_slm, X_slm)
+        
+        # 3. Define the unit circle mask
+        mask = (rho <= 1.0).astype(float)
+        
+        # Initialize an empty phase array
+        total_phase = np.zeros((self.Ny, self.Nx))
+        
+        # 4. Superpose the requested Zernike modes
+        for noll_index, coeff in zernike_coeffs.items():
+            if coeff != 0.0:
+                Z_mode = get_zernike_polynomial(noll_index, rho, theta, mask)
+                total_phase += coeff * Z_mode
+                
+        if wrap:
+            total_phase = total_phase % (2 * np.pi) - np.pi
+
+        return total_phase
+    
+    def generate_fresnel_lens_phasemask(self, focal_length_mm):
+        """
+        Generates a Fresnel lens phase mask to focus the beam at a specific focal length.
+        This is useful for correcting defocus or creating a virtual focus plane.
+        """
+        # 1. Setup SLM Coordinates (Centered at 0)
+        x_slm = np.linspace(-self.Lx_slm/2, self.Lx_slm/2, self.Nx)
+        y_slm = np.linspace(-self.Ly_slm/2, self.Ly_slm/2, self.Ny)
+        X_slm, Y_slm = np.meshgrid(x_slm, y_slm)
+        
+        # 2. Calculate the Fresnel lens phase profile
+        f_um = focal_length_mm * 1000
+        k = 2 * np.pi / self.lam
+        R_squared = X_slm**2 + Y_slm**2
+        fresnel_phase = (k / (2 * f_um)) * R_squared
+        
+        return fresnel_phase % (2*np.pi) - np.pi
+    
+    def generate_blazed_grating_phasemask(self, dx_um, dy_um):
+        """
+        Generates a blazed grating phase mask to steer the beam by (dx_um, dy_um) in the focal plane.
+        The steering angles are calculated based on the desired displacement and the system's focal length.
+        """
+        # 1. Setup SLM Coordinates (Centered at 0)
+        x_slm = np.linspace(-self.Lx_slm/2, self.Lx_slm/2, self.Nx)
+        y_slm = np.linspace(-self.Ly_slm/2, self.Ly_slm/2, self.Ny)
+        X_slm, Y_slm = np.meshgrid(x_slm, y_slm)
+        
+        # 2. Calculate steering angles
+        theta_x = np.arctan(dx_um / self.f_um)  # Steering angle in radians for x
+        theta_y = np.arctan(dy_um / self.f_um)  # Steering angle in radians for y
+        
+        # 3. Calculate the blazed grating phase profile
+        k = 2 * np.pi / self.lam
+        blazed_phase = k * (X_slm * np.sin(theta_x) + Y_slm * np.sin(theta_y))
+        return blazed_phase % (2*np.pi) - np.pi
+
+    def superposition_optimization(self, target, max_iter=30, damping=0.4, verbose=True):
+        """
+        Optimizes a phasemask for a discrete array of optical tweezers using 
+        the weighted superposition method.
+        """
+        print("--- Starting Superposition Phase Retrieval ---")
+        start_time = time.time()
+
+        # 2. Setup SLM Physical Coordinates
+        x_slm = np.linspace(-self.Lx_slm/2, self.Lx_slm/2, self.Nx)
+        y_slm = np.linspace(-self.Ly_slm/2, self.Ly_slm/2, self.Ny)
+
+        # 3. Setup Illumination Beam (Gaussian)
+        am_slm = self.generate_source_amplitude()
+
+        # 4. Define Target Trap Coordinates
+        w_n, theta_n, x_n, y_n, array_shape = target
+        N_traps = len(w_n)
+        
+        # Pre-calculations
+        k = 2 * np.pi / (self.lam * self.f_um)
+
+        X_phase = np.exp(1j * k * x_n[:, None] * x_slm[None, :]) # Shape: (N_traps, Nx)
+        Y_phase = np.exp(1j * k * y_n[:, None] * y_slm[None, :]) # Shape: (N_traps, Ny)
+        X_phase_conj = np.conj(X_phase)
+        Y_phase_conj = np.conj(Y_phase)
+
+        uniformity_history = []
+        minmax_history = []
+        mse_history = []
+        for iteration in range(max_iter):
+            
+            # Step A: Generate the Superposition Complex Field (Vectorized)
+            C_n = w_n * np.exp(1j * theta_n)
+            Y_term = Y_phase * C_n[:, None]   # Shape: (N_traps, Ny)
+            U_tot = Y_term.T @ X_phase      # Shape: (Ny, N_traps) @ (N_traps, Nx) -> (Ny, Nx)
+            pm_slm = np.angle(U_tot)
+            
+            # Step B: Evaluate Exact Intensity at Target Sites (Vectorized)
+            U_slm = am_slm * np.exp(1j * pm_slm)
+            U_foc_n = U_slm @ X_phase_conj.T # Shape: (Ny, Nx) @ (Nx, N_traps) -> (Ny, N_traps)
+            U_foc = np.sum(Y_phase_conj * U_foc_n.T, axis=1) # Shape: (N_traps,)
+            I_foc = np.abs(U_foc)**2
+                
+            # Step C: Calculate Metrics
+            uniformity = 1 - (I_foc[target[0] > 0].std() / I_foc[target[0] > 0].mean()) # 1.0 is perfect uniformity
+            uniformity_history.append(uniformity)
+            mse = np.mean((I_foc/I_foc.sum() - target[0]/target[0].sum())**2)
+            mse_history.append(mse)
+            minmax_ratio = I_foc[target[0] > 0].min() / I_foc[target[0] > 0].max()
+            minmax_history.append(minmax_ratio)
+            
+            # Step D: Update Weights
+            # We dampen the update to prevent oscillations
+            update_ratio = ((target[0]/target[0].sum()) / (I_foc/I_foc.sum()))**damping
+            w_n = w_n * update_ratio
+            
+            # Update the target phases to match the simulated arriving field
+            theta_n = np.angle(U_foc)
+            
+            if verbose:
+                if iteration % 10 == 0:
+                    print(f"Iteration {iteration:03d} | Mean-Squared Error: {mse:.2e} | Uniformity: {uniformity*100:.2f}% | Min/Max ratio: {minmax_ratio:.3f}")
+
+        trap_weights = I_foc.reshape(array_shape)
+        print(f"Iteration {iteration:03d} | Mean-Squared Error: {mse:.2e} | Uniformity: {uniformity*100:.2f}% | Min/Max ratio: {minmax_ratio:.3f}")
+        print(f"Optimization finished in {time.time() - start_time:.2f} seconds.")
+        
+        return pm_slm, [w_n, theta_n, x_n, y_n, array_shape], [uniformity_history, minmax_history, mse_history, trap_weights]
+
+    def zernike_superposition_optimisation_v0(self, target, target_zernike, max_iter=30, damping=0.4):
+        """
+        Optimizes a phasemask for a discrete array of optical tweezers using
+        the weighted superposition method.
+        """
+        print("--- Starting Superposition Phase Retrieval ---")
+ 
+        # 2. Setup SLM Physical Coordinates
+        x_slm = np.linspace(-self.Lx_slm/2, self.Lx_slm/2, self.Nx)
+        y_slm = np.linspace(-self.Ly_slm/2, self.Ly_slm/2, self.Ny)
+        X_slm, Y_slm = np.meshgrid(x_slm, y_slm)
+ 
+        # 3. Setup Illumination Beam (Gaussian)
+        am_slm = self.generate_source_amplitude()
+ 
+        # 4. Define Target Trap Coordinates
+        w_n, theta_n, x_n, y_n, array_shape = target
+        N_traps = len(w_n)
+        
+        # Pre-calculations
+        print("Performing pre-calculations...")
+        k = 2 * np.pi / (self.lam * self.f_um)
+        dXY = np.exp(1j * k * np.einsum('n,ij->nij', x_n, X_slm) + 1j * k * np.einsum('n,ij->nij', y_n, Y_slm))
+        dXYZ = dXY * np.array([np.exp(1j * self.generate_zernike_phasemask(target_zernike[n])) for n in range(N_traps)])
+        dXYZ_conj = np.conj(dXYZ)
+ 
+        uniformity_history = np.zeros(max_iter)
+        mse_history = np.zeros(max_iter)
+        minmax_history = np.zeros(max_iter)
+        start_time = time.time()
+        for it in range(max_iter):
+            # Calculate SLM field
+            """
+            U_slm = np.zeros((self.Ny, self.Nx), dtype=np.complex128)
+            for n in range(N_traps): U_slm += w_n[n] * dX[n] * dY[n] * np.exp(1j*theta_n[n])"""
+            # Pre-calculate the complex coefficients (1D array)
+            opt_params = w_n * np.exp(1j * theta_n)
+            U_slm = np.einsum('n,nij->ij', opt_params, dXYZ)
+            pm_slm = np.angle(U_slm)
+            U_slm = am_slm * np.exp(1j * pm_slm)
+ 
+            # Evaluate Fourier field
+            U_n = np.einsum('ij,nij->n', U_slm, dXYZ_conj)
+            I_n = np.abs(U_n) ** 2
+ 
+            # Heuristic updates
+            w_n = w_n * ((target[0]/target[0].sum()) / (I_n/I_n.sum()))**damping
+            theta_n = np.angle(U_n)
+ 
+            # Calculate metrics
+            uniformity = 1 - (I_n[target[0] > 0].std() / I_n[target[0] > 0].mean()) # 1.0 is perfect uniformity
+            uniformity_history[it] = uniformity
+            mse = np.mean((I_n/I_n.sum() - target[0]/target[0].sum())**2)
+            mse_history[it] = mse
+            minmax_ratio = I_n[target[0] > 0].min() / I_n[target[0] > 0].max()
+            minmax_history[it] = minmax_ratio
+ 
+            print(f"Iteration {it+1:03d} | Mean-Squared Error: {mse:.2e} | Uniformity: {uniformity*100:.2f}% | Min/Max ratio: {minmax_ratio:.3f}")
+ 
+        print(f"Optimization finished in {time.time() - start_time:.2f} s | Algorithm speed: {max_iter/(time.time() - start_time):.3f} it/s")
+        trap_weights = I_n.reshape(array_shape)
+ 
+        return pm_slm, [w_n, theta_n, x_n, y_n], [uniformity_history, minmax_history, mse_history, trap_weights]
+
+    def zernike_superposition_optimization(self, target, target_zernike, max_iter=30, damping=0.4, batch_size=50):
+        """
+        Optimizes a phasemask for a discrete array of optical tweezers using
+        the weighted superposition method.
+        """
+        print("--- Starting Zernike-Superposition Phase Retrieval ---")
+        start_time = time.time()
+ 
+        # 2. Setup SLM Physical Coordinates
+        x_slm = np.linspace(-self.Lx_slm/2, self.Lx_slm/2, self.Nx)
+        y_slm = np.linspace(-self.Ly_slm/2, self.Ly_slm/2, self.Ny)
+ 
+        # 3. Setup Illumination Beam (Gaussian)
+        am_slm = self.generate_source_amplitude()
+ 
+        # 4. Define Target Trap Coordinates
+        w_n, x_n, y_n, array_shape, theta_n = target
+        N_traps = len(w_n)
+        
+        # Pre-calculations
+        k = 2 * np.pi / (self.lam * self.f_um)
+        A_slm = self.generate_source_amplitude()
+ 
+        # Pre-calculate 1D Steering Vectors for speed
+        # Shapes: X_steer is (N_traps, Nx), Y_steer is (N_traps, Ny)
+        X_steer = k * np.outer(x_n, x_slm)
+        Y_steer = k * np.outer(y_n, y_slm)
+ 
+        uniformity_history = []
+        mse_history = []
+        minmax_history = []
+        for iteration in range(max_iter):
+            # =========================================================
+            # STEP A: Forward Build (SLM Plane)
+            # =========================================================
+            U_tot = np.zeros((self.Ny, self.Nx), dtype=np.complex128)
+            
+            for start in range(0, N_traps, batch_size):
+                end = min(start + batch_size, N_traps)
+                current_batch_size = end - start
+                
+                # Broadcast 1D steering vectors into a 3D block: Shape (Batch, Ny, Nx)
+                batch_steer = X_steer[start:end, np.newaxis, :] + Y_steer[start:end, :, np.newaxis]
+                
+                # Add trap-specific Zernike aberrations to the 3D block
+                batch_phase = np.zeros_like(batch_steer)
+                for i, trap_idx in enumerate(range(start, end)):
+                    Z_mask = self.generate_zernike_phasemask(target_zernike[trap_idx])
+                    batch_phase[i] = batch_steer[i] + Z_mask
+                
+                # Add the relative optimization phases (theta_n)
+                batch_phase += theta_n[start:end, np.newaxis, np.newaxis]
+                
+                # Execute compiled C-level exponentiation and sum over the batch
+                batch_U = w_n[start:end, np.newaxis, np.newaxis] * np.exp(1j * batch_phase)
+                U_tot += np.sum(batch_U, axis=0)
+ 
+            # Extract the physical phase mask to display on the SLM
+            Phi_slm = np.angle(U_tot)
+            
+            # =========================================================
+            # STEP B: Backward Simulation (Focal Plane Evaluation)
+            # =========================================================
+            # The actual field reflecting off the SLM
+            E_slm = A_slm * np.exp(1j * Phi_slm)
+            
+            E_traps = np.zeros(N_traps, dtype=np.complex128)
+            
+            for start in range(0, N_traps, batch_size):
+                end = min(start + batch_size, N_traps)
+                
+                # Rebuild the exact same 3D phase block (Steering + Zernikes)
+                batch_steer = X_steer[start:end, np.newaxis, :] + Y_steer[start:end, :, np.newaxis]
+                batch_eval_phase = np.zeros_like(batch_steer)
+                
+                for i, trap_idx in enumerate(range(start, end)):
+                    Z_mask = self.generate_zernike_phasemask(target_zernike[trap_idx])
+                    batch_eval_phase[i] = batch_steer[i] + Z_mask
+                
+                # Multiply by the conjugate (negative) phase to simulate propagation
+                # We broadcast E_slm across the batch dimension
+                batch_arriving = E_slm[np.newaxis, :, :] * np.exp(-1j * batch_eval_phase)
+                
+                # Integrate the field arriving at each trap (sum over spatial Ny, Nx)
+                E_traps[start:end] = np.sum(batch_arriving, axis=(1, 2))
+                
+            # =========================================================
+            # STEP C: Gerchberg-Saxton Updates
+            # =========================================================
+            I_n = np.abs(E_traps)**2
+            mean_I = np.mean(I_n)
+            
+            # 1. Update Weights (Heuristic equalization)
+            w_n = w_n * (mean_I / I_n)**damping
+            
+            # 2. Update Phases (Free evolution)
+            theta_n = np.angle(E_traps)
+ 
+            # Step C: Calculate Metrics
+            uniformity = 1 - (I_n[target[0] > 0].std() / I_n[target[0] > 0].mean()) # 1.0 is perfect uniformity
+            uniformity_history.append(uniformity)
+            mse = np.mean((I_n/I_n.sum() - target[0]/target[0].sum())**2)
+            mse_history.append(mse)
+            minmax_ratio = I_n[target[0] > 0].min() / I_n[target[0] > 0].max()
+            minmax_history.append(minmax_ratio)
+ 
+            print(f"Iteration {iteration+1:03d} | Mean-Squared Error: {mse:.2e} | Uniformity: {uniformity*100:.2f}% | Min/Max ratio: {minmax_ratio:.3f}")
+    
+        print(f"Optimization finished in {time.time() - start_time:.2f} s")
+        trap_weights = I_n.reshape(array_shape)
+ 
+        return Phi_slm, [w_n, theta_n, x_n, y_n], [uniformity_history, minmax_history, mse_history, trap_weights]
+
+    def generate_phasemask(self, trap_terms, zernike_terms=None):
+        w_n, theta_n, x_n, y_n = trap_terms
+        z_n = zernike_terms if zernike_terms is not None else [{} for _ in range(len(w_n))]
+        N_traps = len(w_n)
+
+        x_slm = np.linspace(-self.Lx_slm/2, self.Lx_slm/2, self.Nx)
+        y_slm = np.linspace(-self.Ly_slm/2, self.Ly_slm/2, self.Ny)
+        X_slm, Y_slm = np.meshgrid(x_slm, y_slm)
+
+        k = 2 * np.pi / (self.lam * self.f_um)
+        U_tot = np.zeros((self.Ny, self.Nx), dtype=np.complex128)
+        
+        for n in range(N_traps):
+            delta = k * (x_n[n] * X_slm + y_n[n] * Y_slm)
+            zernike = self.generate_zernike_phasemask(z_n[n])
+            U_tot += w_n[n] * np.exp(1j * (delta + theta_n[n] + zernike))
+
+        pm_slm = np.angle(U_tot)
+        return pm_slm
+ 
+    def simulate_focal_plane(self, pm_slm, Nx_pad=2048, Ny_pad=2048, show=False, zoom_pixels=100, cmap='viridis'):
+        am_slm = self.generate_source_amplitude()
+        field_slm = am_slm * np.exp(1j * pm_slm)
+        field_slm_pad = np.zeros((Ny_pad, Nx_pad), dtype=np.complex128)
+        field_slm_pad[(Ny_pad - self.Ny)//2:(Ny_pad + self.Ny)//2, (Nx_pad - self.Nx)//2:(Nx_pad + self.Nx)//2] = field_slm
+        field_foc_pad = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(field_slm_pad)))
+
+        if show:
+            fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+            I_foc = np.abs(field_foc_pad)**2
+            norm_intensity = I_foc / I_foc.max()
+            x_focal_um = np.linspace(-self.Nx*self.dx_f/2, self.Nx*self.dx_f/2, Nx_pad)
+            y_focal_um = np.linspace(-self.Ny*self.dy_f/2, self.Ny*self.dy_f/2, Ny_pad)
+            im1 = ax.imshow(norm_intensity, 
+                                extent=[x_focal_um[0], x_focal_um[-1], y_focal_um[0], y_focal_um[-1]],
+                                cmap=cmap)
+
+            zoom_range_um = zoom_pixels * self.dx_f
+            ax.set_xlim(-zoom_range_um, zoom_range_um)
+            ax.set_ylim(-zoom_range_um, zoom_range_um)
+            ax.grid(False)
+            ax.set_title(f"Simulated Intensity (Focal Plane)\nZoomed Central Region")
+            ax.set_xlabel("x [um]")
+            ax.set_ylabel("y [um]")
+            cbar1 = plt.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
+            cbar1.set_label("Normalized Intensity")
+
+        return field_foc_pad
+    
+    def visualise_algorithm_performance(self, pm_slm, metrics, zoom_pixels, pad=1):
+        U_foc = self.simulate_focal_plane(pm_slm, Nx_pad=self.Nx*pad, Ny_pad=self.Ny*pad, show=False)
+        I_foc = np.abs(U_foc)**2
+
+        fig, ax = plt.subplots(1, 3, figsize=(21, 6))
+        uniformity_history, minmax_history, mse_history, trap_weights = metrics
+
+        ax[0].plot(uniformity_history, 'b-o', label="Uniformity")
+        ax[0].plot(minmax_history, 'r-s', label="Min/Max Ratio")
+        ax0_secondary = ax[0].twinx()
+        ax0_secondary.plot(mse_history, 'g-o', label="MSE")
+        ax0_secondary.set_ylabel("MSE Value")
+        ax0_secondary.tick_params(axis='y')
+        ax0_secondary.legend(loc='lower right')
+        ax[0].set_xlabel("Iteration")
+        ax[0].set_ylabel("Metric Value")
+        ax[0].legend(loc='upper right')
+        ax[0].grid(True)
+        
+        ax[0].set_title("Optimization Convergence Metrics")
+
+        norm_intensity = I_foc / I_foc.max()
+        x_focal_um = np.linspace(-self.Nx*self.dx_f/2, self.Nx*self.dx_f/2, self.Nx*pad)
+        y_focal_um = np.linspace(-self.Ny*self.dy_f/2, self.Ny*self.dy_f/2, self.Ny*pad)
+        im1 = ax[1].imshow(norm_intensity, 
+                            extent=[x_focal_um[0], x_focal_um[-1], y_focal_um[0], y_focal_um[-1]],
+                            cmap='viridis')
+
+        zoom_range_um = zoom_pixels * self.dx_f
+        ax[1].set_xlim(-zoom_range_um, zoom_range_um)
+        ax[1].set_ylim(-zoom_range_um, zoom_range_um)
+        ax[1].grid(False)
+        ax[1].set_title(f"Simulated Intensity (Focal Plane)\nZoomed Central Region")
+        ax[1].set_xlabel("x [um]")
+        ax[1].set_ylabel("y [um]")
+        cbar1 = plt.colorbar(im1, ax=ax[1], fraction=0.046, pad=0.04)
+        cbar1.set_label("Normalized Intensity")
+
+        # Plot a heatmap of the trap weights with ax[2]
+        im2 = ax[2].imshow(trap_weights/trap_weights.max(), cmap='viridis')
+        ax[2].grid(False)
+        ax[2].set_title("Simulated Trap Weights")
+        ax[2].set_xlabel("Trap X Index")
+        ax[2].set_ylabel("Trap Y Index")
+        cbar2 = plt.colorbar(im2, ax=ax[2], fraction=0.046, pad=0.04)
+        cbar2.set_label("Normalized Trap Weight")
+
+        plt.tight_layout()
+        plt.show()
+
+    def save_phasemask(self, phasemask):
+        phasemask_bmp = Image.fromarray(phasemask)
+        phasemask_bmp.save('C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MeadowController\\phasemasks\\phasemask.bmp')
+        print('Phasemask generated and saved as an 8bit.bmp')
+
+    def superimpose_8bit(self, phasemasks):
+        '''
+        Superimpose 8-bit phasemasks.
+        '''
+        return (sum(phasemasks) % 256).astype(np.uint8)
+    
+    def transform_phase_8bit(self, phasemask):
+        '''
+        Converts phasemask to 8-bit bitmaps.
+        '''
+        return np.uint8(((phasemask/(2*np.pi))*256) + 128)
+ 
+class ZernikeCalibrator:
+    def __init__(self, json_filepath):
+        """Loads the calibration weights from the JSON file."""
+        with open(json_filepath, "r") as f:
+            data = json.load(f)
+        
+        self.poly = data["polynomial_degree"]
+        self.coeffs = data["coefficients"]
+        
+    def get_zernike_coeff(self, x, y):
+        """
+        Predicts the Z value for given x and y coordinates using the fitted polynomial.
+        x and y can be scalar values or numpy arrays.
+        """
+        # Ensure the output shape matches the input shape
+        z_pred = np.zeros_like(x, dtype=float)
+        term_idx = 0
+        
+        for i in range(4):
+            for j in range(4 - i):
+                z_pred += self.coeffs[term_idx] * (x**i) * (y**j)
+                term_idx += 1
+                
+        return z_pred
     
 

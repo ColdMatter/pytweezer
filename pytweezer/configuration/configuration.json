@@ -1,0 +1,20 @@
+{
+
+  "dll_paths": {
+    "daq": "C:\\ControlPrograms\\EDMSuite\\DAQ\\bin\\x86\\RbTweezer\\DAQ.dll",
+    "shared_code": "C:\\ControlPrograms\\EDMSuite\\DAQ\\bin\\x86\\RbTweezer\\SharedCode.dll"
+  },
+  "motmaster":
+  {
+      "exe_path": "C:\\ControlPrograms\\EDMSuite\\MOTMaster\\bin\\x86\\RbTweezer\\MOTMaster.exe",
+      "remote_path": "tcp://localhost:1187/controller.rem"
+  },
+  "wavemeter_lock":
+  {
+      "exe_path": "C:\\ControlPrograms\\EDMSuite\\WavemeterLock\\bin\\Release\\WavemeterLock.exe",
+      "remote_path": "tcp://localhost:2146/controller.rem"
+   },
+  "script_root_path": "C:\\ControlPrograms\\EDMSuite\\RbTweezerMasterScripts",
+  "data_root_path": "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\mot_master_data",
+  "data_prefix": "Tweezer"
+}
