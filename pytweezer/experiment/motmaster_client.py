@@ -1,47 +1,96 @@
 import argparse
 import json
-import shlex
-import subprocess
-import time
 from typing import Any
+
 import zmq
 
 
-def send_command(socket: zmq.Socket, payload: dict[str, Any]) -> dict[str, Any]:
-	socket.send_json(payload)
-	return socket.recv_json()
+class MotMasterClient:
+	def __init__(
+		self,
+		host: str = "127.0.0.1",
+		port: int = 5557,
+		timeout_ms: int = 1200,
+		context: zmq.Context | None = None,
+	) -> None:
+		self.host = host
+		self.port = port
+		self.address = f"tcp://{host}:{port}"
+		self.timeout_ms = timeout_ms
+		self.context = context or zmq.Context.instance()
+
+	def _create_socket(self, timeout_ms: int) -> zmq.Socket:
+		socket = self.context.socket(zmq.REQ)
+		socket.setsockopt(zmq.LINGER, 0)
+		socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
+		socket.setsockopt(zmq.SNDTIMEO, timeout_ms)
+		socket.connect(self.address)
+		return socket
+
+	def close(self) -> None:
+		return None
+
+	def __enter__(self) -> "MotMasterClient":
+		return self
+
+	def __exit__(self, exc_type, exc, tb) -> None:
+		self.close()
+
+	def send_command(
+		self,
+		payload: dict[str, Any],
+		*,
+		timeout_ms: int | None = None,
+		retries: int = 0,
+	) -> dict[str, Any]:
+		effective_timeout = self.timeout_ms if timeout_ms is None else timeout_ms
+		for attempt in range(retries + 1):
+			socket = self._create_socket(effective_timeout)
+			try:
+				socket.send_json(payload)
+				return socket.recv_json()
+			except zmq.error.Again as error:
+				if attempt == retries:
+					raise TimeoutError(
+						f"Timed out waiting for response to command '{payload.get('command')}' "
+						f"after {effective_timeout} ms"
+					) from error
+			finally:
+				socket.close()
+		raise RuntimeError("Unreachable state in send_command")
+
+	def ping(self) -> dict[str, Any]:
+		return self.send_command({"command": "ping"})
+
+	def get_status(self) -> dict[str, Any]:
+		return self.send_command({"command": "get_status"})
+
+	def set_script(self, script: str, timeout_ms: int = 10000) -> dict[str, Any]:
+		return self.send_command(
+			{"command": "set_script", "script": script},
+			timeout_ms=timeout_ms,
+		)
+
+	def get_params(self) -> dict[str, Any]:
+		return self.send_command({"command": "get_params"})
+
+	def start_experiment(self) -> dict[str, Any]:
+		return self.send_command({"command": "start_experiment"})
+
+	def shutdown_server(self) -> dict[str, Any]:
+		return self.send_command({"command": "shutdown"})
 
 
-def probe_server(address: str, timeout_ms: int = 1200) -> bool:
-	context = zmq.Context.instance()
-	socket = context.socket(zmq.REQ)
-	socket.setsockopt(zmq.LINGER, 0)
-	socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
-	socket.setsockopt(zmq.SNDTIMEO, timeout_ms)
-	socket.connect(address)
-
+def probe_server(host: str = "127.0.0.1", port: int = 5557, timeout_ms: int = 1200) -> bool:
 	try:
-		socket.send_json({"command": "ping"})
-		response = socket.recv_json()
-		return isinstance(response, dict) and response.get("ok") is True
+		with MotMasterClient(host=host, port=port, timeout_ms=timeout_ms) as client:
+			response = client.ping()
+			return isinstance(response, dict) and response.get("ok") is True
 	except Exception:
 		return False
-	finally:
-		socket.close()
-
-
-
-def wait_for_server(address: str, timeout_s: float = 15.0, step_s: float = 0.5) -> bool:
-	deadline = time.time() + timeout_s
-	while time.time() < deadline:
-		if probe_server(address):
-			return True
-		time.sleep(step_s)
-	return False
 
 
 def main() -> None:
-	print("running")
 	parser = argparse.ArgumentParser(description="Simple MotMaster ZeroMQ test client")
 	parser.add_argument("--host", default="127.0.0.1", help="Server host")
 	parser.add_argument("--port", type=int, default=5557, help="Server TCP port")
@@ -56,68 +105,47 @@ def main() -> None:
 		help="Send shutdown command after test sequence",
 	)
 	parser.add_argument(
-		"--autostart",
-		action="store_true",
-		help="Auto-start server if it is not reachable",
-	)
-	parser.add_argument(
-		"--server-command",
-		default=None,
-		help="Command to launch the server process",
-	)
-	parser.add_argument(
-		"--server-workdir",
-		default=None,
-		help="Working directory when launching server locally",
-	)
-	parser.add_argument(
 		"--test-connection",
 		action="store_true",
-		help="Only verify server reachability using ping (does not use MotMaster)",
+		help="Only verify server reachability using ping",
 	)
 	args = parser.parse_args()
 
-	address = f"tcp://{args.host}:{args.port}"
-	server_command = args.server_command
-	context = zmq.Context.instance()
-	socket = context.socket(zmq.REQ)
-	socket.setsockopt(zmq.LINGER, 0)
-	socket.setsockopt(zmq.RCVTIMEO, 1200)
-	socket.setsockopt(zmq.SNDTIMEO, 1200)
-	socket.connect(address)
-
 	try:
-		if args.test_connection:
-			ok = probe_server(address)
-			print(json.dumps({"ok": ok, "command": "ping", "address": address}))
-			return
+		with MotMasterClient(host=args.host, port=args.port) as client:
+			if args.test_connection:
+				response = client.ping()
+				print(json.dumps(response, default=str))
+				return
 
-		commands = [
-			{"command": "ping"},
-			{"command": "get_status"},
-			{"command": "set_script", "script": args.script},
-			{"command": "get_params"},
-			{"command": "start_experiment"},
-			{"command": "get_status"},
-		]
+			responses = [
+				("ping", client.ping()),
+				("get_status", client.get_status()),
+				("set_script", client.set_script(args.script)),
+				("get_params", client.get_params()),
+				("start_experiment", client.start_experiment()),
+				("get_status", client.get_status()),
+			]
 
-		if args.shutdown:
-			commands.append({"command": "shutdown"})
+			if args.shutdown:
+				responses.append(("shutdown", client.shutdown_server()))
 
-		for command in commands:
-			try:
-				response = send_command(socket, command)
-			except zmq.error.Again:
-				response = {
+			for command_name, response in responses:
+				print(f"command:  {command_name}")
+				print(f"response: {json.dumps(response, default=str)}")
+	except zmq.error.Again:
+		print(
+			json.dumps(
+				{
 					"ok": False,
 					"error": "Timed out waiting for server response",
+					"host": args.host,
+					"port": args.port,
 				}
-			print(f"request:  {json.dumps(command)}")
-			print(f"response: {json.dumps(response, default=str)}")
+			)
+		)
 	except KeyboardInterrupt:
 		print("Keyboard interrupt received. Exiting client.")
-	finally:
-		socket.close()
 
 
 if __name__ == "__main__":
