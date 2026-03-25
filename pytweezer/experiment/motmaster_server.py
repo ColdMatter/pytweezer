@@ -33,10 +33,11 @@ class MotMasterInterface:
     def __init__(self, interval: Union[int, float] = 0.1) -> None:
         with open(PROPERTIES_FILE, "r") as f:
             self.config = json.load(f)
-        self.root = pathlib.Path(self.config["script_root_path"])
+        self.script_root = pathlib.Path(self.config["script_root_path"])
         self.interval = interval
         self.motmaster = None
         self.script = None
+        self.script_path = None
 
     def _add_ref(self, path: str) -> None:
         _path = pathlib.Path(path)
@@ -141,9 +142,9 @@ class MotMasterInterface:
         script: str,
     ):
         self.script = script
-        path = str(self.root.joinpath(f"{script}.cs"))
+        self.script_path = str(self.script_root.joinpath(f"{script}.cs"))
         try:
-            self.motmaster.SetScriptPath(path)
+            self.motmaster.SetScriptPath(self.script_path)
             print(f"MotMaster script set to {script}.")
         except Exception as e:
             print(f"Error: {e} encountered")
@@ -201,6 +202,15 @@ class MotMasterInterface:
 
     def set_trigger_mode(self, value: bool):
         self.motmaster.SetTriggered(value)
+        
+    def save_pattern_info(self, save_folder, file_tag, task_nr):
+        """Save pattern information to files. calls saveToFiles from MMDataIOHelper"""
+        if self.script is None:
+            raise ValueError(
+                "MotMaster script not set. Please call set_motmaster_experiment first."
+            )
+        self.motmaster.ioHelper.saveToFiles(file_tag, save_folder, task_nr, self.script_path)
+
 
     
 class  DummyMotMasterInterface(MotMasterInterface):
