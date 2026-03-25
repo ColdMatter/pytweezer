@@ -3,6 +3,7 @@ import time
 from typing import Optional, Union
 import json
 import pathlib
+import subprocess
 import sys
 import threading
 
@@ -43,6 +44,64 @@ class MotMasterInterface:
         clr.AddReference(path)
         return None
 
+    def _is_process_running(self, process_name: str) -> bool:
+        try:
+            if sys.platform.startswith("win"):
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                output = result.stdout.lower()
+                return (
+                    result.returncode == 0
+                    and process_name.lower() in output
+                    and "no tasks are running" not in output
+                )
+
+            result = subprocess.run(
+                ["pgrep", "-f", process_name],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0 and bool(result.stdout.strip())
+        except Exception:
+            return False
+
+    def _start_process(self, exe_path: str) -> None:
+        subprocess.Popen(
+            [exe_path],
+            cwd=str(pathlib.Path(exe_path).parent),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def _ensure_motmaster_running(
+        self,
+        exe_path: str,
+        startup_timeout: float = 15.0,
+        poll_interval: float = 0.5,
+    ) -> None:
+        process_name = pathlib.Path(exe_path).name
+        if self._is_process_running(process_name):
+            return None
+
+        print(f"MOTMaster process '{process_name}' not found. Starting it now...")
+        self._start_process(exe_path)
+
+        deadline = time.time() + startup_timeout
+        while time.time() < deadline:
+            if self._is_process_running(process_name):
+                print(f"MOTMaster process '{process_name}' is running.")
+                return None
+            time.sleep(poll_interval)
+
+        raise RuntimeError(
+            f"Timed out waiting for process '{process_name}' to start from '{exe_path}'."
+        )
+
     def connect(self) -> None:
         for path in self.config["dll_paths"].values():
             clr.AddReference(path)
@@ -51,6 +110,7 @@ class MotMasterInterface:
                 for path in path_info.values():
                     self._add_ref(path)
             elif key == "motmaster":
+                self._ensure_motmaster_running(path_info["exe_path"])
                 self._add_ref(path_info["exe_path"])
                 try:
                     import MOTMaster  # type: ignore
