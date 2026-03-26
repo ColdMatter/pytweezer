@@ -216,18 +216,6 @@ files = [
 pycparser = {version = "*", markers = "implementation_name != \"PyPy\""}
 
 [[package]]
-name = "clr"
-version = "1.0.3"
-description = "🌈 Terminal string styling"
-optional = false
-python-versions = "*"
-groups = ["main"]
-files = [
-    {file = "clr-1.0.3-py2.py3-none-any.whl", hash = "sha256:7553f81f7ddc5579e45616ced5fcbdae3941ec817dacf5972d39a156c7cdba1a"},
-    {file = "clr-1.0.3.tar.gz", hash = "sha256:26505b51f73518d531a52b1f7855488f8c764de94f248ebb7cbe0549acc9d333"},
-]
-
-[[package]]
 name = "clr-loader"
 version = "0.2.10"
 description = "Generic pure Python loader for .NET runtimes"
@@ -2703,4 +2691,4 @@ pyzmq = "*"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11.4, <3.14"
-content-hash = "ba5bd3887e76395b8ca88a78eec4f1ef4203f8d0a3fe607f195a7580899bf613"
+content-hash = "dcdff4513e65b4fcde258a2593a41bc75b71beb328af1a549664ec116a766bfa"

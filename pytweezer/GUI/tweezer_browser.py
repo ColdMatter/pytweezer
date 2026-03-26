@@ -1122,9 +1122,34 @@ class BaliFileSelector(QWidget):
         model = QDirModel()
         tree.setModel(model)
         tree.setColumnWidth(0, 250)
-        tree.setRootIndex(
-            model.index(self.props.get("experiments_dir", tweezerpath + "/experiments"))
+        experiments_dir = self.props.get(
+            "experiments_dir", os.path.join(tweezerpath, "pytweezer", "experiments")
         )
+        experiments_dir = os.path.abspath(
+            os.path.normpath(os.path.expanduser(str(experiments_dir)))
+        )
+        if not os.path.isdir(experiments_dir):
+            fallback_dir = os.path.abspath(
+                os.path.normpath(os.path.join(tweezerpath, "pytweezer", "experiments"))
+            )
+            print_error(
+                "tweezer_browser.py - BaliFileSelector: Invalid experiments_dir '{}', using fallback '{}'".format(
+                    experiments_dir, fallback_dir
+                ),
+                "warning",
+            )
+            experiments_dir = fallback_dir
+
+        root_index = model.index(QtCore.QDir.fromNativeSeparators(experiments_dir))
+        if root_index.isValid():
+            tree.setRootIndex(root_index)
+        else:
+            print_error(
+                "tweezer_browser.py - BaliFileSelector: Could not set tree root to '{}'".format(
+                    experiments_dir
+                ),
+                "warning",
+            )
         tree.setColumnHidden(1, True)
         tree.doubleClicked.connect(self.open_file)
         tree.header().hideSection(2)

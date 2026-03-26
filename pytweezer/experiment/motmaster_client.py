@@ -1,21 +1,22 @@
 import argparse
 import json
 from typing import Any, Optional
-
+from pytweezer.servers.configreader import ConfigReader
 import zmq
 
 
 class MotMasterClient:
 	def __init__(
 		self,
-		host: str = "127.0.0.1",
+		host: str = "10.59.3.2",
 		port: int = 5557,
 		timeout_ms: int = 1200,
 		context: zmq.Context | None = None,
 	) -> None:
-		self.host = host
-		self.port = port
-		self.address = f"tcp://{host}:{port}"
+		cr = ConfigReader.getConfiguration()
+		self.host = cr["Servers"]["MotMaster Server"].get("host", host)
+		self.port = cr["Servers"]["MotMaster Server"].get("port", port)
+		self.address = f"tcp://{self.host}:{self.port}"
 		self.timeout_ms = timeout_ms
 		self.context = context or zmq.Context.instance()
 
@@ -156,6 +157,7 @@ class MotMasterClient:
 
 
 def probe_server(host: str = "127.0.0.1", port: int = 5557, timeout_ms: int = 1200) -> bool:
+
 	try:
 		with MotMasterClient(host=host, port=port, timeout_ms=timeout_ms) as client:
 			response = client.ping()

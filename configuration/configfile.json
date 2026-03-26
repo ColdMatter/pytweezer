@@ -36,12 +36,13 @@
             "active": true,
             "script": "../pytweezer/servers/model_sync.py"
         },
-        "Dummy MotMaster Server": {
-            "active": true,
+        "MotMaster Server": {
+            "active": false,
             "script": "../pytweezer/experiment/motmaster_server.py",
-            "host": "0.0.0.0",
+            "host": "10.59.3.2",
             "port": 5557,
-            "simulate": true
+            "simulate": false,
+            "experimentdir": "C:\\ControlPrograms\\EDMSuite\\RbTweezerMasterScripts\\"
         },
         "Imagehub": {
             "active": true,

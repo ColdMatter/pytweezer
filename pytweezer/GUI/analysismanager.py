@@ -272,7 +272,7 @@ class AnalysisManager(BWidget):
         endpoint = manager_conf.get('rep', 'tcp://127.0.0.1:3111')
 
         self.rpc = AnalysisManagerClient(endpoint)
-        self.analysisdir = self._props.get('analysisdir', tweezerpath + '/pytweezer/analysis/')
+        self.analysisdir = tweezerpath + '/pytweezer/analysis/'
         self.init_gui()
         self.refresh_snapshot()
 

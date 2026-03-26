@@ -31,24 +31,31 @@
     },
     "BaliBrowser": {
         "Looper": {},
-        "experiments_dir": "/home/twalker/RbCaF/pytweezer/experiments",
+        "experiments_dir": "C:/Users/tweez/ColdMatter/pytweezer/experiments",
         "testval": 3,
         "testlist": [],
         "Geometry": [
             0,
-            24,
-            1920,
-            1031
+            31,
+            1728,
+            856
         ],
-        "OpenWindows": [
-            "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/dummy.py"
-        ],
+        "OpenWindows": [],
         "dummy": {
             "Geo": [
                 4,
                 5,
                 967,
                 268
+            ],
+            "minimized": false
+        },
+        "rbbasic_test": {
+            "Geo": [
+                0,
+                273,
+                785,
+                181
             ],
             "minimized": false
         }
@@ -62,10 +69,16 @@
             "param2": 0,
             "_totalrun": 126
         },
-        "_task": 12
+        "_task": 12,
+        "RBBasicTest": {
+            "scans": {},
+            "param1": 0,
+            "last_set": "param2: 0.0",
+            "param2": 0
+        }
     },
     "Analysis": {
-        "analysisdir": "/home/twalker/RbCaF/pytweezer/pytweezer/analysis/",
+        "analysisdir": "C:/Users/tweez/ColdMatter/pytweezer/pytweezer/analysis/",
         "Image": {
             "select_first": {
                 "script": "imageselector.py",
