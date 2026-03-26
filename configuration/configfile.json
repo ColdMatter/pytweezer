@@ -28,56 +28,55 @@
     },
     "Servers": {
         "Analysis Manager": {
-            "active": true,
+            "active": false,
             "script": "../pytweezer/servers/analysis_manager.py",
-            "rep": "tcp://localhost:3111"
+            "rep": "tcp://10.59.3.2:3111"
         },
         "Model Sync": {
             "active": true,
             "script": "../pytweezer/servers/model_sync.py"
         },
-        "MotMaster Server": {
-            "active": false,
+        "Dummy MotMaster Server": {
+            "active": true,
             "script": "../pytweezer/experiment/motmaster_server.py",
-            "host": "10.59.3.2",
+            "host": "0.0.0.0",
             "port": 5557,
-            "simulate": false,
-            "experimentdir": "C:\\ControlPrograms\\EDMSuite\\RbTweezerMasterScripts\\"
+            "simulate": true
         },
         "Imagehub": {
             "active": true,
-            "pub": "tcp://localhost:1111",
+            "pub": "tcp://10.59.3.2:1111",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://localhost:2101"
+            "sub": "tcp://10.59.3.2:2101"
         },
         "Commandhub": {
             "active": true,
-            "pub": "tcp://localhost:1112",
+            "pub": "tcp://10.59.3.2:1112",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://localhost:2102"
+            "sub": "tcp://10.59.3.2:2102"
         },
         "Datahub": {
             "active": true,
-            "pub": "tcp://localhost:1113",
+            "pub": "tcp://10.59.3.2:1113",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://localhost:2103"
+            "sub": "tcp://10.59.3.2:2103"
         },
         "Propertyhub": {
             "active": true,
-            "pub": "tcp://localhost:1114",
+            "pub": "tcp://10.59.3.2:1114",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://localhost:2104"
+            "sub": "tcp://10.59.3.2:2104"
         },
         "Messagehub": {
             "active": true,
-            "pub": "tcp://localhost:1115",
+            "pub": "tcp://10.59.3.2:1115",
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://localhost:2105"
+            "sub": "tcp://10.59.3.2:2105"
         },
         "Propertylogger": {
             "active": true,
             "script": "../pytweezer/servers/propertylogger.py",
-            "rep": "tcp://localhost:3106"
+            "rep": "tcp://10.59.3.2:3106"
         },
         "Datalogger": {
             "active": true,
