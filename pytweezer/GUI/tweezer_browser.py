@@ -415,17 +415,36 @@ class ExperimentWindow(QWidget):
         self.check_defaults(None)
 
     def reset(self):
-        filepath = self.paramDir + "/" + self.name + "/defaults.json"
-        if not os.path.isfile(filepath):
-            print_error(
-                "tweezer_browser.py - reset(): Save defaults before restoring defaults!",
-                "warning",
-            )
-            return
-        self.load_params(filepath=filepath)
-        self.check_defaults(None)
-        self.scanCombo.setCurrentText("--NONE--")
-        self.nRepsQSB.setValue(0)
+        # filepath = self.paramDir + "/" + self.name + "/defaults.json"
+        # if not os.path.isfile(filepath):
+        #     print_error(
+        #         "tweezer_browser.py - reset(): Save defaults before restoring defaults!",
+        #         "warning",
+        #     )
+        #     return
+        # self.load_params(filepath=filepath)
+        # self.check_defaults(None)
+        # self.scanCombo.setCurrentText("--NONE--")
+        # self.nRepsQSB.setValue(0)
+        print("Resetting parameters to default values")
+        mm_default_params = self.experiment._motmaster_client.get_params()['params']
+        print("Default parameters from MotMaster:", mm_default_params)
+        for box in self.mm_boxes:
+            box: FloatBox
+            if box.parName in mm_default_params:
+                val = mm_default_params[box.parName]
+                print(f"Resetting {box.parName} to {val}")
+                if isinstance(val, bool):
+                    box.updateValue(val)
+                else:
+                    box.updateValue(
+                        val
+                        / (
+                            box.__dict__["display_multiplier"]
+                            if "display_multiplier" in box.__dict__
+                            else 1
+                        )
+                    )
 
     def check_defaults(self, value, parambox=None):
         if parambox:
@@ -564,6 +583,7 @@ class ExperimentWindow(QWidget):
             )
             # print('load_params val, rounded 2', val, self.rounded_box_val(box))
         self.check_defaults(None)
+
 
     def get_files(self):
         filepath = QFileDialog.getOpenFileName(

@@ -10,7 +10,7 @@ class MotMasterClient:
 		self,
 		host: str = "10.59.3.2",
 		port: int = 5557,
-		timeout_ms: int = 1200,
+		timeout_ms: int = 5000,
 		context: zmq.Context | None = None,
 	) -> None:
 		cr = ConfigReader.getConfiguration()
@@ -115,11 +115,15 @@ class MotMasterClient:
 	def get_params(self) -> dict[str, Any]:
 		return self.send_command({"command": "get_params"})
 
-	def start_experiment(self, parameters: Optional[dict] = None) -> dict[str, Any]:
+	def start_experiment(
+		self,
+		parameters: Optional[dict] = None,
+		timeout_ms: int = -1,
+	) -> dict[str, Any]:
 		payload = {"command": "start_experiment"}
 		if parameters is not None:
 			payload["parameters"] = parameters
-		return self.send_command(payload)
+		return self.send_command(payload, timeout_ms=timeout_ms)
 
 	def shutdown_server(self) -> dict[str, Any]:
 		return self.send_command({"command": "shutdown"})

@@ -5,7 +5,6 @@ import json
 import pathlib
 import subprocess
 import sys
-import threading
 
 import numpy as np
 import zmq
@@ -275,10 +274,6 @@ class MotMasterCommandServer:
         self.context = context or zmq.Context.instance()
         self.socket = self.context.socket(zmq.REP)
         self._running = False
-        self._experiment_thread: Optional[threading.Thread] = None
-
-    def _run_experiment(self, parameters: Optional[dict] = None) -> None:
-        self.interface.start_motmaster_experiment(parameters=parameters)
 
     def _invoke_interface_method(
         self,
@@ -314,14 +309,11 @@ class MotMasterCommandServer:
             return {"ok": True, "command": command, "status": "alive"}
 
         if command == "get_status":
-            experiment_running = bool(
-                self._experiment_thread and self._experiment_thread.is_alive()
-            )
             return {
                 "ok": True,
                 "command": command,
                 "server_running": self._running,
-                "experiment_running": experiment_running,
+                "experiment_running": False,
                 "script": self.interface.script,
             }
 
@@ -389,26 +381,13 @@ class MotMasterCommandServer:
             if parameters is not None and not isinstance(parameters, dict):
                 raise ValueError("'parameters' must be a dictionary when provided")
 
-            if self._experiment_thread and self._experiment_thread.is_alive():
-                return {
-                    "ok": False,
-                    "command": command,
-                    "error": "Experiment already running",
-                    "script": self.interface.script,
-                }
-
-            self._experiment_thread = threading.Thread(
-                target=self._run_experiment,
-                args=(parameters,),
-                name="motmaster-start-experiment",
-                daemon=True,
-            )
-            self._experiment_thread.start()
+            # Blocking call: reply is sent only after MotMaster Go(...) returns.
+            self.interface.start_motmaster_experiment(parameters=parameters)
             return {
                 "ok": True,
                 "command": command,
                 "script": self.interface.script,
-                "started": True,
+                "completed": True,
                 "has_parameters": parameters is not None,
             }
 
