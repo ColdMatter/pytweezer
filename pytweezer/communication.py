@@ -56,6 +56,29 @@ class SLMClient:
         }
         
         return self._send_multipart_command(header, array=mask_array)
+    
+    def run_sequence(self, sequence, fps=1):
+        """Sends a 3D array of masks to be played in rapid succession."""
+        if not isinstance(sequence, np.ndarray):
+            raise ValueError("Sequence must be a NumPy array.")
+        if len(sequence.shape) != 3:
+            raise ValueError("Sequence must be a 3D array (frames, height, width).")
+            
+        header = {
+            "cmd": "RUN_SEQUENCE",
+            "dtype": str(sequence.dtype),
+            "shape": sequence.shape,
+            "fps": fps
+        }
+        
+        expected_play_time_ms = int((sequence.shape[0] / fps) * 1000) + 5000 
+        self.socket.setsockopt(zmq.RCVTIMEO, expected_play_time_ms)
+        
+        reply = self._send_multipart_command(header, array=sequence)
+        
+        # Restore original timeout for future quick commands
+        self.socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
+        return reply
 
     def get_temperature(self):
         """Sends a simple command with no array payload."""
