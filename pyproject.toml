@@ -6,12 +6,11 @@ authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.11.4,<3.14"
+python = "^3.11.4, <3.14"
 
 # --- Core Data Science & Math ---
-numpy = "=1.26.4"
 pandas = "=2.2.2"
-scipy = "=1.13.1"
+scipy = "^1.17.1"
 
 
 # --- Visualization ---
@@ -25,7 +24,6 @@ pylablib = "=1.4.3"
 rich = "=13.9.4"
 paramiko = "=3.4.1"     # SSH client
 tifffile = "^2026.1.28"
-diffractio = "^1.0.0"
 pillow = "^12.1.0"
 pyzmq = "^27.1.0"
 
@@ -39,6 +37,8 @@ ipykernel = "=6.28.0"
 ipywidgets = "=8.1.5"
 tqdm = "^4.67.3"
 h5py = "^3.15.1"
+cupy-cuda13x = "^14.0.1"
+lap = "^0.5.13"
 clr = "^1.0.3"
 termcolor = "^3.3.0"
 qscintilla = "^2.14.1"
