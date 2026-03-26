@@ -20,12 +20,18 @@
             "active": false,
             "script": "../pytweezer/GUI/viewers/live_plot.py"
         },
-        "Analysis Manager": {
-            "active": false,
+        "Analysis Manager UI": {
+            "active": true,
             "script": "../pytweezer/GUI/analysismanager.py"
         }
+
     },
     "Servers": {
+        "Analysis Manager": {
+            "active": true,
+            "script": "../pytweezer/servers/analysis_manager.py",
+            "rep": "tcp://localhost:3111"
+        },
         "Model Sync": {
             "active": true,
             "script": "../pytweezer/servers/model_sync.py"

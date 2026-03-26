@@ -9,6 +9,7 @@ import json
 import sys
 
 import numpy as np
+import zmq
 from configuration.device_db import device_db
 from pytweezer.servers import DataClient, Properties
 from pytweezer.experiment.motmaster_client import MotMasterClient
@@ -53,12 +54,11 @@ class Experiment:
     motmaster_script: Optional[str] = None
     _gui_columns = 4
 
-    def __init__(self, props, motmaster_client: Optional[MotMasterClient] = None):
+    def __init__(self, props, motmaster_client: Optional[MotMasterClient] = None, context: Optional[zmq.Context] = None):
         self.name = self.__class__.__name__
         self._props = Properties("Experiments/" + self.name)
         self._dataq = DataClient("Experiment")
         self._device_db = device_db
-        print(f"Loaded device database: {self._device_db}")
         self.devices = {}
         self._arguments = []
         self._motmaster_client = motmaster_client
@@ -67,10 +67,11 @@ class Experiment:
         self._rep = 0
         self._experiment_params: dict = {}
         if self.motmaster_script is not None and self._motmaster_client is None:
-            self._motmaster_client = MotMasterClient()
+            self._motmaster_client = MotMasterClient(context=context)
         if self._motmaster_client is not None:
             self._motmaster_client.set_script(self.motmaster_script)
             self.mm_params = []
+            self.mm_arguments = None
 
     def _start_build(self):
         self.build()
@@ -113,7 +114,6 @@ class Experiment:
             "mm_script": self.motmaster_script,
         }
         arguments = dict((arg.name, self.__dict__[arg.name]) for arg in self._arguments)
-        print(arguments)
         mm_params = dict((param.name, self.__dict__[param.name]) for param in self.mm_params)
         info.update(arguments)
         info.update(mm_params)
