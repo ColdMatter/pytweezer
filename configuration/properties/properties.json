@@ -1,0 +1,215 @@
+{
+    "Servers": {
+        "Propertylogger": {
+            "check_interval": 10,
+            "logginginterval[s]": 1
+        },
+        "DataStream": {
+            "maxStreamInactive[s]": 1000,
+            "active": {
+                "Experiment.start": {
+                    "timestamp": 1774548331.84619,
+                    "parts": 2
+                },
+                "Experiment.end": {
+                    "timestamp": 1774548332.4938316,
+                    "parts": 2
+                }
+            }
+        },
+        "ImageStream": {
+            "active": {
+                "dummy_cam": {
+                    "timestamp": 1774535338.8244975,
+                    "parts": 3
+                },
+                "select_first_": {
+                    "timestamp": 1774535337.7164698,
+                    "parts": 3
+                }
+            }
+        },
+        "roilist": [
+            "/Viewer/DummyViewer/Viewer/ROI/slice"
+        ]
+    },
+    "Manager": {
+        "ExperimentQ": {
+            "current_scan": []
+        }
+    },
+    "BaliBrowser": {
+        "Looper": {},
+        "experiments_dir": "C:/Users/tweez/ColdMatter/pytweezer/experiments",
+        "testval": 3,
+        "testlist": [],
+        "Geometry": [
+            6,
+            145,
+            1605,
+            1129
+        ],
+        "OpenWindows": [
+            "C:/Users/tweez/ColdMatter/pytweezer/pytweezer/experiments/rbbasic_test.py"
+        ],
+        "dummy": {
+            "Geo": [
+                4,
+                5,
+                967,
+                268
+            ],
+            "minimized": false
+        },
+        "rbbasic_test": {
+            "Geo": [
+                0,
+                91,
+                785,
+                559
+            ],
+            "minimized": false
+        }
+    },
+    "Experiments": {
+        "DummyExperiment": {
+            "scans": {},
+            "sleep_time": 1.0,
+            "last_set": "param2: 0.0",
+            "param1": 0,
+            "param2": 0,
+            "_totalrun": 126
+        },
+        "_task": 28,
+        "RBBasicTest": {
+            "scans": {},
+            "param1": 0,
+            "last_set": "tTweezerExposure: 10000.0",
+            "param2": 0,
+            "PatternLength": 26000.0,
+            "TCLBlockStart": 0.0,
+            "tScanCount": 0,
+            "tRbOffsetVoltageRep": 1.675,
+            "tRbOffsetVoltageCool": 3.3,
+            "tMOTccValue": 0.48,
+            "tcMOTccValue": 0.48,
+            "tMOTccSwitch": 5.5,
+            "tShimXccValue": 9.878,
+            "tShimYccValue": -2.375,
+            "tShimZccValue": -0.0378,
+            "tMolassesShimXccValue": 10.0,
+            "tMolassesShimYccValue": 3.29,
+            "tMolassesShimZccValue": 0.35,
+            "tMOTCool": 3.7001,
+            "tMOTRep": 3.8599,
+            "tMOTCoolVVA": 1.8286,
+            "tMOTRepVVA": 2.901,
+            "tImgCool": 1.84,
+            "tImgRep": 0.028,
+            "tImgCoolVVA": 0.405,
+            "tImgRepVVA": 1.05,
+            "tMolCool": 0.2718,
+            "tMolRep": 1.8552,
+            "tMolCoolVVA": 0.4382,
+            "tMolRepVVA": 1.9732,
+            "tTweezerSetVCO": 9.0,
+            "tTweezerLoadVCO": 9.0,
+            "tTweezerImgVCO": 9.0,
+            "tRbMOTStart": 10.0,
+            "tDropTime": 10.0,
+            "tRbRedMOTDuration": 10000.0,
+            "tMolassesDelay": 1.0,
+            "tRbRedMolassesDuration": 5000.0,
+            "tImgTOF": 1.0,
+            "tMOTExposure": 1.0,
+            "tTweezerExposure": 10000.0,
+            "_totalrun": 83
+        }
+    },
+    "Analysis": {
+        "analysisdir": "C:/Users/tweez/ColdMatter/pytweezer/pytweezer/analysis/",
+        "Image": {
+            "select_first": {
+                "script": "imageselector.py",
+                "active": true,
+                "imagestreams": [
+                    "dummy_cam"
+                ],
+                "SelectedImage": 0
+            }
+        },
+        "Data": {}
+    },
+    "GUI": {
+        "PropertyEditor": {
+            "Geometry": [
+                1920,
+                367,
+                800,
+                800
+            ]
+        }
+    },
+    "Viewer": {
+        "DummyViewer": {
+            "Parameterbox": "Viewer/DummyViewer/ParBox",
+            "ParBox": {
+                "ydata": [
+                    ""
+                ],
+                "datastreams": [
+                    "",
+                    ""
+                ]
+            },
+            "ImageDataBox": "Viewer/DummyViewer/ImDatBox",
+            "ImDatBox": {
+                "ydata": [
+                    ""
+                ],
+                "liststreams": []
+            },
+            "PropDataBox": "Viewer/DummyViewer/PropBox",
+            "PropBox": {
+                "ydata": [
+                    ""
+                ],
+                "keyList": [],
+                "camName": "Axial",
+                "subtree": "/Cameras/Axial/DefaultConfig/"
+            },
+            "ImageDisplay": "Viewer/DummyViewer/Viewer",
+            "Viewer": {
+                "imagestreams": [
+                    "select_first_"
+                ],
+                "maskstreams": [
+                    "--None--"
+                ],
+                "invert_colors": false,
+                "ROIs": [
+                    "slice"
+                ],
+                "ROI": {
+                    "slice": {
+                        "pos": [
+                            0,
+                            0
+                        ],
+                        "size": [
+                            30,
+                            30
+                        ],
+                        "color": 4278190335
+                    }
+                },
+                "maxlevels": 255.0
+            }
+        }
+    },
+    "Cameras": {
+        "Axial": {
+            "Configuration_name": "DefaultConfig"
+        }
+    }
+}

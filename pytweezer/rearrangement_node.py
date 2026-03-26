@@ -2,22 +2,27 @@ import multiprocessing as mp
 import zmq
 import numpy as np
 import time
-from pytweezer import analysis as an
+from pytweezer.analysis import analysis as an
 from pytweezer import phasemask as pm
 from pytweezer import communication as comm
 
 class RearrangementNode(mp.Process):
-    def __init__(self, control_queue, cam_port=5556, slm_port=5555):
+    def __init__(self, control_queue, message_queue, cam_port=5556, slm_port=5555):
         super().__init__()
         self.control_queue = control_queue
+        self.message_queue = message_queue
         self.cam_port = cam_port
         self.slm_port = slm_port
         self.daemon = True 
-        print(f"[Rearrangement Node] Initialised.")
+        self.message_queue.put(f"[Rearrangement Node] Initialised.")
+
+    def _log(self, message):
+        """Helper method to send print statements back to the Jupyter UI."""
+        self.message_queue.put(message)
 
     def run(self):
         """This runs in a completely separate CPU core and memory space."""
-        print("[Rearrangement Node] Booting up...")
+        self._log("[Rearrangement Node] Booting up...")
         
         # 1. Setup ZeroMQ Connections
         context = zmq.Context()
@@ -26,9 +31,11 @@ class RearrangementNode(mp.Process):
         cam_sub = context.socket(zmq.SUB)
         cam_sub.connect(f"tcp://10.59.3.1:{self.cam_port}")
         cam_sub.setsockopt_string(zmq.SUBSCRIBE, "") # Listen to everything
-        
+        self._log("[Rearrangement Node] Listening to camera server.")
+
         # Connect to SLM Server (REQ)
         SLM = comm.SLMClient()
+        self._log("[Rearrangement Node] Connected to SLM server.")
         
         # Setup Poller to listen to both the Notebook and the Camera efficiently
         poller = zmq.Poller()
@@ -45,9 +52,9 @@ class RearrangementNode(mp.Process):
         
         # State variables
         armed = False
-        pm_init, terms1, terms2, d0, threshold, img_shape, grid_positions, array_shape = None, None, None, None, None, None, None, None
+        pm_init, terms1, terms2, d0, threshold, img_shape, grid_positions, array_shape, fps = None, None, None, None, None, None, None, None, None
         
-        print("[Rearrangement Node] Ready and waiting for commands.")
+        self._log("[Rearrangement Node] Ready and waiting for commands.")
         
         while True:
             # --- CHECK FOR JUPYTER COMMANDS ---
@@ -63,16 +70,17 @@ class RearrangementNode(mp.Process):
                     img_shape = cmd["img_shape"]
                     grid_positions = cmd["grid_positions"]
                     array_shape = cmd["initial_array_shape"]
+                    fps = cmd["fps"]
                     
                     # Flush any old images sitting in the camera buffer before arming
                     while cam_sub.poll(0):
                         cam_sub.recv()
                         
                     armed = True
-                    print("[Rearrangement Node] ARMED. Waiting for hardware camera trigger...")
+                    self._log("[Rearrangement Node] ARMED. Waiting for hardware camera trigger...")
                     
                 elif cmd["type"] == "SHUTDOWN":
-                    print("[Rearrangement Node] Shutting down.")
+                    self._log("[Rearrangement Node] Shutting down.")
                     break
             except mp.queues.Empty:
                 pass
@@ -83,26 +91,33 @@ class RearrangementNode(mp.Process):
                 socks = dict(poller.poll(10))
                 
                 if cam_sub in socks:
+                    start1 = time.time()
                     # 1. Receive Image from Camera Server
                     img_bytes = cam_sub.recv()
                     # (Assuming camera sends a raw 2D numpy buffer; adjust decode as needed)
-                    image = np.frombuffer(img_bytes, dtype=np.uint16).reshape(img_shape)
+                    try:
+                        img_array = np.frombuffer(img_bytes, dtype=np.uint16).reshape(img_shape)
+                    except:
+                        self._log("[Rearrangement Node] Error! Input image shape does not match received.")
                     
-                    print("[Rearrangement Node] Image received! Executing pipeline...")
-                    t_start = time.time()
+                    self._log("[Rearrangement Node] Image received! Executing pipeline...")
                     
                     # 2. Extract Occupancy Mask
                     # (Insert your image processing/thresholding logic here)
-                    pixel_sums = an.sum_pixel_values(image, grid_positions, array_shape, window_size=3)
+                    pixel_sums = an.sum_pixel_values(img_array, grid_positions, array_shape, window_size=5)
                     occ_mask = np.zeros(len(pixel_sums.flatten()), dtype=bool)
                     occ_mask[pixel_sums.flatten() > threshold] = True
                     
                     # 3. Generate the highly-optimized sequence (Runs instantly on GPU)
                     sequence = generator.generate_rearrangement_sequence(terms1, terms2, occ_mask, d0=d0)
+                    self._log("[Rearrangement Node] Rearrangement sequence generated.")
                     
                     # 4. Send directly to SLM Server
-                    SLM.run_sequence(sequence, fps=10000)
-                    print(f"[Rearrangement Node] Loop Complete in {(time.time()-t_start)*1000:.2f}ms. Disarming.")
+                    start2 = time.time()
+                    SLM.run_sequence(sequence, fps=fps)
+                    self._log(f"[Rearrangement Node] SLM upload duration: {(time.time() - start2):.6f} s")
+                    self._log(f"[Rearrangement Node] Total rearrangement duration: {(time.time() - start1):.6f} s")
+                    self._log(f"[Rearrangement Node] Rearragement complete. Disarming...")
                     
                     # Disarm to prevent accidental re-firing on subsequent images
                     armed = False
@@ -113,5 +128,7 @@ class RearrangementNode(mp.Process):
                     img_bytes = cam_sub.recv()
                     SLM.update_mask(pm_init)
                     print(f"[Rearrangement Node] Array reset.")
+                    armed = True
+
 
                     

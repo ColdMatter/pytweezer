@@ -70,7 +70,7 @@ class SyntheticCameraServer:
                 print(f"[Camera] Published Frame {frame_count:04d} at {time.strftime('%H:%M:%S')}")
                 
                 # 3. Wait 10 seconds before the next trigger
-                time.sleep(0.5)
+                time.sleep(3)
                 
         except KeyboardInterrupt:
             print("\n[Camera] Shutting down server...")
