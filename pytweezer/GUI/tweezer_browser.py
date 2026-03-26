@@ -338,7 +338,11 @@ class ExperimentWindow(QWidget):
                 box = FloatBox(self.experiment._props, **argument.__dict__.copy())
                 box.spin.valueChanged.connect(self.check_defaults)
             elif type(argument) == pytweezer.experiment.experiment.BoolValue:
-                box = BoolBox(self.experiment._props, value=True, parName=argument.name)
+                box = BoolBox(
+                    self.experiment._props,
+                    value=argument.value,
+                    parName=argument.name,
+                )
                 box.stateChanged.connect(self.check_defaults)
             elif type(argument) == pytweezer.experiment.experiment.StringCombo:
                 box = ComboBox(
@@ -364,7 +368,11 @@ class ExperimentWindow(QWidget):
                 box = FloatBox(self.experiment._props, **argument.__dict__.copy())
                 box.spin.valueChanged.connect(self.check_defaults)
             elif type(argument) == pytweezer.experiment.experiment.BoolValue:
-                box = BoolBox(self.experiment._props, value=True, parName=argument.name)
+                box = BoolBox(
+                    self.experiment._props,
+                    value=argument.value,
+                    parName=argument.name,
+                )
                 box.stateChanged.connect(self.check_defaults)
             elif type(argument) == pytweezer.experiment.experiment.StringCombo:
                 box = ComboBox(

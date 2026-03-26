@@ -357,7 +357,7 @@ class ExpEditWindow(QDialog):
             if type(argument) == pytweezer.experiment.experiment.NumberValue:
                 box = FloatBox(props=None, **argument.__dict__.copy())
             elif type(argument) == pytweezer.experiment.experiment.BoolValue:
-                box = BoolBox(props=None, value=True, parName=argument.name)
+                box = BoolBox(props=None, value=argument.value, parName=argument.name)
             elif type(argument) == pytweezer.experiment.experiment.StringCombo:
                 box = ComboBox(props=None, parName=argument.name, **argument.__dict__.copy())
             else:

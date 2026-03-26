@@ -111,10 +111,11 @@ class IntManager(BasicManager):
 
     def initSpin(self):
         self.spin=QSpinBox()
+        default_val = self.__dict__.get('value', self.default_value)
         if self._props:
-            val=self._props.get(self.parName,self.default_value)     #the values in properties are in SI units. Non SI only on disp
+            val=self._props.get(self.parName,default_val)     #the values in properties are in SI units. Non SI only on disp
         else:
-            val = self.default_value
+            val = default_val
         self.value=val
         self.spin.setValue(val/self._multiplier)
         self.updateValue(val/self.display_multiplier)
@@ -151,10 +152,11 @@ class BoolManager(QCheckBox):
         self.parName=parName
         self.name=parName
         self.stateChanged.connect(self.updateValue)
+        default_val = bool(self.__dict__.get('value', False))
         if self._props:
-            val=self._props.get(self.parName,False)     #the values in properties are in SI units. Non SI only on disp
+            val=self._props.get(self.parName,default_val)     #the values in properties are in SI units. Non SI only on disp
         else:
-            val = False
+            val = default_val
         self.setChecked(val)
         self.updateValue(val)
 
@@ -184,11 +186,12 @@ class FloatManager(IntManager):
         if self.unit:
             self.spin.setSuffix(' '+self.unit)
         self.spin.setSingleStep(self.step)
+        default_val = self.__dict__.get('value', self.default_value)
         if self._props:
             print(self.parName)
-            val=self._props.get(self.parName,self.default_value)     #the values in properties are in SI units. Non SI only on disp
+            val=self._props.get(self.parName,default_val)     #the values in properties are in SI units. Non SI only on disp
         else:
-            val = self.default_value
+            val = default_val
         self.spin.setValue(val/self.display_multiplier)
         self.updateValue(val/self.display_multiplier)
         self.spin.valueChanged.connect(self.updateValue)
@@ -210,6 +213,22 @@ class ComboManager(BasicManager):
         self.spin.InsertAtBottom
         for s in self.stringlist:
                 self.spin.addItem(s)
+
+        default_val = self.__dict__.get(
+            'value', self.stringlist[0] if self.stringlist else ''
+        )
+        if self._props:
+            current_val = self._props.get(self.parName, default_val)
+        else:
+            current_val = default_val
+
+        current_index = self.spin.findText(current_val)
+        if current_index < 0:
+            current_index = 0
+        if self.spin.count() > 0:
+            self.spin.setCurrentIndex(current_index)
+            self.updateValue(current_index)
+
         self.spin.activated.connect(self.updateValue)
 
 
