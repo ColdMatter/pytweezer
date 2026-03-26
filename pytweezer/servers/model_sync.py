@@ -9,11 +9,16 @@ from PyQt5.QtCore import QDateTime, Qt
 
 from pytweezer.GUI.models import PrepModel, ScheduleModel
 
+from pytweezer.servers.configreader import ConfigReader
+
+cr = ConfigReader.getConfiguration()
+host = cr["Servers"]["Model Sync"].get("host", "10.59.3.1")
+
 
 class ModelSyncServer:
     def __init__(
         self,
-        bind_host: str = "0.0.0.0",
+        bind_host: str = host,
         command_port: int = 6010,
         publish_port: int = 6011,
         models: Optional[dict[str, dict[str, Any]]] = None,
@@ -227,11 +232,11 @@ class SyncedScheduleModel(ScheduleModel):
     def __init__(
         self,
         init_or_model_name: Any = None,
-        host: str = "127.0.0.1",
         command_port: int = 6010,
         publish_port: int = 6011,
         timeout_ms: int = 2000,
     ) -> None:
+
         if isinstance(init_or_model_name, str) and init_or_model_name:
             model_name = init_or_model_name
         else:
@@ -297,7 +302,6 @@ class SyncedPrepModel(PrepModel):
     def __init__(
         self,
         init_or_model_name: Any = None,
-        host: str = "127.0.0.1",
         command_port: int = 6010,
         publish_port: int = 6011,
         timeout_ms: int = 2000,
@@ -379,12 +383,11 @@ class SyncedPrepModel(PrepModel):
 def run_model_sync_server(
     schedule_data: Optional[dict[Any, dict[str, Any]]] = None,
     prep_data: Optional[list[dict[str, Any]]] = None,
-    bind_host: str = "0.0.0.0",
     command_port: int = 6010,
     publish_port: int = 6011,
 ) -> None:
     server = ModelSyncServer(
-        bind_host=bind_host,
+        bind_host=host,
         command_port=command_port,
         publish_port=publish_port,
         models={
@@ -397,13 +400,12 @@ def run_model_sync_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run table-model sync server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind")
+    # parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind")
     parser.add_argument("--command-port", type=int, default=6010, help="Command TCP port")
     parser.add_argument("--publish-port", type=int, default=6011, help="Publish TCP port")
     args, _unknown = parser.parse_known_args()
 
     run_model_sync_server(
-        bind_host=args.host,
         command_port=args.command_port,
         publish_port=args.publish_port,
     )
