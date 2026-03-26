@@ -22,11 +22,17 @@ from PyQt5.QtCore import QThreadPool, Qt, QDateTime, QEvent
 import pytweezer
 from pytweezer.analysis.floating_point_arithmetics import round_floating_prec
 from pytweezer.experiment.experiment import Experiment
-from pytweezer.servers import Properties, tweezerpath, icon_path, PropertyAttribute, DataClient
+from pytweezer.servers import (
+    Properties,
+    tweezerpath,
+    icon_path,
+    PropertyAttribute,
+    DataClient,
+)
 from pytweezer.servers import send_info, send_error
 from pytweezer.GUI.browser.editor_sequencer import CodeEditorParser, CodeEditor
 from pytweezer.GUI.arg_boxes import FloatBox, BoolBox, ComboBox
-from pytweezer.GUI.browser.experiment_manager import ExperimentManager
+from pytweezer.servers.experiment_manager import ExperimentManager
 from pytweezer.GUI.browser.prepstation import PrepStation
 from pytweezer.GUI.looper import Looper
 from pytweezer.GUI.browser.experiment_queue import ExperimentQ
@@ -34,7 +40,7 @@ from pytweezer.GUI.pytweezerQt import SearchComboBox
 from pytweezer.analysis.print_messages import print_error
 from bin.processmanager import backup_file
 
-from pytweezer.experiment.dummy_drivers import DummyMotMasterInterface
+from pytweezer.experiment.motmaster_client import MotMasterClient
 
 
 class BaliBrowser(QMainWindow):
@@ -46,45 +52,50 @@ class BaliBrowser(QMainWindow):
     The Prep Station is for storing and editing tasks before sending them to the queue.
     Looper allows groups of tasks to be run dependent on the outcome of measurments.
     """
+
     experimentOpened = QtCore.pyqtSignal()
 
     def __init__(self):
         super().__init__()
-        self.props = Properties('BaliBrowser')
-        self._name = 'BaliBrowser'
+        self.props = Properties("BaliBrowser")
+        self._name = "BaliBrowser"
         self._props = self.props
-        self._task = PropertyAttribute('/Experiments/_task', 0, parent=self)
-        self.paramDir = tweezerpath + '/configuration/tweezer_browser/experiment_params'  # path for storing parameters
-        self.motmaster_interface = DummyMotMasterInterface()
+        self._task = PropertyAttribute("/Experiments/_task", 0, parent=self)
+        self.paramDir = (
+            tweezerpath + "/configuration/tweezer_browser/experiment_params"
+        )  # path for storing parameters
+        self.motmaster_interface = MotMasterClient()
 
         self.threadPool = QThreadPool.globalInstance()
         self.threadPool.setMaxThreadCount(3)
         self.fileSelector = BaliFileSelector(self)
         self.queue = ExperimentQ(self)
-        self.expManager = ExperimentManager(browser=self)
         self.prepStation = PrepStation(browser=self)
-        self.looper = Looper(parent=self)
+        # self.looper = Looper(parent=self)
 
         self.init_ui()
         g = self.geometry()
-        geo = self.props.get('Geometry', g.getRect())
+        geo = self.props.get("Geometry", g.getRect())
         self.setGeometry(*geo)
         self.openWindows = []
-        self.openWindowNames = PropertyAttribute('OpenWindows', [], parent=self)
+        self.openWindowNames = PropertyAttribute("OpenWindows", [], parent=self)
         for window in self.openWindowNames.value:
             self.open_experiment(window, startup=True)
 
         self.prepStation.load_previous()
         self.prepStation.set_model()
-        self.looper.load_previous()
+        # self.looper.load_previous()
 
     def closeEvent(self, event):
         # Backup the following two files, since they are often corrupt after browser restart:
         # /home/bali/scripts/pytweezer/configuration/tweezer_browser/loopfile/loopfile.json
         # /home/bali/scripts/pytweezer/configuration/tweezer_browser/prepfile/prepfile.json
 
-        path = tweezerpath+'/configuration/browser/'
-        for fname in ['loopfile_backups/loopfile.json', 'prepfile_backups/prepfile.json']:
+        path = tweezerpath + "/configuration/browser/"
+        for fname in [
+            "loopfile_backups/loopfile.json",
+            "prepfile_backups/prepfile.json",
+        ]:
             backup_file(path, fname)
         # TODO: Auto-load last backup when crashed while restart
         # TODO: call close event at restart
@@ -92,16 +103,16 @@ class BaliBrowser(QMainWindow):
         super().closeEvent(event)
 
     def init_ui(self):
-        self.statusBar().showMessage('Ready')
+        self.statusBar().showMessage("Ready")
         self.setGeometry(100, 100, 1050, 550)
-        self.setWindowTitle('pytweezer Browser')
+        self.setWindowTitle("pytweezer Browser")
         self.mdi = QMdiArea()
         self.setCentralWidget(self.mdi)
         self.create_dock_widgets()
         self.show()
 
     def create_dock_widgets(self):
-        fileselectorDock = QDockWidget('File Selector', self)
+        fileselectorDock = QDockWidget("File Selector", self)
         fileselectorDock.setWidget(self.fileSelector)
         fileselectorDock.show()
         self.addDockWidget(Qt.LeftDockWidgetArea, fileselectorDock)
@@ -116,19 +127,21 @@ class BaliBrowser(QMainWindow):
         Does nothing if a window already exists for that experiment.
         """
         path, ext, name, filename = filepath_split(filepath)
-        if ext != '.py':
+        if ext != ".py":
             # print_error('Browser attempted to open a non-.py file', 'error')
             return
         for window in self.openWindows:
             if filepath == window.filepath:
-                print_error('Browser attempted to open an already-open experiment', 'warning')
+                print_error(
+                    "Browser attempted to open an already-open experiment", "warning"
+                )
                 window.subWindow.close()
         sub = ExperimentSubWindow(name, self.props, parent=self)
         exwin = ExperimentWindow(filepath, self.props, parent=sub, browser=self)
         sub.setWidget(exwin)
         self.mdi.addSubWindow(sub)
         p = sub.geometry()
-        geo = self.props.get(exwin.name + '/Geo', p.getRect())
+        geo = self.props.get(exwin.name + "/Geo", p.getRect())
         if geo is not None:
             sub.setGeometry(*geo)
         sub.show()
@@ -140,6 +153,7 @@ class BaliBrowser(QMainWindow):
             openWindowNames.append(filepath)
             self.openWindowNames.value = openWindowNames
         return exwin
+
 
 class ExperimentSubWindow(QMdiSubWindow):
     """
@@ -153,27 +167,28 @@ class ExperimentSubWindow(QMdiSubWindow):
         self.setWindowTitle(name)
         self.props = props
         self.browser = parent
-        rect = self.props.get(self.name + '/Geo')
+        rect = self.props.get(self.name + "/Geo")
         if rect:
             self.geometry().setRect(*rect)
         self.geo = self.geometry()
-        if self.props.get(self.name + '/minimized', False):
+        if self.props.get(self.name + "/minimized", False):
             self.showMinimized()
 
     def store_geometry(self):
         self.geo = self.geometry()
-        self.props.set(self.name + '/Geo', self.geo.getRect())
-        self.props.set(self.name + '/minimized', self.isMinimized())
+        self.props.set(self.name + "/Geo", self.geo.getRect())
+        self.props.set(self.name + "/minimized", self.isMinimized())
         mainGeo = self.browser.geometry()
-        self.props.set('Geometry', mainGeo.getRect())
+        self.props.set("Geometry", mainGeo.getRect())
 
     def changeEvent(self, event):
         if event.type() == QEvent.WindowStateChange:
             self.store_geometry()
         super().changeEvent(event)
 
+
 class ExperimentWindow(QWidget):
-    """ Control a single experiment including sequences.
+    """Control a single experiment including sequences.
         Parameter sets may be saved to and loaded from json files. A new folder
         is made for each experiment each day (when saving for the first time).
         The file names are the current time and the "label" from the experiment
@@ -197,80 +212,64 @@ class ExperimentWindow(QWidget):
         self._props = self.props
         self._task = self.browser._task
         self.queue = self.browser.queue
-        self.expManager = self.browser.expManager
         self.prepStation = self.browser.prepStation
-        self.table = self.queue.table
-        self.expDict = self.queue.expDict
         self.paramDir = self.browser.paramDir
         self.style_sheets = None
+        from pytweezer.experiment.experiment import get_experiment
+
         try:
-            spec = importlib.util.spec_from_file_location(filepath, filepath)
-            foo = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(foo)
-            members = inspect.getmembers(foo, inspect.isclass)
-            experiment = None
-            for member in members:
-                name, obj = member
-                mro = inspect.getmro(obj)
-                if inspect.getmro(obj)[1].__name__ == 'Experiment':
-                    experiment = obj(self.props, self.browser.motmaster_interface)
-                    experiment.build()
+            experiment_cls = get_experiment(filepath, self.name)
+            experiment = experiment_cls(self.props, self.browser.motmaster_interface)
+            experiment.build()
             self.experiment: Experiment = experiment
             self.init_ui()
         except Exception as e:
-            # Just print(e) is cleaner and more likely what you want,
-            # but if you insist on printing message specifically whenever possible...
-            if hasattr(e, 'message'):
-                print(e.message)
-            else:
-                print(e)
-            print_error('error opening the experiment', 'error')
+            print(e)
+            print_error("error opening the experiment", "error")
             layout = QVBoxLayout()
             print(e.__dict__)
-            layout.addWidget(QLabel('Syntax Error:  '))
+            layout.addWidget(QLabel("Syntax Error:  "))
             layout.addWidget(QLabel(str(e)))
-            layout.addWidget(QLabel(str(''.join(traceback.format_tb(e.__traceback__)))))
-            layout.addWidget(QLabel('Don\'t worry everyone makes mistakes ;-) '))
+            layout.addWidget(QLabel(str("".join(traceback.format_tb(e.__traceback__)))))
+            layout.addWidget(QLabel("Don't worry everyone makes mistakes ;-) "))
             self.setLayout(layout)
 
     def init_ui(self):
         layout = QVBoxLayout()
 
         # first row: submission settings
-        submitButton = QPushButton('')
+        submitButton = QPushButton("")
         submitButton.setMaximumWidth(30)
-        submitButton.setIcon(QtGui.QIcon(icon_path + 'run.svg'))
+        submitButton.setIcon(QtGui.QIcon(icon_path + "run.svg"))
         submitButton.clicked.connect(self.submit_to_queue)
         self.submitButton = submitButton
 
-        runNextButton = QPushButton('Run Next')
+        runNextButton = QPushButton("Run Next")
         runNextButton.clicked.connect(self.submit_next)
         self.runNextButton = runNextButton
 
-        prepButton = QPushButton('Prep')
+        prepButton = QPushButton("Prep")
         prepButton.clicked.connect(self.submit_to_prepper)
         self.prepButton = prepButton
 
-        saveButton = QPushButton('Save')
+        saveButton = QPushButton("Save")
         saveButton.clicked.connect(self.save_params)
         self.saveButton = saveButton
 
-        loadButton = QPushButton('Load')
+        loadButton = QPushButton("Load")
         loadButton.clicked.connect(self.load_params)
         self.loadButton = loadButton
 
-        defaultButton = QPushButton('Define default')
+        defaultButton = QPushButton("Define default")
         defaultButton.clicked.connect(self.make_default)
         self.defaultButton = defaultButton
 
-        resetButton = QPushButton('Reset')
+        resetButton = QPushButton("Reset")
         resetButton.clicked.connect(self.reset)
         self.resetButton = resetButton
 
-
-
         self.prioQSB = QSpinBox()
-        self.prioQSB.setToolTip('Priority')
+        self.prioQSB.setToolTip("Priority")
         self.prioQSB.setRange(0, 999)
 
         self.scheduleBox = QCheckBox(self)
@@ -286,9 +285,9 @@ class ExperimentWindow(QWidget):
         hlayout.addWidget(defaultButton)
         hlayout.addWidget(resetButton)
         hlayout.addStretch()
-        hlayout.addWidget(QLabel('task:'))
+        hlayout.addWidget(QLabel("task:"))
         hlayout.addStretch()
-        hlayout.addWidget(QLabel('prio:'))
+        hlayout.addWidget(QLabel("prio:"))
         hlayout.addWidget(self.prioQSB)
         hlayout.addStretch()
         hlayout.addWidget(self.scheduleBox)
@@ -298,30 +297,32 @@ class ExperimentWindow(QWidget):
         # second row: scan and repetition info
         hlayout = QHBoxLayout()
 
-        hlayout.addWidget(QLabel('label:'))
+        hlayout.addWidget(QLabel("label:"))
         self.taskLabel = QLineEdit()
         hlayout.addWidget(self.taskLabel)
 
-        hlayout.addWidget(QLabel('repeat:'))
+        hlayout.addWidget(QLabel("repeat:"))
         self.nRepsQSB = QSpinBox()
         self.nRepsQSB.setRange(0, 100000)
         hlayout.addWidget(self.nRepsQSB)
         self.nRepsQSB.valueChanged.connect(self.check_defaults)
 
-        label = QLabel('Scan:')
+        label = QLabel("Scan:")
         label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
         hlayout.addWidget(label)
         self.scanCombo = SearchComboBox(self)
         self.scanCombo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.scanCombo.addItem('--NONE--')
+        self.scanCombo.addItem("--NONE--")
         self.scanCombo.currentTextChanged.connect(self.check_defaults)
 
-        scanNames = sorted(list(self.experiment._props.get('scans', {}).keys()), key=str.casefold)
+        scanNames = sorted(
+            list(self.experiment._props.get("scans", {}).keys()), key=str.casefold
+        )
         for scan in scanNames:
             self.scanCombo.addItem(scan)
 
         hlayout.addWidget(self.scanCombo)
-        editButton = QPushButton('Edit')
+        editButton = QPushButton("Edit")
         editButton.clicked.connect(self.edit_sequence)
         hlayout.addWidget(editButton)
         layout.addLayout(hlayout)
@@ -340,16 +341,20 @@ class ExperimentWindow(QWidget):
                 box = BoolBox(self.experiment._props, value=True, parName=argument.name)
                 box.stateChanged.connect(self.check_defaults)
             elif type(argument) == pytweezer.experiment.experiment.StringCombo:
-                box = ComboBox(self.experiment._props, parName=argument.name, **argument.__dict__.copy())
+                box = ComboBox(
+                    self.experiment._props,
+                    parName=argument.name,
+                    **argument.__dict__.copy()
+                )
                 box.spin.activated.connect(self.check_defaults)
             else:
-                print_error('tweezer_browser error argument type not known', 'error')
+                print_error("tweezer_browser error argument type not known", "error")
                 box = None
             if box:
                 self.argument_boxes.append(box)
             arg_layout.addWidget(box, int(i / ncol), i % ncol)
         layout.addLayout(arg_layout)
-        
+
         mm_param_group = QGroupBox("MM Params")
         mm_param_layout = QGridLayout()
         mm_param_group.setLayout(mm_param_layout)
@@ -362,16 +367,20 @@ class ExperimentWindow(QWidget):
                 box = BoolBox(self.experiment._props, value=True, parName=argument.name)
                 box.stateChanged.connect(self.check_defaults)
             elif type(argument) == pytweezer.experiment.experiment.StringCombo:
-                box = ComboBox(self.experiment._props, parName=argument.name, **argument.__dict__.copy())
+                box = ComboBox(
+                    self.experiment._props,
+                    parName=argument.name,
+                    **argument.__dict__.copy()
+                )
                 box.spin.activated.connect(self.check_defaults)
             else:
-                print_error('tweezer_browser error argument type not known', 'error')
+                print_error("tweezer_browser error argument type not known", "error")
                 box = None
             if box:
                 self.mm_boxes.append(box)
             mm_param_layout.addWidget(box, int(i / ncol), i % ncol)
         layout.addWidget(mm_param_group)
-        
+
         self.setLayout(layout)
         self.check_defaults(None)
 
@@ -379,10 +388,18 @@ class ExperimentWindow(QWidget):
         if type(box) != FloatBox:
             return box.value
         val = round_floating_prec(box.value)
-        if use_ndecimals and 'ndecimals' in box.__dict__ and 'display_multiplier' in box.__dict__:
-            #print('rounded_box_val', val, box.value, box.__dict__['ndecimals'], int(np.log10(box.__dict__['display_multiplier'])), np.round(val, box.__dict__['ndecimals'] - int(np.log10(box.__dict__['display_multiplier']))))
-            val = np.round(val, box.__dict__['ndecimals'] - int(np.log10(box.__dict__['display_multiplier'])))
-            #print('rounded_box_val', val)
+        if (
+            use_ndecimals
+            and "ndecimals" in box.__dict__
+            and "display_multiplier" in box.__dict__
+        ):
+            # print('rounded_box_val', val, box.value, box.__dict__['ndecimals'], int(np.log10(box.__dict__['display_multiplier'])), np.round(val, box.__dict__['ndecimals'] - int(np.log10(box.__dict__['display_multiplier']))))
+            val = np.round(
+                val,
+                box.__dict__["ndecimals"]
+                - int(np.log10(box.__dict__["display_multiplier"])),
+            )
+            # print('rounded_box_val', val)
         return val
 
     def make_default(self):
@@ -390,55 +407,72 @@ class ExperimentWindow(QWidget):
         self.check_defaults(None)
 
     def reset(self):
-        filepath = self.paramDir + '/' + self.name + '/defaults.json'
+        filepath = self.paramDir + "/" + self.name + "/defaults.json"
         if not os.path.isfile(filepath):
-            print_error('tweezer_browser.py - reset(): Save defaults before restoring defaults!', 'warning')
+            print_error(
+                "tweezer_browser.py - reset(): Save defaults before restoring defaults!",
+                "warning",
+            )
             return
         self.load_params(filepath=filepath)
         self.check_defaults(None)
-        self.scanCombo.setCurrentText('--NONE--')
+        self.scanCombo.setCurrentText("--NONE--")
         self.nRepsQSB.setValue(0)
 
     def check_defaults(self, value, parambox=None):
         if parambox:
-            parambox.updateValue(value / (parambox.__dict__['display_multiplier'] if 'display_multiplier' in parambox.__dict__ else 1))
+            parambox.updateValue(
+                value
+                / (
+                    parambox.__dict__["display_multiplier"]
+                    if "display_multiplier" in parambox.__dict__
+                    else 1
+                )
+            )
         if not self.style_sheets:
             self.style_sheets = {}
             for box in self.argument_boxes:
                 self.style_sheets[box.name] = box.styleSheet()
-            self.style_sheets['nRepsQSB'] = self.nRepsQSB.styleSheet()
-            self.style_sheets['scanCombo'] = self.scanCombo.styleSheet()
+            self.style_sheets["nRepsQSB"] = self.nRepsQSB.styleSheet()
+            self.style_sheets["scanCombo"] = self.scanCombo.styleSheet()
 
-        filepath = self.paramDir + '/' + self.name + '/defaults.json'
+        filepath = self.paramDir + "/" + self.name + "/defaults.json"
         if not os.path.isfile(filepath):
             return
-        with open(filepath, 'r') as json_file:
+        with open(filepath, "r") as json_file:
             loaded_params = json.load(json_file)
 
         for box in self.argument_boxes:
-            if box.parName in loaded_params and loaded_params[box.parName] != self.rounded_box_val(box):
+            if box.parName in loaded_params and loaded_params[
+                box.parName
+            ] != self.rounded_box_val(box):
                 if type(box) == FloatBox:
                     style_sheet = self.style_sheets[box.name]
-                    for entry in style_sheet.split(';'):
-                        if 'background-color' in entry:
-                            style_sheet = style_sheet.replace(entry, entry.split(':')[0] + ': rgb(240,230,140)')
+                    for entry in style_sheet.split(";"):
+                        if "background-color" in entry:
+                            style_sheet = style_sheet.replace(
+                                entry, entry.split(":")[0] + ": rgb(240,230,140)"
+                            )
                             break
                     box.setStyleSheet(style_sheet)
                 elif type(box) == BoolBox:
-                    box.setStyleSheet('BoolBox {background-color: rgb(240,230,140);}')
+                    box.setStyleSheet("BoolBox {background-color: rgb(240,230,140);}")
             else:
                 box.setStyleSheet(self.style_sheets[box.name])
 
         if self.nRepsQSB.value() == 0:
-            self.nRepsQSB.setStyleSheet(self.style_sheets['nRepsQSB'])
+            self.nRepsQSB.setStyleSheet(self.style_sheets["nRepsQSB"])
         else:
-            self.nRepsQSB.setStyleSheet('QSpinBox {background-color: rgb(240,230,140);}')
+            self.nRepsQSB.setStyleSheet(
+                "QSpinBox {background-color: rgb(240,230,140);}"
+            )
 
-        if self.scanCombo.currentText() == '--NONE--':
-            self.scanCombo.setStyleSheet(self.style_sheets['scanCombo'])
+        if self.scanCombo.currentText() == "--NONE--":
+            self.scanCombo.setStyleSheet(self.style_sheets["scanCombo"])
         else:
-            self.scanCombo.setStyleSheet('SearchComboBox {background-color: rgb(240,230,140);}')
-
+            self.scanCombo.setStyleSheet(
+                "SearchComboBox {background-color: rgb(240,230,140);}"
+            )
 
     def save_params(self, backup=False, defaults=False):
         """
@@ -448,9 +482,9 @@ class ExperimentWindow(QWidget):
         """
         # setting up directory, getting current time
 
-        dateDir = datetime.today().strftime('%Y_%m_%d')
-        paramTime = datetime.today().strftime('%Hh%M')
-        fullDir = self.paramDir + '/' + self.name + '/' + dateDir
+        dateDir = datetime.today().strftime("%Y_%m_%d")
+        paramTime = datetime.today().strftime("%Hh%M")
+        fullDir = self.paramDir + "/" + self.name + "/" + dateDir
         os.makedirs(fullDir, exist_ok=True)
         # write the parameters to a dictionary
         saved_params = {}
@@ -462,17 +496,21 @@ class ExperimentWindow(QWidget):
             if self.taskLabel.text():
                 label = self.taskLabel.text()
             else:
-                label = 'unlabelled'
-            saved_params['label'] = label
+                label = "unlabelled"
+            saved_params["label"] = label
             if not defaults:
-                with open(fullDir + '/' + paramTime + '_' + label + '.json', 'w') as outfile:
+                with open(
+                    fullDir + "/" + paramTime + "_" + label + ".json", "w"
+                ) as outfile:
                     json.dump(saved_params, outfile, indent=4)
             else:
-                with open(self.paramDir + '/' + self.name + '/defaults.json', 'w') as outfile:
+                with open(
+                    self.paramDir + "/" + self.name + "/defaults.json", "w"
+                ) as outfile:
                     json.dump(saved_params, outfile, indent=4)
         else:
-            saved_params['label'] = 'backup'
-            with open(fullDir + '/backup.json', 'w') as outfile:
+            saved_params["label"] = "backup"
+            with open(fullDir + "/backup.json", "w") as outfile:
                 json.dump(saved_params, outfile, indent=4)
 
     def load_params(self, filepath=None):
@@ -483,131 +521,176 @@ class ExperimentWindow(QWidget):
             return
         with open(filepath) as json_file:
             loaded_params = json.load(json_file)
-        self.taskLabel.setText(loaded_params['label'])
+        self.taskLabel.setText(loaded_params["label"])
         self.save_params(backup=True)  # create backup
         for box in self.argument_boxes:
             if box.parName in loaded_params:
                 val = loaded_params[box.parName]
             else:
                 val = box.value
-                print_error('tweezer_browser.py - load_params(): Param {0} not in save file, setting to default value {1}.'.format(box.parName, box.value), 'warning')
+                print_error(
+                    "tweezer_browser.py - load_params(): Param {0} not in save file, setting to default value {1}.".format(
+                        box.parName, box.value
+                    ),
+                    "warning",
+                )
             if isinstance(val, bool):
                 box.updateValue(val)
             else:
-                box.updateValue(val / (box.__dict__['display_multiplier'] if 'display_multiplier' in box.__dict__ else 1))
-            #print('load_params val, rounded 1', val, box.value, self.rounded_box_val(box))
-            box.updateValue(self.rounded_box_val(box) / (box.__dict__['display_multiplier'] if 'display_multiplier' in box.__dict__ else 1))
-            #print('load_params val, rounded 2', val, self.rounded_box_val(box))
+                box.updateValue(
+                    val
+                    / (
+                        box.__dict__["display_multiplier"]
+                        if "display_multiplier" in box.__dict__
+                        else 1
+                    )
+                )
+            # print('load_params val, rounded 1', val, box.value, self.rounded_box_val(box))
+            box.updateValue(
+                self.rounded_box_val(box)
+                / (
+                    box.__dict__["display_multiplier"]
+                    if "display_multiplier" in box.__dict__
+                    else 1
+                )
+            )
+            # print('load_params val, rounded 2', val, self.rounded_box_val(box))
         self.check_defaults(None)
 
     def get_files(self):
-        filepath = QFileDialog.getOpenFileName(self, "Select Parameter File", self.paramDir + '/' + self.name,
-                                               filter="Param Files (*.json)")[0]
+        filepath = QFileDialog.getOpenFileName(
+            self,
+            "Select Parameter File",
+            self.paramDir + "/" + self.name,
+            filter="Param Files (*.json)",
+        )[0]
         return filepath
 
-
     def submit_to_queue(self):
-        """submits the experiment to the experiment queue """
+        """submits the experiment to the experiment queue"""
         self.store_geometry()
         self.setup_scan()
         self._task.value += 1  # #increase global task number
         task, task_dict = self.setup_task_dict()
-        task_dict['experiment'] = self.experiment
-        print_error('\ntweezer_browser.py - submit_to_queue(): Submitted task dict:\n{0}\n'.format(task_dict), 'weak')
+        # task_dict['experiment'] = self.experiment
+        print_error(
+            "\ntweezer_browser.py - submit_to_queue(): Submitted task dict:\n{0}\n".format(
+                task_dict
+            ),
+            "weak",
+        )
         self.queue.tableModel[task] = task_dict
         self.check_defaults(None)
 
     def submit_next(self):
-        """submits the experiment to the experiment queue with highest priority """
+        """submits the experiment to the experiment queue with highest priority"""
         self.submit_to_queue()
-        self.queue.tableModel[self._task.value]['priority'] = 1000  # 1000 is the biggest number I could think of
+        self.queue.tableModel[self._task.value][
+            "priority"
+        ] = 1000  # 1000 is the biggest number I could think of
         self.check_defaults(None)
 
     def submit_to_prepper(self):
         """submits the experiment to the prep station"""
-        self.browser.looper.startup = True
+        # self.browser.looper.startup = True
         self.store_geometry()
         self.setup_scan()
         task, task_dict = self.setup_task_dict()
-        print_error('\ntweezer_browser.py - submit_to_prepper(): Submitted task dict:\n{0}\n'.format(task_dict), 'weak')
-        self.prepStation.prepList.append(task_dict)
-        self.prepStation.tableModel.layoutChanged.emit()
+        print_error(
+            "\ntweezer_browser.py - submit_to_prepper(): Submitted task dict:\n{0}\n".format(
+                task_dict
+            ),
+            "weak",
+        )
+        # Use tableModel.append() to sync through RPC instead of prepList.append()
+        self.prepStation.tableModel.append(task_dict)
         self.prepStation.update_prep_file()
-        for group in self.browser.looper.groupDict.values():
-            for item in group.groupItemList:
-                item.update_nr_box()
-        self.browser.looper.startup = False
-        self.browser.looper.update_loop_file()
+        # for group in self.browser.looper.groupDict.values():
+        #     for item in group.groupItemList:
+        #         item.update_nr_box()
+        # self.browser.looper.startup = False
+        # self.browser.looper.update_loop_file()
         self.check_defaults(None)
 
     def setup_scan(self):
-        """ build scan sequence """
+        """build scan sequence"""
         self.scan = self.scanCombo.currentText()
-        if self.scan != '--NONE--':
-            self.scan_settings = self.experiment._props.get('scans/' + self.scan, {})
+        if self.scan != "--NONE--":
+            self.scan_settings = self.experiment._props.get("scans/" + self.scan, {})
 
             # generate numpy array containing scan values for example
             # np.array([[0,0],[1,10],[2,20]]) for two parameters scanned
-            if 'listgenerators' in self.scan_settings:
-                generators = self.scan_settings.get('listgenerators', [''])
+            if "listgenerators" in self.scan_settings:
+                generators = self.scan_settings.get("listgenerators", [""])
                 scan_values = []
-                self.scanPars = self.scan_settings.get('parameters', [])
+                self.scanPars = self.scan_settings.get("parameters", [])
                 for i, gen in enumerate(generators):
                     # print(self.scanPars[i])
-                    if self.scanPars[i] != '--NONE--':
+                    if self.scanPars[i] != "--NONE--":
                         scan_values.append(eval(gen))
                     else:
                         scan_values.append(np.zeros_like(eval(generators[0])))
                 scan_values = np.vstack(scan_values).T
             else:
-                scan_values = eval(self.scan_settings.get('listgenerator', ''))
+                scan_values = eval(self.scan_settings.get("listgenerator", ""))
                 if scan_values.ndim == 1:
                     scan_values = scan_values[:, np.newaxis]
-            send_info('bali Experiment scanning: {} {}'.format(self.scanPars, scan_values))
+            send_info(
+                "bali Experiment scanning: {} {}".format(self.scanPars, scan_values)
+            )
 
             self.n_runs = scan_values.shape[0]
             self.scan_values = scan_values.tolist()
-            self.scan_values = round_floating_prec(self.scan_values)  # TODO: use n_digits
+            self.scan_values = round_floating_prec(
+                self.scan_values
+            )  # TODO: use n_digits
             self.scan_sequence = np.arange(self.n_runs)
             self.scan_sequence = self.scan_sequence.tolist()
-            if self.scan_settings.get('Randomize', True):
+            if self.scan_settings.get("Randomize", True):
                 np.random.shuffle(self.scan_sequence)
         else:
             self.n_runs = 1
             self.scanPars = []
             self.scan_values = []
             self.scan_sequence = []
-        print_error('tweezer_browser.py - setup_scan: Scan values are {0}'.format(self.scan_values), 'weak')
+        print_error(
+            "tweezer_browser.py - setup_scan: Scan values are {0}".format(
+                self.scan_values
+            ),
+            "weak",
+        )
 
     def setup_task_dict(self):
         """creates task dictionary to be stored in the experimentQ or prepstation"""
         task = self._task.value
         task_dict = {}
-        task_dict['task'] = task
-        lastSet = self.experiment._props.get('last_set', '')
-        task_dict['label'] = lastSet
+        task_dict["task"] = task
+        lastSet = self.experiment._props.get("last_set", "")
+        task_dict["label"] = lastSet
         if self.taskLabel.text():
-            task_dict['label'] = self.taskLabel.text() + ' ' + task_dict['label']
-        if self.scanCombo.currentText() != '--NONE--':
-            task_dict['label'] = 'scan: {} {}'.format(self.scanCombo.currentText(), task_dict['label'])
-        task_dict['expName'] = self.name
-        task_dict['run'] = 0
-        task_dict['priority'] = self.prioQSB.value()
-        task_dict['args'] = self.build_argument_dict()
-        task_dict['nRuns'] = self.n_runs
-        task_dict['scanpars'] = self.scanPars
-        task_dict['scanvals'] = self.scan_values
-        task_dict['nReps'] = self.nRepsQSB.value()
-        task_dict['scansequence'] = self.scan_sequence
-        task_dict['repetition'] = 0
-        task_dict['terminated'] = False
-        task_dict['filepath'] = self.filepath
+            task_dict["label"] = self.taskLabel.text() + " " + task_dict["label"]
+        if self.scanCombo.currentText() != "--NONE--":
+            task_dict["label"] = "scan: {} {}".format(
+                self.scanCombo.currentText(), task_dict["label"]
+            )
+        task_dict["expName"] = self.name
+        task_dict["run"] = 0
+        task_dict["priority"] = self.prioQSB.value()
+        task_dict["args"] = self.build_argument_dict()
+        task_dict["nRuns"] = self.n_runs
+        task_dict["scanpars"] = self.scanPars
+        task_dict["scanvals"] = self.scan_values
+        task_dict["nReps"] = self.nRepsQSB.value()
+        task_dict["scansequence"] = self.scan_sequence
+        task_dict["repetition"] = 0
+        task_dict["terminated"] = False
+        task_dict["filepath"] = self.filepath
         if self.scheduleBox.isChecked():
-            task_dict['status'] = 'Waiting'
-            task_dict['dueDateTime'] = self.dateTimeEdit.dateTime().toString()
+            task_dict["status"] = "Waiting"
+            task_dict["dueDateTime"] = self.dateTimeEdit.dateTime().toString()
         else:
-            task_dict['status'] = 'Queued'
-            task_dict['dueDateTime'] = QDateTime.currentDateTime().toString()
+            task_dict["status"] = "Queued"
+            task_dict["dueDateTime"] = QDateTime.currentDateTime().toString()
         return task, task_dict
 
     def build_argument_dict(self):
@@ -616,8 +699,11 @@ class ExperimentWindow(QWidget):
         for arg in self.argument_boxes:
             argDict[arg.name] = self.rounded_box_val(arg)
             if argDict[arg.name] == 0 and arg.value != 0:
-                print_error('tweezer_browser.py - build_argument_dict(): Error while rounding!', 'error')
-                print(arg.name, arg.value, arg.__dict__['ndecimals'])
+                print_error(
+                    "tweezer_browser.py - build_argument_dict(): Error while rounding!",
+                    "error",
+                )
+                print(arg.name, arg.value, arg.__dict__["ndecimals"])
         return argDict
 
     def edit_sequence(self):
@@ -626,8 +712,10 @@ class ExperimentWindow(QWidget):
         d.exec_()
         currentsequence = self.scanCombo.currentText()
         self.scanCombo.clear()
-        self.scanCombo.addItem('--NONE--')
-        scanNames = sorted(list(self.experiment._props.get('scans', {}).keys()), key=str.casefold)
+        self.scanCombo.addItem("--NONE--")
+        scanNames = sorted(
+            list(self.experiment._props.get("scans", {}).keys()), key=str.casefold
+        )
         for scan in scanNames:
             self.scanCombo.addItem(scan)
         self.scanCombo.setCurrentText(currentsequence)
@@ -650,8 +738,8 @@ class ExperimentWindow(QWidget):
         return [arg.name for arg in self.experiment._arguments]
 
     def argument_dicts(self):
-        '''returns a list containing copies of the argument dictionaries'''
-        arg_dict =  [arg.__dict__.copy() for arg in self.experiment._arguments]
+        """returns a list containing copies of the argument dictionaries"""
+        arg_dict = [arg.__dict__.copy() for arg in self.experiment._arguments]
         mm_dict = [arg.__dict__.copy() for arg in self.experiment.mm_params]
         return arg_dict + mm_dict
 
@@ -660,25 +748,27 @@ class ExperimentWindow(QWidget):
 
 
 class SequenceEditor(QDialog):
-    '''
+    """
     docstring
-    '''
+    """
 
     def __init__(self, experiment_window: ExperimentWindow):
         super().__init__(experiment_window)
         self.exp_window = experiment_window
         self.setWindowTitle("Sequence editor")
         self.qlayout = QVBoxLayout()
-        self.qlayout.addWidget(QLabel('Sequence Name:'))
+        self.qlayout.addWidget(QLabel("Sequence Name:"))
         self.nameEdit = QLineEdit(self.exp_window.scanCombo.currentText())
         self.qlayout.addWidget(self.nameEdit)
 
         self.number_scans = 3
         snake_scan = False
-        if self.nameEdit.text() != '--NONE--':
-            defaults = self.exp_window.experiment._props.get('scans/' + self.nameEdit.text(), {})
-            self.number_scans = int(defaults.get('number_scans', 3))
-            snake_scan = defaults.get('snake_scan', False)
+        if self.nameEdit.text() != "--NONE--":
+            defaults = self.exp_window.experiment._props.get(
+                "scans/" + self.nameEdit.text(), {}
+            )
+            self.number_scans = int(defaults.get("number_scans", 3))
+            snake_scan = defaults.get("snake_scan", False)
 
         self.startSpins = []
         self.stopSpins = []
@@ -687,17 +777,17 @@ class SequenceEditor(QDialog):
         self.listGeneratorEdits = []
 
         btn_layout = QHBoxLayout()
-        self.randomize = QCheckBox('Randomize')
+        self.randomize = QCheckBox("Randomize")
         btn_layout.addWidget(self.randomize)
 
-        self.tickbox_snake_scan = QCheckBox('Snake-like scan')
+        self.tickbox_snake_scan = QCheckBox("Snake-like scan")
         self.tickbox_snake_scan.setChecked(snake_scan)
         btn_layout.addWidget(self.tickbox_snake_scan)
         self.tickbox_snake_scan.stateChanged.connect(self.update_list_generator)
 
-        self.n_dim = QCheckBox('{0}D scan'.format(self.number_scans))
+        self.n_dim = QCheckBox("{0}D scan".format(self.number_scans))
         btn_layout.addWidget(self.n_dim)
-        btn_layout.addWidget(QLabel('Dimensions:'))
+        btn_layout.addWidget(QLabel("Dimensions:"))
         self.n_dim_box = QDoubleSpinBox()
         self.n_dim_box.setDecimals(0)
         self.n_dim_box.setRange(1, 10)
@@ -709,14 +799,14 @@ class SequenceEditor(QDialog):
 
         self.glayout = QGridLayout()
         self.glayout.setSpacing(0)
-        self.glayout.addWidget(QLabel('Parameter'), 2, 1)
-        self.glayout.addWidget(QLabel('Start'), 2, 2)
-        self.glayout.addWidget(QLabel('End'), 2, 3)
-        self.glayout.addWidget(QLabel('Steps'), 2, 4)
+        self.glayout.addWidget(QLabel("Parameter"), 2, 1)
+        self.glayout.addWidget(QLabel("Start"), 2, 2)
+        self.glayout.addWidget(QLabel("End"), 2, 3)
+        self.glayout.addWidget(QLabel("Steps"), 2, 4)
 
-        if self.nameEdit.text() != '--NONE--':
-            self.randomize.setChecked(defaults.get('Randomize', True))
-            self.n_dim.setChecked(defaults.get('nDscan', False))
+        if self.nameEdit.text() != "--NONE--":
+            self.randomize.setChecked(defaults.get("Randomize", True))
+            self.n_dim.setChecked(defaults.get("nDscan", False))
         self.n_dim.toggled.connect(self.update_list_generator)
 
         self.init_scans()
@@ -736,18 +826,23 @@ class SequenceEditor(QDialog):
         ends = []
         stepsl = []
         listgenerators = []
-        if self.nameEdit.text() != '--NONE--':
-            defaults = self.exp_window.experiment._props.get('scans/' + self.nameEdit.text(), {})
-            params = defaults.get('parameters', ['--NONE--'])
-            starts = defaults.get('starts', [0])
-            ends = defaults.get('ends', [0])
-            stepsl = defaults.get('stepsl', [0])
-            listgenerators = defaults.get('listgenerators', [''])
+        if self.nameEdit.text() != "--NONE--":
+            defaults = self.exp_window.experiment._props.get(
+                "scans/" + self.nameEdit.text(), {}
+            )
+            params = defaults.get("parameters", ["--NONE--"])
+            starts = defaults.get("starts", [0])
+            ends = defaults.get("ends", [0])
+            stepsl = defaults.get("stepsl", [0])
+            listgenerators = defaults.get("listgenerators", [""])
 
         for i in range(len(self.parameterCombos), self.number_scans):
             self.parameterCombos.append(QComboBox())
-            self.parameterCombos[-1].addItem('--NONE--')
-            paramNames = [box.parName for box in self.exp_window.argument_boxes+self.exp_window.mm_boxes] 
+            self.parameterCombos[-1].addItem("--NONE--")
+            paramNames = [
+                box.parName
+                for box in self.exp_window.argument_boxes + self.exp_window.mm_boxes
+            ]
             for name in sorted(paramNames, key=str.casefold):
                 self.parameterCombos[-1].addItem(name)
             self.startSpins.append(QDoubleSpinBox())
@@ -757,7 +852,7 @@ class SequenceEditor(QDialog):
             stepsSpinBox = QSpinBox()
             stepsSpinBox.setMaximum(int(10e3))
             self.stepsSpins.append(stepsSpinBox)
-            self.listGeneratorEdits.append(QLineEdit(''))
+            self.listGeneratorEdits.append(QLineEdit(""))
 
             self.glayout.addWidget(self.parameterCombos[i], 3 + i * 2, 1)
             self.glayout.addWidget(self.startSpins[i], 3 + i * 2, 2)
@@ -765,17 +860,29 @@ class SequenceEditor(QDialog):
             self.glayout.addWidget(self.stepsSpins[i], 3 + 2 * i, 4)
             self.glayout.addWidget(self.listGeneratorEdits[i], 4 + 2 * i, 0, 1, 5)
 
-            self.parameterCombos[i].currentTextChanged.connect(lambda text: self.update_parameter(text, i))
-            self.parameterCombos[i].setCurrentText(params[i] if i < len(params) else '--NONE--')
-            self.startSpins[i].setValue((starts[i] if i < len(starts) else 0) / self.startSpins[i].multiplier)
-            self.stopSpins[i].setValue((ends[i] if i < len(ends) else 0) / self.stopSpins[i].multiplier)
+            self.parameterCombos[i].currentTextChanged.connect(
+                lambda text: self.update_parameter(text, i)
+            )
+            self.parameterCombos[i].setCurrentText(
+                params[i] if i < len(params) else "--NONE--"
+            )
+            self.startSpins[i].setValue(
+                (starts[i] if i < len(starts) else 0) / self.startSpins[i].multiplier
+            )
+            self.stopSpins[i].setValue(
+                (ends[i] if i < len(ends) else 0) / self.stopSpins[i].multiplier
+            )
             self.stepsSpins[i].setValue(stepsl[i] if i < len(stepsl) else 0)
-            self.listGeneratorEdits[i].setText(listgenerators[i] if i < len(listgenerators) else '')
+            self.listGeneratorEdits[i].setText(
+                listgenerators[i] if i < len(listgenerators) else ""
+            )
             self.startSpins[i].valueChanged.connect(self.update_list_generator)
             self.stopSpins[i].valueChanged.connect(self.update_list_generator)
             self.stepsSpins[i].valueChanged.connect(self.update_list_generator)
 
-        self.qlayout.addLayout(self.glayout)  # TODO: this is needed but somehow a reduced version of it
+        self.qlayout.addLayout(
+            self.glayout
+        )  # TODO: this is needed but somehow a reduced version of it
         self.setLayout(self.qlayout)
 
     def update_ndim(self):
@@ -788,77 +895,106 @@ class SequenceEditor(QDialog):
                 self.glayout.removeWidget(self.stopSpins[enum])
                 self.glayout.removeWidget(self.stepsSpins[enum])
                 self.glayout.removeWidget(self.listGeneratorEdits[enum])
-            self.parameterCombos = self.parameterCombos[:self.number_scans]
-            self.startSpins = self.startSpins[:self.number_scans]
-            self.stopSpins = self.stopSpins[:self.number_scans]
-            self.stepsSpins = self.stepsSpins[:self.number_scans]
-            self.listGeneratorEdits = self.listGeneratorEdits[:self.number_scans]
-        self.n_dim.setText('{0}D scan'.format(self.number_scans))
+            self.parameterCombos = self.parameterCombos[: self.number_scans]
+            self.startSpins = self.startSpins[: self.number_scans]
+            self.stopSpins = self.stopSpins[: self.number_scans]
+            self.stepsSpins = self.stepsSpins[: self.number_scans]
+            self.listGeneratorEdits = self.listGeneratorEdits[: self.number_scans]
+        self.n_dim.setText("{0}D scan".format(self.number_scans))
         self.init_scans()
         self.update_list_generator()
 
     def update_parameter(self, parname, n):
         """sets range and steps of the scanned parameter according to the parameters settings"""
-        print('_updateParameter {}: {}'.format(n, parname))
+        print("_updateParameter {}: {}".format(n, parname))
         i = n
-        if parname == '--NONE--':
+        if parname == "--NONE--":
             return
         for arg in self.exp_window.argument_dicts():
-            if arg['name'] == parname:
+            if arg["name"] == parname:
                 argument = arg
                 break
         else:
-            send_error('tweezer_browser coding error')
+            send_error("tweezer_browser coding error")
             return
         if i >= len(self.parameterCombos):
-            print_error('SequenceEditor - update_parameter(): Trying to update box {0} in box array of length {1}.'.
-                        format(i, len(self.parameterCombos)), 'error')
+            print_error(
+                "SequenceEditor - update_parameter(): Trying to update box {0} in box array of length {1}.".format(
+                    i, len(self.parameterCombos)
+                ),
+                "error",
+            )
             return
         parname = self.parameterCombos[i].currentText()
-        is_bool = type(argument['value']) == bool
+        is_bool = type(argument["value"]) == bool
         for box in [self.startSpins[n], self.stopSpins[i]]:
-            print_error('tweezer_browser.py - update_parameter(): Argument dict for {0}: {1}'.format(parname, argument), 'weak')
+            print_error(
+                "tweezer_browser.py - update_parameter(): Argument dict for {0}: {1}".format(
+                    parname, argument
+                ),
+                "weak",
+            )
 
-            if 'step' in argument:
-                box.setSingleStep(argument['step'])
+            if "step" in argument:
+                box.setSingleStep(argument["step"])
             elif is_bool:
                 box.setSingleStep(1)
             else:
                 box.setSingleStep(1)
-                print_error('tweezer_browser.py - update_parameter(): Set step=1 for box {0}.'.format(parname), 'weak')
+                print_error(
+                    "tweezer_browser.py - update_parameter(): Set step=1 for box {0}.".format(
+                        parname
+                    ),
+                    "weak",
+                )
 
-            if 'ndecimals' in argument:
-                box.setDecimals(argument['ndecimals'])
+            if "ndecimals" in argument:
+                box.setDecimals(argument["ndecimals"])
             elif is_bool:
                 box.setDecimals(0)
             else:
                 box.setDecimals(0)
-                print_error('tweezer_browser.py - update_parameter(): Set decimals=0 for box {0}.'.format(parname), 'weak')
+                print_error(
+                    "tweezer_browser.py - update_parameter(): Set decimals=0 for box {0}.".format(
+                        parname
+                    ),
+                    "weak",
+                )
 
-            if 'unit' in argument:
-                box.setSuffix(argument['unit'])
+            if "unit" in argument:
+                box.setSuffix(argument["unit"])
             elif is_bool:
-                box.setSuffix(' (bool)')
+                box.setSuffix(" (bool)")
             else:
-                box.setSuffix('')
+                box.setSuffix("")
 
-            if 'minval' in argument and 'maxval' in argument:
-                box.setRange(argument['minval'], argument['maxval'])
+            if "minval" in argument and "maxval" in argument:
+                box.setRange(argument["minval"], argument["maxval"])
             elif is_bool:
                 box.setRange(0, 1)
             else:
                 box.setRange(0, 1)
-                print_error('tweezer_browser.py - update_parameter(): Set range=(0, 1) for box {0}.'.format(parname), 'weak')
+                print_error(
+                    "tweezer_browser.py - update_parameter(): Set range=(0, 1) for box {0}.".format(
+                        parname
+                    ),
+                    "weak",
+                )
 
-            if 'display_multiplier' in argument:
-                box.multiplier = argument['display_multiplier']
+            if "display_multiplier" in argument:
+                box.multiplier = argument["display_multiplier"]
             elif is_bool:
                 box.multiplier = 1
             else:
                 box.multiplier = 1
-                print_error('tweezer_browser.py - update_parameter(): Set multiplier=1 for box {0}.'.format(parname), 'weak')
+                print_error(
+                    "tweezer_browser.py - update_parameter(): Set multiplier=1 for box {0}.".format(
+                        parname
+                    ),
+                    "weak",
+                )
 
-            val = argument['value']
+            val = argument["value"]
             box.setValue(val / box.multiplier)
 
     def round_n_dec(self, value, n_dec):
@@ -867,12 +1003,22 @@ class SequenceEditor(QDialog):
         return value
 
     def update_list_generator(self):
-        starts = [self.round_n_dec(self.startSpins[i].value() * self.startSpins[i].multiplier,
-                                   self.startSpins[i].decimals() - int(np.log10(self.startSpins[i].multiplier)))
-                  for i in range(self.number_scans)]
-        stops = [self.round_n_dec(self.stopSpins[i].value() * self.stopSpins[i].multiplier,
-                                   self.stopSpins[i].decimals() - int(np.log10(self.stopSpins[i].multiplier)))
-                  for i in range(self.number_scans)]
+        starts = [
+            self.round_n_dec(
+                self.startSpins[i].value() * self.startSpins[i].multiplier,
+                self.startSpins[i].decimals()
+                - int(np.log10(self.startSpins[i].multiplier)),
+            )
+            for i in range(self.number_scans)
+        ]
+        stops = [
+            self.round_n_dec(
+                self.stopSpins[i].value() * self.stopSpins[i].multiplier,
+                self.stopSpins[i].decimals()
+                - int(np.log10(self.stopSpins[i].multiplier)),
+            )
+            for i in range(self.number_scans)
+        ]
         steps = [self.stepsSpins[i].value() for i in range(self.number_scans)]
 
         for k in range(self.number_scans):
@@ -882,43 +1028,62 @@ class SequenceEditor(QDialog):
                 stop = stops[k]
                 step = steps[0]
                 # generator = 'np.linspace('+repr(start)+','+repr(stop)+','+repr(steps)+')'
-                generator = 'np.linspace({},{},{})'.format(start, stop, step)
+                generator = "np.linspace({},{},{})".format(start, stop, step)
             else:
-                lens = int(np.prod(steps[k + 1:]))
+                lens = int(np.prod(steps[k + 1 :]))
                 reps = int(np.prod(steps[:k]))
                 # [x1, x1, x2, x2, x1, x1, x2, x2, x1, x1, x2, x2] has lens=2 and reps=3
                 # Create sequence like [x1, x1, x2, x2]:
-                arr = np.repeat(np.linspace(starts[k], stops[k], steps[k]).reshape(steps[k], 1), lens, axis=1).flatten()
+                arr = np.repeat(
+                    np.linspace(starts[k], stops[k], steps[k]).reshape(steps[k], 1),
+                    lens,
+                    axis=1,
+                ).flatten()
                 # Create sequence like [x1, x1, x2, x2, x1, x1, x2, x2, x1, x1, x2, x2]:
                 # arr = np.repeat(arr.reshape(1, len(arr)), reps, axis=0).flatten()
 
                 if self.tickbox_snake_scan.isChecked():
-                    generator = ('np.array([np.flip(rep) if enum % 2 == 0 else rep for enum, rep in enumerate(np.repeat('
-                                 'np.repeat(np.linspace({0}, {1}, {2}).reshape({2}, 1), {3},'
-                                 ' axis=1).flatten().reshape(1, {5}), {4}, axis=0))]).flatten()').format(
-                        starts[k], stops[k], steps[k], lens, reps, len(arr))
+                    generator = (
+                        "np.array([np.flip(rep) if enum % 2 == 0 else rep for enum, rep in enumerate(np.repeat("
+                        "np.repeat(np.linspace({0}, {1}, {2}).reshape({2}, 1), {3},"
+                        " axis=1).flatten().reshape(1, {5}), {4}, axis=0))]).flatten()"
+                    ).format(starts[k], stops[k], steps[k], lens, reps, len(arr))
                 else:
-                    generator = ('np.repeat(np.repeat(np.linspace({0}, {1}, {2}).reshape({2}, 1), {3}, axis=1).flatten()'
-                             '.reshape(1, {5}), {4}, axis=0).flatten()').format(
-                    starts[k], stops[k], steps[k], lens, reps, len(arr))
+                    generator = (
+                        "np.repeat(np.repeat(np.linspace({0}, {1}, {2}).reshape({2}, 1), {3}, axis=1).flatten()"
+                        ".reshape(1, {5}), {4}, axis=0).flatten()"
+                    ).format(starts[k], stops[k], steps[k], lens, reps, len(arr))
             self.listGeneratorEdits[k].setText(generator)
 
     def update_values(self):
-        parnames = [self.parameterCombos[i].currentText() for i in range(self.number_scans)]
-        if self.nameEdit.text() != '--NONE--':
-            scannedvalues = {'parameters': parnames,
-                             'starts': [self.startSpins[i].value() * self.startSpins[i].multiplier for i in range(self.number_scans)],
-                             'ends': [self.stopSpins[i].value() * self.stopSpins[i].multiplier for i in range(self.number_scans)],
-                             'stepsl': [self.stepsSpins[i].value() for i in range(self.number_scans)],
-                             'listgenerators': [self.listGeneratorEdits[i].text() for i in range(self.number_scans)],
-                             'Randomize': self.randomize.isChecked(),
-                             'number_scans': self.number_scans,
-                             'nDscan': self.n_dim.isChecked(),
-                             'snake_scan': self.tickbox_snake_scan.isChecked()
-                             }
+        parnames = [
+            self.parameterCombos[i].currentText() for i in range(self.number_scans)
+        ]
+        if self.nameEdit.text() != "--NONE--":
+            scannedvalues = {
+                "parameters": parnames,
+                "starts": [
+                    self.startSpins[i].value() * self.startSpins[i].multiplier
+                    for i in range(self.number_scans)
+                ],
+                "ends": [
+                    self.stopSpins[i].value() * self.stopSpins[i].multiplier
+                    for i in range(self.number_scans)
+                ],
+                "stepsl": [
+                    self.stepsSpins[i].value() for i in range(self.number_scans)
+                ],
+                "listgenerators": [
+                    self.listGeneratorEdits[i].text() for i in range(self.number_scans)
+                ],
+                "Randomize": self.randomize.isChecked(),
+                "number_scans": self.number_scans,
+                "nDscan": self.n_dim.isChecked(),
+                "snake_scan": self.tickbox_snake_scan.isChecked(),
+            }
             self.exp_window.experiment._props.set(
-                'scans/' + self.nameEdit.text(),
-                scannedvalues)
+                "scans/" + self.nameEdit.text(), scannedvalues
+            )
         self.done(0)
 
 
@@ -929,17 +1094,17 @@ class QDock(QDockWidget):
     """
 
     def __init__(self, parent=None):
-        super().__init__('', parent)
+        super().__init__("", parent)
 
-        qSplitter = QSplitter(Qt.Vertical)
+        qSplitter = QSplitter(Qt.Horizontal)
         qSplitter.addWidget(parent.prepStation)
         qSplitter.addWidget(parent.queue)
 
-        loopSplitter = QSplitter(Qt.Horizontal)
-        loopSplitter.addWidget(qSplitter)
-        loopSplitter.addWidget(parent.looper)
+        # loopSplitter = QSplitter(Qt.Horizontal)
+        # loopSplitter.addWidget(qSplitter)
+        # loopSplitter.addWidget(parent.looper)
 
-        self.setWidget(loopSplitter)
+        self.setWidget(qSplitter)
 
 
 class BaliFileSelector(QWidget):
@@ -957,7 +1122,9 @@ class BaliFileSelector(QWidget):
         model = QDirModel()
         tree.setModel(model)
         tree.setColumnWidth(0, 250)
-        tree.setRootIndex(model.index(self.props.get('experiments_dir', tweezerpath + '/experiments')))
+        tree.setRootIndex(
+            model.index(self.props.get("experiments_dir", tweezerpath + "/experiments"))
+        )
         tree.setColumnHidden(1, True)
         tree.doubleClicked.connect(self.open_file)
         tree.header().hideSection(2)
@@ -999,7 +1166,7 @@ class BaliFileSelector(QWidget):
         index = self.tree.currentIndex()
         filename = self.tree.model().filePath(index)
         self.browser.open_experiment(filename)
-        
+
     def terminate(self):
         pass
 
@@ -1019,7 +1186,7 @@ def filepath_split(filepath):
 def main():
     qApp = QApplication(sys.argv)
     icon = QtGui.QIcon()
-    icon.addFile(icon_path+'pytweezer_experiment_browser_icon.svg')
+    icon.addFile(icon_path + "pytweezer_experiment_browser_icon.svg")
     qApp.setWindowIcon(icon)
     Win = BaliBrowser()
     Win.show()
@@ -1035,15 +1202,15 @@ def main():
 
 
 def exception_hook(exctype, value, traceback):
-    print_error('tweezer_browser.py: error {0} {1}'.format(exctype, value), 'error')
+    print_error("tweezer_browser.py: error {0} {1}".format(exctype, value), "error")
     print(traceback)
     sys._excepthook(exctype, value, traceback)
     sys.exit(1)
 
 
 # Start Qt event loop unless running in interactive mode or using pyside.
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys
 
-    if (sys.flags.interactive != 1) or not hasattr(Qt, 'PYQT_VERSION'):
+    if (sys.flags.interactive != 1) or not hasattr(Qt, "PYQT_VERSION"):
         main()

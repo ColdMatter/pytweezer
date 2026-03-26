@@ -4,10 +4,8 @@ import time
 from datetime import datetime
 
 from PyQt5 import QtGui, QtCore,QtWidgets
-from PyQt5.QtWidgets import *
+from PyQt5.QtWidgets import QFrame, QHBoxLayout, QPushButton, QGridLayout, QLabel
 import numpy as np
-from PyQt5.QtCore import Qt
-from pytweezer import *
 from os.path import isfile
 from os import listdir, remove
 from pytweezer.GUI.pytweezerQt import BWidget
@@ -16,7 +14,6 @@ from pytweezer.servers import tweezerpath, icon_path
 import subprocess
 from pytweezer.analysis.print_messages import print_error
 import signal
-from pytweezer.servers import Properties
 
 
 class SingleProcess(QFrame):
@@ -56,76 +53,6 @@ class SingleProcess(QFrame):
         self.timer.setInterval(1000)          # Throw event timeout with an interval of 1000 milliseconds
         self.timer.timeout.connect(self.updateStatus) # each time timer counts a second, call self.blink
         self.timer.start()
-
-        if self.category + self.processname == 'Servers/CameraHub':
-            self._props = Properties(name)
-            self.camerahub_restart_timer = QtCore.QTimer()
-            self.camerahub_restart_timer.timeout.connect(self.check_camera_force_ip)
-            self.camerahub_restart_timer.start(int(5e3))  # every 20 sec
-
-    def check_camera_force_ip(self):
-        cameras = ['Axial', 'RadBa', 'Beamprofiler']
-        if self._props.get('/Cameras/auto_force_ip', False):
-            print_error('\nprocessmanager.py - check_force_ip(): Restarting the camerahub.\n', 'warning')
-            self._props.set('/BaliBrowser/ExperimentQ/pause_requested', True)
-
-            timeout = 60  # s
-            time_step = 0.5  # s
-            enum = 0
-            while not self._props.get('/BaliBrowser/ExperimentQ/pausing', False):
-                time.sleep(0.5)  # s
-                enum += 1
-                if enum >= timeout / time_step:
-                    print_error('processmanager.py - ExperimentQ won\'t pause.', 'error')
-                    break
-            print_error('processmanager.py - check_force_ip(): ExperimentQ is pausing.', 'info')
-
-            # Now, the ExperimentQ is pausing
-            time.sleep(0.5)  # s
-
-            error_restart = False
-            try:
-                for cam in cameras:
-                    self._props.set('/Cameras/{0}/init_done'.format(cam), False)
-                    self._props.set('/Cameras/{0}/init_error'.format(cam), False)
-                time.sleep(1)  # s
-                print_error('processmanager.py - check_force_ip(): Starting process...', 'info')
-                self.startProcess()
-
-                # Now, wait with timeout for the camera hub to finish
-                enum = 0
-                while True:
-                    done = True
-                    for cam in cameras:
-                        if self._props.get('/Cameras/{0}/init_error'.format(cam), True):
-                            break
-                        done = done and self._props.get('/Cameras/{0}/init_done'.format(cam), False)
-                    if done:
-                        break
-
-                    time.sleep(0.5)  # s
-                    enum += 1
-                    if enum >= timeout / time_step:
-                        error_restart = True
-                        print_error('processmanager.py - Camera won\'t be initialized.', 'error')
-                        break
-
-                # Camera hub started or timeout occurred.
-
-                for cam in cameras:
-                    error_restart = error_restart or self._props.get('/Cameras/{0}/init_error'.format(cam), True)
-
-                time.sleep(0.5)  # s
-                if not error_restart:
-                    self._props.set('/Cameras/auto_force_ip', False)
-                    self._props.set('/BaliBrowser/ExperimentQ/play_requested', True)
-                    print_error('processmanager.py - check_force_ip(): Done, flags reset.', 'info')
-                else:
-                    print_error('processmanager.py - check_camera_force_ip(): Restarting the camerahub '
-                                'failed.', 'error')
-            except Exception as e:
-                print_error('processmanager.py - check_camera_force_ip(): Restarting the camerahub failed with '
-                            'exception:\n{0}'.format(e), 'error')
 
     def __del__(self):
         print('__del__',self.processname)
@@ -167,27 +94,29 @@ class SingleProcess(QFrame):
 
 class ProcessManager(BWidget):
 
-    def __init__(self,parent=None):
+    def __init__(self, parent=None):
         super().__init__('ProcessManager', parent, create_props=False)
         self.setStyleSheet("ProcessManager {background-color: rgb(195,205,230);color:blue; margin:0px; border:5px solid rgb(0, 0, 80);} ")
-        layout=QGridLayout()
-        layout.setContentsMargins(0,0,0,0)
+        layout = QGridLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(1)
-        conf=ConfigReader.getConfiguration()
-        cmdlist=[]
-        self.processlist=[]   #enshure child classes are properly destroyed
-        for cnum,category in enumerate(['Servers', 'Driver', 'GUI', 'Viewer', 'InfluxDB']):
+        conf = ConfigReader.getConfiguration()
+        cmdlist = []
+        self.processlist = []   # ensure child classes are properly destroyed
+        
+        # Only show GUI and Viewer categories (not Servers)
+        for cnum, category in enumerate(['GUI', 'Viewer']):
             if category in conf:
-                line=1
-                layout.addWidget(QLabel(category),line,cnum)
+                line = 1
+                layout.addWidget(QLabel(category), line, cnum)
                 for name, param in sorted(conf[category].items())[::-1]:
                     tooltip = None
                     if 'tooltip' in param:
                         tooltip = param['tooltip']
                     process = SingleProcess(tweezerpath + '/bin/' + param['script'], name,
-                                            param['active'], category+'/', tooltip=tooltip)
-                    line=line+1
-                    layout.addWidget(process,line,cnum)
+                                            param['active'], category + '/', tooltip=tooltip)
+                    line = line + 1
+                    layout.addWidget(process, line, cnum)
                     self.processlist.append(process)
         self.setLayout(layout)
 
@@ -195,18 +124,18 @@ class ProcessManager(BWidget):
         super().move(x,y)
         print(x)
 
-    def closeEvent(self,event):
-        ''' on shutdown terminate daemon processes first '''
+    def closeEvent(self, event):
+        '''on shutdown terminate all GUI/Viewer processes'''
         for p in self.processlist:
             p.terminateProcess()
-        print_error('processmanager.py: Terminated all processes.', 'info')
+        print_error('processmanager.py: Terminated all GUI/Viewer processes.', 'info')
 
         # Backup the following two files, since they are often corrupt after restart:
         # /home/bali/scripts/pytweezer/configuration/properties/properties.json
 
         path = '../pytweezer/configuration/properties/'
-        for fname in ['properties.json']:
-            backup_file(path, fname)
+        # for fname in ['properties.json']:
+        #     backup_file(path, fname)
         # TODO: Auto-load last backup when crashed while restart
 
         event.accept()

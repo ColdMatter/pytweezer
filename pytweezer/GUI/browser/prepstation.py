@@ -15,6 +15,7 @@ from pytweezer.analysis.floating_point_arithmetics import round_floating_prec
 from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import tweezerpath, icon_path
 from pytweezer.GUI.models import PrepModel
+from pytweezer.servers.model_sync import SyncedPrepModel
 from pytweezer.GUI.arg_boxes import FloatBox, BoolBox, ComboBox
 
 
@@ -64,11 +65,11 @@ class PrepStation(QGroupBox):
         pushButton.clicked.connect(self.push)
         self.buttonLayout.addWidget(pushButton)
 
-        loopButton = QPushButton('')
-        loopButton.setMaximumWidth(30)
-        loopButton.setIcon(QtGui.QIcon(icon_path + 'right_arrow.svg'))
-        loopButton.clicked.connect(self.push_to_looper)
-        self.buttonLayout.addWidget(loopButton)
+        # loopButton = QPushButton('')
+        # loopButton.setMaximumWidth(30)
+        # loopButton.setIcon(QtGui.QIcon(icon_path + 'right_arrow.svg'))
+        # loopButton.clicked.connect(self.push_to_looper)
+        # self.buttonLayout.addWidget(loopButton)
 
         # pushAllButton = QPushButton('Push All')
         # pushAllButton.clicked.connect(self.push_all_clicked)
@@ -113,11 +114,11 @@ class PrepStation(QGroupBox):
         push_action.setShortcutContext(Qt.WidgetShortcut)
         self.table.addAction(push_action)
 
-        loop_action = QAction("Loop", self.table)
-        loop_action.triggered.connect(partial(self.push_to_looper))
-        loop_action.setShortcuts(["SHIFT+SPACE", "Ctrl+SPACE"])
-        loop_action.setShortcutContext(Qt.WidgetShortcut)
-        self.table.addAction(loop_action)
+        # loop_action = QAction("Loop", self.table)
+        # loop_action.triggered.connect(partial(self.push_to_looper))
+        # loop_action.setShortcuts(["SHIFT+SPACE", "Ctrl+SPACE"])
+        # loop_action.setShortcutContext(Qt.WidgetShortcut)
+        # self.table.addAction(loop_action)
 
         edit_action = QAction("Edit", self.table)
         edit_action.triggered.connect(self.open_editor)
@@ -138,7 +139,7 @@ class PrepStation(QGroupBox):
         self.table.addAction(save_action)
 
     def set_model(self):
-        self.tableModel = PrepModel(self.prepList)
+        self.tableModel = SyncedPrepModel(self.prepList)
         self.table.setModel(self.tableModel)
         self.prep_layout.addWidget(self.table)
 
@@ -184,14 +185,14 @@ class PrepStation(QGroupBox):
     def push_row(self, row):
         self._task.value += 1
         newTaskNr = self._task.value
-        self.prepList[row]['task'] = newTaskNr
-        if self.prepList[row]['status'] != 'Sleeping':
-            if QDateTime.fromString(self.prepList[row]['dueDateTime']) < QDateTime.currentDateTime():
-                self.prepList[row]['status'] = 'Queued'
+        self.tableModel[row]['task'] = newTaskNr
+        if self.tableModel[row]['status'] != 'Sleeping':
+            if QDateTime.fromString(self.tableModel[row]['dueDateTime']) < QDateTime.currentDateTime():
+                self.tableModel[row]['status'] = 'Queued'
             else:
-                self.prepList[row]['status'] = 'Waiting'
-        task_dict = self.prepList[row].copy()
-        task_dict['experiment'] = get_experiment(task_dict['filepath'], self.browser)
+                self.tableModel[row]['status'] = 'Waiting'
+        task_dict = self.tableModel[row].copy()
+        # task_dict['experiment'] = get_experiment(task_dict['filepath'], self.browser)
         print_error('\nprepstation.py - push_row(): Submitted task dict:\n{0}\n'.format(task_dict), 'weak')
         self.queue.tableModel[newTaskNr] = task_dict
         self.update_prep_file()
@@ -216,12 +217,12 @@ class PrepStation(QGroupBox):
                         self.table.setCurrentIndex(i)
         self.update_prep_file()
 
-        self.browser.looper.startup = True
-        for group in self.browser.looper.groupDict.values():
-            for item in group.groupItemList:
-                item.update_nr_box()
-        self.browser.looper.startup = False
-        self.browser.looper.update_loop_file()
+        # self.browser.looper.startup = True
+        # for group in self.browser.looper.groupDict.values():
+        #     for item in group.groupItemList:
+        #         item.update_nr_box()
+        # self.browser.looper.startup = False
+        # self.browser.looper.update_loop_file()
 
     def set_sleeping(self):
         """Set the task as sleeping before sending"""
@@ -234,11 +235,11 @@ class PrepStation(QGroupBox):
             else:
                 self.tableModel[row]['status'] = 'Sleeping'
 
-    def push_to_looper(self):
-        idx = self.table.selectedIndexes()
-        if idx:
-            row = idx[0].row()
-            self.browser.looper.tabWidget.currentWidget().baustelle.add_task_item(row)
+    # def push_to_looper(self):
+    #     idx = self.table.selectedIndexes()
+    #     if idx:
+    #         row = idx[0].row()
+    #         self.browser.looper.tabWidget.currentWidget().baustelle.add_task_item(row)
 
     def move_up(self):
         idx = self.table.selectedIndexes()
@@ -247,7 +248,9 @@ class PrepStation(QGroupBox):
             row = idx.row()
             column = idx.column()
             if row != 0:
-                self.prepList[row], self.prepList[row-1] = self.prepList[row-1], self.prepList[row]
+                # Swap in the model's backing store
+                self.tableModel.backing_store[row], self.tableModel.backing_store[row-1] = \
+                    self.tableModel.backing_store[row-1], self.tableModel.backing_store[row]
                 self.tableModel.layoutChanged.emit()
                 newIndex = self.tableModel.index(row-1, column)
                 self.table.setCurrentIndex(newIndex)
@@ -261,7 +264,9 @@ class PrepStation(QGroupBox):
             row = idx.row()
             column = idx.column()
             if row != self.tableModel.rowCount()-1:
-                self.prepList[row], self.prepList[row+1] = self.prepList[row+1], self.prepList[row]
+                # Swap in the model's backing store
+                self.tableModel.backing_store[row], self.tableModel.backing_store[row+1] = \
+                    self.tableModel.backing_store[row+1], self.tableModel.backing_store[row]
                 self.tableModel.layoutChanged.emit()
                 newIndex = self.tableModel.index(row+1, column)
                 self.table.setCurrentIndex(newIndex)
@@ -270,7 +275,8 @@ class PrepStation(QGroupBox):
 
     def update_prep_file(self):
         with open(tweezerpath+'/configuration/tweezer_browser/prepfile.json', 'w') as f:
-            json.dump(self.prepList, f, indent=4)
+            # Save from the synced model's backing store, not the stale prepList
+            json.dump(self.tableModel.backing_store, f, indent=4)
             
 
     def open_editor(self):

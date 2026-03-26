@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import QHeaderView, QGroupBox, QDialog
 
 from pytweezer.servers import Properties, tweezerpath, icon_path, PropertyAttribute, DataClient
 from pytweezer.GUI.models import ScheduleModel, PrepModel
+from pytweezer.servers.model_sync import SyncedScheduleModel
 
 
 class ExperimentQ(QGroupBox):
@@ -38,6 +39,8 @@ class ExperimentQ(QGroupBox):
         self.testlist = PropertyAttribute('testlist', [], parent=self)
 
         self.lock = False
+        self._selected_task_key = None
+        self._selected_column = 0
 
     def create_buttons(self):
         self.pauseButton = QPushButton('')
@@ -105,8 +108,9 @@ class ExperimentQ(QGroupBox):
         self.table.setContextMenuPolicy(Qt.ActionsContextMenu)
 
         self.expDict = {}
-        self.tableModel = ScheduleModel(self.expDict)
+        self.tableModel = SyncedScheduleModel()
         self.table.setModel(self.tableModel)
+        self._connect_model_selection_preservation(self.tableModel)
 
         cw = QtGui.QFontMetrics(self.font()).averageCharWidth()
         h = self.table.horizontalHeader()
@@ -118,6 +122,43 @@ class ExperimentQ(QGroupBox):
         """Sets a new model for the table"""
         self.tableModel = model
         self.table.setModel(self.tableModel)
+        self._connect_model_selection_preservation(self.tableModel)
+
+    def _connect_model_selection_preservation(self, model):
+        model.modelAboutToBeReset.connect(self._remember_selection)
+        model.modelReset.connect(self._restore_selection)
+
+    def _remember_selection(self):
+        idx = self.table.selectedIndexes()
+        if not idx:
+            self._selected_task_key = None
+            self._selected_column = 0
+            return
+
+        current = idx[0]
+        row = current.row()
+        if row < 0 or row >= len(self.tableModel.row_to_key):
+            self._selected_task_key = None
+            self._selected_column = 0
+            return
+
+        self._selected_task_key = self.tableModel.row_to_key[row]
+        self._selected_column = current.column()
+
+    def _restore_selection(self):
+        if self._selected_task_key is None:
+            return
+
+        try:
+            row = self.tableModel.row_to_key.index(self._selected_task_key)
+        except ValueError:
+            self._selected_task_key = None
+            return
+
+        column = min(self._selected_column, max(0, self.tableModel.columnCount() - 1))
+        new_index = self.tableModel.index(row, column)
+        self.table.setCurrentIndex(new_index)
+        self.table.selectRow(row)
 
     def delete_clicked(self):
         """Deletes a task from the queue, or terminates gracefully if already running"""

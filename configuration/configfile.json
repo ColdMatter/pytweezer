@@ -9,23 +9,34 @@
             "script": "../pytweezer/GUI/streammonitor.py"
         },
         "H5 Manager": {
-            "active" : true,
+            "active" : false,
             "script": "../pytweezer/GUI/h5storage.py"
         },
         "Property_Editor": {
-            "active": true,
+            "active": false,
             "script": "../pytweezer/GUI/property_editor.py"
         },
         "Live Plot": {
-            "active": true,
+            "active": false,
             "script": "../pytweezer/GUI/viewers/live_plot.py"
         },
         "Analysis Manager": {
-            "active": true,
+            "active": false,
             "script": "../pytweezer/GUI/analysismanager.py"
         }
     },
     "Servers": {
+        "Model Sync": {
+            "active": true,
+            "script": "../pytweezer/servers/model_sync.py"
+        },
+        "Dummy MotMaster Server": {
+            "active": true,
+            "script": "../pytweezer/experiment/motmaster_server.py",
+            "host": "0.0.0.0",
+            "port": 5557,
+            "simulate": true
+        },
         "Imagehub": {
             "active": true,
             "pub": "tcp://localhost:1111",
@@ -69,6 +80,10 @@
             "active": true,
             "script": "../pytweezer/servers/imagelogger.py"
         },
+        "Experiment Manager": {
+            "active": true,
+            "script": "../pytweezer/servers/experiment_manager.py"
+        },
         "Elephant": {
             "active": false,
             "script": "../pytweezer/GUI/mighty.py"
@@ -76,7 +91,7 @@
     },
     "Viewer": {
         "DummyViewer": {
-            "active": true,
+            "active": false,
             "script": "../pytweezer/GUI/viewers/image_group.py"
         }
     }

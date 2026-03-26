@@ -11,15 +11,7 @@ import sys
 import numpy as np
 from configuration.device_db import device_db
 from pytweezer.servers import DataClient, Properties
-
-# NOTE: these imports will only work with the pythonnet package
-try:
-    import clr
-    from System.Collections.Generic import Dictionary
-    from System import String, Object
-    from System import Activator
-except Exception as e:
-    print(f"Error: {e} encountered, probably no pythonnet")
+from pytweezer.experiment.motmaster_client import MotMasterClient
 
 # config dir is relative to the root of the repository, which is added to the path when pytweezer is installed, so should be findable from anywhere in the code using a relative path from the root. If this becomes an issue we can add some code to find the config dir based on the location of this file.
 CONFIG_DIR = "pytweezer/configuration"
@@ -27,99 +19,41 @@ PROPERTIES_FILE = CONFIG_DIR + "/properties.json"
 DEFAULTS_FILE = CONFIG_DIR + "/defaults.json"
 EXPERIMENTS_FILE = CONFIG_DIR + "/experiments.json"
 
+def get_experiment(filepath, name):
+    """Load an experiment class from a given file path. The file should contain exactly one subclass of Experiment, which will be returned."""
+    try:
+        module_name = f"_experiment_{name}"
+        spec = importlib.util.spec_from_file_location(module_name, filepath)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {filepath}")
 
-class MotMasterInterface:
-    def __init__(self, interval: Union[int, float] = 0.1) -> None:
-        with open(PROPERTIES_FILE, "r") as f:
-            self.config = json.load(f)
-        self.root = pathlib.Path(self.config["script_root_path"])
-        self.interval = interval
-        self.motmaster = None
-        self.script = None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
 
-    def _add_ref(self, path: str) -> None:
-        _path = pathlib.Path(path)
-        sys.path.append(_path.parent)
-        clr.AddReference(path)
-        return None
+        candidates = [
+            obj
+            for _, obj in inspect.getmembers(module, inspect.isclass)
+            if issubclass(obj, Experiment)
+            and obj is not Experiment
+            and obj.__module__ == module.__name__
+        ]
 
-    def connect(self) -> None:
-        for path in self.config["dll_paths"].values():
-            clr.AddReference(path)
-        for key, path_info in self.config.items():
-            if key == "dll_paths":
-                for path in path_info.values():
-                    self._add_ref(path)
-            elif key == "motmaster":
-                self._add_ref(path_info["exe_path"])
-                try:
-                    import MOTMaster
-
-                    self.motmaster = Activator.GetObject(
-                        MOTMaster.Controller, path_info["remote_path"]
-                    )
-                    print("Connected to MotMaster.")
-                except Exception as e:
-                    print(f"Error: {e} encountered")
-            elif key == "caf_hardware_controller":
-                self._add_ref(path_info["exe_path"])
-                try:
-                    import MoleculeMOTHadwareControl
-
-                    self.hardware_controller = Activator.GetObject(
-                        MoleculeMOTHadwareControl.Controller, path_info["remote_path"]
-                    )
-                except Exception as e:
-                    print(f"Error: {e} encountered")
-
-    def disconnect(self) -> None:
-        self.stage.close()
-        return None
-
-    def set_motmaster_experiment(
-        self,
-        script: str,
-    ):
-        self.script = script
-        path = str(self.root.joinpath(f"{script}.cs"))
-        try:
-            self.motmaster.SetScriptPath(path)
-            print(f"MotMaster script set to {script}.")
-        except Exception as e:
-            print(f"Error: {e} encountered")
-        return None
-
-    def set_motmaster_dictionary(self):
-        self.parameter_dictionary = Dictionary[String, Object]()
-        with open(DEFAULTS_FILE, "r") as f:
-            default_parameters = json.load(f)
-        for key, value in default_parameters.items():
-            self.parameter_dictionary[key] = value
-
-    def start_motmaster_experiment(
-        self,
-    ):
-        if self.script is None:
+        if len(candidates) != 1:
             raise ValueError(
-                "MotMaster script not set. Please call set_motmaster_experiment first."
+                f"Expected exactly one Experiment subclass in {filepath}, found {len(candidates)}"
             )
-        try:
-        
-            self.motmaster.Go(self.parameter_dictionary)
-            time.sleep(self.interval)
-        except Exception as e:
-            print(f"Error starting MotMaster experiment {self.script}: {e}")
-        return None
 
-    def get_params(self):
-        return dict(self.motmaster.GetParameters())
-
+        experiment_cls = candidates[0]
+        return experiment_cls
+    except Exception as e:
+        print(f"Error loading experiment from {filepath}: {e}")
+        raise e
 
 class Experiment:
     motmaster_script: Optional[str] = None
     _gui_columns = 4
 
-    def __init__(self, props, motmaster_interface: Optional[MotMasterInterface] = None):
+    def __init__(self, props, motmaster_client: Optional[MotMasterClient] = None):
         self.name = self.__class__.__name__
         self._props = Properties("Experiments/" + self.name)
         self._dataq = DataClient("Experiment")
@@ -127,17 +61,15 @@ class Experiment:
         print(f"Loaded device database: {self._device_db}")
         self.devices = {}
         self._arguments = []
-        self._motmaster_interface = motmaster_interface
+        self._motmaster_client = motmaster_client
         self._task = 0
         self._run = 0
         self._rep = 0
-        if self.motmaster_script is not None and self._motmaster_interface is None:
-            raise ValueError(
-                "MotMaster interface is required when a script is specified."
-            )
-        if self._motmaster_interface is not None:
-            self._motmaster_interface.set_motmaster_experiment(self.motmaster_script)
-            self._motmaster_interface.set_motmaster_dictionary()
+        self._experiment_params: dict = {}
+        if self.motmaster_script is not None and self._motmaster_client is None:
+            self._motmaster_client = MotMasterClient()
+        if self._motmaster_client is not None:
+            self._motmaster_client.set_script(self.motmaster_script)
             self.mm_params = []
 
     def _start_build(self):
@@ -196,23 +128,31 @@ class Experiment:
         This method should be used to set up the experiment, e.g. by calling setattr_device and defining any other necessary attributes that will be constant throughout the experiment.
         """
         if self.motmaster_script is not None:
-            for param_name in self._motmaster_interface.parameter_dictionary.keys():
-                self.setattr_mm_param(param_name)
+            response = self._motmaster_client.get_params()
+            if response.get("ok"):
+                params = response.get("params", {})
+                for param_name in params.keys():
+                    self.setattr_mm_param(param_name)
 
     def pre_run(self):
         """
         This method is called before each run, e.g. for reinitialising devices.
         """
         if self.motmaster_script is not None:
+            self._experiment_params = {}
             for param in self.mm_params:
                 name = param.name
-                self._motmaster_interface.parameter_dictionary[name] = param.value
+                self._experiment_params[name] = getattr(self, name)
 
     def run(self):
         """
         This method will usually only need to trigger the motmaster pattern.
         """
-        self._motmaster_interface.start_motmaster_experiment()
+        if self._motmaster_client:
+            if self._experiment_params:
+                self._motmaster_client.start_experiment(parameters=self._experiment_params)
+            else:
+                self._motmaster_client.start_experiment()
 
     def post_run(self):
         """
@@ -252,11 +192,17 @@ class Experiment:
 
     def setattr_mm_param(self, param_name):
         """Create an attribute for a MotMaster parameter, which can be modified by the user in the GUI."""
-        if self._motmaster_interface is None:
-            raise ValueError("MotMaster interface is not set.")
-        param_type = type(self._motmaster_interface.parameter_dictionary[param_name])
+        if self._motmaster_client is None:
+            raise ValueError("MotMaster client is not set.")
+        response = self._motmaster_client.get_params()
+        if not response.get("ok"):
+            raise ValueError(f"Failed to get MotMaster parameters: {response}")
+        param_dict = response.get("params", {})
+        if param_name not in param_dict:
+            raise ValueError(f"Parameter '{param_name}' not found in MotMaster parameters")
+        param_value = param_dict[param_name]
+        param_type = type(param_value)
         print(param_type)
-        param_value = self._motmaster_interface.parameter_dictionary[param_name]
         if param_type == int:
             param = NumberValue(
                 name=param_name,

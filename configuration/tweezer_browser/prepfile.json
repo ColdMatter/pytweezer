@@ -1,42 +1,22 @@
 [
     {
-        "task": 80,
-        "label": "param2: 0.0",
+        "task": 4,
+        "label": "sleep_time: 1.0",
         "expName": "dummy",
         "run": 0,
         "priority": 0,
         "args": {
-            "sleep_time": 1.0
+            "sleep_time": 3.0
         },
         "nRuns": 1,
         "scanpars": [],
         "scanvals": [],
-        "nReps": 0,
+        "nReps": 15,
         "scansequence": [],
         "repetition": 0,
         "terminated": false,
         "filepath": "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/dummy.py",
         "status": "Queued",
-        "dueDateTime": "Tue Mar 24 10:31:14 2026"
-    },
-    {
-        "task": 79,
-        "label": "param2: 0.0",
-        "expName": "dummy",
-        "run": 0,
-        "priority": 0,
-        "args": {
-            "sleep_time": 1.0
-        },
-        "nRuns": 1,
-        "scanpars": [],
-        "scanvals": [],
-        "nReps": 0,
-        "scansequence": [],
-        "repetition": 0,
-        "terminated": false,
-        "filepath": "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/dummy.py",
-        "status": "Queued",
-        "dueDateTime": "Tue Mar 24 10:37:23 2026"
+        "dueDateTime": "Thu Mar 26 13:06:25 2026"
     }
 ]

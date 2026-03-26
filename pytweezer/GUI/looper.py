@@ -20,6 +20,7 @@ from pytweezer.GUI.browser.prepstation import PrepStation
 from pytweezer.servers import tweezerpath, icon_path
 from pytweezer.GUI.browser.browser_workers import Worker
 from pytweezer.GUI.models import PrepModel
+from pytweezer.servers.model_sync import SyncedPrepModel
 from pytweezer.GUI.qled import LedIndicator
 from pytweezer.GUI.pytweezerQt import SearchComboBox
 from pytweezer.analysis.print_messages import print_error
@@ -43,7 +44,9 @@ class Looper(QGroupBox):
         self.browser = parent
         self._task = self.browser._task
         self.loopDir = tweezerpath + '/configuration/loops'
-        self.prepList = self.browser.prepStation.prepList
+        # Use the synced model's backing store for consistency with prep station changes
+        self.tableModel = self.browser.prepStation.tableModel
+        self.prepList = self.tableModel.backing_store
         self.keyList = PropertyAttribute('keyList', [], parent=self)
         self.dataManager = DataManager(self.keyList, self.props)
         self.dataDict = self.dataManager.dataDict  # dictionary for storing streamed data
@@ -577,7 +580,9 @@ class LoopItem(QFrame):
         self.group = parent.group
         self.loopManager = self.looper.loopManager
         self._task = self.browser._task
-        self.prepList = self.browser.prepStation.prepList
+        # Use the synced model's backing store
+        self.tableModel = self.browser.prepStation.tableModel
+        self.prepList = self.tableModel.backing_store
         self.props = parent.props
         self.groupItemList = parent.groupItemList
         self._props = parent._props
@@ -808,7 +813,7 @@ class TaskItem(LoopItem):
         self._task.value += 1
         newTaskNr = self._task.value
         task_dict = self.task.copy()
-        task_dict['experiment'] = get_experiment(task_dict['filepath'], self.browser)
+        # task_dict['experiment'] = get_experiment(task_dict['filepath'], self.browser)
         signals.addItem.emit(newTaskNr, task_dict)
 
     def end_run(self):
@@ -997,7 +1002,7 @@ class ListItem(TaskItem):
         newTaskNr = self._task.value
         task_dict = task.copy()
         experiment = get_experiment(task_dict['filepath'], self.browser)
-        task_dict['experiment'] = experiment
+        # task_dict['experiment'] = experiment
         if not experiment:
             print_error('Looper: experiment missing!', 'error')
             self.terminate()
@@ -1558,7 +1563,7 @@ class ListBox(PrepStation):
         self.table.addAction(delete_action)
 
     def set_model(self):
-        self.tableModel = PrepModel(self.taskList)
+        self.tableModel = SyncedPrepModel(self.taskList)
         self.table.setModel(self.tableModel)
         self.qlayout.addWidget(self.table)
 

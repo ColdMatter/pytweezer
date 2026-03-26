@@ -6,6 +6,7 @@ import zmq
 import threading
 import time
 import logging, sys
+from zmq.utils import jsonapi
 # logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 from pytweezer.analysis.print_messages import print_error
 """Configuration:  deep, fundamental property of the system.
@@ -86,6 +87,20 @@ class PropertyAttribute:
 
 class Properties(threading.Thread):
 
+    @staticmethod
+    def _configure_tcp_socket(socket, endpoint):
+        if isinstance(endpoint, str) and endpoint.startswith('tcp://'):
+            socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
+            if hasattr(zmq, 'TCP_KEEPALIVE_IDLE'):
+                socket.setsockopt(zmq.TCP_KEEPALIVE_IDLE, 60)
+            if hasattr(zmq, 'TCP_KEEPALIVE_INTVL'):
+                socket.setsockopt(zmq.TCP_KEEPALIVE_INTVL, 30)
+            if hasattr(zmq, 'TCP_KEEPALIVE_CNT'):
+                socket.setsockopt(zmq.TCP_KEEPALIVE_CNT, 5)
+            socket.setsockopt(zmq.RECONNECT_IVL, 100)
+            socket.setsockopt(zmq.RECONNECT_IVL_MAX, 2000)
+        socket.setsockopt(zmq.LINGER, 0)
+
     def __init__(self, name, initfromfile=False):
         threading.Thread.__init__(self, daemon=True)
         """ managing configuration and properties within bali control center
@@ -103,10 +118,14 @@ class Properties(threading.Thread):
         # iniitialize dictionaries
         self.properties_lock = threading.Lock()
         # initialize sockets
+        hub_sub_endpoint = conf['Servers']['Propertyhub']['sub']
+        hub_pub_endpoint = conf['Servers']['Propertyhub']['pub']
         self.pub_socket = zmqcontext.socket(zmq.PUB)
-        self.pub_socket.connect(conf['Servers']['Propertyhub']['sub'])
+        self._configure_tcp_socket(self.pub_socket, hub_sub_endpoint)
+        self.pub_socket.connect(hub_sub_endpoint)
         self.sub_socket = zmqcontext.socket(zmq.SUB)
-        self.sub_socket.connect(conf['Servers']['Propertyhub']['pub'])
+        self._configure_tcp_socket(self.sub_socket, hub_pub_endpoint)
+        self.sub_socket.connect(hub_pub_endpoint)
         self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "Prop")
 
         pub_mon = self.pub_socket.get_monitor_socket()
@@ -119,11 +138,18 @@ class Properties(threading.Thread):
         time.sleep(0.01)
         if not initfromfile:
             self.init_socket = zmqcontext.socket(zmq.REQ)
-            self.init_socket.connect(conf['Servers']['Propertylogger']['rep'])
-            self.init_socket.send_string('INIT?')
-            message = self.init_socket.recv_string()
-            self.properties = self.init_socket.recv_json()
-            pass
+            logger_endpoint = conf['Servers']['Propertylogger']['rep']
+            self._configure_tcp_socket(self.init_socket, logger_endpoint)
+            self.init_socket.setsockopt(zmq.RCVTIMEO, 5000)
+            self.init_socket.setsockopt(zmq.SNDTIMEO, 5000)
+            self.init_socket.connect(logger_endpoint)
+            try:
+                self.init_socket.send_string('INIT?')
+                self.init_socket.recv_string()
+                self.properties = self.init_socket.recv_json()
+            except Exception as error:
+                print_error(f'properties.py init handshake failed ({error}); falling back to property file', 'warning')
+                self.properties = cr.Properties()
         else:
             self.properties = cr.Properties()
         self.recent_changes = set()  # keeps recent changes
@@ -254,9 +280,16 @@ class Properties(threading.Thread):
 
     def _recv(self, flags=0):
         """recv a numpy array"""
-        message = self.sub_socket.recv_string(flags=flags)
+        parts = self.sub_socket.recv_multipart(flags=flags)
+        if len(parts) < 2:
+            return
+        message = parts[0].decode('utf-8', errors='ignore')
         logging.debug(self.name,' received: ',message)
-        md = self.sub_socket.recv_json(flags=flags)  # TODO: Causing properties to crash when s==None
+        try:
+            md = jsonapi.loads(parts[1])
+        except Exception as error:
+            print_error(f'properties.py malformed property payload: {error}', 'warning')
+            return
         # in _default_decoder.decode(s)
         # Triggered by pushing experiment with scan
         """
@@ -376,9 +409,12 @@ class Properties(threading.Thread):
 
 
     def run(self):
-        lasttime = 0
         while True:
-            self._recv()
+            try:
+                self._recv()
+            except Exception as error:
+                print_error(f'properties.py receive loop error: {error}', 'warning')
+                time.sleep(0.05)
 
 
 if __name__ == "__main__":

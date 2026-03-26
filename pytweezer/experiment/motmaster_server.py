@@ -11,6 +11,7 @@ import numpy as np
 import zmq
 import pythonnet
 import numbers
+from pytweezer.servers.configreader import ConfigReader
 
 # NOTE: these imports will only work with the pythonnet package
 try:
@@ -219,7 +220,7 @@ class  DummyMotMasterInterface(MotMasterInterface):
         pass
     
     def connect(self) -> None:
-        print("DummyMotMasterInterface: connect called, but no connection made.")
+        print("DummyMotMasterInterface: connect called.")
         self.motmaster = None
         self.script = None
         return None
@@ -228,12 +229,12 @@ class  DummyMotMasterInterface(MotMasterInterface):
         self,
         script: str,
     ):
-        print(f"DummyMotMasterInterface: set_motmaster_experiment called with script '{script}', but no experiment set.")
+        print(f"DummyMotMasterInterface: set_motmaster_experiment called with script '{script}'")
         self.script = script
         return None
     
     def set_motmaster_dictionary(self):
-        print("DummyMotMasterInterface: set_motmaster_dictionary called, but no dictionary set.")
+        print("DummyMotMasterInterface: set_motmaster_dictionary called")
         self.parameter_dictionary = {}
         return None
     
@@ -241,15 +242,14 @@ class  DummyMotMasterInterface(MotMasterInterface):
         self,
         parameters: Optional[dict] = None,
     ):
-        print(f"DummyMotMasterInterface: start_motmaster_experiment called with script '{self.script}', but no experiment started.")
+        print(f"DummyMotMasterInterface: start_motmaster_experiment called with script '{self.script}'")
         return None
     
     def get_params(self):
-        print("DummyMotMasterInterface: get_params called, but no parameters to return.")
-        return {}
+        return {"param1": 1, "param2": 2.0}
     
     def disconnect(self) -> None:
-        print("DummyMotMasterInterface: disconnect called, but no connection to close.")
+        print("DummyMotMasterInterface: disconnect called")
         return None
 
     def save_pattern_info(self, save_folder, file_tag, task_nr):
@@ -504,14 +504,60 @@ def run_motmaster_command_server(
     server.serve_forever()
 
 
+def _load_runtime_options_from_config(process_token: Optional[str]) -> dict:
+    defaults = {
+        "host": "0.0.0.0",
+        "port": 5557,
+        "simulate": False,
+        "interval": 0.1,
+    }
+
+    try:
+        conf = ConfigReader.getConfiguration()
+        servers = conf.get("Servers", {})
+
+        if isinstance(process_token, str) and process_token.startswith("Servers/"):
+            process_name = process_token.split("/", 1)[1]
+            entry = servers.get(process_name, {})
+            if isinstance(entry, dict):
+                defaults.update(
+                    {
+                        "host": entry.get("host", defaults["host"]),
+                        "port": entry.get("port", defaults["port"]),
+                        "simulate": entry.get("simulate", defaults["simulate"]),
+                        "interval": entry.get("interval", defaults["interval"]),
+                    }
+                )
+            return defaults
+
+        for _name, entry in servers.items():
+            if not isinstance(entry, dict):
+                continue
+            script = str(entry.get("script", ""))
+            if script.endswith("motmaster_server.py"):
+                defaults.update(
+                    {
+                        "host": entry.get("host", defaults["host"]),
+                        "port": entry.get("port", defaults["port"]),
+                        "simulate": entry.get("simulate", defaults["simulate"]),
+                        "interval": entry.get("interval", defaults["interval"]),
+                    }
+                )
+                break
+    except Exception as error:
+        print(f"Warning: failed to read runtime options from config: {error}")
+
+    return defaults
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run MotMaster ZeroMQ command server")
     parser.add_argument(
         "--host",
-        default="0.0.0.0",
+        default=None,
         help="Host interface to bind (use 0.0.0.0 for remote clients)",
     )
-    parser.add_argument("--port", type=int, default=5557, help="TCP port to bind")
+    parser.add_argument("--port", type=int, default=None, help="TCP port to bind")
     parser.add_argument(
         "--simulate",
         action="store_true",
@@ -520,16 +566,28 @@ def main() -> None:
     parser.add_argument(
         "--interval",
         type=float,
-        default=0.1,
+        default=None,
         help="Delay after starting MotMaster experiment (seconds)",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "process_token",
+        nargs="?",
+        default=None,
+        help="Optional process token passed by ProcessManager, e.g. Servers/Dummy MotMaster Server",
+    )
+    args, _unknown = parser.parse_known_args()
+
+    options = _load_runtime_options_from_config(args.process_token)
+    host = args.host if args.host is not None else options["host"]
+    port = args.port if args.port is not None else int(options["port"])
+    interval = args.interval if args.interval is not None else float(options["interval"])
+    simulate = args.simulate or bool(options["simulate"])
 
     run_motmaster_command_server(
-        host=args.host,
-        port=args.port,
-        interval=args.interval,
-        simulate=args.simulate,
+        host=host,
+        port=port,
+        interval=interval,
+        simulate=simulate,
     )
 
 
