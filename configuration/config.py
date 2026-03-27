@@ -1,103 +1,125 @@
-{
+HOST_DICT = {
+    "beast": "10.59.3.2",
+    "localhost": "127.0.0.1"
+}
+
+port_iterator = iter(range(3278, 99999))
+get_next_port = lambda: int(next(port_iterator))
+
+HOST = HOST_DICT["localhost"]
+
+SIMULATING = True
+
+CONFIG = {
     "GUI": {
         "Browser": {
-            "active": true,
+            "active": True,
             "script": "../pytweezer/GUI/tweezer_browser.py"
         },
         "StreamMonitor": {
-            "active": false,
+            "active": False,
             "script": "../pytweezer/GUI/streammonitor.py"
         },
         "H5 Manager": {
-            "active" : false,
+            "active": False,
             "script": "../pytweezer/GUI/h5storage.py"
         },
         "Property_Editor": {
-            "active": false,
+            "active": False,
             "script": "../pytweezer/GUI/property_editor.py"
         },
         "Live Plot": {
-            "active": false,
+            "active": False,
             "script": "../pytweezer/GUI/viewers/live_plot.py"
         },
         "Analysis Manager UI": {
-            "active": true,
+            "active": True,
             "script": "../pytweezer/GUI/analysismanager.py"
         }
 
     },
     "Servers": {
         "Analysis Manager": {
-            "active": false,
+            "active": False,
             "script": "../pytweezer/servers/analysis_manager.py",
-            "rep": "tcp://10.59.3.1:3111"
+            "host": HOST,
+            "port": get_next_port()
         },
         "Model Sync": {
-            "active": true,
-            "script": "../pytweezer/servers/model_sync.py"
+            "active": True,
+            "script": "../pytweezer/servers/model_sync.py",
+            "host": HOST,
+            "command_port": get_next_port(),
+            "pub_port": get_next_port(),
         },
         "MotMaster Server": {
-            "active": false,
+            "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
-            "host": "10.59.3.2",
-            "port": 5557,
-            "simulate": true
+            "host": HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING
         },
         "Imagehub": {
-            "active": true,
-            "pub": "tcp://10.59.3.1:1111",
-            "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://10.59.3.1:2101"
+            "active": True,
+            "host": HOST,
+            "pub_port": get_next_port(),
+            "sub_port": get_next_port(),
+            "script": "../pytweezer/servers/xsub_xpub.py", 
         },
         "Commandhub": {
-            "active": true,
-            "pub": "tcp://10.59.3.1:1112",
+            "active": True,
+            "host": HOST,
+            "pub_port": get_next_port(),
+            "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://10.59.3.1:2102"
         },
         "Datahub": {
-            "active": true,
-            "pub": "tcp://10.59.3.1:1113",
+            "active": True,
+            "host": HOST,
+            "pub_port": get_next_port(),
+            "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://10.59.3.1:2103"
         },
         "Propertyhub": {
-            "active": true,
-            "pub": "tcp://10.59.3.1:1114",
+            "active": True,
+            "host": HOST,
+            "pub_port": get_next_port(),
+            "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://10.59.3.1:2104"
         },
         "Messagehub": {
-            "active": true,
-            "pub": "tcp://10.59.3.1:1115",
+            "active": True,
+            "host": HOST,
+            "pub_port": get_next_port(),
+            "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
-            "sub": "tcp://10.59.3.1:2105"
         },
         "Propertylogger": {
-            "active": true,
+            "active": True,
             "script": "../pytweezer/servers/propertylogger.py",
-            "rep": "tcp://10.59.3.1:3106"
+            "host": HOST,
+            "port": get_next_port()
         },
         "Datalogger": {
-            "active": true,
+            "active": True,
             "script": "../pytweezer/servers/datalogger.py"
         },
         "Imagelogger": {
-            "active": true,
+            "active": True,
             "script": "../pytweezer/servers/imagelogger.py"
         },
         "Experiment Manager": {
-            "active": true,
+            "active": True,
             "script": "../pytweezer/servers/experiment_manager.py"
         },
         "Elephant": {
-            "active": false,
+            "active": False,
             "script": "../pytweezer/GUI/mighty.py"
         }
     },
     "Viewer": {
         "DummyViewer": {
-            "active": false,
+            "active": False,
             "script": "../pytweezer/GUI/viewers/image_group.py"
         }
     }

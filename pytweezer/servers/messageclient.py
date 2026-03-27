@@ -18,8 +18,12 @@ class MessageClient(GenericClient):
 
     def _connect(self):
         conf=ConfigReader.getConfiguration()
-        imgsub=conf['Servers']['Messagehub']['pub']
-        imgpub=conf['Servers']['Messagehub']['sub']
+        c = conf['Servers']['Messagehub']
+        host = c['host']
+        pub_port = c['pub_port']
+        sub_port = c['sub_port']
+        imgpub = f"tcp://{host}:{pub_port}"
+        imgsub = f"tcp://{host}:{sub_port}"
         #print(imgpub)
         self.pub_socket.connect(imgpub)
         self.sub_socket.connect(imgsub)
