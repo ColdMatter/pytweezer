@@ -6,16 +6,7 @@
         },
         "DataStream": {
             "maxStreamInactive[s]": 1000,
-            "active": {
-                "Experiment.start": {
-                    "timestamp": 1774548331.84619,
-                    "parts": 2
-                },
-                "Experiment.end": {
-                    "timestamp": 1774548332.4938316,
-                    "parts": 2
-                }
-            }
+            "active": {}
         },
         "ImageStream": {
             "active": {
@@ -50,7 +41,8 @@
             1129
         ],
         "OpenWindows": [
-            "C:/Users/tweez/ColdMatter/pytweezer/pytweezer/experiments/rbbasic_test.py"
+            "C:/Users/tweez/ColdMatter/pytweezer/pytweezer/experiments/rbbasic_test.py",
+            "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/rbbasic_test.py"
         ],
         "dummy": {
             "Geo": [
@@ -80,7 +72,7 @@
             "param2": 0,
             "_totalrun": 126
         },
-        "_task": 28,
+        "_task": 32,
         "RBBasicTest": {
             "scans": {},
             "param1": 0,
