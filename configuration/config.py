@@ -92,6 +92,7 @@ CONFIG = {
             "host": HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
+            "stream_name": "Global Messages",
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Propertylogger": {
@@ -113,9 +114,11 @@ CONFIG = {
             "script": "../pytweezer/servers/experiment_manager.py"
         },
         "ImagEM X2 Camera": {
-            "active": False,
+            "active": True,
             "script": "../pytweezer/servers/imagemx2_server.py",
-            "simulate": False,
+            "host": HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
             "stream_name": "imagemx2",
             "timeout": 5.0,
             "tooltip": "Persistent camera process; experiments should use ImagEMX2CameraClient"

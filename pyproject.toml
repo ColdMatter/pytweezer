@@ -64,11 +64,6 @@ pythonnet = "=3.0.5"    # .NET integration
 # iso8601 = "=2.1.0"      # from pip section
 scikit-image = "^0.26.0"
 pyvisa-py = "^0.8.1"
-
-
-
-
-[tool.poetry.group.dev.dependencies]
 sipyco = {git = "https://github.com/m-labs/sipyco.git"}
 
 [build-system]

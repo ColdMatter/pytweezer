@@ -244,7 +244,7 @@ class ScrollPlot(pg.PlotItem):
         d = QDialog()
         layout=QVBoxLayout()
         d.setWindowTitle("Select Data")
-        editor = PlotDataEditor(self.props, self.datadict, parent=self, preselect=self.dataname)
+        editor = PlotDataEditor(self.props, self.datadict, preselect=self.dataname)
         layout.addWidget(editor)
         d.setLayout(layout)
         d.exec_()

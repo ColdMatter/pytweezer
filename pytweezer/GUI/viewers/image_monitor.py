@@ -140,10 +140,8 @@ class ImageDisplay(QWidget):
 
     def update_image(self):
         if self.imgstream.has_new_data():
-            print("new data")
             while self.imgstream.has_new_data():
                 msg, head, imgdata = self.imgstream.recv()
-                print(f"msg: {msg}, head: {head}")
                 self.image_item.setImage(
                     imgdata, autoLevels=True
                 )
@@ -167,16 +165,6 @@ class ImageDisplay(QWidget):
                 )
                 # print(imgdata)
                 self.imgdata = imgdata
-                img_flat = imgdata.flatten()
-                imMin = imgdata.min()
-                self.imDataDict["imMin"] = imMin
-                imMax = imgdata.max()
-                self.imDataDict["imMax"] = imMax
-                imMean = imgdata.mean()
-                self.imDataDict["imMean"] = imMean
-                nDead = len(np.where(img_flat > 0.9 * self._maxlevels)[0])
-                self.imDataDict["nDead"] = nDead
-                # self.parent().imDataBox.setNewData(self.imDataDict)
         self.update_mask()
 
     def update_mask(self):

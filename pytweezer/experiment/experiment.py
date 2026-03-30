@@ -7,12 +7,15 @@ import pathlib
 import time
 import json
 import sys
+import subprocess
 
 import numpy as np
 import zmq
 from configuration.device_db import device_db
+from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import DataClient, Properties
 from pytweezer.experiment.motmaster_client import MotMasterClient
+from pytweezer.servers.clients import ImageClient
 
 # config dir is relative to the root of the repository, which is added to the path when pytweezer is installed, so should be findable from anywhere in the code using a relative path from the root. If this becomes an issue we can add some code to find the config dir based on the location of this file.
 CONFIG_DIR = "pytweezer/configuration"
@@ -53,11 +56,14 @@ def get_experiment(filepath, name):
 class Experiment:
     motmaster_script: Optional[str] = None
     _gui_columns = 4
+    _save_results_h5 = True
+    _results_h5_dir = ""
 
     def __init__(self, props, motmaster_client: Optional[MotMasterClient] = None, context: Optional[zmq.Context] = None):
         self.name = self.__class__.__name__
         self._props = Properties("Experiments/" + self.name)
-        self._dataq = DataClient("Experiment")
+        self._dataq = DataClient("Experiment/" + self.name)
+        self._imgq = ImageClient("Experiment/" + self.name)
         self._device_db = device_db
         self.devices = {}
         self.args: dict[str, Union["NumberValue", "StringCombo", "BoolValue"]] = {}
@@ -71,6 +77,8 @@ class Experiment:
             self._motmaster_client = MotMasterClient(context=context)
         if self._motmaster_client is not None:
             self._motmaster_client.set_script(self.motmaster_script)
+        self.result_channels: dict[str, Union[ResultChannel, ImageResultChannel]] = {}
+        self._last_start_info: dict = {}
 
     @property
     def _arguments(self):
@@ -153,7 +161,6 @@ class Experiment:
         """
         start a single run
         """
-        # change to __enter__ ???
         global globaltime
         global starttime
         global _experiment
@@ -188,13 +195,165 @@ class Experiment:
         }
         arguments = {name: arg.get() for name, arg in self.args.items()}
         mm_params = {name: arg.get() for name, arg in self.mm_args.items()}
-        info.update(arguments)
-        info.update(mm_params)
+        info["arguments"] = arguments
+        info["mm_params"] = mm_params
+        self._last_start_info = dict(info)
         self._dataq.send(info, channel=".start")
 
     def _publish_endvalues(self):
         info = {"_endtime": self._endtime}
+        result_payloads = {}
+        for name, channel in self.result_channels.items():
+            payload = channel.push()
+            if payload is not None:
+                result_payloads[name] = payload
         self._dataq.send(info, channel=".end")
+
+        if self._save_results_h5:
+            self._save_measurement_h5(start_info=self._last_start_info, end_info=info, results=result_payloads)
+
+    def _get_results_h5_dir(self) -> pathlib.Path:
+        if isinstance(self._results_h5_dir, str) and self._results_h5_dir.strip():
+            out_dir = pathlib.Path(self._results_h5_dir)
+        else:
+            base = self._props.get('/Servers/Imagepath', str(pathlib.Path.cwd() / 'Data'))
+            out_dir = pathlib.Path(base) / 'measurements_h5'
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir
+
+    @staticmethod
+    def _sanitize_h5_key(key: str) -> str:
+        return str(key).replace('/', '_').replace(' ', '_')
+
+    def _write_h5_value(self, group, key: str, value):
+        key = self._sanitize_h5_key(key)
+
+        if isinstance(value, dict):
+            sub = group.create_group(key)
+            for k, v in value.items():
+                self._write_h5_value(sub, str(k), v)
+            return
+
+        if isinstance(value, np.ndarray):
+            group.create_dataset(key, data=value)
+            return
+
+        if isinstance(value, (list, tuple)):
+            arr = np.asarray(value)
+            if arr.dtype == object:
+                group.create_dataset(key, data=np.asarray([str(v) for v in value], dtype='S'))
+            else:
+                group.create_dataset(key, data=arr)
+            return
+
+        if isinstance(value, (np.integer, int, np.floating, float, np.bool_, bool)):
+            group.attrs[key] = value
+            return
+
+        if isinstance(value, str):
+            group.attrs[key] = value
+            return
+
+        if value is None:
+            group.attrs[key] = 'None'
+            return
+
+        group.attrs[key] = str(value)
+
+    def _save_measurement_h5(self, start_info: dict, end_info: dict, results: dict):
+        try:
+            import h5py
+        except Exception as error:
+            print_error(f"Could not import h5py for measurement save: {error}", 'error')
+            return
+
+        run = int(start_info.get('_run', self._run))
+        rep = int(start_info.get('_repetition', getattr(self, '_repetition', self._rep)))
+        task = int(start_info.get('_task', 0))
+        filename = f"{self.name}_task{task}.h5"
+        path = self._get_results_h5_dir() / filename
+
+        try:
+            with h5py.File(path, 'a') as f:
+                f.attrs['experiment_name'] = self.name
+                f.attrs['task'] = task
+
+                base_group_name = f"run_{run:06d}_rep_{rep:04d}"
+                group_name = base_group_name
+                if group_name in f:
+                    i = 1
+                    while f"{base_group_name}_dup{i}" in f:
+                        i += 1
+                    group_name = f"{base_group_name}_dup{i}"
+
+                g_run = f.create_group(group_name)
+
+                g_start = g_run.create_group('start')
+                for k, v in start_info.items():
+                    self._write_h5_value(g_start, k, v)
+
+                g_end = g_run.create_group('end')
+                for k, v in end_info.items():
+                    self._write_h5_value(g_end, k, v)
+
+                g_res = g_run.create_group('results')
+                for name, payload in results.items():
+                    self._write_h5_value(g_res, name, payload)
+
+                g_git = g_run.create_group('git')
+                for k, v in self._get_git_repo_info().items():
+                    self._write_h5_value(g_git, k, v)
+
+            print_error(f"Saved measurement run to HDF5: {path} [{group_name}]", 'success')
+        except Exception as error:
+            print_error(f"Failed to save measurement HDF5 at {path}: {error}", 'error')
+
+    @staticmethod
+    def _run_git(repo_root: pathlib.Path, args: list[str]) -> str:
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(repo_root), *args],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if completed.returncode != 0:
+                return ""
+            return completed.stdout.strip()
+        except Exception:
+            return ""
+
+    def _get_git_repo_info(self) -> dict:
+        info = {
+            "available": False,
+            "repo_root": "",
+            "branch": "",
+            "commit": "",
+            "commit_short": "",
+            "dirty": False,
+            "remote_origin": "",
+        }
+
+        try:
+            start_path = pathlib.Path(__file__).resolve().parent
+            top = self._run_git(start_path, ["rev-parse", "--show-toplevel"])
+            if not top:
+                return info
+
+            repo_root = pathlib.Path(top)
+            info["available"] = True
+            info["repo_root"] = str(repo_root)
+            info["branch"] = self._run_git(repo_root, ["rev-parse", "--abbrev-ref", "HEAD"])
+            info["commit"] = self._run_git(repo_root, ["rev-parse", "HEAD"])
+            info["commit_short"] = self._run_git(repo_root, ["rev-parse", "--short", "HEAD"])
+            info["remote_origin"] = self._run_git(repo_root, ["config", "--get", "remote.origin.url"])
+
+            status = self._run_git(repo_root, ["status", "--porcelain"])
+            info["dirty"] = bool(status)
+        except Exception:
+            return info
+
+        return info
 
     def build(self):
         """
@@ -330,8 +489,47 @@ class Experiment:
         self.args[name] = arg_inst
         setattr(self, name, arg_inst)
         
+    def setattr_result(self, name, result_type: Optional[type] = None):
+        """Set a result value to be published at the end of the run."""
+        if result_type is None:
+            result_type = ResultChannel
+        channel = result_type(name, client=self._dataq if result_type is ResultChannel else self._imgq)
+        setattr(self, name, channel)
+        self.result_channels[name] = channel
+        
 
+class ResultChannel:
+    """Descriptor for experiment result values that should be published to the data channel at the end of each run."""
+    def __init__(self, name: str, client: DataClient):
+        self.name = name
+        self.client = client
+        self.data = None
+        
+    def set(self, value):
+        self.data = value
 
+    def push(self):
+        if self.data is None:
+            print_error(f"Result '{self.name}' has no data set. Use set_data() to set the value before pushing.")
+            return None
+        payload = {self.name: self.data}
+        self.client.send(payload, channel=".result")
+        return payload
+        
+class ImageResultChannel(ResultChannel):
+    """Descriptor for experiment result values that should be published to the image channel at the end of each run."""
+    
+    
+    def push(self):
+        if self.data is None:
+            print_error(f"Image result '{self.name}' has no image data set.")
+            return None
+        self.client: ImageClient
+        self.client.send(self.data, header={"name": self.name}, channel=".result")
+        return {self.name: self.data}
+
+        
+        
 class NumberValue:
     """floating point argument for experiment window
 

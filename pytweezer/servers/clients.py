@@ -246,10 +246,10 @@ class ImageClient(DataClient):
         """distribute ove ZMQ
 
         Args:
-            header (dict) :
-                data to be send (must be json serializable)
             data (np.array):
-                optional array of data
+                data array to be send (must be numpy array, will be converted to bytes and reconstructed on the other side according to the header info)
+            header (dict) :
+                optionsl dictionary with additional info about the data (must be json serializable)
             channel (string):
                 subchannel (will be appended to name when sending)
             flags (int):

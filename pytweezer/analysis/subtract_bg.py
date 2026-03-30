@@ -5,7 +5,7 @@ from pytweezer.servers import *
 import argparse
 from imageio import imread
 
-class ImageSubstract():
+class SubtractBackground():
     _imagestreams = PropertyAttribute('imagestreams',['None'])
     _background_path = PropertyAttribute('background_path', '[]')
     _bit_resolution_bg = PropertyAttribute('bit_resolution_bg', 16)
@@ -22,7 +22,7 @@ class ImageSubstract():
         if self._bit_resolution_bg != self._bit_resolution_im:
             self.background /= 2**(self._bit_resolution_bg-self._bit_resolution_im)
         print(self.background.dtype)
-        print('substract_image.py subscriptions: ',self._imagestreams)
+        print('subtract_background.py subscriptions: ',self._imagestreams)
 
     def run(self):
         prop=self._props
@@ -39,7 +39,7 @@ class ImageSubstract():
 
 
 def main_run(name):
-    sub = ImageSubstract(name)
+    sub = SubtractBackground(name)
     sub.run()
 
 if __name__ == "__main__":

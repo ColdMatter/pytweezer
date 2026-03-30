@@ -18,8 +18,8 @@ device_db = {
         "module": "pytweezer.drivers.imagemX2",
         "class": "ImagEMX2CameraClient",
         "parameters": {
-            "stream_name": "imagemx2",
-            "request_timeout": 10.0
+            "server_name": "ImagEM X2 Camera",
+            "timeout": 5.0
         }
     },
 }
