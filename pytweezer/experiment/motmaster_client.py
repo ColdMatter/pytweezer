@@ -13,9 +13,17 @@ class MotMasterClient:
 		timeout_ms: int = 5000,
 		context: zmq.Context | None = None,
 	) -> None:
-		cr = ConfigReader.getConfiguration()
-		self.host = cr["Servers"]["MotMaster Server"].get("host", host)
-		self.port = cr["Servers"]["MotMaster Server"].get("port", port)
+		try:
+			cr = ConfigReader.getConfiguration()
+			self.host = cr["Servers"]["MotMaster Server"].get("host", host)
+			self.port = cr["Servers"]["MotMaster Server"].get("port", port)
+		except ModuleNotFoundError:
+			self.host = host
+			self.port = port
+			print(
+				"Warning: Could not load configuration. Using default host and port for MotMasterClient."
+			)
+			print(f"Host: {self.host}, Port: {self.port}")
 		self.address = f"tcp://{self.host}:{self.port}"
 		self.timeout_ms = timeout_ms
 		self.context = context or zmq.Context.instance()
