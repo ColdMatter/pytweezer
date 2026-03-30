@@ -66,9 +66,9 @@ class MessageClient(GenericClient):
         #print('hnd')
         return self.sub_socket.poll(1)==zmq.POLLIN
 
-#print('init Messageclient')
-mgsc=MessageClient('testname')
-time.sleep(0.01)
+# #print('init Messageclient')
+# mgsc=MessageClient('testname')
+# time.sleep(0.01)
 
 
 

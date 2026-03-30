@@ -14,4 +14,12 @@ device_db = {
             "frequency": 1e9,
         }
     },
+    "imagemx2_camera": {
+        "module": "pytweezer.drivers.imagemX2",
+        "class": "ImagEMX2CameraClient",
+        "parameters": {
+            "stream_name": "imagemx2",
+            "request_timeout": 10.0
+        }
+    },
 }

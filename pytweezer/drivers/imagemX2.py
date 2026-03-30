@@ -1,462 +1,361 @@
+import argparse
+import logging
+import os
+import time
+import uuid
+from typing import Any
+
+import numpy as np
 import pylablib.devices.DCAM as dcam
 import tifffile as tiff
 
-from pytweezer.servers import ImageClient
-from pytweezer.servers import CommandClient, DataClient
-from pytweezer.servers import Properties, PropertyAttribute
-import time
-import copy
-import argparse
-import numpy as np
-import logging, sys
-
-logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
-
-
+from pytweezer.servers import CommandClient, DataClient, ImageClient
 
 IMAGE_DIRECTORY = (
     "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/HamCamImages"
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 class ImagEMX2Camera:
-    """Class to control the Hamamatsu ImagEM X2 camera via DCAM API."""
+    """Low-level wrapper around the Hamamatsu ImagEM X2 DCAM driver."""
 
-    def __init__(self, name, image_dir=None, timeout=5):
+    def __init__(self, image_dir: str | None = None, timeout: float = 5.0):
         try:
             self.dcam = dcam.DCAMCamera()
-        except Exception as e:
-            raise RuntimeError("Could not connect to ImagEM X2 camera") from e
-        try:
             self.dcam.open()
-            print("Connected to ImagEM X2 camera.")
-        except Exception as e:
-            raise RuntimeError("Could not open connection to ImagEM X2 camera") from e
+        except Exception as exc:
+            raise RuntimeError("Could not connect to ImagEM X2 camera") from exc
 
-        self.image_dir = (
-            image_dir
-            or "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\HamCamImages\\"
-        )
+        self.image_dir = image_dir or IMAGE_DIRECTORY
         self.timeout = timeout
-        self._connect_clients()
-        
-    def _connect_clients(self):
-        self.imstream = ImageClient('dummy_cam')
-        self.cmdstream = CommandClient('dummy_cam')
-        self.cmdstream.subscribe('dummy_cam')
 
-    def set_roi(self, x0, width, y0, height):
-        """Set the region of interest (ROI) for image acquisition.
+    def close(self):
+        try:
+            self.dcam.close()
+        except Exception:
+            LOGGER.exception("Failed to close ImagEM X2 camera cleanly")
 
-        Parameters:
-            x0 (int): Starting x-coordinate of the ROI.
-            width (int): Width of the ROI.
-            y0 (int): Starting y-coordinate of the ROI.
-            height (int): Height of the ROI.
-        """
+    def set_roi(self, x0: int, width: int, y0: int, height: int):
         self.dcam.set_roi(x0, x0 + width - 1, y0, y0 + height - 1)
 
-    def set_ccd_mode(self, mode):
-        """Set the CCD mode.
+    def set_ccd_mode(self, mode: int):
+        self.dcam.set_attribute_value("ccd_mode", int(mode))
 
-        Parameters:
-            mode (int): 2 for EM gain mode, 1 for normal mode.
-        """
-        if mode:
-            self.dcam.set_attribute_value("ccd_mode", 2)
-        else:
-            self.dcam.set_attribute_value("ccd_mode", 1)
+    def enable_em_gain(self, enable: bool = True):
+        self.set_ccd_mode(2 if enable else 1)
 
-    def enable_em_gain(self, enable=True):
-        """Enable or disable EM gain.
+    def set_direct_em_gain_mode(self, mode: int):
+        self.dcam.set_attribute_value("direct_em_gain_mode", int(mode))
 
-        Parameters:
-            enable (bool): True to enable EM gain, False to disable.
-        """
-        if enable:
-            self.set_ccd_mode(2)
-        else:
-            self.set_ccd_mode(1)
+    def enable_direct_em_gain(self, enable: bool = True):
+        self.set_direct_em_gain_mode(2 if enable else 1)
 
-    def set_direct_em_gain_mode(self, mode):
-        """Set the direct EM gain mode.
-
-        Parameters:
-            mode (int): 1 for relative, 2 for absolute.
-        """
-        self.dcam.set_attribute_value("direct_em_gain_mode", mode)
-
-    def enable_direct_em_gain(self, enable=True):
-        """Enable or disable direct EM gain.
-
-        Parameters:
-            enable (bool): True to enable direct EM gain, False to disable.
-        """
-        if enable:
-            self.set_direct_em_gain_mode(2)
-        else:
-            self.set_direct_em_gain_mode(1)
-
-    def set_sensitivity(self, sensitivity):
-        """Set the camera sensitivity (EM gain).
-
-        Parameters:
-            sensitivity (int): Sensitivity value (1-16).
-        """
-        self.dcam.set_attribute_value("sensitivity", sensitivity)
+    def set_sensitivity(self, sensitivity: int):
+        self.dcam.set_attribute_value("sensitivity", int(sensitivity))
 
     def set_trigger_source(self, source: str):
-        """Set the trigger source.
-
-        Parameters:
-            source (str): Trigger source, options are "software", "external", "internal".
-        """
         self.dcam.set_trigger_mode(source)
 
-    def set_exposure_time(self, exposure):
-        """Set the exposure time.
-
-        Parameters:
-            exposure_ms (float): Exposure time in as yet unknown units.
-        """
+    def set_exposure_time(self, exposure: float):
         self.dcam.set_exposure(exposure)
 
     def set_external_exposure_mode(self):
-        """Set the camera to external exposure mode. Also known as "level trigger mode"."""
         self.set_trigger_source("ext")
-        self.dcam.set_attribute_value("trigger_active", 2)  # level
+        self.dcam.set_attribute_value("trigger_active", 2)
         self.dcam.setup_ext_trigger(invert=True)
 
-    def setup_acquisition(self, acq_mode, nframes):
-        """Setup image acquisition.
-
-        Parameters:
-            acq_mode (str): Acquisition mode. "snap" or "sequence".
-            nframes (int): Number of frames to acquire in snap mode, or buffer size in sequence mode.
-        """
-        self.dcam.setup_acquisition(acq_mode, nframes)
+    def setup_acquisition(self, acq_mode: str, nframes: int):
+        self.dcam.setup_acquisition(acq_mode, int(nframes))
 
     def start_acquisition(self):
-        """Start image acquisition."""
         self.dcam.start_acquisition()
 
     def stop_acquisition(self):
-        """Stop image acquisition."""
         self.dcam.stop_acquisition()
 
-    def acquire_n_frames(self, nframes, exp_info=None, start_frame=0, autosave=False):
-        """Acquire a specified number of frames.
-
-        Parameters:
-            nframes (int): Number of frames to acquire.
-        """
-        self.dcam.wait_for_frame(nframes=nframes, timeout=self.timeout)
-        imgs, infos = self.dcam.read_multiple_images((start_frame, start_frame + nframes), return_info=True)
-        imgs: np.ndarray
-        infos: list[dcam.DCAM.TFrameInfo]
-        for i, img in enumerate(imgs):
-            if exp_info is not None:
-                self.broadcast_image(img, task=self.exp_info["task"], run=self.exp_info["run"], rep=self.exp_info["rep"], index=i, timestamp=time.time())
-            if autosave:
-                self.save_tiff(img, IMAGE_DIRECTORY, run_no=self.exp_info["run"])
-            
-        return imgs
-    
-    def broadcast_image(self, im, task, run, rep, index, timestamp):
-    
-        info = {
-            "timestamp": timestamp,
-            "task": task,
-            "run": run,
-            "rep": rep,
-            "index": index,
-            "_imageresolution" : [1,1],
-            "_offset": [0,0]
-        }  # TODO all cam settings
-
-        self.imstream.send(im, info)
-        # print('camera time stamp:',image_stamp)
-
-
-    def clear_buffer(self):
-        """Clear the camera buffer."""
-        self.dcam.read_multiple_images()
+    def acquire_n_frames(self, nframes: int, start_frame: int = 0) -> np.ndarray:
+        self.dcam.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
+        images, _infos = self.dcam.read_multiple_images(
+            (int(start_frame), int(start_frame) + int(nframes)), return_info=True
+        )
+        return np.asarray(images)
 
     @staticmethod
-    def save_tiff(image, image_dir=None, run_no=0):
-        import os
-        import tifffile as tiff
-
-        """Save image to a TIFF file.
-
-        Parameters:
-            filename (str): Path to the output TIFF file.
-            images (ndarray): Array of images to save.
-        """
+    def save_tiff(image: np.ndarray, image_dir: str | None = None, run_no: int = 0):
+        image_dir = image_dir or IMAGE_DIRECTORY
         i = 1
-        while os.path.exists(image_dir + "/HamTweezer%s_%s.tif" % (f"{run_no:04d}", i)):
+        while os.path.exists(os.path.join(image_dir, f"HamTweezer{run_no:04d}_{i}.tif")):
             i += 1
-
-        run_no_str = f"{run_no:04d}"
-        filename = os.path.join(image_dir, "HamTweezer%s_%s.tif" % (run_no_str, i))
+        filename = os.path.join(image_dir, f"HamTweezer{run_no:04d}_{i}.tif")
         tiff.imwrite(filename, image)
 
 
+class ImagEMX2Server:
+    """Long-lived server process that owns one persistent ImagEM X2 connection."""
 
-
-class Camserver:
-    """Controls the camera and handles the communication with the Image and Data bus."""
-
-    # _task       =PropertyAttribute('/Experiments/_task',0)                #task number (a task contains multiple repetitions of scans)
-    # _repetition =PropertyAttribute('/Experiments/_repetition',0)    #repetition index (a scan can be repeated multiple times)
-    # _run        =PropertyAttribute('/Experiments/_run',0)                  #run number in a scan (a scan has multiple experiment runs)
-    _resolution = PropertyAttribute(
-        "resolution [m per pixel]", (0.00001, 0.00001)
-    )  # run number in a scan (a scan has multiple experiment runs)
-    _conf_name = PropertyAttribute("Configuration_name", "DefaultConfig")
-
-    _autoreconfigure = PropertyAttribute("Autroreconfigure", True)
-
-    def __init__(self, name, serial):
-        """
-        initializes the driver.  Set the properties to the camera. If configuration does not exist,
-        create new configuration with current values from camera
-
-        Args:
-            name (str): Name of the camera. Will be used to identify the properties and to create a named
-                        imagestream
-            serial    : Serial number of the camera
-        """
-        # global defaultproperties
- 
-        self.imstream = ImageClient(name)
-        self.cmdstream = CommandClient(name)
-        self.cmdstream.subscribe(name)
-        self.name = "Cameras/" + name
-        self._props = Properties(self.name)
-        self.connected = False
-
-        self.lastinfo = (0, 0, 0)
-        self.imgindex = 0  # number of image in the current experiment
-
-        self.cam = ImagEMX2Camera(serial)
-        props = self._props
+    def __init__(
+        self,
+        stream_name: str,
+        image_dir: str | None = None,
+        timeout: float = 5.0,
+        poll_interval: float = 0.005,
+    ):
+        self.stream_name = stream_name
+        self.poll_interval = poll_interval
         self.running = False
-        self.connected = True
 
-        self.indexq = DataClient(self.name)
+        self.camera = ImagEMX2Camera(image_dir=image_dir, timeout=timeout)
+        self.imstream = ImageClient(stream_name)
+        self.cmdstream = CommandClient(stream_name)
+        self.cmdstream.subscribe(stream_name)
+
+        # Tracks current experiment indices to annotate images consistently.
+        self.indexq = DataClient(f"{stream_name}.index")
         self.indexq.subscribe(["Experiment.start"])
-        self.experiment_timings = [
-            [0, {"_run": 0, "_repetition": 0, "_task": 0}]
-        ]  # list containing timings of the experiment
-
-        self.configure()
-
-    def configure(self):
-        with self.cam:
-            while True:
-                self.cam.start()
-                changes = self._props.changes()
-                print(changes)
-                # if any(s.startswith(self.confname) for s in changes): #some subentry has changed
-                if "/" + self.name in changes:  # some subentry has changed
-                    print(self.name, "reconfiguring")
-                    cam_props = self._props.get(self.confname, {})
-                    self.cam.stop()
-                    if cam_props == {}:
-                        cam_props = self.cam.getProps()
-                        self._props.set(self._conf_name, cam_props)
-                        self._cam_props = cam_props
-                    else:
-                        newprops = self.cam.setProps(cam_props)
-                        self._props.set(
-                            self.confname, newprops
-                        )  # update changed properties
-                        self._cam_props = newprops
-                    self._props.changes()  # clear changes
-                else:
-                    self.cam.stop()
-                    break
-
-    def update_experiment_indices(self):
-        """keep list of experiment starts updatesd"""
-
-        while self.indexq.has_new_data():
-            # print('datamgr.py data incomming!')
-            recvmsg = self.indexq.recv()
-            A = None
-            if len(recvmsg) == 2:
-                msg, msg_dic = recvmsg
-            elif len(recvmsg) == 3:
-                msg, msg_dic, A = recvmsg
-            else:
-                print("datamgr message error")
-                return
-            # print(msg)
-            if msg == "Experiment.start":
-                indices = dict(
-                    (k, msg_dic[k])
-                    for k in ("_run", "_repetition", "_task")
-                    if k in msg_dic
-                )
-                timestamp = msg_dic["_starttime"]
-                self.experiment_timings.append([timestamp, indices])
-                while len(self.experiment_timings) > 20:
-                    del self.experiment_timings[0]
+        self.last_exp_info = {"task": 0, "run": 0, "rep": 0}
 
     def run(self):
-        """runloop running forever
-        Sends images from the camera to the imagestream and initiates reconfiguration of the camera in case
-        properties have changed.
-        """
-        if not self.connected:
+        self.running = True
+        LOGGER.info("ImagEMX2 server '%s' started", self.stream_name)
+        try:
+            while self.running:
+                self._update_experiment_indices()
+                self._handle_pending_commands()
+                time.sleep(self.poll_interval)
+        finally:
+            self._shutdown()
+
+    def stop(self):
+        self.running = False
+
+    def _shutdown(self):
+        try:
+            self.camera.stop_acquisition()
+        except Exception:
+            pass
+        self.camera.close()
+        LOGGER.info("ImagEMX2 server '%s' stopped", self.stream_name)
+
+    def _update_experiment_indices(self):
+        while self.indexq.has_new_data():
+            recvmsg = self.indexq.recv()
+            if recvmsg is None:
+                continue
+
+            if len(recvmsg) == 2:
+                message, msg_dict = recvmsg
+            elif len(recvmsg) == 3:
+                message, msg_dict, _array = recvmsg
+            else:
+                continue
+
+            if message != "Experiment.start":
+                continue
+
+            self.last_exp_info = {
+                "task": msg_dict.get("_task", 0),
+                "run": msg_dict.get("_run", 0),
+                "rep": msg_dict.get("_repetition", 0),
+            }
+
+    def _handle_pending_commands(self):
+        while self.cmdstream.has_new_data():
+            msg = self.cmdstream.recv()
+            if msg is None:
+                return
+
+            if len(msg) == 2:
+                channel, payload = msg
+            elif len(msg) == 3:
+                channel, payload, _ = msg
+            else:
+                continue
+
+            command = self._parse_command(channel)
+            if command is None:
+                continue
+
+            try:
+                self._execute_command(command, payload if isinstance(payload, dict) else {})
+            except Exception:
+                LOGGER.exception("ImagEMX2 command '%s' failed", command)
+
+    def _parse_command(self, channel: str) -> str | None:
+        prefix = f"{self.stream_name} "
+        if not channel.startswith(prefix):
+            return None
+        return channel[len(prefix) :].strip()
+
+    def _execute_command(self, command: str, payload: dict[str, Any]):
+        if command == "shutdown":
+            self.stop()
             return
-        with self.cam:
-            self.ii = 0
-            self.cam.start()
-            self.running = True
-            while self.running == True:  # poll camera and commands
-                self.sendimage(
-                    self.cam.get_image()
-                )  # if no image is available waits Config.grabTimeout milliseconds
-                if self._autoreconfigure:
-                    changes = self._props.changes()
-                    # print(changes)
-                    # if any(s.startswith(self.confname) for s in changes): #some subentry has changed
-                    if "/" + self.name in changes:  # some subentry has changed
-                        print(self.name, "reconfiguring")
-                        cam_props = self._props.get(self.confname, {})
-                        self.cam.stop()
-                        if cam_props == {}:
-                            cam_props = self.cam.getProps()
-                            self._props.set(self._conf_name, cam_props)
-                            self._cam_props = cam_props
-                        else:
-                            newprops = self.cam.setProps(cam_props)
-                            self._props.set(
-                                self.confname, newprops
-                            )  # update changed properties
-                            self._cam_props = newprops
-                        self.cam.start()
-                        self._props.changes()  # clear changes
-                self.ii += 1
-                # print(self.ii)
-                # if self.ii>300 : self.running=False
 
-                if self.cmdstream.has_new_data():
-                    cmd = self.cmdstream.recv()
-            self.cam.stop()
-        return 0
-
-    def _image_to_array(self, im):
-        """Convert blackfly image into numpy array
-
-        Args:
-            im: Image from blackfly driver
-
-        Returns:
-            numpy.array(float64).    The image as a numpy array
-        """
-        # ii=im.getData()
-        # im2=im.convert(pc2.PIXEL_FORMAT.RAW16)
-        imarr = np.array(im.getData())  ## This is much too slow (try struct.pack)
-
-        rows = im.getRows()
-        cols = im.getCols()
-        if imarr.shape[0] == rows * cols * 2:
-            imarr2 = imarr[::2] / 16 + 16 * imarr[1::2]
-        else:
-            imarr2 = imarr
-        imarr2 = np.reshape(imarr2, (rows, cols))
-        imarr2 = imarr2.T
-        # imarr=np.rot90(imarr)
-        # imarr = imarr[::,::-1]
-        imarr2 = imarr2.astype(np.float64)
-        return imarr2.copy()
-
-    def generateImageIndex(self, _task=0, _repetition=0, _run=0):
-        """
-        in the current measurement count the images. If the next run has started (either task,repetition or run changes)
-        reset the counter(imgindex).
-        """
-        measIndex = (_task, _repetition, _run)
-        if self.lastinfo == measIndex:
-            self.imgindex += 1
-        else:
-            self.imgindex = 0
-            self.lastinfo = measIndex
-
-    def sendimage(self, im):
-        """send blackfly camera image via the imagestream
-        The image is converted to numpy array, additional information like binning,
-        timestamp, ... is added to a dictionary and both are send to the imagestream
-
-
-        Args:
-            im: Blackfly image object
-
-        Returns:
-            None
-
-        """
-        # print('sending image')
-        if im == None:
+        if command == "start":
+            self.camera.start_acquisition()
             return
-        if self.confname != "DefaultConfig":
-            print("{} sending image.".format(self.name))
-        A = self._image_to_array(im)
 
-        timestamp_dict = im.getTimeStamp().__dict__
-        image_stamp = (
-            float(timestamp_dict["seconds"]) + timestamp_dict["microSeconds"] * 1e-6
-        )
-        if time.time() - image_stamp > 5:
-            print(
-                "Warning: bfly.py ",
-                self.name,
-                " image readout delayed by{:.0f}s".format(time.time() - image_stamp),
+        if command == "stop":
+            self.camera.stop_acquisition()
+            return
+
+        if command == "setup":
+            acq_mode = payload.get("acq_mode", "sequence")
+            nframes = int(payload.get("nframes", 1))
+            self.camera.setup_acquisition(acq_mode=acq_mode, nframes=nframes)
+            return
+
+        if command == "set_roi":
+            self.camera.set_roi(
+                x0=int(payload["x0"]),
+                width=int(payload["width"]),
+                y0=int(payload["y0"]),
+                height=int(payload["height"]),
             )
+            return
 
-        run_task = self.find_experiment_indices(image_stamp)
-        self.generateImageIndex(**run_task)
+        if command == "set_exposure":
+            self.camera.set_exposure_time(float(payload["exposure"]))
+            return
 
-        binning = self._cam_props["GigEBinningSettings"][0]
+        if command == "capture":
+            self._capture_and_publish(payload)
+            return
 
-        info = {
-            "timestamp": image_stamp,
-            "_imgresolution": [x * binning for x in self._resolution],
-            "_imgindex": self.imgindex,
-            "camgain": -1,
-        }  # TODO CAMgain   self._cam_props[' }
-        info.update(run_task)
-        imgsettings = self._cam_props["GigEImageSettings"]
-        # print('Pixelformat{0:b}'.format(imgsettings['pixelFormat']))
-        # print(pc2.PIXEL_FORMAT.__dict__)
-        info["_offset"] = [imgsettings["offsetX"], imgsettings["offsetY"]]
-        self.imstream.send(A, info)
-        # print('camera time stamp:',image_stamp)
+        LOGGER.warning("Unknown ImagEMX2 command: %s", command)
 
-    def find_experiment_indices(self, timestamp):
-        """find the run,task and repetition for a given timestamp"""
-        self.update_experiment_indices()
-        tstamps = [i[0] for i in self.experiment_timings]
-        tstamps = np.array(tstamps)
+    def _capture_and_publish(self, payload: dict[str, Any]):
+        nframes = int(payload.get("nframes", 1))
+        start_frame = int(payload.get("start_frame", 0))
+        autosave = bool(payload.get("autosave", False))
+        request_id = payload.get("request_id", "")
 
-        index = 0
-        if timestamp > tstamps[0]:
-            index = np.argwhere(tstamps - timestamp < 0)[-1][0]
-        return self.experiment_timings[int(index)][1]
+        exp_info = payload.get("exp_info") or self.last_exp_info
+        task = int(exp_info.get("task", self.last_exp_info.get("task", 0)))
+        run = int(exp_info.get("run", self.last_exp_info.get("run", 0)))
+        rep = int(exp_info.get("rep", self.last_exp_info.get("rep", 0)))
+
+        images = self.camera.acquire_n_frames(nframes=nframes, start_frame=start_frame)
+
+        for index, image in enumerate(images):
+            timestamp = time.time()
+            info = {
+                "timestamp": timestamp,
+                "task": task,
+                "run": run,
+                "rep": rep,
+                "_imgindex": index,
+                "request_id": request_id,
+                "_imageresolution": [1, 1],
+                "_offset": [0, 0],
+            }
+            self.imstream.send(image, info)
+            if autosave:
+                self.camera.save_tiff(image, image_dir=self.camera.image_dir, run_no=run)
 
 
-def run(name):
-    """initialize a Camserver and run it"""
-    cs = Camserver(name)
-    cs.run()
+class ImagEMX2CameraClient:
+    """Experiment-side proxy that requests captures from a persistent camera server."""
+
+    def __init__(
+        self,
+        stream_name: str = "imagemx2",
+        request_timeout: float = 10.0,
+    ):
+        self.stream_name = stream_name
+        self.request_timeout = request_timeout
+        self.cmdstream = CommandClient(stream_name)
+        self.imstream = ImageClient(f"{stream_name}.client", recvtimeout=200)
+        self.imstream.subscribe(stream_name)
+
+    def setup_acquisition(self, acq_mode: str, nframes: int):
+        self.cmdstream.send("setup", data={"acq_mode": acq_mode, "nframes": int(nframes)})
+
+    def start_acquisition(self):
+        self.cmdstream.send("start", data={})
+
+    def stop_acquisition(self):
+        self.cmdstream.send("stop", data={})
+
+    def set_roi(self, x0: int, width: int, y0: int, height: int):
+        self.cmdstream.send(
+            "set_roi",
+            data={"x0": int(x0), "width": int(width), "y0": int(y0), "height": int(height)},
+        )
+
+    def set_exposure_time(self, exposure: float):
+        self.cmdstream.send("set_exposure", data={"exposure": float(exposure)})
+
+    def acquire_n_frames(
+        self,
+        nframes: int,
+        exp_info: dict[str, Any] | None = None,
+        start_frame: int = 0,
+        autosave: bool = False,
+    ) -> list[np.ndarray]:
+        request_id = uuid.uuid4().hex
+        self.cmdstream.send(
+            "capture",
+            data={
+                "nframes": int(nframes),
+                "start_frame": int(start_frame),
+                "autosave": bool(autosave),
+                "exp_info": exp_info,
+                "request_id": request_id,
+            },
+        )
+
+        deadline = time.monotonic() + self.request_timeout
+        images: list[np.ndarray] = []
+
+        while len(images) < int(nframes):
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for {nframes} frames from stream '{self.stream_name}'"
+                )
+
+            msg = self.imstream.recv()
+            if msg is None:
+                continue
+            if len(msg) != 3:
+                continue
+
+            _channel, header, image = msg
+            if not isinstance(header, dict):
+                continue
+            if header.get("request_id") != request_id:
+                continue
+            images.append(image)
+
+        return images
+
+    def close(self):
+        return None
+
+
+def run_server(name: str, image_dir: str | None = None, timeout: float = 5.0):
+    server = ImagEMX2Server(stream_name=name, image_dir=image_dir, timeout=timeout)
+    server.run()
+
+
+def run(name: str):
+    """Backward-compatible entrypoint used by legacy launchers."""
+    run_server(name=name)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run persistent ImagEM X2 camera server")
+    parser.add_argument("name", nargs="?", default="imagemx2", help="stream/server name")
+    parser.add_argument("--image-dir", default=None, help="optional output directory for autosaved images")
+    parser.add_argument("--timeout", type=float, default=5.0, help="frame wait timeout in seconds")
+    parser.add_argument("--log-level", default="INFO", help="Python log level")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
+    run_server(name=args.name, image_dir=args.image_dir, timeout=args.timeout)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("name", nargs=1, help="name of this program instance")
-    args = parser.parse_args()
-    name = args.name[0]
-    run(name)
+    main()

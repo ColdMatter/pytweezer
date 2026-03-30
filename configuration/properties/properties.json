@@ -6,20 +6,7 @@
         },
         "DataStream": {
             "maxStreamInactive[s]": 1000,
-            "active": {
-                "Experiment.end": {
-                    "timestamp": 1774867698.349826,
-                    "parts": 2
-                },
-                "Experiment.start": {
-                    "timestamp": 1774867697.4709558,
-                    "parts": 2
-                },
-                "find_atoms_": {
-                    "timestamp": 1774867698.697769,
-                    "parts": 2
-                }
-            }
+            "active": {}
         },
         "ImageStream": {
             "active": {
@@ -49,8 +36,8 @@
         "testval": 3,
         "testlist": [],
         "Geometry": [
-            1920,
-            372,
+            0,
+            24,
             1920,
             1031
         ],
