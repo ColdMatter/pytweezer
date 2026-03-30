@@ -25,7 +25,6 @@ scipy = "^1.17.1"
 matplotlib = "=3.8.4"
 
 # --- Hardware & Automation ---
-pyvisa = "=1.14.1"
 pylablib = "=1.4.3"
 
 # --- Utilities & Networking ---
@@ -64,6 +63,7 @@ pythonnet = "=3.0.5"    # .NET integration
 # wakepy = "=0.9.1"       # from pip section
 # iso8601 = "=2.1.0"      # from pip section
 scikit-image = "^0.26.0"
+pyvisa-py = "^0.8.1"
 
 
 
