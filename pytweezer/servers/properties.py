@@ -101,6 +101,61 @@ class Properties(threading.Thread):
             socket.setsockopt(zmq.RECONNECT_IVL_MAX, 2000)
         socket.setsockopt(zmq.LINGER, 0)
 
+    @staticmethod
+    def _extract_tcp_host(endpoint):
+        if not isinstance(endpoint, str) or not endpoint.startswith('tcp://'):
+            return None
+        addr = endpoint[len('tcp://'):]
+        if ':' not in addr:
+            return None
+        return addr.rsplit(':', 1)[0]
+
+    @staticmethod
+    def _replace_tcp_host(endpoint, host):
+        if not isinstance(endpoint, str) or not endpoint.startswith('tcp://'):
+            return endpoint
+        addr = endpoint[len('tcp://'):]
+        if ':' not in addr:
+            return endpoint
+        _old_host, port = addr.rsplit(':', 1)
+        return f'tcp://{host}:{port}'
+
+    def _fetch_initial_properties(self, logger_endpoint, hub_pub_endpoint):
+        endpoints = [logger_endpoint]
+
+        # For remote setups, if Propertylogger endpoint is localhost, try the Propertyhub host.
+        logger_host = self._extract_tcp_host(logger_endpoint)
+        hub_host = self._extract_tcp_host(hub_pub_endpoint)
+        if (
+            logger_host in ('localhost', '127.0.0.1', '0.0.0.0')
+            and hub_host not in (None, 'localhost', '127.0.0.1', '0.0.0.0')
+        ):
+            alt_endpoint = self._replace_tcp_host(logger_endpoint, hub_host)
+            if alt_endpoint not in endpoints:
+                endpoints.append(alt_endpoint)
+
+        last_error = None
+        for endpoint in endpoints:
+            for _attempt in range(3):
+                init_socket = zmqcontext.socket(zmq.REQ)
+                self._configure_tcp_socket(init_socket, endpoint)
+                init_socket.setsockopt(zmq.RCVTIMEO, 2000)
+                init_socket.setsockopt(zmq.SNDTIMEO, 2000)
+                init_socket.connect(endpoint)
+                try:
+                    init_socket.send_string('INIT?')
+                    init_socket.recv_string()
+                    return init_socket.recv_json()
+                except Exception as error:
+                    last_error = error
+                    time.sleep(0.15)
+                finally:
+                    init_socket.close()
+
+        raise RuntimeError(
+            f'init handshake failed via endpoints {endpoints}: {last_error}'
+        )
+
     def __init__(self, name, initfromfile=False):
         threading.Thread.__init__(self, daemon=True)
         """ managing configuration and properties within bali control center
@@ -118,8 +173,12 @@ class Properties(threading.Thread):
         # iniitialize dictionaries
         self.properties_lock = threading.Lock()
         # initialize sockets
-        hub_sub_endpoint = conf['Servers']['Propertyhub']['sub']
-        hub_pub_endpoint = conf['Servers']['Propertyhub']['pub']
+        c = conf['Servers']['Propertyhub']
+        host = c['host']
+        pub_port = c['pub_port'] 
+        sub_port = c['sub_port']
+        hub_sub_endpoint = f"tcp://{host}:{sub_port}"
+        hub_pub_endpoint = f"tcp://{host}:{pub_port}"
         self.pub_socket = zmqcontext.socket(zmq.PUB)
         self._configure_tcp_socket(self.pub_socket, hub_sub_endpoint)
         self.pub_socket.connect(hub_sub_endpoint)
@@ -137,18 +196,18 @@ class Properties(threading.Thread):
 
         time.sleep(0.01)
         if not initfromfile:
-            self.init_socket = zmqcontext.socket(zmq.REQ)
-            logger_endpoint = conf['Servers']['Propertylogger']['rep']
-            self._configure_tcp_socket(self.init_socket, logger_endpoint)
-            self.init_socket.setsockopt(zmq.RCVTIMEO, 5000)
-            self.init_socket.setsockopt(zmq.SNDTIMEO, 5000)
-            self.init_socket.connect(logger_endpoint)
+            host = conf['Servers']['Propertylogger'].get('host', 'localhost')
+            port = conf['Servers']['Propertylogger'].get('port', 3106)
+            logger_endpoint = f"tcp://{host}:{port}"
             try:
-                self.init_socket.send_string('INIT?')
-                self.init_socket.recv_string()
-                self.properties = self.init_socket.recv_json()
+                self.properties = self._fetch_initial_properties(logger_endpoint, hub_pub_endpoint)
             except Exception as error:
-                print_error(f'properties.py init handshake failed ({error}); falling back to property file', 'warning')
+                print_error(
+                    'properties.py init handshake failed ({0}); '
+                    'falling back to property file. '
+                    'Check Servers/Propertylogger/rep reachability for this client.'.format(error),
+                    'warning'
+                )
                 self.properties = cr.Properties()
         else:
             self.properties = cr.Properties()

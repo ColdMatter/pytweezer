@@ -97,8 +97,12 @@ def _terminate_stale_instances(instance_name: str, grace_s: float = 1.5) -> None
 def run_server(name, pubbinding_override=None, subbinding_override=None, kill_stale=True):
     conf = ConfigReader.getConfiguration()
     name = name.split('/')[-1]
-    pubbinding = pubbinding_override or conf['Servers'][name]['pub']
-    subbinding = subbinding_override or conf['Servers'][name]['sub']
+    c = conf['Servers'][name]
+    host = c['host']
+    pub_port = c['pub_port']
+    sub_port = c['sub_port']
+    pubbinding = pubbinding_override or f"tcp://{host}:{pub_port}"
+    subbinding = subbinding_override or f"tcp://{host}:{sub_port}"
     #print(name + " starting on")
     #print('XSUB: ', subbinding)
     #print('XPUB: ', pubbinding)

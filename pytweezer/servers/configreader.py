@@ -14,15 +14,17 @@ configpath = os.path.realpath(
     os.path.dirname(os.path.abspath(__file__)) + "/../../configuration/"
 )
 icon_path = tweezerpath + "/pytweezer/GUI/icons/"
-configfilename = configpath + "/configfile.json"
+configfilename = configpath + "/config.py"
 propertyfilename = configpath + "/properties/properties.json"
 
 
 def Config():
     """return configuration dictionary"""
-    with open(configfilename) as inputfile:
-        configuration = json.load(inputfile)
-    return configuration
+    # with open(configfilename) as inputfile:
+    #     configuration = json.load(inputfile)
+    # return configuration
+    from configuration.config import CONFIG
+    return CONFIG
 
 
 class ConfigReader:

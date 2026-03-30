@@ -85,7 +85,9 @@ def run_propertylogger(name='Servers/Propertylogger'):
     rep_socket = zmqcontext.socket(zmq.REP)
     rep_socket.setsockopt(zmq.LINGER, 0)
     #rep_socket.RCVTIMEO = p.get('reptimeout',100)
-    rep_endpoint = conf['Servers'][server_name]['rep']
+    host = conf['Servers'][server_name].get('host', 'localhost')
+    port = conf['Servers'][server_name].get('port', 3106)
+    rep_endpoint = f"tcp://{host}:{port}"
     if isinstance(rep_endpoint, str) and rep_endpoint.startswith('tcp://'):
         rep_socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
         if hasattr(zmq, 'TCP_KEEPALIVE_IDLE'):
