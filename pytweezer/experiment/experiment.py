@@ -60,7 +60,8 @@ class Experiment:
         self._dataq = DataClient("Experiment")
         self._device_db = device_db
         self.devices = {}
-        self._arguments = []
+        self.args: dict[str, Union["NumberValue", "StringCombo", "BoolValue"]] = {}
+        self.mm_args: dict[str, Union["NumberValue", "StringCombo", "BoolValue"]] = {}
         self._motmaster_client = motmaster_client
         self._task = 0
         self._run = 0
@@ -70,8 +71,80 @@ class Experiment:
             self._motmaster_client = MotMasterClient(context=context)
         if self._motmaster_client is not None:
             self._motmaster_client.set_script(self.motmaster_script)
-            self.mm_params = []
-            self.mm_arguments = None
+
+    @property
+    def _arguments(self):
+        """Ordered experiment arguments for GUI compatibility."""
+        return list(self.args.values())
+
+    @property
+    def mm_params(self):
+        """Ordered MotMaster arguments for GUI compatibility."""
+        return list(self.mm_args.values())
+
+    def _resolve_argument_container(self, name: str, mm: Optional[bool] = None):
+        if mm is True:
+            return self.mm_args
+        if mm is False:
+            return self.args
+
+        # Auto-resolve by name when caller doesn't specify argument domain.
+        if name in self.args:
+            return self.args
+        if name in self.mm_args:
+            return self.mm_args
+        raise KeyError(f"Unknown argument '{name}'")
+
+    def set_argument_value(self, name: str, value, mm: Optional[bool] = None):
+        container = self._resolve_argument_container(name, mm)
+        arg = container[name]
+        arg.value = self._coerce_argument_value(arg, value)
+
+    def get_argument_value(self, name: str, mm: Optional[bool] = None):
+        container = self._resolve_argument_container(name, mm)
+        return container[name].get()
+
+    @staticmethod
+    def _coerce_argument_value(arg, value):
+        if isinstance(arg, BoolValue):
+            if isinstance(value, (bool, np.bool_)):
+                return bool(value)
+            if isinstance(value, str):
+                txt = value.strip().lower()
+                if txt in ("1", "true", "t", "yes", "y", "on"):
+                    return True
+                if txt in ("0", "false", "f", "no", "n", "off"):
+                    return False
+            try:
+                return bool(int(float(value)))
+            except (TypeError, ValueError):
+                pass
+            raise ValueError(
+                f"Argument '{arg.name}' could not coerce value {value!r} to bool"
+            )
+
+        if isinstance(arg, StringCombo):
+            coerced = str(value)
+            if coerced not in arg.stringlist:
+                raise ValueError(
+                    f"Argument '{arg.name}' value '{coerced}' not in allowed options {arg.stringlist}"
+                )
+            return coerced
+
+        if isinstance(arg, NumberValue):
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Argument '{arg.name}' could not coerce value {value!r} to number"
+                )
+            if arg.ndecimals == 0:
+                return int(round(numeric_value))
+            return numeric_value
+
+        raise TypeError(
+            f"Unsupported argument object type for '{getattr(arg, 'name', '?')}': {type(arg).__name__}"
+        )
 
     def _start_build(self):
         self.build()
@@ -113,8 +186,8 @@ class Experiment:
             "_exp_name": self.exp_name,
             "mm_script": self.motmaster_script,
         }
-        arguments = dict((arg.name, self.__dict__[arg.name]) for arg in self._arguments)
-        mm_params = dict((param.name, self.__dict__[param.name]) for param in self.mm_params)
+        arguments = {name: arg.get() for name, arg in self.args.items()}
+        mm_params = {name: arg.get() for name, arg in self.mm_args.items()}
         info.update(arguments)
         info.update(mm_params)
         self._dataq.send(info, channel=".start")
@@ -140,9 +213,8 @@ class Experiment:
         """
         if self.motmaster_script is not None:
             self._experiment_params = {}
-            for param in self.mm_params:
-                name = param.name
-                self._experiment_params[name] = getattr(self, name)
+            for name, param in self.mm_args.items():
+                self._experiment_params[name] = param.get()
 
     def run(self):
         """
@@ -191,7 +263,7 @@ class Experiment:
         return device_instance
 
     def setattr_mm_param(self, param_name):
-        """Create an attribute for a MotMaster parameter, which can be modified by the user in the GUI."""
+        """Register a MotMaster parameter as an argument object attribute."""
         if self._motmaster_client is None:
             raise ValueError("MotMaster client is not set.")
         response = self._motmaster_client.get_params()
@@ -235,27 +307,28 @@ class Experiment:
             raise ValueError(
                 f"Unsupported parameter type {param_type} for parameter {param_name}"
             )
-        setattr(self, param_name, param.value)
-        self.mm_params.append(param)
+        self.mm_args[param_name] = param
+        setattr(self, param_name, param)
 
     def setattr_argument(self, name, argtype, *args, **kwargs):
         """
-        Create a user-controllable attribute
-        The user will have an element in the GUI he can modify
+        Create a user-controllable argument object attribute.
+        The user will have an element in the GUI they can modify.
 
         Args:
             name: (str)
-                Name of the attribute. You can address the attribute via ``self.myname``
+                Name of the argument. You can address the argument object via ``self.myname``
             argtype: (class)
                 Currently only NumberValue is available
 
         Example::
 
-            self.setattr_argument("Nr_Ablation_Pulses", NumberValue(ndecimals=0, step=1,value=20))
+            self.setattr_argument("Nr_Ablation_Pulses", NumberValue, ndecimals=0, step=1, value=20)
+            self.Nr_Ablation_Pulses.get()
         """
         arg_inst = argtype(name, *args, **kwargs)
-        setattr(self, name, arg_inst.value)
-        self._arguments.append(arg_inst)
+        self.args[name] = arg_inst
+        setattr(self, name, arg_inst)
         
 
 
@@ -301,6 +374,9 @@ class NumberValue:
         self.minval = minval
         self.maxval = maxval
 
+    def get(self):
+        return self.value
+
 
 class StringCombo:
     """String choice argument for expeirment window."""
@@ -315,6 +391,9 @@ class StringCombo:
         self.name = name
         self.stringlist = stringlist
         self.value = stringlist[0]
+
+    def get(self):
+        return self.value
 
 
 class BoolValue:
@@ -331,6 +410,9 @@ class BoolValue:
         """
         self.name = name
         self.value = value
+
+    def get(self):
+        return self.value
 
 
 def get_rid():

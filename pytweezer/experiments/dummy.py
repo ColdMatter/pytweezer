@@ -26,7 +26,7 @@ class DummyExperiment(Experiment):
         image_1 = np.array([[1 if j == 2 else 0 for j in range(5)] for i in range(5)])
         image_2 = np.array([[1 if j == 4 - i else 0 for j in range(5)] for i in range(5)])
         self.dummy_camera.dummy_images = [image_0, image_1, image_2]
-        time.sleep(self.sleep_time)
+        time.sleep(self.sleep_time.get())
         
 
     def post_run(self):

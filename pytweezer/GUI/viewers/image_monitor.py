@@ -101,6 +101,8 @@ class ImageDisplay(QWidget):
         ii.setLookupTable(cmap.getLookupTable())
         print(cmap.getLookupTable())
         plot.addItem(ii)
+        self.plot = plot
+
         # add Image mask
         maskdat = np.zeros(imgdata.shape)
         # maskdat[20:25]=1
@@ -174,7 +176,7 @@ class ImageDisplay(QWidget):
                 self.imDataDict["imMean"] = imMean
                 nDead = len(np.where(img_flat > 0.9 * self._maxlevels)[0])
                 self.imDataDict["nDead"] = nDead
-                self.parent().imDataBox.setNewData(self.imDataDict)
+                # self.parent().imDataBox.setNewData(self.imDataDict)
         self.update_mask()
 
     def update_mask(self):
@@ -218,11 +220,11 @@ class ImageDisplay(QWidget):
         self.maskstream.unsubscribe()
         self.maskstream.subscribe(self._maskstreams)
 
-    def _subscribe_win(self, key):
+    def _subscribe_win(self, key, category="Image"):
         d = QDialog()
         layout = QVBoxLayout()
         d.setWindowTitle("Dialog")
-        editor = SubscriptionEditor(self._props, "Image", streamkey=key)
+        editor = SubscriptionEditor(self._props, category, streamkey=key)
         layout.addWidget(editor)
         d.setLayout(layout)
         # d.setWindowModality(QtGui.ApplicationModal)
