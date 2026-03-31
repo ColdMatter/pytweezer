@@ -4,6 +4,14 @@ version = "0.2.1"
 description = "Pytweezer package"
 authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
 readme = "README.md"
+packages = [
+	{ include = "pytweezer" },
+	{ include = "bin" },
+]
+
+[tool.poetry.scripts]
+pytweezer-controller = "bin.controller:main"
+pytweezer-dashboard = "bin.processmanager:main"
 
 [tool.poetry.dependencies]
 python = "^3.11.4, <3.14"
@@ -17,7 +25,6 @@ scipy = "^1.17.1"
 matplotlib = "=3.8.4"
 
 # --- Hardware & Automation ---
-pyvisa = "=1.14.1"
 pylablib = "=1.4.3"
 
 # --- Utilities & Networking ---
@@ -55,9 +62,9 @@ pydantic = "=2.10.5"
 pythonnet = "=3.0.5"    # .NET integration
 # wakepy = "=0.9.1"       # from pip section
 # iso8601 = "=2.1.0"      # from pip section
-
-
-
+scikit-image = "^0.26.0"
+pyvisa-py = "^0.8.1"
+sipyco = {git = "https://github.com/m-labs/sipyco.git"}
 
 [build-system]
 requires = ["poetry-core"]

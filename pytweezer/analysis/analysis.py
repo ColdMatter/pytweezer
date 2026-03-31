@@ -15,8 +15,8 @@ from rich.progress import track
 from scipy.special import erf
 import datetime
 
-cloudpath = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\"
-tweezer_img_source_dir = "C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\HamCamImages\\"
+cloudpath = "C:\\Users\\tweez\\OneDrive - Imperial College London\\"
+tweezer_img_source_dir = "C:\\Users\\tweez\\OneDrive - Imperial College London\\caftweezers\\HamCamImages\\"
 root = cloudpath + "caftweezers\\mot_master_data"
 remote_path = "C:\\Users\\cafmot\\OneDrive - Imperial College London (1)\\Desktop\\MOTCamSave\\ThorCam Images\\"
 RbMassAMU = 86.909184
@@ -687,6 +687,28 @@ class TweezerExperimentAnalysis:
         
         return t, n_container/(sigma_x * np.sqrt(sigma_y)), n_err_container/(sigma_x * np.sqrt(sigma_y))
 
+    def get_tweezer_images(self):
+        def extract_number(filename):
+            # Finds the digits immediately preceding the extension
+            match = re.search(r'(\d+)\.[^.]+$', filename)
+            return int(match.group(1)) if match else 0
+        images_list = [f for f in os.listdir(tweezer_img_source_dir) if f.endswith('.tif')]
+        images_list = sorted(images_list, key=extract_number)
+        images = []
+        for img_file in images_list:
+            img_path = tweezer_img_source_dir + img_file
+            img = Image.open(img_path)
+            img_array = np.array(img)
+            images.append(img_array)
+        print('Images loaded from tweezer image directory.')
+        return images
+    
+    def clear_tweezer_images(self):
+        images_list = [f for f in os.listdir(tweezer_img_source_dir) if f.endswith('.tif')]
+        for img_file in images_list:
+            os.remove(tweezer_img_source_dir + img_file)
+        print('Tweezer image directory cleared.')
+
     def tweezer_inject(self, zipNo):
         images_list = [f for f in os.listdir(tweezer_img_source_dir) if f.endswith('.tif')]
         zipPathIMG = self.dirPath + '\\' + self.fileNameString + '_' + str(zipNo).zfill(3) + '.zip'
@@ -717,9 +739,9 @@ class TweezerExperimentAnalysis:
             sleep(0.1)
             os.remove(image_path)
 
-    def tweezer_show_bg_subtracted(self, zipNo, reg=[25, 31, 22, 28], cmap='coolwarm', show=True, vmaxfactor=0.8, show_grid=True):
-        images = self.read_images_from_zip(zipNo)
-        backgrounds = self.read_images_from_zip(zipNo + 1)
+    def tweezer_show_bg_subtracted(self, images, backgrounds, reg=[0, -1, 0, -1], cmap='gray', show=True, vmaxfactor=0.8, show_grid=True):
+        images = np.array(images)
+        backgrounds = np.array(backgrounds)
         bg_sub_img = images - backgrounds.mean(axis=0)
         img_average = bg_sub_img.mean(axis=0)
         trap_average = img_average[reg[0]:reg[1], reg[2]:reg[3]]
@@ -734,8 +756,7 @@ class TweezerExperimentAnalysis:
                 ax[1].grid()
         return img_average
     
-    def tweezer_show(self, zipNo, reg=[25, 31, 22, 28], cmap='coolwarm', show=True, vmaxfactor=0.8, show_grid=True):
-        images = self.read_images_from_zip(zipNo)
+    def tweezer_show(self, images, reg=[25, 31, 22, 28], cmap='coolwarm', show=True, vmaxfactor=0.8, show_grid=True):
         img_average = images.mean(axis=0)
         trap_average = img_average[reg[0]:reg[1], reg[2]:reg[3]]
         vmin = img_average.min()
@@ -749,12 +770,11 @@ class TweezerExperimentAnalysis:
                 ax[1].grid()
         return img_average
     
-    def get_array_loading_probability(self, imgFileNo, grid_positions, grid_shape, threshold=6.85, window_size=5, binning=20, show_histogram=True):
+    def get_array_loading_probability(self, images, grid_positions, grid_shape, threshold=6.85, window_size=5, binning=20, show_histogram=True):
         n_row, n_col = grid_shape
         a500 = 0.00483372
         b500 = 1828.38
         c500 = 13
-        images = self.read_images_from_zip(imgFileNo)
         photon_rates, count_rates, atom_counter = [], [], np.zeros(grid_shape)
         for image in images:
             counts = sum_pixel_values(image, grid_positions, [n_row, n_col], window_size=window_size)
@@ -790,11 +810,10 @@ class TweezerExperimentAnalysis:
             fig.colorbar(cax, ax=ax[2])
         return photon_rates, loading_probabilities, threshold
     
-    def get_array_loading_probability_general(self, imgFileNo, grid_positions, threshold=6.85, window_size=5, binning=20):
+    def get_array_loading_probability_general(self, images, grid_positions, threshold=6.85, window_size=5, binning=20):
         a500 = 0.00483372
         b500 = 1828.38
         c500 = 13
-        images = self.read_images_from_zip(imgFileNo)
         photon_rates, count_rates, atom_counter = [], [], np.zeros(len(grid_positions))
         for image in images:
             counts = sum_pixel_values_general(image, grid_positions, window_size=window_size)
@@ -861,11 +880,11 @@ class TweezerExperimentAnalysis:
 
         return survival_prob_list, survival_prob_err_list, individual_survival_prob_list
     
-    def array_baseline_measurement(self, zipNo, grid_shape = [8, 8], trap_size = 3, detection_step=100):
-        img_array = self.tweezer_show_bg_subtracted(zipNo, reg=[0, -1, 0, -1], show=False, vmaxfactor=0.6, cmap='gray', show_grid=False)
+    def array_baseline_measurement(self, images, backgrounds, grid_shape = [8, 8], trap_size = 3, detection_step=100):
+        img_array = self.tweezer_show_bg_subtracted(images, backgrounds, reg=[0, -1, 0, -1], show=False, vmaxfactor=0.6, cmap='gray', show_grid=False)
         grid_positions, detection_threshold = detect_trap_sites(img_array, grid_shape, detection_step=detection_step)
         visualize_results(img_array, grid_positions, margin=20, window_size=trap_size, threshold=detection_threshold)
-        photon_rates, loading_probabilities, threshold = self.get_array_loading_probability(zipNo, grid_positions, grid_shape, threshold=0, window_size=trap_size, binning=20)
+        photon_rates, loading_probabilities, threshold = self.get_array_loading_probability(images, grid_positions, grid_shape, threshold=0, window_size=trap_size, binning=20)
         cvar = np.std(loading_probabilities) / loading_probabilities.mean()
         print(f"Loading Threshold = {threshold:.6f} kHz")
         print(f"Standard Deviation = {cvar*100} %")

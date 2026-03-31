@@ -4,6 +4,7 @@ from pytweezer.servers import zmqcontext
 import zmq
 import time
 import inspect
+import os
 
 class MessageClient(GenericClient):
     ''' Standardized way of sending messages over the message stream
@@ -18,8 +19,12 @@ class MessageClient(GenericClient):
 
     def _connect(self):
         conf=ConfigReader.getConfiguration()
-        imgsub=conf['Servers']['Messagehub']['pub']
-        imgpub=conf['Servers']['Messagehub']['sub']
+        c = conf['Servers']['Messagehub']
+        host = c['host']
+        pub_port = c['pub_port']
+        sub_port = c['sub_port']
+        imgpub = f"tcp://{host}:{pub_port}"
+        imgsub = f"tcp://{host}:{sub_port}"
         #print(imgpub)
         self.pub_socket.connect(imgpub)
         self.sub_socket.connect(imgsub)
@@ -62,17 +67,34 @@ class MessageClient(GenericClient):
         #print('hnd')
         return self.sub_socket.poll(1)==zmq.POLLIN
 
-#print('init Messageclient')
-mgsc=MessageClient('testname')
-time.sleep(0.01)
+_message_client = None
+
+
+def _get_default_client_name():
+    """Read default stream name from config, keeping legacy fallback."""
+    conf = ConfigReader.getConfiguration()
+    messagehub = conf.get('Servers', {}).get('Messagehub', {})
+    return messagehub.get('stream_name', 'testname')
+
+
+def get_message_client(name=None):
+    """Return the shared MessageClient, creating it on first use."""
+    global _message_client
+    if _message_client is None:
+        if name is None:
+            name = _get_default_client_name()
+        _message_client = MessageClient(name)
+        # Give PUB/SUB sockets a brief moment to establish before first send.
+        time.sleep(0.01)
+    return _message_client
 
 
 
 def send_msg(msg,errlevel):
     frame = inspect.stack()[1]
     module = inspect.getmodule(frame[0])
-    filename = module.__file__.split('/')[-1] 
-    mgsc.send(errlevel,filename+' '+msg)
+    filename = os.path.basename(module.__file__) if module and hasattr(module, '__file__') else '<interactive>'
+    get_message_client().send(errlevel,filename+' '+msg)
 
 #Convenience functions
 #----------------------------

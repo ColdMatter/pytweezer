@@ -270,8 +270,7 @@ class ExperimentManager:
         print("set_dict called")
         print(f"name: {name}")
         print(f"value: {value}")
-        # self.experiment.__dict__[name] = value
-        setattr(self.experiment, name, value)
+        self.experiment.set_argument_value(name, value)
 
     def set_run_nr(self, value):
         """Sets the experiment run number and updates the table."""

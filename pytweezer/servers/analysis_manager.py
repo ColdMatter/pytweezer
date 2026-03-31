@@ -19,7 +19,9 @@ class AnalysisManagerService:
         self.server_name = server_name
         self.conf = ConfigReader.getConfiguration()
         self.server_conf = self.conf.get("Servers", {}).get(server_name, {})
-        self.rep_endpoint = self.server_conf.get("rep", "tcp://127.0.0.1:3111")
+        host = self.server_conf.get("host", "localhost")
+        port = self.server_conf.get("port", 3111)
+        self.rep_endpoint = self.server_conf.get("rep", f"tcp://{host}:{port}")
 
         # Keep legacy property namespace so existing analysis configs still work.
         self.props = Properties("Analysis")
@@ -28,6 +30,8 @@ class AnalysisManagerService:
         self.context = zmqcontext
         self.socket = self.context.socket(zmq.REP)
         self.socket.setsockopt(zmq.LINGER, 0)
+        # Avoid blocking forever in recv so signal-triggered shutdown can exit promptly.
+        self.socket.setsockopt(zmq.RCVTIMEO, 1000)
         if self.rep_endpoint.startswith("tcp://"):
             self.socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
             if hasattr(zmq, "TCP_KEEPALIVE_IDLE"):
@@ -205,6 +209,8 @@ class AnalysisManagerService:
         while self._running:
             try:
                 request = self.socket.recv_json()
+            except zmq.Again:
+                continue
             except Exception as error:
                 print_error(f"analysis_manager recv error: {error}", "warning")
                 continue
@@ -244,18 +250,6 @@ def main() -> None:
 
     def _shutdown(_signo, _frame):
         service._running = False
-        # Unblock recv by connecting briefly and sending shutdown.
-        ctx = zmq.Context.instance()
-        sock = ctx.socket(zmq.REQ)
-        sock.setsockopt(zmq.LINGER, 0)
-        try:
-            sock.connect(service.rep_endpoint)
-            sock.send_json({"command": "shutdown"})
-            sock.recv_json()
-        except Exception:
-            pass
-        finally:
-            sock.close()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)

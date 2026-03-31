@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 import os
+import time
 import zmq
 
 from pytweezer.GUI.property_editor import PropEdit
@@ -28,17 +29,38 @@ class AnalysisManagerClient(QtCore.QObject):
         self.timeout_ms = timeout_ms
         self.context = zmq.Context.instance()
 
-    def request(self, payload: dict):
-        socket = self.context.socket(zmq.REQ)
-        socket.setsockopt(zmq.LINGER, 0)
-        socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
-        socket.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
-        socket.connect(self.endpoint)
-        try:
-            socket.send_json(payload)
-            return socket.recv_json()
-        finally:
-            socket.close()
+    def request(self, payload: dict, retries: int = 2, retry_delay_s: float = 0.12) -> dict:
+        last_error = None
+        attempts = max(1, int(retries) + 1)
+
+        for attempt in range(attempts):
+            socket = self.context.socket(zmq.REQ)
+            socket.setsockopt(zmq.LINGER, 0)
+            socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
+            socket.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
+            socket.connect(self.endpoint)
+            try:
+                socket.send_json(payload)
+                return socket.recv_json()
+            except zmq.Again as error:
+                last_error = error
+                if attempt < attempts - 1:
+                    time.sleep(retry_delay_s)
+                    continue
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Analysis Manager not responding at {self.endpoint} "
+                        f"(timeout {self.timeout_ms} ms)"
+                    ),
+                }
+            except Exception as error:
+                last_error = error
+                return {"ok": False, "error": str(error)}
+            finally:
+                socket.close()
+
+        return {"ok": False, "error": str(last_error) if last_error else "unknown RPC error"}
 
 
 class CheckableModel(QtGui.QStandardItemModel):
@@ -268,8 +290,11 @@ class AnalysisManager(BWidget):
     def __init__(self, name='Analysis', parent=None):
         super().__init__(name, parent)
         self.conf = ConfigReader.getConfiguration()
-        manager_conf = self.conf.get('Servers', {}).get('Analysis Manager', {})
-        endpoint = manager_conf.get('rep', 'tcp://127.0.0.1:3111')
+        manager_conf = self.conf['Servers']['Analysis Manager']
+        host = manager_conf['host']
+        port = manager_conf['port']
+        endpoint = f"tcp://{host}:{port}"
+        self._last_snapshot_error = ''
 
         self.rpc = AnalysisManagerClient(endpoint)
         self.analysisdir = tweezerpath + '/pytweezer/analysis/'
@@ -302,8 +327,14 @@ class AnalysisManager(BWidget):
     def refresh_snapshot(self):
         response = self.rpc.request({'command': 'snapshot'})
         if not response.get('ok'):
-            print_error(f"AnalysisManager snapshot error: {response.get('error')}", 'error')
+            error_text = str(response.get('error', 'unknown error'))
+            # Avoid flooding the console with the same timeout while service starts.
+            if error_text != self._last_snapshot_error:
+                print_error(f"AnalysisManager snapshot error: {error_text}", 'warning')
+                self._last_snapshot_error = error_text
             return
+
+        self._last_snapshot_error = ''
 
         self.analysisdir = response.get('analysisdir', self.analysisdir)
         self.tvw.populate(response)

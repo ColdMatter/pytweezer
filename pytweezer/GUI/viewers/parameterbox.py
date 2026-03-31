@@ -16,6 +16,7 @@ class ParameterBox(BFrame):
         self.setFrameStyle(QFrame.StyledPanel | QFrame.Plain)
         self.setLineWidth(1)
         self.datadict={}
+        self.stream_data = {}
         self.propname = name
         self.props = Properties(self.propname)
         self.datalist = self.props.get('ydata', [''])
@@ -25,13 +26,16 @@ class ParameterBox(BFrame):
         # set names
         self.name = name
         self.datastream = DataClient(self.propname)
-        self.subscription_name = self.props.get('datastreams', ['',''])[0]
-        self.dataLabel = QLabel('')
-        self.dataValue = QLabel('')
+        self.subscription_names = self.props.get('datastreams', [''])
+        self.dataBoxes = []
+        self.row_config = []
 
-        layout = QHBoxLayout()
-        layout.addWidget(self.dataLabel)
-        layout.addWidget(self.dataValue)
+        layout = QVBoxLayout()
+        for _ in range(10):
+            box = DataBox()
+            box.hide()
+            self.dataBoxes.append(box)
+            layout.addWidget(box)
         self.setLayout(layout)
 
         #Context Menu
@@ -46,21 +50,25 @@ class ParameterBox(BFrame):
         self.timer=timer
 
     def setNewData(self):
-        if self.datastream.has_new_data():
+        got_new = False
+        while self.datastream.has_new_data():
             recvmsg=self.datastream.recv()
+            if recvmsg is None:
+                continue
             A=None
             if len(recvmsg)==2:
                 msg,di=recvmsg
             elif len(recvmsg)==3:
                 msg,di,A=recvmsg
-            self.datadict = di
-            #print('datadict:',di)
-            if self.dataname:
-                val = self.datadict[self.dataname]
-                self.dataValue.setText(str(round(val,5)))
             else:
-                val = "EmptyString"
-                self.dataValue.setText(val)
+                continue
+            if isinstance(di, dict):
+                self.stream_data[msg] = di
+                self.datadict = di
+                got_new = True
+
+        if got_new:
+            self._update_rows()
 
     def openMenu(self, position):
         menu=QMenu()
@@ -97,15 +105,60 @@ class ParameterBox(BFrame):
         self.updateSubscription()
 
     def updateSubscription(self):
-        self.subscription_name = self.props.get('datastreams', [''])[0]
+        self.subscription_names = self.props.get('datastreams', [''])
+        stream_names = [s for s in self.subscription_names if isinstance(s, str) and s]
         # we first unsubsribe from the old datastream, then subsribe to the new one
         self.datastream.unsubscribe()
-        self.datastream.subscribe([self.subscription_name])
+        if len(stream_names) > 0:
+            self.datastream.subscribe(stream_names)
+        self.stream_data = {}
 
     def updateDataLists(self):
         self.datalist = self.props.get('ydata', [''])
+        if len(self.datalist) == 0:
+            self.datalist = ['']
         self.dataname = self.datalist[0]
-        self.dataLabel.setText(self.dataname+':')
+
+        streams = [s for s in self.props.get('datastreams', ['']) if isinstance(s, str) and s]
+        if len(streams) == 0:
+            streams = ['']
+
+        n_rows = max(len(streams), len(self.datalist))
+        if len(self.datalist) == 1 and n_rows > 1:
+            keys = self.datalist * n_rows
+        else:
+            keys = list(self.datalist)
+            while len(keys) < n_rows:
+                keys.append(keys[-1] if len(keys) > 0 else '')
+
+        stream_list = list(streams)
+        while len(stream_list) < n_rows:
+            stream_list.append(stream_list[-1] if len(stream_list) > 0 else '')
+
+        self.row_config = list(zip(stream_list, keys))
+        self._update_rows()
+
+    def _update_rows(self):
+        for box in self.dataBoxes:
+            box.hide()
+
+        for i, (stream_name, data_key) in enumerate(self.row_config[:len(self.dataBoxes)]):
+            box = self.dataBoxes[i]
+            label = stream_name if stream_name else 'stream'
+            if data_key:
+                label = f'{label}: {data_key}'
+            box.label.setText(label)
+
+            di = self.stream_data.get(stream_name, None)
+            val = '---'
+            if isinstance(di, dict) and data_key in di:
+                raw = di[data_key]
+                if isinstance(raw, (float, int)):
+                    val = str(round(raw, 5))
+                else:
+                    val = str(raw)
+            box.value.setText(val)
+            box.show()
 
 class ImageDataBox(BFrame):
     def __init__(self,name,parent=None):
@@ -119,7 +172,7 @@ class ImageDataBox(BFrame):
         self.dataname = self.datalist[0]
         self.imDataDict = {}
         self.dataBoxes = []
-        self.qlayout = QVBoxLayout()
+        self.qlayout = QHBoxLayout()
         for i in range(10):
             box = DataBox()
             self.dataBoxes.append(box)
@@ -173,7 +226,7 @@ class ImageDataBox(BFrame):
         for dataname in self.imDataDict.keys():
             dataCombo.addItem(dataname)
         dataCombo.currentTextChanged.connect(self.setNewDataName)
-        layout.addWidget(editor)
+        layout.addWidget(dataCombo)
         d.setLayout(layout)
         d.exec_()
 
