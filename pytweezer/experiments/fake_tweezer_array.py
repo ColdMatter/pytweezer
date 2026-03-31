@@ -2,7 +2,7 @@ import time
 
 import numpy as np
 
-from pytweezer.experiment.experiment import Experiment
+from pytweezer.experiment.experiment import Experiment, ImageResultChannel
 from pytweezer.experiment.experiment import BoolValue
 from pytweezer.experiment.experiment import NumberValue
 from pytweezer.experiment.dummy_drivers import DummyCamera
@@ -17,6 +17,8 @@ class FakeTweezerArray(Experiment):
         super().build()
         self.setattr_device("dummy_camera", mode="test", n_frames=1, servers=True)
         self.dummy_camera: DummyCamera
+        
+        self.setattr_result("image_channel", ImageResultChannel)
 
         self.setattr_argument("n_frames", NumberValue, ndecimals=0, step=1, value=10, minval=1, maxval=1000)
         self.setattr_argument("image_height", NumberValue, ndecimals=0, step=1, value=256, minval=32, maxval=4096)
@@ -120,6 +122,8 @@ class FakeTweezerArray(Experiment):
             )
             for _ in range(n_frames)
         ]
+        
+        self.image_channel.set(np.array(images))
 
         self.dummy_camera.dummy_images = images
         time.sleep(self.sleep_time.get())

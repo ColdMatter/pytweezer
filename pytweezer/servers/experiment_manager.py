@@ -2,12 +2,17 @@ from PyQt5 import QtCore
 from PyQt5.QtCore import QDateTime, QThread, pyqtSignal
 import numpy as np
 import time
+import threading
 
 from pytweezer.analysis.print_messages import print_error
 from pytweezer.experiment.experiment import get_experiment
 from pytweezer.experiment.motmaster_client import MotMasterClient
+from pytweezer.logging_utils import get_logger
 from pytweezer.servers.model_sync import SyncedScheduleModel
 from pytweezer.servers.properties import Properties
+
+
+logger = get_logger(__name__)
 
 
 class QueueThread(QThread):
@@ -43,13 +48,15 @@ class ExperimentManager:
     def __init__(self):
         self._props = Properties("Manager")
         self.queueThread = None
-        # Create own instance of synced model for standalone operation
-        self._model = SyncedScheduleModel()
-        self.start_queue()
+        self.queueRunning = False
+        self._queue_condition = threading.Condition()
         self.paused = False
         self.running = False  # tells the queue whether an experiment is currently running
         self.taskNr = 0
         self.motmaster_client = MotMasterClient()
+        # Create own instance of synced model for standalone operation
+        self._model = SyncedScheduleModel()
+        self.start_queue()
 
     @property
     def model(self):
@@ -117,8 +124,12 @@ class ExperimentManager:
             return
         while self.run_nr < self.n_runs and self.running:
             self.terminated = self.expDict[self.taskNr]['terminated']
-            while self.paused and not self.terminated:
-                time.sleep(0.01)
+            while self._is_task_paused(self.taskNr) and not self.terminated:
+                # Reflect pause in manager state for legacy code paths.
+                self.paused = True
+                self._wait_for_queue_event(0.2)
+                self.terminated = self.expDict[self.taskNr]['terminated']
+            self.paused = False
             if self.terminated:
                 return  # pass back to the main loop to terminate the task
             if self.n_runs > 1:
@@ -137,17 +148,26 @@ class ExperimentManager:
         self.run_nr = 0
 
     def pause(self):
-        """Pauses or unpauses the experiment."""
-        if self.running:
-            if self.paused:
-                self._update_task_status(self.taskNr, 'Running')
-            else:
-                self._update_task_status(self.taskNr, 'Paused')
-        self.paused = not self.paused
+        """Toggle pause by editing current task status in the synced model."""
+        if not self.running or self.taskNr not in self.expDict:
+            return
+        if self._is_task_paused(self.taskNr):
+            self._update_task_status(self.taskNr, 'Queued')
+            self.paused = False
+        else:
+            self._update_task_status(self.taskNr, 'Paused')
+            self.paused = True
+        self._notify_queue_event()
+
+    def _is_task_paused(self, taskNr):
+        """Return True if the given task is marked paused in the shared model."""
+        if taskNr not in self.expDict:
+            return False
+        return self.expDict[taskNr].get('status') == 'Paused'
 
     def start_queue(self):
         """Starts the experiment queue worker in its own thread."""
-        print('queue worker starting')
+        logger.info('Queue worker starting')
         self.queueRunning = True
         self.queueThread = QueueThread(self.queue_fn)
         self.queueThread.update_ui.connect(self.update_table)
@@ -158,8 +178,19 @@ class ExperimentManager:
         del self.model[k]
 
     def finished(self):
-        print('queue worker finished')
+        logger.info('Queue worker finished')
         self.queueRunning = False
+        self._notify_queue_event()
+
+    def _notify_queue_event(self):
+        """Wake the queue worker when queue state changes."""
+        with self._queue_condition:
+            self._queue_condition.notify_all()
+
+    def _wait_for_queue_event(self, timeout_s=0.5):
+        """Wait for queue-relevant state changes with timeout fallback."""
+        with self._queue_condition:
+            self._queue_condition.wait(timeout=timeout_s)
 
 
     def queue_fn(self, progress_callback=None):
@@ -169,17 +200,19 @@ class ExperimentManager:
         If the are tasks, is looks through them in order of 1) priority and 2) task number.
         If a task is marked as 'waiting', it moves on to the next task. Otherwise, it runs the task.
         """
-        while True:
+        while self.queueRunning:
             i = 0
-            while self.expDict == {} or self.running:
-                time.sleep(0.01)
+            while self.queueRunning and (self.expDict == {} or self.running):
+                self._wait_for_queue_event(0.5)
+            if not self.queueRunning:
+                break
             while i < len(self.expDict.keys()):
                 try:
                     try:
                         nextTaskNr = self.model.row_to_key[i] 
                     except Exception as e:
                         print_error('ExperimentManager: IndexError in queue_fn, likely due to task deletion during iteration', 'error')
-                        print(e)
+                        logger.exception('Exception while selecting next task in queue loop')
                         break
                     nextTask = self.expDict[nextTaskNr]
                     # Only check due_check for tasks that are sleeping/waiting;
@@ -194,7 +227,8 @@ class ExperimentManager:
                     else:
                         i += 1
                     if i == len(self.expDict.keys()):
-                        time.sleep(0.5)  # if all experiments are waiting, this stops the program locking up
+                        # If all tasks are waiting/sleeping, avoid a tight poll loop.
+                        self._wait_for_queue_event(0.5)
                 except Exception as e:
                     print_error('Task {} failed with error: {}'.format(nextTaskNr, e), 'error')
                     self.running = False
@@ -233,18 +267,24 @@ class ExperimentManager:
                 }
             )
             self.update_table()
+            self._notify_queue_event()
 
     def terminate_experiment(self):
         """Graceful termination of the experiment. Allows current run to finish."""
-        print('Terminating experiment')
+        logger.info('Terminating experiment')
         self._update_task_status(self.taskNr, 'Terminating')
         self.running = False
+        self._notify_queue_event()
         time.sleep(0.1)  # just to give the table time to display. Can be shortened or taken out.
         self.delete_item(self.taskNr)
 
     def start_measurement(self):
         """Sets arguments, calls experimental start_measurement function."""
         self.experiment.build()
+        # Keep runtime identifiers on the experiment instance in sync with queue state.
+        self.experiment._task = self.taskNr
+        self.experiment._run = int(self.run_nr)
+        self.experiment._rep = int(self.rep)
         for arg in self.arg_dict.keys():
             self.set_dict(arg, self.arg_dict[arg])
         # print('\n\033[1mExperimentQ: task {} ({}) starting\n\033[0m'.format(self.taskNr, self.name))
@@ -264,17 +304,16 @@ class ExperimentManager:
         # time.sleep(0.1)  # just to give the table time to display. Can be shortened or taken out.
         del self.model[self.taskNr]
         self.running = False
+        self._notify_queue_event()
 
     def set_dict(self, name, value):
         """Sets experiment arguments."""
-        print("set_dict called")
-        print(f"name: {name}")
-        print(f"value: {value}")
+        logger.debug("set_dict called: %s=%r", name, value)
         self.experiment.set_argument_value(name, value)
 
     def set_run_nr(self, value):
         """Sets the experiment run number and updates the table."""
-        self.experiment._run = value
+        self.experiment._run = value       
         self.expDict[self.taskNr]['run'] = value
         # Sync through RPC to ensure GUI sees the update
         self.model._sync.apply_operation(
@@ -289,7 +328,7 @@ class ExperimentManager:
 
     def set_rep_nr(self, value):
         """Sets the experiment repetition number and updates the table."""
-        self.experiment._repetition = value
+        self.experiment._rep = value
         self.expDict[self.taskNr]['repetition'] = value
         # Sync through RPC to ensure GUI sees the update
         self.model._sync.apply_operation(
@@ -311,7 +350,7 @@ def main():
     # Create and run the experiment manager
     manager = ExperimentManager()
     
-    print(f"Experiment Manager started and listening to synced schedule model")
+    logger.info("Experiment Manager started and listening to synced schedule model")
     sys.exit(app.exec_())
 
 

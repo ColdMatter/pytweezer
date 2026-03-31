@@ -6,29 +6,20 @@
         },
         "DataStream": {
             "maxStreamInactive[s]": 1000,
-            "active": {
-                "Experiment/FakeTweezerArray.start": {
-                    "timestamp": 1774891638.7065744,
-                    "parts": 2
-                },
-                "find_atoms_": {
-                    "timestamp": 1774891639.1934001,
-                    "parts": 2
-                },
-                "Experiment/FakeTweezerArray.end": {
-                    "timestamp": 1774891639.2184498,
-                    "parts": 2
-                }
-            }
+            "active": {}
         },
         "ImageStream": {
             "active": {
                 "dummy_cam": {
-                    "timestamp": 1774891638.1520796,
+                    "timestamp": 1774968914.9369519,
                     "parts": 3
                 },
                 "select_first_": {
                     "timestamp": 1774867696.234995,
+                    "parts": 3
+                },
+                "Experiment/FakeTweezerArray.result": {
+                    "timestamp": 1774968914.632619,
                     "parts": 3
                 }
             }
@@ -54,8 +45,8 @@
         "testval": 3,
         "testlist": [],
         "Geometry": [
-            1920,
-            491,
+            0,
+            24,
             1920,
             1031
         ],
@@ -126,7 +117,7 @@
             "param2": 0,
             "_totalrun": 203
         },
-        "_task": 84,
+        "_task": 109,
         "FakeTweezerArray": {
             "scans": {
                 "p1": {
@@ -162,7 +153,7 @@
                 }
             },
             "n_frames": 1.0,
-            "last_set": "param2: 0.0",
+            "last_set": "sleep_time: 0.1",
             "image_height": 500.0,
             "image_width": 500.0,
             "grid_rows": 8.0,
@@ -179,7 +170,7 @@
             "sleep_time": 0.1,
             "param1": 0,
             "param2": 0,
-            "_totalrun": 13425
+            "_totalrun": 13686
         }
     },
     "Analysis": {

@@ -187,7 +187,7 @@ class Experiment:
         info = {
             "_starttime": self._starttime,
             "_run": self._run,
-            "_repetition": self._repetition,
+            "_repetition": self._rep,
             "_task": task,
             "_name": self._name,
             "_exp_name": self.exp_name,
@@ -270,27 +270,48 @@ class Experiment:
         run = int(start_info.get('_run', self._run))
         rep = int(start_info.get('_repetition', getattr(self, '_repetition', self._rep)))
         task = int(start_info.get('_task', 0))
-        filename = f"{self.name}_task{task}.h5"
+        filename = f"task{task}_{self.name}.h5"
         path = self._get_results_h5_dir() / filename
 
         try:
             with h5py.File(path, 'a') as f:
-                f.attrs['experiment_name'] = self.name
                 f.attrs['task'] = task
 
-                base_group_name = f"run_{run:06d}_rep_{rep:04d}"
-                group_name = base_group_name
-                if group_name in f:
+                # Create task_info group once (constant metadata across all runs in a task)
+                if 'task_info' not in f:
+                    g_task_info = f.create_group('task_info')
+                    g_task_info.attrs['experiment_name'] = self.name
+
+                    # Store git info (constant for the task)
+                    g_git = g_task_info.create_group('git')
+                    for k, v in self._get_git_repo_info().items():
+                        self._write_h5_value(g_git, k, v)
+
+                    # Store scan arguments and MotMaster parameters (constant for the task)
+                    if 'arguments' in start_info:
+                        self._write_h5_value(g_task_info, 'arguments', start_info['arguments'])
+                    if 'mm_params' in start_info:
+                        self._write_h5_value(g_task_info, 'mm_params', start_info['mm_params'])
+
+                rep_group_name = f"rep_{rep:04d}"
+                g_rep = f.require_group(rep_group_name)
+                g_rep.attrs['repetition'] = rep
+
+                base_run_group_name = f"run_{run:06d}"
+                run_group_name = base_run_group_name
+                if run_group_name in g_rep:
                     i = 1
-                    while f"{base_group_name}_dup{i}" in f:
+                    while f"{base_run_group_name}_dup{i}" in g_rep:
                         i += 1
-                    group_name = f"{base_group_name}_dup{i}"
+                    run_group_name = f"{base_run_group_name}_dup{i}"
 
-                g_run = f.create_group(group_name)
+                g_run = g_rep.create_group(run_group_name)
 
+                # Write start info, excluding arguments and mm_params (those are in task_info)
                 g_start = g_run.create_group('start')
                 for k, v in start_info.items():
-                    self._write_h5_value(g_start, k, v)
+                    if k not in ('arguments', 'mm_params'):
+                        self._write_h5_value(g_start, k, v)
 
                 g_end = g_run.create_group('end')
                 for k, v in end_info.items():
@@ -300,11 +321,10 @@ class Experiment:
                 for name, payload in results.items():
                     self._write_h5_value(g_res, name, payload)
 
-                g_git = g_run.create_group('git')
-                for k, v in self._get_git_repo_info().items():
-                    self._write_h5_value(g_git, k, v)
-
-            print_error(f"Saved measurement run to HDF5: {path} [{group_name}]", 'success')
+            print_error(
+                f"Saved measurement run to HDF5: {path} [{rep_group_name}/{run_group_name}]",
+                'success'
+            )
         except Exception as error:
             print_error(f"Failed to save measurement HDF5 at {path}: {error}", 'error')
 

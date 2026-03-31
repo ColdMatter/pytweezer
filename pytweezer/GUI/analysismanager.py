@@ -12,7 +12,6 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 import os
-import time
 import zmq
 
 from pytweezer.GUI.property_editor import PropEdit
@@ -28,24 +27,51 @@ class AnalysisManagerClient(QtCore.QObject):
         self.endpoint = endpoint
         self.timeout_ms = timeout_ms
         self.context = zmq.Context.instance()
+        self._socket = None
+        self._poller = zmq.Poller()
+
+    def _connect_socket(self):
+        if self._socket is not None:
+            self._poller.unregister(self._socket)
+            self._socket.close()
+        socket = self.context.socket(zmq.REQ)
+        socket.setsockopt(zmq.LINGER, 0)
+        socket.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
+        socket.connect(self.endpoint)
+        self._socket = socket
+        self._poller.register(socket, zmq.POLLIN)
+
+    def _reset_socket(self):
+        if self._socket is None:
+            return
+        try:
+            self._poller.unregister(self._socket)
+        except Exception:
+            pass
+        self._socket.close()
+        self._socket = None
+
+    def close(self):
+        self._reset_socket()
 
     def request(self, payload: dict, retries: int = 2, retry_delay_s: float = 0.12) -> dict:
         last_error = None
         attempts = max(1, int(retries) + 1)
 
         for attempt in range(attempts):
-            socket = self.context.socket(zmq.REQ)
-            socket.setsockopt(zmq.LINGER, 0)
-            socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
-            socket.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
-            socket.connect(self.endpoint)
+            if self._socket is None:
+                self._connect_socket()
             try:
-                socket.send_json(payload)
-                return socket.recv_json()
+                self._socket.send_json(payload)
+                events = dict(self._poller.poll(self.timeout_ms))
+                if events.get(self._socket) == zmq.POLLIN:
+                    return self._socket.recv_json()
+                raise zmq.Again()
             except zmq.Again as error:
                 last_error = error
+                self._reset_socket()
                 if attempt < attempts - 1:
-                    time.sleep(retry_delay_s)
+                    QtCore.QThread.msleep(int(max(0, retry_delay_s) * 1000))
                     continue
                 return {
                     "ok": False,
@@ -56,9 +82,8 @@ class AnalysisManagerClient(QtCore.QObject):
                 }
             except Exception as error:
                 last_error = error
+                self._reset_socket()
                 return {"ok": False, "error": str(error)}
-            finally:
-                socket.close()
 
         return {"ok": False, "error": str(last_error) if last_error else "unknown RPC error"}
 
@@ -165,7 +190,7 @@ class TreeViewWidget(QWidget):
 
     def refresh_status(self):
         # Keep checkbox state synced with actual process status.
-        response = self.rpc.request({"command": "snapshot"})
+        response = self.rpc.request({"command": "snapshot"}, retries=0, retry_delay_s=0)
         if not response.get("ok"):
             return
 
@@ -325,7 +350,7 @@ class AnalysisManager(BWidget):
         self.setLayout(layout)
 
     def refresh_snapshot(self):
-        response = self.rpc.request({'command': 'snapshot'})
+        response = self.rpc.request({'command': 'snapshot'}, retries=0, retry_delay_s=0)
         if not response.get('ok'):
             error_text = str(response.get('error', 'unknown error'))
             # Avoid flooding the console with the same timeout while service starts.
