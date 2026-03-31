@@ -28,7 +28,6 @@
             "/Viewer/DummyViewer/Viewer/ROI/slice",
             "/Viewer/TweezerViewer/ROI/slice"
         ],
-        "Imagepath": "/home/twalker/RbCaF/pytweezer/Data"
     },
     "Manager": {
         "ExperimentQ": {
@@ -41,7 +40,6 @@
     },
     "BaliBrowser": {
         "Looper": {},
-        "experiments_dir": "/home/twalker/RbCaF/pytweezer/experiments",
         "testval": 3,
         "testlist": [],
         "Geometry": [
@@ -51,8 +49,7 @@
             1031
         ],
         "OpenWindows": [
-            "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/dummy.py",
-            "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/fake_tweezer_array.py"
+
         ],
         "dummy": {
             "Geo": [

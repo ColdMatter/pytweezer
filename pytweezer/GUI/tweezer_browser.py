@@ -1150,23 +1150,24 @@ class BaliFileSelector(QWidget):
         model = QDirModel()
         tree.setModel(model)
         tree.setColumnWidth(0, 250)
-        experiments_dir = self.props.get(
-            "experiments_dir", os.path.join(tweezerpath, "pytweezer", "experiments")
-        )
-        experiments_dir = os.path.abspath(
-            os.path.normpath(os.path.expanduser(str(experiments_dir)))
-        )
-        if not os.path.isdir(experiments_dir):
-            fallback_dir = os.path.abspath(
-                os.path.normpath(os.path.join(tweezerpath, "pytweezer", "experiments"))
-            )
-            print_error(
-                "tweezer_browser.py - BaliFileSelector: Invalid experiments_dir '{}', using fallback '{}'".format(
-                    experiments_dir, fallback_dir
-                ),
-                "warning",
-            )
-            experiments_dir = fallback_dir
+        # experiments_dir = self.props.get(
+        #     "experiments_dir", os.path.join(tweezerpath, "pytweezer", "experiments")
+        # )
+        # experiments_dir = os.path.abspath(
+        #     os.path.normpath(os.path.expanduser(str(experiments_dir)))
+        # )
+        # if not os.path.isdir(experiments_dir):
+        #     fallback_dir = os.path.abspath(
+        #         os.path.normpath(os.path.join(tweezerpath, "pytweezer", "experiments"))
+        #     )
+        #     print_error(
+        #         "tweezer_browser.py - BaliFileSelector: Invalid experiments_dir '{}', using fallback '{}'".format(
+        #             experiments_dir, fallback_dir
+        #         ),
+        #         "warning",
+        #     )
+        #     experiments_dir = fallback_dir
+        experiments_dir = os.path.join(tweezerpath, "pytweezer", "experiments")
 
         root_index = model.index(QtCore.QDir.fromNativeSeparators(experiments_dir))
         if root_index.isValid():

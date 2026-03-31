@@ -216,7 +216,7 @@ class Experiment:
         if isinstance(self._results_h5_dir, str) and self._results_h5_dir.strip():
             out_dir = pathlib.Path(self._results_h5_dir)
         else:
-            base = self._props.get('/Servers/Imagepath', str(pathlib.Path.cwd() / 'Data'))
+            base = str(pathlib.Path.cwd() / 'Data')
             out_dir = pathlib.Path(base) / 'measurements_h5'
         out_dir.mkdir(parents=True, exist_ok=True)
         return out_dir

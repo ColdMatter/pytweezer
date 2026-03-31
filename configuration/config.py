@@ -1,14 +1,15 @@
 HOST_DICT = {
-    "beast": "10.59.3.2",
+    "beast": "10.59.3.1",
+    "mm_pc": "10.59.3.2",
     "localhost": "127.0.0.1"
 }
 
-port_iterator = iter(range(3278, 99999))
+port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
 HOST = HOST_DICT["beast"]
 
-SIMULATING = True
+SIMULATING = False
 
 CONFIG = {
     "GUI": {
@@ -55,7 +56,7 @@ CONFIG = {
         "MotMaster Server": {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
-            "host": HOST,
+            "host": HOST_DICT["mm_pc"],
             "port": 5557,
             "simulate": SIMULATING
         },
