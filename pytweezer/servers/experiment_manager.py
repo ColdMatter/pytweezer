@@ -6,6 +6,7 @@ import threading
 
 from pytweezer.analysis.print_messages import print_error
 from pytweezer.experiment.experiment import get_experiment
+from pytweezer.experiment.pathing import resolve_experiment_filepath
 from pytweezer.experiment.motmaster_client import MotMasterClient
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers.model_sync import SyncedScheduleModel
@@ -79,7 +80,7 @@ class ExperimentManager:
         self.taskNr = taskNr
         self.name = task_dict['expName'] + ' ' + task_dict['label']
         # self.experiment = task_dict['experiment']
-        filepath = task_dict['filepath']
+        filepath = resolve_experiment_filepath(task_dict['filepath'])
         experiment_cls = get_experiment(filepath, task_dict['expName'])
         self.experiment = experiment_cls(self._props, motmaster_client=self.motmaster_client)
         self.arg_dict = task_dict['args']

@@ -22,6 +22,10 @@ from PyQt5.QtCore import QThreadPool, Qt, QDateTime, QEvent
 import pytweezer
 from pytweezer.analysis.floating_point_arithmetics import round_floating_prec
 from pytweezer.experiment.experiment import Experiment
+from pytweezer.experiment.pathing import (
+    canonical_experiment_filepath,
+    resolve_experiment_filepath,
+)
 from pytweezer.servers import (
     Properties,
     tweezerpath,
@@ -32,9 +36,7 @@ from pytweezer.servers import (
 from pytweezer.servers import send_info, send_error
 from pytweezer.GUI.browser.editor_sequencer import CodeEditorParser, CodeEditor
 from pytweezer.GUI.arg_boxes import FloatBox, BoolBox, ComboBox
-from pytweezer.servers.experiment_manager import ExperimentManager
 from pytweezer.GUI.browser.prepstation import PrepStation
-from pytweezer.GUI.looper import Looper
 from pytweezer.GUI.browser.experiment_queue import ExperimentQ
 from pytweezer.GUI.pytweezerQt import SearchComboBox
 from pytweezer.analysis.print_messages import print_error
@@ -126,18 +128,20 @@ class BaliBrowser(QMainWindow):
         Opens a new experiment window.
         Does nothing if a window already exists for that experiment.
         """
-        path, ext, name, filename = filepath_split(filepath)
+        canonical_filepath = canonical_experiment_filepath(filepath)
+        resolved_filepath = resolve_experiment_filepath(filepath)
+        path, ext, name, filename = filepath_split(resolved_filepath)
         if ext != ".py":
             # print_error('Browser attempted to open a non-.py file', 'error')
             return
         for window in self.openWindows:
-            if filepath == window.filepath:
+            if canonical_filepath == window.filepath:
                 print_error(
                     "Browser attempted to open an already-open experiment", "warning"
                 )
                 window.subWindow.close()
         sub = ExperimentSubWindow(name, self.props, parent=self)
-        exwin = ExperimentWindow(filepath, self.props, parent=sub, browser=self)
+        exwin = ExperimentWindow(resolved_filepath, self.props, parent=sub, browser=self)
         sub.setWidget(exwin)
         self.mdi.addSubWindow(sub)
         p = sub.geometry()
@@ -150,7 +154,7 @@ class BaliBrowser(QMainWindow):
         self.openWindows.append(exwin)
         if not startup:
             openWindowNames = self.openWindowNames.value
-            openWindowNames.append(filepath)
+            openWindowNames.append(canonical_filepath)
             self.openWindowNames.value = openWindowNames
         return exwin
 
@@ -204,8 +208,9 @@ class ExperimentWindow(QWidget):
 
     def __init__(self, filepath, props, parent=None, browser=None):
         super().__init__(parent)
-        self.filepath = filepath
-        self.path, ext, self.name, self.filename = filepath_split(filepath)
+        self.filepath = canonical_experiment_filepath(filepath)
+        self.absolute_filepath = resolve_experiment_filepath(filepath)
+        self.path, ext, self.name, self.filename = filepath_split(self.absolute_filepath)
         self.subWindow = parent
         self.browser = browser
         self.props = props
@@ -218,7 +223,7 @@ class ExperimentWindow(QWidget):
         from pytweezer.experiment.experiment import get_experiment
 
         try:
-            experiment_cls = get_experiment(filepath, self.name)
+            experiment_cls = get_experiment(self.absolute_filepath, self.name)
             experiment = experiment_cls(self.props, self.browser.motmaster_interface)
             experiment.build()
             self.experiment: Experiment = experiment
@@ -751,7 +756,10 @@ class ExperimentWindow(QWidget):
     def closeEvent(self, event):
         """when an exp window is closed, removes the window from the open window list"""
         openWindowNames = self.browser.openWindowNames.value
-        openWindowNames.remove(self.filepath)
+        for idx, saved_path in enumerate(openWindowNames):
+            if canonical_experiment_filepath(saved_path) == self.filepath:
+                del openWindowNames[idx]
+                break
         self.browser.openWindowNames.value = openWindowNames
         self.browser.openWindows.remove(self)
         self.subWindow.close()
