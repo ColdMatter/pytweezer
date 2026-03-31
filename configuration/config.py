@@ -6,7 +6,7 @@ HOST_DICT = {
 port_iterator = iter(range(3278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-HOST = HOST_DICT["localhost"]
+HOST = HOST_DICT["beast"]
 
 SIMULATING = True
 
@@ -56,7 +56,7 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
             "host": HOST,
-            "port": get_next_port(),
+            "port": 5557,
             "simulate": SIMULATING
         },
         "Imagehub": {
