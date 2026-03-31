@@ -1,13 +1,11 @@
 #pylint: disable=<C0302>
-from functools import partial
 
 from PyQt5 import QtGui, QtCore
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QWidget, QTableView, QPushButton, QAbstractItemView, QAction, QHBoxLayout, QVBoxLayout
-from PyQt5.QtWidgets import QHeaderView, QGroupBox, QDialog
+from PyQt5.QtWidgets import QTableView, QPushButton, QAbstractItemView, QAction, QHBoxLayout, QVBoxLayout
+from PyQt5.QtWidgets import QHeaderView, QGroupBox
 
-from pytweezer.servers import Properties, tweezerpath, icon_path, PropertyAttribute, DataClient
-from pytweezer.GUI.models import ScheduleModel, PrepModel
+from pytweezer.servers import icon_path, PropertyAttribute
 from pytweezer.servers.model_sync import SyncedScheduleModel
 
 
@@ -61,39 +59,35 @@ class ExperimentQ(QGroupBox):
         terminateAllButton.clicked.connect(self.terminate_all)
         self.buttonLayout.addWidget(terminateAllButton)
 
-        self.restartButton = QPushButton('Restart Q')
-        self.restartButton.setMaximumWidth(30)
-        self.restartButton.clicked.connect(self.restart)
-        self.buttonLayout.addWidget(self.restartButton)
 
         self.buttonLayout.setAlignment(Qt.AlignLeft)
 
     def init_table_actions(self):
 
         delete_action = QAction("Delete", self.table)
-        delete_action.triggered.connect(partial(self.delete_clicked))
+        delete_action.triggered.connect(self.delete_clicked)
         delete_action.setShortcut("SHIFT+DELETE")
         delete_action.setShortcutContext(Qt.WidgetShortcut)
         self.table.addAction(delete_action)
 
         terminate_action = QAction("Terminate", self.table)
-        terminate_action.triggered.connect(partial(self.terminate_clicked))
+        terminate_action.triggered.connect(self.terminate_clicked)
         terminate_action.setShortcut("DELETE")
         terminate_action.setShortcutContext(Qt.WidgetShortcut)
         self.table.addAction(terminate_action)
 
         terminate_all_action = QAction("Terminate all", self.table)
-        terminate_all_action.triggered.connect(partial(self.terminate_all))
+        terminate_all_action.triggered.connect(self.terminate_all)
         self.table.addAction(terminate_all_action)
 
         sleep_action = QAction("Sleep", self.table)
-        sleep_action.triggered.connect(partial(self.set_sleeping))
+        sleep_action.triggered.connect(self.set_sleeping)
         sleep_action.setShortcut("SHIFT+SPACE")
         sleep_action.setShortcutContext(Qt.WidgetShortcut)
         self.table.addAction(sleep_action)
 
         pause_action = QAction("Pause", self.table)
-        pause_action.triggered.connect(partial(self.pause))
+        pause_action.triggered.connect(self.pause)
         pause_action.setShortcut("SPACE")
         pause_action.setShortcutContext(Qt.WidgetShortcut)
         self.table.addAction(pause_action)
@@ -107,12 +101,10 @@ class ExperimentQ(QGroupBox):
         self.table.verticalHeader().hide()
         self.table.setContextMenuPolicy(Qt.ActionsContextMenu)
 
-        self.expDict = {}
         self.tableModel = SyncedScheduleModel()
         self.table.setModel(self.tableModel)
         self._connect_model_selection_preservation(self.tableModel)
 
-        cw = QtGui.QFontMetrics(self.font()).averageCharWidth()
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         for i in range(1,h.count()):
@@ -123,6 +115,11 @@ class ExperimentQ(QGroupBox):
         self.tableModel = model
         self.table.setModel(self.tableModel)
         self._connect_model_selection_preservation(self.tableModel)
+
+    @property
+    def expDict(self):
+        """Return live task dictionary from the synced schedule model."""
+        return self.tableModel.backing_store
 
     def _connect_model_selection_preservation(self, model):
         model.modelAboutToBeReset.connect(self._remember_selection)
@@ -162,32 +159,26 @@ class ExperimentQ(QGroupBox):
 
     def delete_clicked(self):
         """Deletes a task from the queue, or terminates gracefully if already running"""
-        idx = self.table.selectedIndexes()
-        if idx:
-            row = idx[0].row()
-            taskNr = self.tableModel.row_to_key[row]
-            status = self.expDict[taskNr]['status']
-            if status == 'Running' or status == 'Scanning':
-                self.tableModel[taskNr]['terminated'] = True
-            else:
-                del self.tableModel[taskNr]
-            self.table.setCurrentIndex(idx[0])
+        current = self._selected_index()
+        if current is None:
+            return
+
+        taskNr = self.tableModel.row_to_key[current.row()]
+        status = self.expDict[taskNr].get('status')
+        if status in ('Running', 'Scanning'):
+            self.tableModel[taskNr]['terminated'] = True
+        else:
+            del self.tableModel[taskNr]
+        self.table.setCurrentIndex(current)
 
     def terminate_clicked(self):
         """Selected task will be gracefully terminated (allowed to finish run)"""
-        idx = self.table.selectedIndexes()
-        if idx:
-            row = idx[0].row()
-            taskNr = self.tableModel.row_to_key[row]
-            self.tableModel[taskNr]['terminated'] = True
-            self.tableModel[taskNr]['status'] = 'Termination Pending'
-        else:
-            if len(self.tableModel.row_to_key) > 0:
-                taskNr = self.tableModel.row_to_key[0]
-                self.tableModel[taskNr]['terminated'] = True
-                self.tableModel[taskNr]['status'] = 'Termination Pending'
-            else:
-                pass
+        taskNr = self._get_selected_task_key(default_first=True)
+        if taskNr is None:
+            return
+
+        self.tableModel[taskNr]['terminated'] = True
+        self.tableModel[taskNr]['status'] = 'Termination Pending'
 
     def terminate_all(self):
         for taskNr in self.tableModel.row_to_key:
@@ -196,74 +187,69 @@ class ExperimentQ(QGroupBox):
 
     def set_sleeping(self):
         """Selected task will be ignored by the manager"""
-        idx = self.table.selectedIndexes()
-        if idx:
-            row = idx[0].row()
-            taskNr = self.tableModel.row_to_key[row]
-            status = self.expDict[taskNr]['status']
-            if status == 'Sleeping':
-                self.tableModel[taskNr]['status'] = 'Queued'
-            else:
-                self.tableModel[taskNr]['status'] = 'Sleeping'
+        taskNr = self._get_selected_task_key(default_first=False)
+        if taskNr is None:
+            return
+
+        status = self.expDict[taskNr].get('status')
+        self.tableModel[taskNr]['status'] = 'Queued' if status == 'Sleeping' else 'Sleeping'
 
     def pause(self):
-        """Pause the currently running experiment"""
-        self.browser.expManager.pause()
-        if self.browser.expManager.paused:
-            self.pauseButton.setIcon(QtGui.QIcon(icon_path+'run.png'))
-        else:
-            self.pauseButton.setIcon(QtGui.QIcon(icon_path+'pause.png'))
+        """Toggle pause state by editing the active task status in the synced model."""
+        taskNr = self._get_active_task_key()
+        if taskNr is None:
+            # No active task to pause/resume.
+            self.pauseButton.setIcon(QtGui.QIcon(icon_path + 'pause.png'))
+            return
 
-    @QtCore.pyqtSlot(int, QtCore.QVariant)
-    def update_item(self, k, v):
-        self.tableModel[k] = v
-        self.lock = False
+        status = self.expDict[taskNr].get('status', '')
+        if status == 'Paused':
+            # Resume into queued state; manager will set Running/Scanning on next run.
+            self.tableModel[taskNr]['status'] = 'Queued'
+            self.pauseButton.setIcon(QtGui.QIcon(icon_path + 'pause.png'))
+        elif status in ('Running', 'Scanning'):
+            self.tableModel[taskNr]['status'] = 'Paused'
+            self.pauseButton.setIcon(QtGui.QIcon(icon_path + 'run.png'))
 
-    @QtCore.pyqtSlot(int)
-    def delete_item(self, k):
-        del self.tableModel[k]
-        self.lock = False
+    def _get_active_task_key(self):
+        """Return the currently active task key (running/scanning/paused), if any."""
+        taskNr = self._get_selected_task_key(default_first=False)
+        if taskNr is not None:
+            status = self.expDict.get(taskNr, {}).get('status', '')
+            if status in ('Running', 'Scanning', 'Paused'):
+                return taskNr
 
-    def restart(self):
-        if not self.browser.expManager.queueRunning:
-            self.browser.expManager.start_queue()
-        else:
-            print('queue already running')
+        for taskNr in self.tableModel.row_to_key:
+            status = self.expDict.get(taskNr, {}).get('status', '')
+            if status in ('Running', 'Scanning', 'Paused'):
+                return taskNr
+        return None
 
-    def props_test_func(self):
-        """
-        I've been using this for testing things because the button was there and unused
-        """
-        #self.test.value = 5
-        #test = self._props.get('testval')
-        #print('Set value to 5. get property. result: {}'.format(test))
-        #self.test.value += 1
-        #test2 = self._props.get('testval')
-        #print('Increment value by 1. get property. result: {}'.format(test2))
-        #self._props.set('testval', 1)
-        #test3 = self.test.value
-        #print('Set property to 1. get value. result: {}'.format(test3))
-        #test4 = self.test.value*3
-        #print('multiply value by 3. result: {}'.format(test4))
-        self.testlist.value = [1, 2, 3]
-        test = self._props.get('testlist')
-        print('Set value to [1,2,3]. get property. result: {}'.format(test))
-        self.testlist.value.append(4)
-        test2 = self._props.get('testlist')
-        print('append 4. get property. result: {}'.format(test2))
-        self._props.set('testlist', ['a', 'b', 'c'])
-        test3 = self.testlist.value
-        print('Set property to [a, b, c]. get value. result: {}'.format(test3))
-        test4 = self.testlist.value[2]
-        print('get index 2 result: {}'.format(test4))
-        self.testlist.value[2] = 'd'
-        test5 = self._props.get('testlist')
-        print('set index 2 to d. get property. result: {}'.format(test5))
+    def _selected_index(self):
+        """Return current selected model index, if any."""
+        selected = self.table.selectedIndexes()
+        if not selected:
+            return None
+        return selected[0]
 
+    def _get_selected_task_key(self, default_first=False):
+        """Return selected task key, optionally falling back to first task."""
+        current = self._selected_index()
+        if current is not None:
+            row = current.row()
+            if 0 <= row < len(self.tableModel.row_to_key):
+                return self.tableModel.row_to_key[row]
 
-        # self.test = 5
-        # test = self._props.get('testval')
-        # print('Set value to 5. get property. result: {}'.format(test))
-        # self._props.set('testval', 1)
-        # test3 = self.test
-        # print('Set property to 1. get value. result: {}'.format(test3))
+        if default_first and self.tableModel.row_to_key:
+            return self.tableModel.row_to_key[0]
+        return None
+
+    # @QtCore.pyqtSlot(int, QtCore.QVariant)
+    # def update_item(self, k, v):
+    #     self.tableModel[k] = v
+    #     self.lock = False
+
+    # @QtCore.pyqtSlot(int)
+    # def delete_item(self, k):
+    #     del self.tableModel[k]
+    #     self.lock = False

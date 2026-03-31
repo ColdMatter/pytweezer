@@ -34,14 +34,20 @@ class ImageWindow(BMainWindow):
     def initUI(self):
         self.statusBar().showMessage('Ready')
         self.createDockWidgets()
-        self.image = ImageDisplay(self._displayname, parent=self)
+        self.image_monitor = self.get_display_class()(self.get_display_name(), parent=self)
         # add LUT for ImageDisplay
-        self.setCentralWidget(self.image)
+        self.setCentralWidget(self.image_monitor)
         #self.image.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Expanding)
         #self.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Expanding)
         #self.linedock.setMaximumWidth(100)
         #self.linedock.setMaximumHeight(100)
         #Qt.QTimer.singleShot(1000,self.res)
+
+    def get_display_class(self):
+        return ImageDisplay
+
+    def get_display_name(self):
+        return self._displayname
 
 
 
@@ -68,18 +74,19 @@ class ImageWindow(BMainWindow):
         dockLayout.addWidget(self.parbox)
 
         #dock=QDockWidget(self._imDataBoxName,self)
-        self.imDataBox=ImageDataBox(self._imDataBoxName)
-        dockLayout.addWidget(self.imDataBox)
+        # self.imDataBox=ImageDataBox(self._imDataBoxName)
+        # dockLayout.addWidget(self.imDataBox)
 
 
-        self.propBox=CamPropsBox(self._propBoxName)
-        dockLayout.addWidget(self.propBox)
+        # self.propBox=CamPropsBox(self._propBoxName)
+        # dockLayout.addWidget(self.propBox)
 
 
         dockWidget.setLayout(dockLayout)
         dock.setWidget(dockWidget)
         self.addDockWidget(Qt.Qt.TopDockWidgetArea,dock)
-        dock.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Minimum)
+        # dock.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Minimum)
+
 
 
 def main(name):

@@ -30,6 +30,8 @@ class AnalysisManagerService:
         self.context = zmqcontext
         self.socket = self.context.socket(zmq.REP)
         self.socket.setsockopt(zmq.LINGER, 0)
+        # Avoid blocking forever in recv so signal-triggered shutdown can exit promptly.
+        self.socket.setsockopt(zmq.RCVTIMEO, 1000)
         if self.rep_endpoint.startswith("tcp://"):
             self.socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
             if hasattr(zmq, "TCP_KEEPALIVE_IDLE"):
@@ -207,6 +209,8 @@ class AnalysisManagerService:
         while self._running:
             try:
                 request = self.socket.recv_json()
+            except zmq.Again:
+                continue
             except Exception as error:
                 print_error(f"analysis_manager recv error: {error}", "warning")
                 continue
@@ -246,18 +250,6 @@ def main() -> None:
 
     def _shutdown(_signo, _frame):
         service._running = False
-        # Unblock recv by connecting briefly and sending shutdown.
-        ctx = zmq.Context.instance()
-        sock = ctx.socket(zmq.REQ)
-        sock.setsockopt(zmq.LINGER, 0)
-        try:
-            sock.connect(service.rep_endpoint)
-            sock.send_json({"command": "shutdown"})
-            sock.recv_json()
-        except Exception:
-            pass
-        finally:
-            sock.close()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)

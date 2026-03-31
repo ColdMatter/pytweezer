@@ -11,22 +11,32 @@
         "ImageStream": {
             "active": {
                 "dummy_cam": {
-                    "timestamp": 1774535338.8244975,
+                    "timestamp": 1774968914.9369519,
                     "parts": 3
                 },
                 "select_first_": {
-                    "timestamp": 1774535337.7164698,
+                    "timestamp": 1774867696.234995,
+                    "parts": 3
+                },
+                "Experiment/FakeTweezerArray.result": {
+                    "timestamp": 1774968914.632619,
                     "parts": 3
                 }
             }
         },
         "roilist": [
-            "/Viewer/DummyViewer/Viewer/ROI/slice"
-        ]
+            "/Viewer/DummyViewer/Viewer/ROI/slice",
+            "/Viewer/TweezerViewer/ROI/slice"
+        ],
+        "Imagepath": "/home/twalker/RbCaF/pytweezer/Data"
     },
     "Manager": {
         "ExperimentQ": {
-            "current_scan": []
+            "current_scan": [
+                "param1",
+                "--NONE--",
+                "--NONE--"
+            ]
         }
     },
     "BaliBrowser": {
@@ -41,7 +51,8 @@
             1031
         ],
         "OpenWindows": [
-            "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/dummy.py"
+            "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/dummy.py",
+            "/home/twalker/RbCaF/pytweezer/pytweezer/experiments/fake_tweezer_array.py"
         ],
         "dummy": {
             "Geo": [
@@ -51,29 +62,137 @@
                 268
             ],
             "minimized": false
+        },
+        "ExperimentQ": {
+            "current_scan": []
+        },
+        "fake_tweezer_array": {
+            "Geo": [
+                0,
+                273,
+                967,
+                439
+            ],
+            "minimized": false
         }
     },
     "Experiments": {
         "DummyExperiment": {
-            "scans": {},
+            "scans": {
+                "p1": {
+                    "parameters": [
+                        "param1",
+                        "--NONE--",
+                        "--NONE--"
+                    ],
+                    "starts": [
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "ends": [
+                        10.0,
+                        0.0,
+                        1.0
+                    ],
+                    "stepsl": [
+                        10,
+                        0,
+                        0
+                    ],
+                    "listgenerators": [
+                        "np.linspace(0.0,10.0,10)",
+                        "np.linspace(0.0,0.0,10)",
+                        "np.linspace(1.0,1.0,10)"
+                    ],
+                    "Randomize": true,
+                    "number_scans": 3,
+                    "nDscan": false,
+                    "snake_scan": false
+                }
+            },
             "sleep_time": 1.0,
             "last_set": "param2: 0.0",
             "param1": 0,
             "param2": 0,
-            "_totalrun": 126
+            "_totalrun": 203
         },
-        "_task": 12
+        "_task": 109,
+        "FakeTweezerArray": {
+            "scans": {
+                "p1": {
+                    "parameters": [
+                        "param1",
+                        "--NONE--",
+                        "--NONE--"
+                    ],
+                    "starts": [
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "ends": [
+                        10.0,
+                        0.0,
+                        1.0
+                    ],
+                    "stepsl": [
+                        10,
+                        0,
+                        0
+                    ],
+                    "listgenerators": [
+                        "np.linspace(0.0,10.0,10)",
+                        "np.linspace(0.0,0.0,10)",
+                        "np.linspace(1.0,1.0,10)"
+                    ],
+                    "Randomize": false,
+                    "number_scans": 3,
+                    "nDscan": false,
+                    "snake_scan": false
+                }
+            },
+            "n_frames": 1.0,
+            "last_set": "sleep_time: 0.1",
+            "image_height": 500.0,
+            "image_width": 500.0,
+            "grid_rows": 8.0,
+            "grid_cols": 8.0,
+            "filling_fraction": 0.5,
+            "grid_spacing_px": 30.0,
+            "border_px": 100.0,
+            "atom_peak": 10.0,
+            "atom_fwhm_px": 5.0,
+            "background_level": 0,
+            "noise_sigma": 0.0,
+            "poisson_noise": false,
+            "seed": 0,
+            "sleep_time": 0.1,
+            "param1": 0,
+            "param2": 0,
+            "_totalrun": 13686
+        }
     },
     "Analysis": {
         "analysisdir": "/home/twalker/RbCaF/pytweezer/pytweezer/analysis/",
         "Image": {
             "select_first": {
                 "script": "imageselector.py",
-                "active": true,
+                "active": false,
                 "imagestreams": [
                     "dummy_cam"
                 ],
                 "SelectedImage": 0
+            },
+            "find_atoms": {
+                "script": "find_tweezer_atoms.py",
+                "active": true,
+                "imagestreams": [
+                    "dummy_cam"
+                ],
+                "atom_fwhm_px": 5.0,
+                "threshold": 10.0,
+                "expected_sites": 64
             }
         },
         "Data": {}
@@ -86,6 +205,38 @@
                 800,
                 800
             ]
+        },
+        "H5Storage": {
+            "datastreams": [],
+            "h5file": "Set Filename",
+            "Singledatastreams": [],
+            "imagestreams": [],
+            "x-axis": {
+                "current_selection": "_task"
+            },
+            "y-axis 0": {
+                "current_selection": "param1",
+                "linewidth": 1,
+                "color": 4278255615,
+                "Symbol": "o",
+                "SymbolSize": 5
+            },
+            "y-axis 1": {
+                "current_selection": "--None--",
+                "linewidth": 1,
+                "color": 4278255615,
+                "Symbol": "o",
+                "SymbolSize": 5
+            },
+            "y-axis 2": {
+                "current_selection": "--None--",
+                "linewidth": 1,
+                "color": 4278255615,
+                "Symbol": "o",
+                "SymbolSize": 5
+            },
+            "CurrentTab": 1,
+            "timeout_without_endtime": 60
         }
     },
     "Viewer": {
@@ -119,7 +270,7 @@
             "ImageDisplay": "Viewer/DummyViewer/Viewer",
             "Viewer": {
                 "imagestreams": [
-                    "select_first_"
+                    "dummy_cam"
                 ],
                 "maskstreams": [
                     "--None--"
@@ -131,8 +282,8 @@
                 "ROI": {
                     "slice": {
                         "pos": [
-                            0,
-                            0
+                            33.7875312324002,
+                            17.74072017609263
                         ],
                         "size": [
                             30,
@@ -143,11 +294,93 @@
                 },
                 "maxlevels": 255.0
             }
+        },
+        "TweezerViewer": {
+            "imagestreams": [
+                "--None--",
+                "dummy_cam"
+            ],
+            "maskstreams": [
+                "--None--"
+            ],
+            "invert_colors": false,
+            "ROIs": [],
+            "ROI": {},
+            "positionstreams": [
+                "find_atoms_"
+            ],
+            "tweezer_square_size": 6.0,
+            "show_tweezer_grid": true,
+            "maxlevels": 255.0,
+            "Parameterbox": "Viewer/TweezerViewer/ParBox",
+            "ParBox": {
+                "ydata": [
+                    "timestamp"
+                ],
+                "datastreams": [
+                    "find_atoms_stats",
+                    "find_atoms_"
+                ]
+            },
+            "ImageDataBox": "Viewer/TweezerViewer/ImDatBox",
+            "ImDatBox": {
+                "ydata": [
+                    ""
+                ],
+                "liststreams": [
+                    "N atoms",
+                    "Filling Fraction"
+                ],
+                "datastreams": [
+                    ""
+                ]
+            },
+            "PropDataBox": "Viewer/TweezerViewer/PropBox",
+            "PropBox": {
+                "ydata": [
+                    ""
+                ],
+                "keyList": [],
+                "camName": "Axial",
+                "subtree": "/Cameras/Axial/DefaultConfig/"
+            },
+            "expected_sites": 64
         }
     },
     "Cameras": {
         "Axial": {
             "Configuration_name": "DefaultConfig"
+        }
+    },
+    "Live Plot": {
+        "Plot 0": {
+            "datastreams": [
+                "find_atoms_stats"
+            ],
+            "ydata": [
+                "filling_fraction"
+            ],
+            "rolling_buffer_length": 30,
+            "N_curves": 1,
+            "linecolors": [
+                [
+                    55,
+                    126,
+                    184
+                ],
+                [
+                    166,
+                    206,
+                    227
+                ],
+                [
+                    255,
+                    127,
+                    0
+                ]
+            ],
+            "running_average_window_size": 5,
+            "running_average": true
         }
     }
 }

@@ -96,10 +96,12 @@ class GenericClient:
         host = c["host"]
         pub_port = c["pub_port"]
         sub_port = c["sub_port"]
-        pub = f"tcp://{host}:{pub_port}"
-        sub = f"tcp://{host}:{sub_port}"
-        self.pub_socket.connect(pub)
-        self.sub_socket.connect(sub)
+        # In the xsub/xpub hub, publishers must connect to XSUB (sub_port)
+        # and subscribers must connect to XPUB (pub_port).
+        publish_endpoint = f"tcp://{host}:{sub_port}"
+        subscribe_endpoint = f"tcp://{host}:{pub_port}"
+        self.pub_socket.connect(publish_endpoint)
+        self.sub_socket.connect(subscribe_endpoint)
 
     def unsubscribe(self, channel=None):
         """unsubscribe from specific channel
@@ -244,10 +246,10 @@ class ImageClient(DataClient):
         """distribute ove ZMQ
 
         Args:
-            header (dict) :
-                data to be send (must be json serializable)
             data (np.array):
-                optional array of data
+                data array to be send (must be numpy array, will be converted to bytes and reconstructed on the other side according to the header info)
+            header (dict) :
+                optionsl dictionary with additional info about the data (must be json serializable)
             channel (string):
                 subchannel (will be appended to name when sending)
             flags (int):

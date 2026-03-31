@@ -27,18 +27,65 @@ class AnalysisManagerClient(QtCore.QObject):
         self.endpoint = endpoint
         self.timeout_ms = timeout_ms
         self.context = zmq.Context.instance()
+        self._socket = None
+        self._poller = zmq.Poller()
 
-    def request(self, payload: dict):
+    def _connect_socket(self):
+        if self._socket is not None:
+            self._poller.unregister(self._socket)
+            self._socket.close()
         socket = self.context.socket(zmq.REQ)
         socket.setsockopt(zmq.LINGER, 0)
-        socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
         socket.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
         socket.connect(self.endpoint)
+        self._socket = socket
+        self._poller.register(socket, zmq.POLLIN)
+
+    def _reset_socket(self):
+        if self._socket is None:
+            return
         try:
-            socket.send_json(payload)
-            return socket.recv_json()
-        finally:
-            socket.close()
+            self._poller.unregister(self._socket)
+        except Exception:
+            pass
+        self._socket.close()
+        self._socket = None
+
+    def close(self):
+        self._reset_socket()
+
+    def request(self, payload: dict, retries: int = 2, retry_delay_s: float = 0.12) -> dict:
+        last_error = None
+        attempts = max(1, int(retries) + 1)
+
+        for attempt in range(attempts):
+            if self._socket is None:
+                self._connect_socket()
+            try:
+                self._socket.send_json(payload)
+                events = dict(self._poller.poll(self.timeout_ms))
+                if events.get(self._socket) == zmq.POLLIN:
+                    return self._socket.recv_json()
+                raise zmq.Again()
+            except zmq.Again as error:
+                last_error = error
+                self._reset_socket()
+                if attempt < attempts - 1:
+                    QtCore.QThread.msleep(int(max(0, retry_delay_s) * 1000))
+                    continue
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Analysis Manager not responding at {self.endpoint} "
+                        f"(timeout {self.timeout_ms} ms)"
+                    ),
+                }
+            except Exception as error:
+                last_error = error
+                self._reset_socket()
+                return {"ok": False, "error": str(error)}
+
+        return {"ok": False, "error": str(last_error) if last_error else "unknown RPC error"}
 
 
 class CheckableModel(QtGui.QStandardItemModel):
@@ -143,7 +190,7 @@ class TreeViewWidget(QWidget):
 
     def refresh_status(self):
         # Keep checkbox state synced with actual process status.
-        response = self.rpc.request({"command": "snapshot"})
+        response = self.rpc.request({"command": "snapshot"}, retries=0, retry_delay_s=0)
         if not response.get("ok"):
             return
 
@@ -268,8 +315,11 @@ class AnalysisManager(BWidget):
     def __init__(self, name='Analysis', parent=None):
         super().__init__(name, parent)
         self.conf = ConfigReader.getConfiguration()
-        manager_conf = self.conf.get('Servers', {}).get('Analysis Manager', {})
-        endpoint = manager_conf.get('rep', 'tcp://127.0.0.1:3111')
+        manager_conf = self.conf['Servers']['Analysis Manager']
+        host = manager_conf['host']
+        port = manager_conf['port']
+        endpoint = f"tcp://{host}:{port}"
+        self._last_snapshot_error = ''
 
         self.rpc = AnalysisManagerClient(endpoint)
         self.analysisdir = tweezerpath + '/pytweezer/analysis/'
@@ -300,10 +350,16 @@ class AnalysisManager(BWidget):
         self.setLayout(layout)
 
     def refresh_snapshot(self):
-        response = self.rpc.request({'command': 'snapshot'})
+        response = self.rpc.request({'command': 'snapshot'}, retries=0, retry_delay_s=0)
         if not response.get('ok'):
-            print_error(f"AnalysisManager snapshot error: {response.get('error')}", 'error')
+            error_text = str(response.get('error', 'unknown error'))
+            # Avoid flooding the console with the same timeout while service starts.
+            if error_text != self._last_snapshot_error:
+                print_error(f"AnalysisManager snapshot error: {error_text}", 'warning')
+                self._last_snapshot_error = error_text
             return
+
+        self._last_snapshot_error = ''
 
         self.analysisdir = response.get('analysisdir', self.analysisdir)
         self.tvw.populate(response)

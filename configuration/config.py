@@ -40,7 +40,7 @@ CONFIG = {
     },
     "Servers": {
         "Analysis Manager": {
-            "active": False,
+            "active": True,
             "script": "../pytweezer/servers/analysis_manager.py",
             "host": HOST,
             "port": get_next_port()
@@ -92,6 +92,7 @@ CONFIG = {
             "host": HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
+            "stream_name": "Global Messages",
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Propertylogger": {
@@ -112,6 +113,16 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/servers/experiment_manager.py"
         },
+        "ImagEM X2 Camera": {
+            "active": True,
+            "script": "../pytweezer/servers/imagemx2_server.py",
+            "host": HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "stream_name": "imagemx2",
+            "timeout": 5.0,
+            "tooltip": "Persistent camera process; experiments should use ImagEMX2CameraClient"
+        },
         "Elephant": {
             "active": False,
             "script": "../pytweezer/GUI/mighty.py"
@@ -121,6 +132,10 @@ CONFIG = {
         "DummyViewer": {
             "active": False,
             "script": "../pytweezer/GUI/viewers/image_group.py"
+        },
+        "TweezerViewer": {
+            "active": True,
+            "script": "../pytweezer/GUI/viewers/tweezer_image_monitor.py"
         }
     }
 }

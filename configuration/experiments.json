@@ -1,7 +1,0 @@
-{
-    "DummyExperimment": {
-        "module": "pytweezer.experiment.dummy",
-        "class": "DummyExperiment"
-        
-    }
-}
