@@ -41,7 +41,7 @@
             "script": "../pytweezer/experiment/motmaster_server.py",
             "host": "10.59.3.2",
             "port": 5557,
-            "simulate": true
+            "simulate": false
         },
         "Imagehub": {
             "active": true,
