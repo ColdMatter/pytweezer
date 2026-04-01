@@ -153,7 +153,7 @@
                 }
             },
             "n_frames": 1.0,
-            "last_set": "sleep_time: 0.1",
+            "last_set": "param2: 0.0",
             "image_height": 500.0,
             "image_width": 500.0,
             "grid_rows": 8.0,

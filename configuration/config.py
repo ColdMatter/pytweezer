@@ -3,10 +3,10 @@ HOST_DICT = {
     "localhost": "127.0.0.1"
 }
 
-port_iterator = iter(range(3278, 99999))
+port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-HOST = HOST_DICT["localhost"]
+HOST = HOST_DICT["beast"]
 
 SIMULATING = True
 

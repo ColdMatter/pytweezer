@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import QMdiSubWindow, QLabel, QCompleter
 from PyQt5.QtWidgets import QSizePolicy, QComboBox, QGridLayout, QDialogButtonBox
 from PyQt5.QtWidgets import QMenu, QCheckBox, QLineEdit, QDoubleSpinBox
 from PyQt5.QtWidgets import QFileDialog, QSplitter, QDateTimeEdit
-from PyQt5.QtCore import QThreadPool, Qt, QDateTime, QEvent
+from PyQt5.QtCore import Qt, QDateTime, QEvent
 
 import pytweezer
 from pytweezer.analysis.floating_point_arithmetics import round_floating_prec
@@ -66,8 +66,6 @@ class BaliBrowser(QMainWindow):
         )  # path for storing parameters
         self.motmaster_interface = MotMasterClient()
 
-        self.threadPool = QThreadPool.globalInstance()
-        self.threadPool.setMaxThreadCount(3)
         self.fileSelector = BaliFileSelector(self)
         self.queue = ExperimentQ(self)
         self.prepStation = PrepStation(browser=self)
