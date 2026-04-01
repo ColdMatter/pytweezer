@@ -101,9 +101,9 @@ class TweezerImageWindow(ImageWindow):
 
     def __init__(self, name, parent=None):
         super().__init__(name, parent)
-        self._info_timer = QtCore.QTimer(self)
-        self._info_timer.timeout.connect(self.update_infobox)
-        self._info_timer.start(100)
+        # self._info_timer = QtCore.QTimer(self)
+        # self._info_timer.timeout.connect(self.update_infobox)
+        # self._info_timer.start(100)
 
     def get_display_class(self):
         return TweezerImageDisplay
