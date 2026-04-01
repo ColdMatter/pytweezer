@@ -884,6 +884,7 @@ class SequenceEditor(QDialog):
             self.startSpins.append(QDoubleSpinBox())
             self.startSpins[-1].multiplier = 1
             self.stopSpins.append(QDoubleSpinBox())
+            
             self.stopSpins[-1].multiplier = 1
             stepsSpinBox = QSpinBox()
             stepsSpinBox.setMaximum(int(10e3))
@@ -915,6 +916,9 @@ class SequenceEditor(QDialog):
             self.startSpins[i].valueChanged.connect(self.update_list_generator)
             self.stopSpins[i].valueChanged.connect(self.update_list_generator)
             self.stepsSpins[i].valueChanged.connect(self.update_list_generator)
+        for spin in self.stopSpins + self.startSpins:
+            spin.setMinimum(-10e6)
+            spin.setMaximum(10e6)
 
         self.qlayout.addLayout(
             self.glayout
