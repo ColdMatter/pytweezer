@@ -13,6 +13,7 @@ from PyQt5.QtCore import QDateTime
 import pytweezer
 from pytweezer.analysis.floating_point_arithmetics import round_floating_prec
 from pytweezer.analysis.print_messages import print_error
+from pytweezer.experiment.pathing import canonical_experiment_filepath
 from pytweezer.servers import tweezerpath, icon_path
 from pytweezer.GUI.models import PrepModel
 from pytweezer.servers.model_sync import SyncedPrepModel
@@ -161,11 +162,12 @@ class PrepStation(QGroupBox):
                     for arg in d['args']:
                         args_round[arg] = round_floating_prec(d['args'][arg])
                     d['args'] = args_round
+                    d['filepath'] = canonical_experiment_filepath(d['filepath'])
                     if 'dueDateTime' not in d.keys():
                         d['dueDateTime'] = QDateTime.currentDateTime().toString()
                     opened = False
                     for window in self.browser.openWindows:
-                        if d['filepath'] == window.filepath:
+                        if canonical_experiment_filepath(d['filepath']) == window.filepath:
                             opened = True
                     if not opened:
                         self.browser.open_experiment(d['filepath'])
@@ -446,9 +448,10 @@ class DisplayBox(QWidget):
 
 
 def get_experiment(filepath, browser):
+    canonical_filepath = canonical_experiment_filepath(filepath)
     opened = False
     for window in browser.openWindows:
-        if filepath == window.filepath:
+        if canonical_filepath == window.filepath:
             experiment = window.experiment
             opened = True
     if not opened:

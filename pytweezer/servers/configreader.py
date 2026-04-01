@@ -23,7 +23,7 @@ def Config():
     # with open(configfilename) as inputfile:
     #     configuration = json.load(inputfile)
     # return configuration
-    from configuration.config import CONFIG
+    from pytweezer.configuration.config import CONFIG
     return CONFIG
 
 
