@@ -1,8 +1,11 @@
 import argparse
 import logging
 import os
+import socket
 import time
+from functools import wraps
 from typing import Any
+from unittest.mock import MagicMock
 
 import numpy as np
 import pylablib.devices.DCAM as dcam
@@ -19,69 +22,115 @@ IMAGE_DIRECTORY = (
 LOGGER = logging.getLogger(__name__)
 
 
+def requires_camera(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        self._require_camera()
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
+
 class ImagEMX2Camera:
     """Low-level wrapper around the Hamamatsu ImagEM X2 DCAM driver."""
 
     def __init__(self, image_dir: str | None = None, timeout: float = 5.0):
+        self.image_dir = image_dir or IMAGE_DIRECTORY
+        self.timeout = timeout
+        self.dcam = None
+        self._open_camera()
+
+    def _open_camera(self):
         try:
             self.dcam = dcam.DCAMCamera()
             self.dcam.open()
         except Exception as exc:
+            self.dcam = None
             raise RuntimeError("Could not connect to ImagEM X2 camera") from exc
 
-        self.image_dir = image_dir or IMAGE_DIRECTORY
-        self.timeout = timeout
+    def _require_camera(self):
+        if self.dcam is None:
+            raise RuntimeError("ImagEM X2 camera connection has been relinquished")
 
     def close(self):
         try:
-            self.dcam.close()
+            if self.dcam is not None:
+                self.dcam.close()
         except Exception:
             LOGGER.exception("Failed to close ImagEM X2 camera cleanly")
+        finally:
+            self.dcam = None
 
+    def relinquish_camera(self):
+        self.close()
+        return {"ok": True, "relinquished": True}
+
+    def reacquire_camera(self):
+        if self.dcam is None:
+            self._open_camera()
+        return {"ok": True, "relinquished": False}
+
+    @requires_camera
     def set_roi(self, x0: int, width: int, y0: int, height: int):
         self.dcam.set_roi(x0, x0 + width - 1, y0, y0 + height - 1)
 
+    @requires_camera
     def set_ccd_mode(self, mode: int):
         self.dcam.set_attribute_value("ccd_mode", int(mode))
 
     def enable_em_gain(self, enable: bool = True):
         self.set_ccd_mode(2 if enable else 1)
 
+    @requires_camera
     def set_direct_em_gain_mode(self, mode: int):
         self.dcam.set_attribute_value("direct_em_gain_mode", int(mode))
 
     def enable_direct_em_gain(self, enable: bool = True):
         self.set_direct_em_gain_mode(2 if enable else 1)
 
+    @requires_camera
     def set_sensitivity(self, sensitivity: int):
         self.dcam.set_attribute_value("sensitivity", int(sensitivity))
 
+    @requires_camera
     def set_trigger_source(self, source: str):
         self.dcam.set_trigger_mode(source)
 
+    @requires_camera
     def set_exposure_time(self, exposure: float):
         self.dcam.set_exposure(exposure)
 
+    @requires_camera
     def set_external_exposure_mode(self):
         self.set_trigger_source("ext")
         self.dcam.set_attribute_value("trigger_active", 2)
         self.dcam.setup_ext_trigger(invert=True)
 
+    @requires_camera
     def setup_acquisition(self, acq_mode: str, nframes: int):
         self.dcam.setup_acquisition(acq_mode, int(nframes))
 
+    @requires_camera
     def start_acquisition(self):
         self.dcam.start_acquisition()
 
+    @requires_camera
     def stop_acquisition(self):
         self.dcam.stop_acquisition()
 
+    @requires_camera
     def acquire_n_frames(self, nframes: int, start_frame: int = 0) -> np.ndarray:
         self.dcam.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
         images, _infos = self.dcam.read_multiple_images(
             (int(start_frame), int(start_frame) + int(nframes)), return_info=True
         )
         return np.asarray(images)
+
+    @requires_camera
+    def acquire_single_frame(self, timeout: float | None = None) -> np.ndarray:
+        self.dcam.wait_for_frame(nframes=1, timeout=timeout or self.timeout)
+        image, _info = self.dcam.read_newest_image(return_info=True)
+        return np.asarray(image)
 
     @staticmethod
     def save_tiff(image: np.ndarray, image_dir: str | None = None, run_no: int = 0):
@@ -157,8 +206,11 @@ class SimulatedImagEMX2Camera:
 
     def acquire_n_frames(self, nframes: int, start_frame: int = 0) -> np.ndarray:
         del start_frame
+        if not self._running:
+            raise RuntimeError("Simulated camera is not running")
         count = max(1, int(nframes))
-        return np.asarray([self._generate_frame() for _ in range(count)])
+        time.sleep(0.1 * count)
+        return np.stack([self._generate_frame() for _ in range(count)], axis=0)
 
     @staticmethod
     def save_tiff(image: np.ndarray, image_dir: str | None = None, run_no: int = 0):
@@ -183,12 +235,12 @@ class ImagEMX2CameraClient:
         self.port = int(port or server_conf.get("port", 3251))
         self.stream_name = server_conf.get("stream_name", "imagemx2")
         self.image_dir = IMAGE_DIRECTORY
+        self.use_shared_memory = False
         self.imstream = ImageClient(self.stream_name)
         self._rpc = RPCClient(self.host, self.port, target_name=target_name, timeout=timeout)
 
     def __getattr__(self, name):
-        # Forward unknown methods to RPC target for direct driver access.
-        return getattr(self._rpc, name)
+        return self._rpc.__getattr__(name)
 
     def close(self):
         try:
@@ -197,44 +249,73 @@ class ImagEMX2CameraClient:
             LOGGER.exception("Failed to close ImagEMX2 RPC client")
 
     def ping(self):
-        return {
-            "ok": True,
-            "host": self.host,
-            "port": self.port,
-            "target": "camera",
-        }
+        return {"ok": True, "host": self.host, "port": self.port, "target": "camera"}
 
-    def acquire_n_frames(
+    # def acquire_single_frame(
+    #     self,
+    #     timeout: float | None = None,
+    #     exp_info: dict[str, Any] | None = None,
+    #     autosave: bool = False,
+    #     broadcast: bool = False,
+    # ) -> np.ndarray:
+    #     return self._rpc.acquire_single_frame(
+    #         timeout=timeout,
+    #         exp_info=exp_info,
+    #         autosave=autosave,
+    #         broadcast=broadcast,
+    #     )
+
+    # def acquire_n_frames(
+    #     self,
+    #     nframes: int,
+    #     exp_info: dict[str, Any] | None = None,
+    #     start_frame: int = 0,
+    #     autosave: bool = False,
+    #     broadcast: bool = False,
+    # ) -> np.ndarray:
+    #     return self._rpc.acquire_n_frames(
+    #         nframes=nframes,
+    #         exp_info=exp_info,
+    #         start_frame=start_frame,
+    #         autosave=autosave,
+    #         broadcast=broadcast,
+    #     )
+
+
+class ImagEMX2CameraServer(ImagEMX2Camera):
+    def __init__(
         self,
-        nframes: int,
+        host: str,
+        port: int,
+        stream_name: str = "imagemx2",
+        image_dir: str | None = None,
+        timeout: float = 5.0,
+        simulate: bool = False,
+    ):
+        super().__init__(image_dir=image_dir, timeout=timeout)
+        self.stream_name = stream_name
+        self.image_client = ImageClient(stream_name)
+
+    def acquire_single_frame(
+        self,
+        timeout=None,
         exp_info: dict[str, Any] | None = None,
-        start_frame: int = 0,
         autosave: bool = False,
-        broadcast: bool = True,
+        broadcast: bool = False,
     ) -> np.ndarray:
-        images = np.asarray(self._rpc.acquire_n_frames(nframes=nframes, start_frame=start_frame))
-
-        merged_info = exp_info or {"task": 0, "run": 0, "rep": 0}
-        task = int(merged_info.get("task", 0))
-        run = int(merged_info.get("run", 0))
-        rep = int(merged_info.get("rep", 0))
-
-        for index, image in enumerate(images):
-            if autosave:
-                ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir, run_no=run)
-            if broadcast:
-                info = {
-                    "timestamp": time.time(),
-                    "task": task,
-                    "run": run,
-                    "rep": rep,
-                    "_imgindex": index,
-                    "_imageresolution": [1, 1],
-                    "_offset": [0, 0],
-                }
-                self.imstream.send(image, info)
-
-        return images
+        image = super().acquire_single_frame(timeout)
+        if autosave:
+            ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir)
+        info = {
+            "timestamp": time.time(),
+            "_imgresolution": [1, 1],
+            "_offset": [0, 0],
+        }
+        if exp_info is not None:
+            info.update(exp_info)
+        if broadcast:
+            self.image_client.send(image, info)
+        return image
 
 
 def run_server(
@@ -245,7 +326,19 @@ def run_server(
     timeout: float = 5.0,
     simulate: bool = False,
 ):
-    camera = SimulatedImagEMX2Camera(image_dir=image_dir, timeout=timeout) if simulate else ImagEMX2Camera(image_dir=image_dir, timeout=timeout)
+    if simulate:
+        LOGGER.warning("Running ImagEM X2 Camera server in SIMULATION MODE")
+        camera = SimulatedImagEMX2Camera(image_dir=image_dir, timeout=timeout)
+    else:
+
+        camera = ImagEMX2CameraServer(
+            host=host,
+            port=port,
+            stream_name=stream_name,
+            image_dir=image_dir,
+            timeout=timeout,
+            simulate=simulate,
+    )
 
     LOGGER.info(
         "Starting ImagEM X2 RPC server host=%s port=%s stream=%s simulate=%s",
@@ -254,11 +347,15 @@ def run_server(
         stream_name,
         simulate,
     )
-    simple_server_loop({"camera": camera}, host=host, port=int(port), description="ImagEM X2 RPC server")
+    simple_server_loop(
+        {"camera": camera},
+        host=host,
+        port=int(port),
+        description="ImagEM X2 RPC server",
+    )
 
 
 def run(name: str):
-    # Backward-compatible entrypoint. Name is ignored here.
     del name
     conf = ConfigReader.getConfiguration()
     server_conf = conf.get("Servers", {}).get("ImagEM X2 Camera", {})
@@ -272,6 +369,7 @@ def run(name: str):
 
 
 def main():
+    
     parser = argparse.ArgumentParser(description="Run ImagEM X2 sipyco RPC server")
     parser.add_argument("--host", default="127.0.0.1", help="RPC bind host")
     parser.add_argument("--port", type=int, default=3251, help="RPC bind port")
@@ -281,6 +379,8 @@ def main():
     parser.add_argument("--simulate", action="store_true", help="use simulated camera backend")
     parser.add_argument("--log-level", default="INFO", help="Python log level")
     args = parser.parse_args()
+    
+
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
     run_server(
