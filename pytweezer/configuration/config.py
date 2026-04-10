@@ -7,9 +7,10 @@ HOST_DICT = {
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-HOST = HOST_DICT["beast"]
+SIMULATING = True
+SERVER_HOST = HOST_DICT["beast"] if not SIMULATING else HOST_DICT["localhost"]
+MM_HOST = HOST_DICT["mm_pc"] if not SIMULATING else HOST_DICT["localhost"]
 
-SIMULATING = False
 
 CONFIG = {
     "GUI": {
@@ -43,54 +44,54 @@ CONFIG = {
         "Analysis Manager": {
             "active": True,
             "script": "../pytweezer/servers/analysis_manager.py",
-            "host": HOST,
+            "host": SERVER_HOST,
             "port": get_next_port()
         },
         "Model Sync": {
             "active": True,
             "script": "../pytweezer/servers/model_sync.py",
-            "host": HOST,
+            "host": SERVER_HOST,
             "command_port": get_next_port(),
             "pub_port": get_next_port(),
         },
         "MotMaster Server": {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
-            "host": HOST_DICT["mm_pc"],
-            "port": 5557,
+            "host": MM_HOST,
+            "port": get_next_port(),
             "simulate": SIMULATING
         },
         "Imagehub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py", 
         },
         "Commandhub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Datahub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Propertyhub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Messagehub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "stream_name": "Global Messages",
@@ -99,7 +100,7 @@ CONFIG = {
         "Propertylogger": {
             "active": True,
             "script": "../pytweezer/servers/propertylogger.py",
-            "host": HOST,
+            "host": SERVER_HOST,
             "port": get_next_port()
         },
         "Datalogger": {
@@ -117,7 +118,7 @@ CONFIG = {
         "ImagEM X2 Camera": {
             "active": True,
             "script": "../pytweezer/servers/imagemx2_server.py",
-            "host": HOST,
+            "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "imagemx2",
