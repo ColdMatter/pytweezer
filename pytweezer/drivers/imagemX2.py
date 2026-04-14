@@ -4,7 +4,8 @@ import os
 import socket
 import time
 from functools import wraps
-from typing import Any
+from tkinter import NO
+from typing import Any, Optional
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -34,11 +35,15 @@ def requires_camera(func):
 class ImagEMX2Camera:
     """Low-level wrapper around the Hamamatsu ImagEM X2 DCAM driver."""
 
-    def __init__(self, image_dir: str | None = None, timeout: float = 5.0):
+    def __init__(self, image_dir: str | None = None, timeout: float = 5.0, stream_name: Optional[str] = None):
         self.image_dir = image_dir or IMAGE_DIRECTORY
         self.timeout = timeout
         self.dcam = None
         self._open_camera()
+        
+        self.stream_name = stream_name
+        if stream_name:
+            self.image_client = ImageClient(stream_name)
 
     def _open_camera(self):
         try:
@@ -126,17 +131,39 @@ class ImagEMX2Camera:
         )
         return np.asarray(images)
 
-    @requires_camera
-    def acquire_single_frame(self, timeout: float | None = None) -> np.ndarray:
-        self.dcam.wait_for_frame(nframes=1, timeout=timeout or self.timeout)
+    def acquire_single_frame(
+        self,
+        timeout=None,
+        exp_info: dict[str, Any] | None = None,
+        autosave: bool = False,
+        broadcast: bool = False,
+    ) -> np.ndarray:
+        self.dcam.wait_for_frame(n_frames=1, timeout=timeout)
         image, _info = self.dcam.read_newest_image(return_info=True)
-        return np.asarray(image)
+        image = np.asarray(image)
+        if autosave:
+            ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir)
+        info = {
+            "timestamp": time.time(),
+            "_imgresolution": [1, 1],
+            "_offset": [0, 0],
+        }
+        if exp_info is not None:
+            info.update(exp_info)
+        if broadcast:
+            if self.image_client is None:
+                LOGGER.error("tried to broad image but no client exists")
+            self.image_client.send(image, info)
+        return image
+
 
     @staticmethod
     def save_tiff(image: np.ndarray, image_dir: str | None = None, run_no: int = 0):
         image_dir = image_dir or IMAGE_DIRECTORY
         i = 1
-        while os.path.exists(os.path.join(image_dir, f"HamTweezer{run_no:04d}_{i}.tif")):
+        while os.path.exists(
+            os.path.join(image_dir, f"HamTweezer{run_no:04d}_{i}.tif")
+        ):
             i += 1
         filename = os.path.join(image_dir, f"HamTweezer{run_no:04d}_{i}.tif")
         tiff.imwrite(filename, image)
@@ -237,7 +264,9 @@ class ImagEMX2CameraClient:
         self.image_dir = IMAGE_DIRECTORY
         self.use_shared_memory = False
         self.imstream = ImageClient(self.stream_name)
-        self._rpc = RPCClient(self.host, self.port, target_name=target_name, timeout=timeout)
+        self._rpc = RPCClient(
+            self.host, self.port, target_name=target_name, timeout=timeout
+        )
 
     def __getattr__(self, name):
         return self._rpc.__getattr__(name)
@@ -282,42 +311,6 @@ class ImagEMX2CameraClient:
     #     )
 
 
-class ImagEMX2CameraServer(ImagEMX2Camera):
-    def __init__(
-        self,
-        host: str,
-        port: int,
-        stream_name: str = "imagemx2",
-        image_dir: str | None = None,
-        timeout: float = 5.0,
-        simulate: bool = False,
-    ):
-        super().__init__(image_dir=image_dir, timeout=timeout)
-        self.stream_name = stream_name
-        self.image_client = ImageClient(stream_name)
-
-    def acquire_single_frame(
-        self,
-        timeout=None,
-        exp_info: dict[str, Any] | None = None,
-        autosave: bool = False,
-        broadcast: bool = False,
-    ) -> np.ndarray:
-        image = super().acquire_single_frame(timeout)
-        if autosave:
-            ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir)
-        info = {
-            "timestamp": time.time(),
-            "_imgresolution": [1, 1],
-            "_offset": [0, 0],
-        }
-        if exp_info is not None:
-            info.update(exp_info)
-        if broadcast:
-            self.image_client.send(image, info)
-        return image
-
-
 def run_server(
     host: str,
     port: int,
@@ -331,14 +324,14 @@ def run_server(
         camera = SimulatedImagEMX2Camera(image_dir=image_dir, timeout=timeout)
     else:
 
-        camera = ImagEMX2CameraServer(
+        camera = ImagEMX2Camera(
             host=host,
             port=port,
             stream_name=stream_name,
             image_dir=image_dir,
             timeout=timeout,
             simulate=simulate,
-    )
+        )
 
     LOGGER.info(
         "Starting ImagEM X2 RPC server host=%s port=%s stream=%s simulate=%s",
@@ -355,8 +348,7 @@ def run_server(
     )
 
 
-def run(name: str):
-    del name
+def run():
     conf = ConfigReader.getConfiguration()
     server_conf = conf.get("Servers", {}).get("ImagEM X2 Camera", {})
     run_server(
@@ -369,18 +361,22 @@ def run(name: str):
 
 
 def main():
-    
+
     parser = argparse.ArgumentParser(description="Run ImagEM X2 sipyco RPC server")
     parser.add_argument("--host", default="127.0.0.1", help="RPC bind host")
     parser.add_argument("--port", type=int, default=3251, help="RPC bind port")
     parser.add_argument("--stream-name", default="imagemx2", help="Image stream name")
-    parser.add_argument("--image-dir", default=None, help="optional TIFF autosave directory")
-    parser.add_argument("--timeout", type=float, default=5.0, help="frame wait timeout in seconds")
-    parser.add_argument("--simulate", action="store_true", help="use simulated camera backend")
+    parser.add_argument(
+        "--image-dir", default=None, help="optional TIFF autosave directory"
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=5.0, help="frame wait timeout in seconds"
+    )
+    parser.add_argument(
+        "--simulate", action="store_true", help="use simulated camera backend"
+    )
     parser.add_argument("--log-level", default="INFO", help="Python log level")
     args = parser.parse_args()
-    
-
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
     run_server(
