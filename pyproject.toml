@@ -66,6 +66,7 @@ scikit-image = "^0.26.0"
 pyvisa-py = "^0.8.1"
 sipyco = {git = "https://github.com/m-labs/sipyco.git"}
 magicmock = "^0.3"
+rotpy = "^0.2.1"
 
 [build-system]
 requires = ["poetry-core"]

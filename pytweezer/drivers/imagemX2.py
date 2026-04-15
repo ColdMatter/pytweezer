@@ -35,12 +35,17 @@ def requires_camera(func):
 class ImagEMX2Camera:
     """Low-level wrapper around the Hamamatsu ImagEM X2 DCAM driver."""
 
-    def __init__(self, image_dir: str | None = None, timeout: float = 5.0, stream_name: Optional[str] = None):
+    def __init__(
+        self,
+        image_dir: str | None = None,
+        timeout: float = 5.0,
+        stream_name: Optional[str] = None,
+    ):
         self.image_dir = image_dir or IMAGE_DIRECTORY
         self.timeout = timeout
-        self.dcam = None
+        self.dcam: dcam.DCAMCamera
         self._open_camera()
-        
+
         self.stream_name = stream_name
         if stream_name:
             self.image_client = ImageClient(stream_name)
@@ -156,7 +161,6 @@ class ImagEMX2Camera:
             self.image_client.send(image, info)
         return image
 
-
     @staticmethod
     def save_tiff(image: np.ndarray, image_dir: str | None = None, run_no: int = 0):
         image_dir = image_dir or IMAGE_DIRECTORY
@@ -244,7 +248,7 @@ class SimulatedImagEMX2Camera:
         ImagEMX2Camera.save_tiff(image=image, image_dir=image_dir, run_no=run_no)
 
 
-class ImagEMX2CameraClient:
+class ImagEMX2CameraClient(RPCClient):
     """Experiment-side RPC client with direct access to camera methods."""
 
     def __init__(
@@ -255,6 +259,7 @@ class ImagEMX2CameraClient:
         target_name: Any = "camera",
         timeout: float | None = 5.0,
     ):
+
         conf = ConfigReader.getConfiguration()
         server_conf = conf.get("Servers", {}).get(server_name, {})
 
@@ -262,53 +267,13 @@ class ImagEMX2CameraClient:
         self.port = int(port or server_conf.get("port", 3251))
         self.stream_name = server_conf.get("stream_name", "imagemx2")
         self.image_dir = IMAGE_DIRECTORY
-        self.use_shared_memory = False
         self.imstream = ImageClient(self.stream_name)
-        self._rpc = RPCClient(
-            self.host, self.port, target_name=target_name, timeout=timeout
+        super().__init__(
+            host=self.host, port=self.port, target=target_name, timeout=timeout
         )
-
-    def __getattr__(self, name):
-        return self._rpc.__getattr__(name)
-
-    def close(self):
-        try:
-            self._rpc.close_rpc()
-        except Exception:
-            LOGGER.exception("Failed to close ImagEMX2 RPC client")
 
     def ping(self):
         return {"ok": True, "host": self.host, "port": self.port, "target": "camera"}
-
-    # def acquire_single_frame(
-    #     self,
-    #     timeout: float | None = None,
-    #     exp_info: dict[str, Any] | None = None,
-    #     autosave: bool = False,
-    #     broadcast: bool = False,
-    # ) -> np.ndarray:
-    #     return self._rpc.acquire_single_frame(
-    #         timeout=timeout,
-    #         exp_info=exp_info,
-    #         autosave=autosave,
-    #         broadcast=broadcast,
-    #     )
-
-    # def acquire_n_frames(
-    #     self,
-    #     nframes: int,
-    #     exp_info: dict[str, Any] | None = None,
-    #     start_frame: int = 0,
-    #     autosave: bool = False,
-    #     broadcast: bool = False,
-    # ) -> np.ndarray:
-    #     return self._rpc.acquire_n_frames(
-    #         nframes=nframes,
-    #         exp_info=exp_info,
-    #         start_frame=start_frame,
-    #         autosave=autosave,
-    #         broadcast=broadcast,
-    #     )
 
 
 def run_server(
@@ -323,7 +288,6 @@ def run_server(
         LOGGER.warning("Running ImagEM X2 Camera server in SIMULATION MODE")
         camera = SimulatedImagEMX2Camera(image_dir=image_dir, timeout=timeout)
     else:
-
         camera = ImagEMX2Camera(
             host=host,
             port=port,
@@ -346,19 +310,6 @@ def run_server(
         port=int(port),
         description="ImagEM X2 RPC server",
     )
-
-
-def run():
-    conf = ConfigReader.getConfiguration()
-    server_conf = conf.get("Servers", {}).get("ImagEM X2 Camera", {})
-    run_server(
-        host=server_conf.get("host", "127.0.0.1"),
-        port=int(server_conf.get("port", 3251)),
-        stream_name=server_conf.get("stream_name", "imagemx2"),
-        timeout=float(server_conf.get("timeout", 5.0)),
-        simulate=bool(server_conf.get("simulate", False)),
-    )
-
 
 def main():
 

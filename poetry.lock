@@ -2399,6 +2399,40 @@ pygments = ">=2.13.0,<3.0.0"
 jupyter = ["ipywidgets (>=7.5.1,<9)"]
 
 [[package]]
+name = "rotpy"
+version = "0.2.1"
+description = "Cython bindings for the Spinnaker camera control API."
+optional = false
+python-versions = "*"
+files = [
+    {file = "rotpy-0.2.1-cp310-cp310-macosx_10_14_x86_64.whl", hash = "sha256:279eda3a1b4bc3f9146dc72c7dd4ff7b43bae1b3ba8cbfd9ebab70bed3e83fe8"},
+    {file = "rotpy-0.2.1-cp310-cp310-manylinux_2_27_x86_64.whl", hash = "sha256:0245f7bf0c8e72d534f66d92be28f3f5b78f278e32bb1c6d14ad62ae952f608e"},
+    {file = "rotpy-0.2.1-cp310-cp310-win32.whl", hash = "sha256:e902067941291adf1f5b7aefb1c46690cdb78161eb6d7128ad8393dda5e308ac"},
+    {file = "rotpy-0.2.1-cp310-cp310-win_amd64.whl", hash = "sha256:8b9ccf65da9580dcd06d464fbca84291b1cddd96dac137351ac2a721b0786596"},
+    {file = "rotpy-0.2.1-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:4d71d34935203af64020026350d010fe4f108fa31181dede6c845e93352b1a6f"},
+    {file = "rotpy-0.2.1-cp311-cp311-manylinux_2_27_x86_64.whl", hash = "sha256:d40e26c536f31d4e68375d08d46c1a65e7f5eb98da9eb5ec140925b8e33aae66"},
+    {file = "rotpy-0.2.1-cp311-cp311-win32.whl", hash = "sha256:e42501610b0bbe32ed93a0c9e2acd018bcc850076c572b25dfd5593c609f66c0"},
+    {file = "rotpy-0.2.1-cp311-cp311-win_amd64.whl", hash = "sha256:5f6897d58197b3fb2173e585b2eb110be65d62ad31a275fb8dda431d8ca7cdc5"},
+    {file = "rotpy-0.2.1-cp37-cp37m-macosx_10_14_x86_64.whl", hash = "sha256:03e9ff4e6419591e2c9e4133e81a4e85ecb471077294f40d55138db2b0a6829c"},
+    {file = "rotpy-0.2.1-cp37-cp37m-manylinux_2_27_x86_64.whl", hash = "sha256:008361b0adeee80c106990df7436e4bd888a35ccf68721a3ec9e19988426bcf2"},
+    {file = "rotpy-0.2.1-cp37-cp37m-win32.whl", hash = "sha256:91e045f17024d16f09e89914e6fec5ab49d4a283f38711ca6b282f50eceac8b8"},
+    {file = "rotpy-0.2.1-cp37-cp37m-win_amd64.whl", hash = "sha256:a105f96d120440db1d312dc47d118fcc03bc04bf9f3040e89ab00a2beb3fa57b"},
+    {file = "rotpy-0.2.1-cp38-cp38-macosx_10_14_x86_64.whl", hash = "sha256:7e04283ab07cc1af2b0d467846c00f604eee82b34b492fbc659b1e075f533708"},
+    {file = "rotpy-0.2.1-cp38-cp38-manylinux_2_27_x86_64.whl", hash = "sha256:2551ce0241b348b1cef413eabeb3dcff4634ac043bdf05da4b28de83a228315f"},
+    {file = "rotpy-0.2.1-cp38-cp38-win32.whl", hash = "sha256:52b2fa70a39cb1634aebadd66245d5b14d941e469e35168f1eb84e208d19646f"},
+    {file = "rotpy-0.2.1-cp38-cp38-win_amd64.whl", hash = "sha256:8cd9a70f24549bb7fe03e54e24645abdf1fd5a1c0d52872c6adb4e5a3d625fa1"},
+    {file = "rotpy-0.2.1-cp39-cp39-macosx_10_14_x86_64.whl", hash = "sha256:3a6ab291592937a93be0d752b8e024e2889e07d225adef86ed507ba74c1b5fff"},
+    {file = "rotpy-0.2.1-cp39-cp39-manylinux_2_27_x86_64.whl", hash = "sha256:9f2ed40bf6a6baa23408de546f54f75d14689239264f5f65b00a7b2c970760ca"},
+    {file = "rotpy-0.2.1-cp39-cp39-win32.whl", hash = "sha256:1fc21132708438f3d662517382fb8962ddfd1d4afa21c17715c9b288916dbc9f"},
+    {file = "rotpy-0.2.1-cp39-cp39-win_amd64.whl", hash = "sha256:66adb96d8de80a3f802e9cd5767f57bd00934f5a87b377512d48e1610b23b35a"},
+    {file = "rotpy-0.2.1.tar.gz", hash = "sha256:5975f18a6dc3f2af293d10f19dfd79960c92a55259a306e4eeaf0f42ea5d2374"},
+]
+
+[package.extras]
+doc = ["autodocsumm", "cython", "sphinx", "sphinx-copybutton", "sphinx-rtd-theme"]
+test = ["pytest"]
+
+[[package]]
 name = "rpyc"
 version = "6.0.2"
 description = "Remote Python Call (RPyC) is a transparent and symmetric distributed computing library"
@@ -2787,4 +2821,4 @@ pyzmq = "*"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11.4, <3.14"
-content-hash = "a74327210eda1986169f945b27834961596a66f0328d1a65f2cb22ebc38e2fd3"
+content-hash = "1eef11b043156c5230f2143777838c24abb43d1dc99655b600267cc06008094b"

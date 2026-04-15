@@ -1,15 +1,16 @@
-HOST_DICT = {
+HOSTS = {
     "beast": "10.59.3.1",
-    "mm_pc": "10.59.3.2",
-    "localhost": "127.0.0.1"
+    "rb_mm_pc": "10.59.3.2",
+    "caf_mm_pc": "10.59.3.5",
+    "localhost": "127.0.0.1",
+    
 }
 
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
 SIMULATING = True
-SERVER_HOST = HOST_DICT["beast"] if not SIMULATING else HOST_DICT["localhost"]
-MM_HOST = HOST_DICT["mm_pc"] if not SIMULATING else HOST_DICT["localhost"]
+SERVER_HOST = HOSTS["beast"] if not SIMULATING else HOSTS["localhost"]
 
 
 CONFIG = {
@@ -54,10 +55,17 @@ CONFIG = {
             "command_port": get_next_port(),
             "pub_port": get_next_port(),
         },
-        "MotMaster Server": {
+        "Rb MotMaster Server": {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
-            "host": MM_HOST,
+            "host": HOSTS["rb_mm_pc"],
+            "port": get_next_port(),
+            "simulate": SIMULATING
+        },
+        "CaF MotMaster Server": {
+            "active": True,
+            "script": "../pytweezer/experiment/motmaster_server.py",
+            "host": HOSTS["caf_mm_pc"],
             "port": get_next_port(),
             "simulate": SIMULATING
         },
@@ -125,10 +133,16 @@ CONFIG = {
             "timeout": 5.0,
             "tooltip": "Persistent camera process; experiments should use ImagEMX2CameraClient"
         },
-        "Elephant": {
-            "active": False,
-            "script": "../pytweezer/GUI/mighty.py"
-        }
+        "Blackfly Camera": {
+            "active": True,
+            "script": "../pytweezer/drivers/bfly2.py",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "stream_name": "bfly",
+            "timeout": 5.0,
+            "tooltip": "Persistent camera process; experiments should use BlackflyCameraClient"
+        },
     },
     "Viewer": {
         "DummyViewer": {
