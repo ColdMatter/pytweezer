@@ -8,6 +8,7 @@ from tkinter import NO
 from typing import Any, Optional
 from unittest.mock import MagicMock
 
+from imageio import config
 import numpy as np
 import pylablib.devices.DCAM as dcam
 import tifffile as tiff
@@ -261,7 +262,7 @@ class ImagEMX2CameraClient(RPCClient):
     ):
 
         conf = ConfigReader.getConfiguration()
-        server_conf = conf.get("Servers", {}).get(server_name, {})
+        server_conf = conf.get("Devices", {}).get(server_name, {})
 
         self.host = host or server_conf.get("host", "127.0.0.1")
         self.port = int(port or server_conf.get("port", 3251))
@@ -284,19 +285,6 @@ def run_server(
     timeout: float = 5.0,
     simulate: bool = False,
 ):
-    if simulate:
-        LOGGER.warning("Running ImagEM X2 Camera server in SIMULATION MODE")
-        camera = SimulatedImagEMX2Camera(image_dir=image_dir, timeout=timeout)
-    else:
-        camera = ImagEMX2Camera(
-            host=host,
-            port=port,
-            stream_name=stream_name,
-            image_dir=image_dir,
-            timeout=timeout,
-            simulate=simulate,
-        )
-
     LOGGER.info(
         "Starting ImagEM X2 RPC server host=%s port=%s stream=%s simulate=%s",
         host,
@@ -304,6 +292,17 @@ def run_server(
         stream_name,
         simulate,
     )
+    if simulate:
+        LOGGER.warning("Running ImagEM X2 Camera server in SIMULATION MODE")
+        camera = SimulatedImagEMX2Camera(image_dir=image_dir, timeout=timeout)
+    else:
+        camera = ImagEMX2Camera(
+            stream_name=stream_name,
+            image_dir=image_dir,
+            timeout=timeout,
+        )
+
+
     simple_server_loop(
         {"camera": camera},
         host=host,
@@ -328,6 +327,10 @@ def main():
     )
     parser.add_argument("--log-level", default="INFO", help="Python log level")
     args = parser.parse_args()
+    
+    config = ConfigReader.getConfiguration()
+    server_conf = config.get("Devices", {}).get("ImagEM X2 Camera", {})
+    simulate = server_conf.get("simulate", False)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
     run_server(
@@ -336,7 +339,7 @@ def main():
         stream_name=args.stream_name,
         image_dir=args.image_dir,
         timeout=args.timeout,
-        simulate=args.simulate,
+        simulate=simulate,
     )
 
 

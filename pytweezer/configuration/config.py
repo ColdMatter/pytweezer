@@ -48,6 +48,11 @@ CONFIG = {
             "host": SERVER_HOST,
             "port": get_next_port()
         },
+        "Experiment Manager": {
+            "active": True,
+            "script": "../pytweezer/servers/experiment_manager.py",
+            "host": SERVER_HOST
+        },
         "Model Sync": {
             "active": True,
             "script": "../pytweezer/servers/model_sync.py",
@@ -58,6 +63,7 @@ CONFIG = {
         "Rb MotMaster Server": {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
+            "config_file": "rb_mm_config.json",
             "host": HOSTS["rb_mm_pc"],
             "port": get_next_port(),
             "simulate": SIMULATING
@@ -65,6 +71,7 @@ CONFIG = {
         "CaF MotMaster Server": {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
+            "config_file": "caf_mm_config.json",
             "host": HOSTS["caf_mm_pc"],
             "port": get_next_port(),
             "simulate": SIMULATING
@@ -113,16 +120,16 @@ CONFIG = {
         },
         "Datalogger": {
             "active": True,
-            "script": "../pytweezer/servers/datalogger.py"
+            "script": "../pytweezer/servers/datalogger.py",
+            "host": SERVER_HOST,
         },
         "Imagelogger": {
             "active": True,
-            "script": "../pytweezer/servers/imagelogger.py"
-        },
-        "Experiment Manager": {
-            "active": True,
-            "script": "../pytweezer/servers/experiment_manager.py"
-        },
+            "script": "../pytweezer/servers/imagelogger.py",
+            "host": SERVER_HOST,
+        }
+    },
+    "Devices": {
         "ImagEM X2 Camera": {
             "active": True,
             "script": "../pytweezer/servers/imagemx2_server.py",
@@ -134,7 +141,7 @@ CONFIG = {
             "tooltip": "Persistent camera process; experiments should use ImagEMX2CameraClient"
         },
         "Blackfly Camera": {
-            "active": True,
+            "active": False,
             "script": "../pytweezer/drivers/bfly2.py",
             "host": SERVER_HOST,
             "port": get_next_port(),

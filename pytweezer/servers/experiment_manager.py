@@ -60,7 +60,6 @@ class ExperimentManager:
         self.taskNr = 0
         self._measurement_start_time = None
         self._measurement_results = {}
-        self.motmaster_client = MotMasterClient()
         # Create own instance of synced model for standalone operation
         self._model = SyncedScheduleModel()
         self.start_queue()
@@ -88,7 +87,7 @@ class ExperimentManager:
         # self.experiment = task_dict['experiment']
         filepath = resolve_experiment_filepath(task_dict['filepath'])
         experiment_cls = get_experiment(filepath, task_dict['expName'])
-        self.experiment = experiment_cls(self._props, motmaster_client=self.motmaster_client)
+        self.experiment = experiment_cls(self._props)
         self.arg_dict = task_dict['args']
         self.n_runs = task_dict['nRuns']
         self.scan_pars = task_dict['scanpars']

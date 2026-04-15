@@ -1,8 +1,8 @@
 from imageio import imread
-from balic.servers import ImageClient
-from balic.servers import CommandClient,DataClient
-from balic.servers import Properties,PropertyAttribute
-from balic.analysis.print_messages import print_error
+from pytweezer.servers import ImageClient
+from pytweezer.servers import CommandClient,DataClient
+from pytweezer.servers import Properties,PropertyAttribute
+from pytweezer.analysis.print_messages import print_error
 import time
 from termcolor import colored
 import copy
