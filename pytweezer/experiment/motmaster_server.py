@@ -257,68 +257,25 @@ class MotMasterCommandServer:
 
 
 def run_motmaster_command_server(
-    host: str = "0.0.0.0", port: int = 5557, interval: Union[int, float] = 0.1, simulate: bool = False
+    host: str = "0.0.0.0", port: int = 5557, interval: Union[int, float] = 0.1, simulate: bool = False, config_file: Optional[str] = None
 ) -> None:
     if simulate:
         interface = DummyMotMasterInterface(interval=interval)
     else:
-        interface = MotMasterInterface(interval=interval)
+        interface = MotMasterInterface(config_file, interval=interval)
     interface.connect()
     if (not simulate) and interface.motmaster is None:
         raise RuntimeError("Failed to connect to MotMaster.")
+
 
     server = MotMasterCommandServer(interface=interface, host=host, port=port)
     server.serve_forever()
 
 
-def _load_runtime_options_from_config(process_token: Optional[str]) -> dict:
-    defaults = {
-        "host": "0.0.0.0",
-        "port": 5557,
-        "simulate": False,
-        "interval": 0.1,
-    }
-
-    try:
-        conf = ConfigReader.getConfiguration()
-        servers = conf.get("Servers", {})
-
-        if isinstance(process_token, str) and process_token.startswith("Servers/"):
-            process_name = process_token.split("/", 1)[1]
-            entry = servers.get(process_name, {})
-            if isinstance(entry, dict):
-                defaults.update(
-                    {
-                        "host": entry.get("host", defaults["host"]),
-                        "port": entry.get("port", defaults["port"]),
-                        "simulate": entry.get("simulate", defaults["simulate"]),
-                        "interval": entry.get("interval", defaults["interval"]),
-                    }
-                )
-            return defaults
-
-        for _name, entry in servers.items():
-            if not isinstance(entry, dict):
-                continue
-            script = str(entry.get("script", ""))
-            if script.endswith("motmaster_server.py"):
-                defaults.update(
-                    {
-                        "host": entry.get("host", defaults["host"]),
-                        "port": entry.get("port", defaults["port"]),
-                        "simulate": entry.get("simulate", defaults["simulate"]),
-                        "interval": entry.get("interval", defaults["interval"]),
-                    }
-                )
-                break
-    except Exception as error:
-        print(f"Warning: failed to read runtime options from config: {error}")
-
-    return defaults
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run MotMaster ZeroMQ command server")
+    parser.add_argument('--name', nargs='?', default=None, help='name of this program instance')
     parser.add_argument(
         "--host",
         default=None,
@@ -336,25 +293,24 @@ def main() -> None:
         default=None,
         help="Delay after starting MotMaster experiment (seconds)",
     )
-    parser.add_argument(
-        "process_token",
-        nargs="?",
-        default=None,
-        help="Optional process token passed by ProcessManager, e.g. Servers/Dummy MotMaster Server",
-    )
+
     args, _unknown = parser.parse_known_args()
 
-    options = _load_runtime_options_from_config(args.process_token)
-    host = args.host if args.host is not None else options["host"]
-    port = args.port if args.port is not None else int(options["port"])
-    interval = args.interval if args.interval is not None else float(options["interval"])
-    simulate = args.simulate or bool(options["simulate"])
+    from pytweezer.configuration.config import CONFIG
+    from pytweezer.servers import tweezerpath
+    config_dict = CONFIG["Servers"][f"{args.system} MotMaster Server"]
+    host = args.host or config_dict.get("host")
+    port = args.port or config_dict.get("port")
+    simulate = args.simulate or config_dict.get("simulate", False)
+    interval = args.interval or config_dict.get("interval", 0.1)
+    config_file = tweezerpath + "/pytweezer/configuration/" + config_dict.get("config_file")
 
     run_motmaster_command_server(
         host=host,
         port=port,
         interval=interval,
         simulate=simulate,
+        config_file=config_file,
     )
 
 
