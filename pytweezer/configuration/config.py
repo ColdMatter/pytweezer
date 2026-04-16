@@ -130,15 +130,23 @@ CONFIG = {
         }
     },
     "Devices": {
-        "ImagEM X2 Camera": {
+        "Rb HamCam": {
             "active": True,
             "script": "../pytweezer/servers/imagemx2_server.py",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
-            "stream_name": "imagemx2",
+            "stream_name": "rb_hamcam",
             "timeout": 5.0,
-            "tooltip": "Persistent camera process; experiments should use ImagEMX2CameraClient"
+        },
+        "CaF HamCam": {
+            "active": True,
+            "script": "../pytweezer/servers/imagemx2_server.py",
+            "host": HOSTS["caf_mm_pc"],
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "stream_name": "caf_hamcam",
+            "timeout": 5.0,
         },
         "Blackfly Camera": {
             "active": False,
@@ -148,7 +156,6 @@ CONFIG = {
             "simulate": SIMULATING,
             "stream_name": "bfly",
             "timeout": 5.0,
-            "tooltip": "Persistent camera process; experiments should use BlackflyCameraClient"
         },
     },
     "Viewer": {
