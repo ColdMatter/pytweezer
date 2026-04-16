@@ -130,13 +130,14 @@ class ImagEMX2Camera:
         self.dcam.stop_acquisition()
 
     @requires_camera
-    def acquire_n_frames(self, nframes: int, start_frame: int = 0) -> np.ndarray:
-        self.dcam.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
+    def acquire_n_frames(self, nframes: int, start_frame: int = 0, timeout: float | None = None) -> np.ndarray:
+        self.dcam.wait_for_frame(nframes=int(nframes), timeout=timeout or self.timeout)
         images, _infos = self.dcam.read_multiple_images(
             (int(start_frame), int(start_frame) + int(nframes)), return_info=True
         )
         return np.asarray(images)
 
+    @requires_camera
     def acquire_single_frame(
         self,
         timeout=None,
@@ -144,7 +145,7 @@ class ImagEMX2Camera:
         autosave: bool = False,
         broadcast: bool = False,
     ) -> np.ndarray:
-        self.dcam.wait_for_frame(n_frames=1, timeout=timeout)
+        self.dcam.wait_for_frame(n_frames=1, timeout=timeout or self.timeout)
         image, _info = self.dcam.read_newest_image(return_info=True)
         image = np.asarray(image)
         if autosave:
