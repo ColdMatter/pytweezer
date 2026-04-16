@@ -298,7 +298,7 @@ def main() -> None:
 
     from pytweezer.configuration.config import CONFIG
     from pytweezer.servers import tweezerpath
-    config_dict = CONFIG["Servers"][f"{args.system} MotMaster Server"]
+    config_dict = CONFIG["Servers"][f"{args.name} MotMaster Server"]
     host = args.host or config_dict.get("host")
     port = args.port or config_dict.get("port")
     simulate = args.simulate or config_dict.get("simulate", False)
