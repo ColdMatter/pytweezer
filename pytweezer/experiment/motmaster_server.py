@@ -11,6 +11,8 @@ import zmq
 import pythonnet
 import numbers
 from pytweezer.servers.configreader import ConfigReader
+from pytweezer.experiment.motmaster_interface import MotMasterInterface
+
 
 # NOTE: these imports will only work with the pythonnet package
 try:
@@ -22,195 +24,16 @@ try:
 except Exception as e:
     print(f"Error: {e} encountered, probably no pythonnet")
 
-# config dir is relative to the root of the repository, which is added to the path when pytweezer is installed, so should be findable from anywhere in the code using a relative path from the root. If this becomes an issue we can add some code to find the config dir based on the location of this file.
-CONFIG_DIR = "pytweezer/configuration"
-PROPERTIES_FILE = CONFIG_DIR + "/configuration.json"
-DEFAULTS_FILE = CONFIG_DIR + "/defaults.json"
-EXPERIMENTS_FILE = CONFIG_DIR + "/experiments.json"
+# config directory local to the package.
+CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
 
 
-class MotMasterInterface:
-    def __init__(self, interval: Union[int, float] = 0.1) -> None:
-        with open(PROPERTIES_FILE, "r") as f:
-            self.config = json.load(f)
-        self.script_root = pathlib.Path(self.config["script_root_path"])
-        self.interval = interval
-        self.motmaster = None
-        self.script = None
-        self.script_path = None
-
-    def _add_ref(self, path: str) -> None:
-        _path = pathlib.Path(path)
-        sys.path.append(_path.parent)
-        clr.AddReference(path)
-        return None
-
-    def _is_process_running(self, process_name: str) -> bool:
-        try:
-            if sys.platform.startswith("win"):
-                result = subprocess.run(
-                    ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                )
-                output = result.stdout.lower()
-                return (
-                    result.returncode == 0
-                    and process_name.lower() in output
-                    and "no tasks are running" not in output
-                )
-
-            result = subprocess.run(
-                ["pgrep", "-f", process_name],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            return result.returncode == 0 and bool(result.stdout.strip())
-        except Exception:
-            return False
-
-    def _start_process(self, exe_path: str) -> None:
-        subprocess.Popen(
-            [exe_path],
-            cwd=str(pathlib.Path(exe_path).parent),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-    def _ensure_motmaster_running(
-        self,
-        exe_path: str,
-        startup_timeout: float = 15.0,
-        poll_interval: float = 0.5,
-    ) -> None:
-        process_name = pathlib.Path(exe_path).name
-        if self._is_process_running(process_name):
-            return None
-
-        print(f"MOTMaster process '{process_name}' not found. Starting it now...")
-        self._start_process(exe_path)
-
-        deadline = time.time() + startup_timeout
-        while time.time() < deadline:
-            if self._is_process_running(process_name):
-                print(f"MOTMaster process '{process_name}' is running.")
-                return None
-            time.sleep(poll_interval)
-
-        raise RuntimeError(
-            f"Timed out waiting for process '{process_name}' to start from '{exe_path}'."
-        )
-
-    def connect(self) -> None:
-        for path in self.config["dll_paths"].values():
-            clr.AddReference(path)
-        for key, path_info in self.config.items():
-            if key == "dll_paths":
-                for path in path_info.values():
-                    self._add_ref(path)
-            elif key == "motmaster":
-                self._ensure_motmaster_running(path_info["exe_path"])
-                self._add_ref(path_info["exe_path"])
-                try:
-                    import MOTMaster  # type: ignore
-
-                    self.motmaster = Activator.GetObject(
-                        MOTMaster.Controller, path_info["remote_path"]
-                    )
-                    print("Connected to MotMaster.")
-                except Exception as e:
-                    print(f"Error: {e} encountered")
-            elif key == "caf_hardware_controller":
-                self._add_ref(path_info["exe_path"])
-                try:
-                    import MoleculeMOTHadwareControl  # type: ignore
-
-                    self.hardware_controller = Activator.GetObject(
-                        MoleculeMOTHadwareControl.Controller, path_info["remote_path"]
-                    )
-                except Exception as e:
-                    print(f"Error: {e} encountered")
-
-    def disconnect(self) -> None:
-        self.stage.close()
-        return None
-
-    def set_motmaster_experiment(
-        self,
-        script: str,
-    ):
-        self.script = script
-        self.script_path = str(self.script_root.joinpath(f"{script}.cs"))
-        try:
-            self.motmaster.SetScriptPath(self.script_path)
-            print(f"MotMaster script set to {script}.")
-        except Exception as e:
-            print(f"Error: {e} encountered")
-        return None
-
-    def get_motmaster_dictionary(self):
-        self.parameter_dictionary = self.motmaster.GetParameters()
-        # self.parameter_dictionary = Dictionary[String, Object]()
-        # with open(DEFAULTS_FILE, "r") as f:
-        #     default_parameters = json.load(f)
-        # for key, value in default_parameters.items():
-        #     self.parameter_dictionary[key] = value
-
-    def python_to_cs_dict(self, parameters: dict):
-        pars_csdict = Dictionary[String, Object]()
-        for key, value in parameters.items():
-            if isinstance(value, numbers.Integral):
-                value = Int32(value)
-            pars_csdict[key] = value
-        return pars_csdict
-
-
-    def start_motmaster_experiment(
-        self, parameters: Optional[dict] = None
-    ):
-        if self.script is None:
-            raise ValueError(
-                "MotMaster script not set. Please call set_motmaster_experiment first."
-            )
-        try:
-            if parameters is not None:
-                pars_csdict = self.python_to_cs_dict(parameters)
-                self.motmaster.Go(pars_csdict)
-            else:
-                self.motmaster.Go()
-            time.sleep(self.interval)
-        except Exception as e:
-            print(f"Error starting MotMaster experiment {self.script}: {e}")
-        return None
-
-    def get_params(self):
-        return dict(self.motmaster.GetParameters())
-
-    def get_params_csdict(self):
-        return self.motmaster.GetParameters()
-
-    def set_run_until_stopped(self, value: bool):
-        self.motmaster.SetRunUntilStopped(value)
-    
-    def set_iterations(self, iterations: int):
-        self.motmaster.SetIterations(iterations)
-
-    def set_save_toggle(self, save: bool):
-        self.motmaster.SaveToggle(save)
-
-    def set_trigger_mode(self, value: bool):
-        self.motmaster.SetTriggered(value)
-        
-    def save_pattern_info(self, save_folder, file_tag, task_nr):
-        """Save pattern information to files. calls saveToFiles from MMDataIOHelper"""
-        if self.script is None:
-            raise ValueError(
-                "MotMaster script not set. Please call set_motmaster_experiment first."
-            )
-        self.motmaster.ioHelper.saveToFiles(file_tag, save_folder, task_nr, self.script_path)
-
+def _resolve_config_file(config_file: Optional[str]) -> pathlib.Path:
+    candidate = config_file or "rb_mm_config.json"
+    path = pathlib.Path(candidate)
+    if path.is_absolute():
+        return path
+    return CONFIG_DIR / path
 
     
 class  DummyMotMasterInterface(MotMasterInterface):
