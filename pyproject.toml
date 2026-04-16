@@ -67,6 +67,7 @@ pyvisa-py = "^0.8.1"
 sipyco = {git = "https://github.com/m-labs/sipyco.git"}
 magicmock = "^0.3"
 rotpy = "^0.2.1"
+pycaf = {git = "https://github.com/ColdMatter/pycaf", branch = "cafmot"}
 
 [build-system]
 requires = ["poetry-core"]
