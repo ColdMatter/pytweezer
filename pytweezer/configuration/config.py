@@ -9,7 +9,7 @@ HOSTS = {
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-SIMULATING = True
+SIMULATING = False
 SERVER_HOST = HOSTS["beast"] if not SIMULATING else HOSTS["localhost"]
 
 
