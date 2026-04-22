@@ -5,9 +5,9 @@ from pytweezer.servers.configreader import ConfigReader
 
 
 def _resolve_server_name(token: str, conf: dict) -> str:
-    if isinstance(token, str) and token.startswith("Servers/"):
+    if isinstance(token, str) and token.startswith("Devices/"):
         return token.split("/", 1)[1]
-    if isinstance(token, str) and token in conf.get("Servers", {}):
+    if isinstance(token, str) and token in conf.get("Devices", {}):
         return token
     return "ImagEM X2 Camera"
 
@@ -17,7 +17,7 @@ def main():
     parser.add_argument(
         "name",
         nargs="?",
-        default="Servers/ImagEM X2 Camera",
+        default="Devices/Rb HamCam",
         help="process-manager label or explicit server name",
     )
     parser.add_argument(
@@ -43,6 +43,14 @@ def main():
     timeout = args.timeout if args.timeout is not None else float(server_conf.get("timeout", 5.0))
     simulate = bool(args.simulate or server_conf.get("simulate", False))
 
+    print(f"Starting ImagEM X2 Camera server with configuration:\n"
+          f"  Host: {host}\n"
+          f"  Port: {port}\n"
+          f"  Stream Name: {stream_name}\n"
+          f"  Image Directory: {args.image_dir or server_conf.get('image_dir', 'None')}\n"
+          f"  Timeout: {timeout} seconds\n"
+          f"  Simulate: {simulate}")
+    
 
     run_server(
         host=host,

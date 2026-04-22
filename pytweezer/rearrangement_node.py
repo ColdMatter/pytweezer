@@ -8,10 +8,11 @@ from pytweezer import communication as comm
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera, ImagEMX2CameraClient
 
 class RearrangementNode(mp.Process):
-    def __init__(self, control_queue, message_queue, slm_port=5555):
+    def __init__(self, control_queue, message_queue, data_queue, slm_port=5555):
         super().__init__()
         self.control_queue = control_queue
         self.message_queue = message_queue
+        self.data_queue = data_queue
         self.slm_port = slm_port
         self.daemon = True 
         self.message_queue.put(f"[Fast SLM Node] Initialised.")
@@ -21,6 +22,10 @@ class RearrangementNode(mp.Process):
         """Helper method to send print statements back to the Jupyter UI."""
         self.message_queue.put(message)
 
+    def _return_images(self, imgs):
+        """Helper method to send images back to the Jupyter UI."""
+        self.data_queue.put({"type": "images", "data": imgs})
+
     def do_rearrangement(self, grid_positions, array_shape, threshold, pm_init, terms1, terms2, d0, fps):
         # Wait for an image to arrive (timeout after 10ms to check Jupyter commands again)
         # 1. Receive Image from Camera Server
@@ -28,7 +33,7 @@ class RearrangementNode(mp.Process):
         self._log("[Fast SLM Node] Starting camera acquisition for rearrangement.")
         try:
             self.camera.start_acquisition()
-            img_array = self.camera.acquire_n_frames(1, broadcast=True)[0]
+            img_array0 = self.camera.acquire_n_frames(1, broadcast=True)[0]
             start1 = time.time()
             self._log("[Fast SLM Node] Image received! Executing pipeline...")
         except Exception as e:
@@ -38,7 +43,7 @@ class RearrangementNode(mp.Process):
         # 2. Extract Occupancy Mask
         # (Insert your image processing/thresholding logic here)
         try:
-            pixel_sums = an.sum_pixel_values(img_array, grid_positions, array_shape, window_size=3)[::-1, ::-1]
+            pixel_sums = an.sum_pixel_values(img_array0, grid_positions, array_shape, window_size=3)[::-1, ::-1]
             occ_mask = np.zeros(len(pixel_sums.flatten()), dtype=bool)
             occ_mask[pixel_sums.flatten() > threshold] = True
             self._log("[Fast SLM Node] Occupancy mask extracted.")
@@ -61,9 +66,10 @@ class RearrangementNode(mp.Process):
         
         self._log(f"[Fast SLM Node] Rearrangement complete. Waiting for reset trigger.")
         self.camera.start_acquisition()
-        img_array = self.camera.acquire_n_frames(1, broadcast=True)[0]
+        img_array1 = self.camera.acquire_n_frames(1, broadcast=True)[0]
         self.SLM.update_mask(pm_init)
         self._log(f"[Fast SLM Node] Array reset.")
+        self._return_images([img_array0, img_array1])
 
     def do_sequence(self, sequence,fps):
         # Wait for an image to arrive (timeout after 10ms to check Jupyter commands again)
@@ -108,10 +114,9 @@ class RearrangementNode(mp.Process):
         # Set up phasemask generation
         self.phasemask = pm.OptimisationBasedPhasemaskGeneratorGPU()
 
-        # Setup camera
-        self.camera = ImagEMX2CameraClient()
-        self.camera.setup_acquisition("snap", 1)
-        self._log("[Fast SLM Node] Connected to camera server.")
+        # Set up camera
+        self.camera = ImagEMX2Camera()
+        self.camera.relinquish_camera()
         
         # State variables
         pm_init, terms1, terms2, d0, threshold, grid_positions, array_shape, fps = None, None, None, None, None, None, None, None
@@ -133,7 +138,23 @@ class RearrangementNode(mp.Process):
                     array_shape = cmd["initial_array_shape"]
                     fps = cmd["fps"]
                     self._log("[Fast SLM Node] Arm command received. Starting rearrangement sequence...")
+
+                    # Setup camera
+                    self.camera.reacquire_camera()
+                    self.camera.setup_acquisition("snap", 1)
+                    self.camera.set_trigger_source("ext")
+                    self.camera.set_external_exposure_mode()
+                    self.camera.enable_em_gain(True)
+                    self.camera.enable_direct_em_gain(True)
+                    self.camera.set_sensitivity(1200)
+                    self.camera.timeout = 60*2
+                    X0, Y0, WIDTH, HEIGHT = 50, 70, 384, 384
+                    self.camera.set_roi(X0, WIDTH, Y0, HEIGHT)
+                    self._log("[Fast SLM Node] Connected to camera server.")
+
                     self.do_rearrangement(grid_positions, array_shape, threshold, pm_init, terms1, terms2, d0, fps)
+
+                    self.camera.relinquish_camera()
 
                 elif cmd["type"] == "ARM_SEQUENCE":
                     sequence = cmd["sequence"]
@@ -143,6 +164,7 @@ class RearrangementNode(mp.Process):
                     
                 elif cmd["type"] == "SHUTDOWN":
                     self._log("[Fast SLM Node] Shutting down.")
+                    self.camera.close()
                     break
             except mp.queues.Empty:
                 pass

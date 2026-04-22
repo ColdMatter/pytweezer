@@ -270,6 +270,7 @@ class ImagEMX2CameraClient(RPCClient):
         self.stream_name = server_conf.get("stream_name", "imagemx2")
         self.image_dir = IMAGE_DIRECTORY
         self.imstream = ImageClient(self.stream_name)
+        print(self.host, self.port, self.stream_name)
         super().__init__(
             host=self.host, port=self.port, target_name=target_name, timeout=timeout
         )
@@ -302,11 +303,11 @@ def run_server(
             image_dir=image_dir,
             timeout=timeout,
         )
-
+    print(f"ImagEM X2 Camera server running on {host}:{port} with stream '{stream_name}'")
 
     simple_server_loop(
         {"camera": camera},
-        host=host,
+        host="10.59.3.1",
         port=int(port),
         description="ImagEM X2 RPC server",
     )
@@ -335,7 +336,7 @@ def main():
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
     run_server(
-        host=args.host,
+        host="10.59.3.1",
         port=args.port,
         stream_name=args.stream_name,
         image_dir=args.image_dir,
