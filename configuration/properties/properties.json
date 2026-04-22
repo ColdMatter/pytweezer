@@ -53,11 +53,12 @@
     },
     "BaliBrowser": {
         "Looper": {},
+        "experiments_dir": "/home/twalker/RbCaF/pytweezer/experiments",
         "testval": 3,
         "testlist": [],
         "Geometry": [
-            0,
-            24,
+            1920,
+            372,
             1920,
             1031
         ],

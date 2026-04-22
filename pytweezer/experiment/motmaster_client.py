@@ -8,22 +8,18 @@ import zmq
 class MotMasterClient:
 	def __init__(
 		self,
-		host: str = "10.59.3.2",
-		port: int = 5557,
+		system: str = "Rb",
 		timeout_ms: int = 5000,
 		context: zmq.Context | None = None,
 	) -> None:
 		try:
 			cr = ConfigReader.getConfiguration()
-			self.host = cr["Servers"]["MotMaster Server"].get("host", host)
-			self.port = cr["Servers"]["MotMaster Server"].get("port", port)
-		except ModuleNotFoundError:
-			self.host = host
-			self.port = port
-			print(
-				"Warning: Could not load configuration. Using default host and port for MotMasterClient."
-			)
-			print(f"Host: {self.host}, Port: {self.port}")
+			name = f"{system} MotMaster Server"
+			self.host = cr["Servers"][name]["host"]
+			self.port = cr["Servers"][name]["port"]
+		except KeyError as error:
+			raise ValueError(f"Configuration for '{system} MotMaster Server' not found")
+
 		self.address = f"tcp://{self.host}:{self.port}"
 		self.timeout_ms = timeout_ms
 		self.context = context or zmq.Context.instance()

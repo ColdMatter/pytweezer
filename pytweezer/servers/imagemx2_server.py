@@ -34,13 +34,15 @@ def main():
 
     conf = ConfigReader.getConfiguration()
     server_name = _resolve_server_name(args.name, conf)
-    server_conf = conf.get("Servers", {}).get(server_name, {})
+    server_conf = conf.get("Devices", {}).get(server_name, {})
+
 
     host = args.host or server_conf.get("host", "127.0.0.1")
     port = args.port if args.port is not None else int(server_conf.get("port", 3251))
     stream_name = args.stream_name or server_conf.get("stream_name", "imagemx2")
     timeout = args.timeout if args.timeout is not None else float(server_conf.get("timeout", 5.0))
     simulate = bool(args.simulate or server_conf.get("simulate", False))
+
 
     run_server(
         host=host,

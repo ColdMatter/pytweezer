@@ -27,6 +27,34 @@ def Config():
     return CONFIG
 
 
+def DashboardConfig():
+    """return configuration dictionary for GUI/Viewer launchers"""
+
+    from pytweezer.configuration.config import get_dashboard_config
+    return get_dashboard_config()
+
+
+def ControllerConfig():
+    """return configuration dictionary for controller launchers"""
+
+    from pytweezer.configuration.config import get_controller_config
+    return get_controller_config()
+
+
+def MachineName():
+    """return the active machine name"""
+
+    from pytweezer.configuration.config import get_machine_name
+    return get_machine_name()
+
+
+def MachineProfile():
+    """return the active machine profile"""
+
+    from pytweezer.configuration.config import get_machine_profile
+    return get_machine_profile()
+
+
 class ConfigReader:
     """read the static configuration file"""
 
@@ -40,6 +68,22 @@ class ConfigReader:
         """
 
         return Config()
+
+    @staticmethod
+    def getDashboardConfiguration():
+        return DashboardConfig()
+
+    @staticmethod
+    def getControllerConfiguration():
+        return ControllerConfig()
+
+    @staticmethod
+    def getMachineName():
+        return MachineName()
+
+    @staticmethod
+    def getMachineProfile():
+        return MachineProfile()
 
 
 def Properties():

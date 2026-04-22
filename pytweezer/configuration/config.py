@@ -1,15 +1,17 @@
-HOST_DICT = {
+HOSTS = {
     "beast": "10.59.3.1",
-    "mm_pc": "10.59.3.2",
-    "localhost": "127.0.0.1"
+    "rb_mm_pc": "10.59.3.2",
+    "caf_mm_pc": "10.59.3.5",
+    "localhost": "127.0.0.1",
+    
 }
 
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-HOST = HOST_DICT["beast"]
-
 SIMULATING = False
+SERVER_HOST = HOSTS["beast"] if not SIMULATING else HOSTS["localhost"]
+
 
 CONFIG = {
     "GUI": {
@@ -43,54 +45,68 @@ CONFIG = {
         "Analysis Manager": {
             "active": True,
             "script": "../pytweezer/servers/analysis_manager.py",
-            "host": HOST,
+            "host": SERVER_HOST,
             "port": get_next_port()
+        },
+        "Experiment Manager": {
+            "active": True,
+            "script": "../pytweezer/servers/experiment_manager.py",
+            "host": SERVER_HOST
         },
         "Model Sync": {
             "active": True,
             "script": "../pytweezer/servers/model_sync.py",
-            "host": HOST,
+            "host": SERVER_HOST,
             "command_port": get_next_port(),
             "pub_port": get_next_port(),
         },
-        "MotMaster Server": {
+        "Rb MotMaster Server": {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
-            "host": HOST_DICT["mm_pc"],
-            "port": 5557,
+            "config_file": "rb_mm_config.json",
+            "host": HOSTS["rb_mm_pc"],
+            "port": get_next_port(),
+            "simulate": SIMULATING
+        },
+        "CaF MotMaster Server": {
+            "active": True,
+            "script": "../pytweezer/experiment/motmaster_server.py",
+            "config_file": "caf_mm_config.json",
+            "host": HOSTS["caf_mm_pc"],
+            "port": get_next_port(),
             "simulate": SIMULATING
         },
         "Imagehub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py", 
         },
         "Commandhub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Datahub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Propertyhub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Messagehub": {
             "active": True,
-            "host": HOST,
+            "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "stream_name": "Global Messages",
@@ -99,35 +115,48 @@ CONFIG = {
         "Propertylogger": {
             "active": True,
             "script": "../pytweezer/servers/propertylogger.py",
-            "host": HOST,
+            "host": SERVER_HOST,
             "port": get_next_port()
         },
         "Datalogger": {
             "active": True,
-            "script": "../pytweezer/servers/datalogger.py"
+            "script": "../pytweezer/servers/datalogger.py",
+            "host": SERVER_HOST,
         },
         "Imagelogger": {
             "active": True,
-            "script": "../pytweezer/servers/imagelogger.py"
-        },
-        "Experiment Manager": {
-            "active": True,
-            "script": "../pytweezer/servers/experiment_manager.py"
-        },
-        "ImagEM X2 Camera": {
+            "script": "../pytweezer/servers/imagelogger.py",
+            "host": SERVER_HOST,
+        }
+    },
+    "Devices": {
+        "Rb HamCam": {
             "active": True,
             "script": "../pytweezer/servers/imagemx2_server.py",
-            "host": HOST,
+            "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
-            "stream_name": "imagemx2",
+            "stream_name": "rb_hamcam",
             "timeout": 5.0,
-            "tooltip": "Persistent camera process; experiments should use ImagEMX2CameraClient"
         },
-        "Elephant": {
+        "CaF HamCam": {
+            "active": True,
+            "script": "../pytweezer/servers/imagemx2_server.py",
+            "host": HOSTS["caf_mm_pc"],
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "stream_name": "caf_hamcam",
+            "timeout": 5.0,
+        },
+        "Blackfly Camera": {
             "active": False,
-            "script": "../pytweezer/GUI/mighty.py"
-        }
+            "script": "../pytweezer/drivers/bfly2.py",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "stream_name": "bfly",
+            "timeout": 5.0,
+        },
     },
     "Viewer": {
         "DummyViewer": {
