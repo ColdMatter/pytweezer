@@ -6,4 +6,5 @@ class RBBasicTest(Experiment):
         super().build()
 
     def run(self):
-        self._motmaster_client.start_experiment()
+        print(f"sending params {self._experiment_params} to MotMaster and starting experiment...")
+        self._motmaster_client.start_experiment(parameters=self._experiment_params)

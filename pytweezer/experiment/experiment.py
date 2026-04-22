@@ -384,7 +384,7 @@ class Experiment:
             if response.get("ok"):
                 params = response.get("params", {})
                 for param_name in params.keys():
-                    self.setattr_mm_param(param_name)
+                    self.setattr_mm_param(param_name, params[param_name])
 
     def pre_run(self):
         """
@@ -441,19 +441,11 @@ class Experiment:
         self.devices[device_name] = device_instance
         return device_instance
 
-    def setattr_mm_param(self, param_name):
+    def setattr_mm_param(self, param_name, param_value):
         """Register a MotMaster parameter as an argument object attribute."""
         if self._motmaster_client is None:
             raise ValueError("MotMaster client is not set.")
-        response = self._motmaster_client.get_params()
-        if not response.get("ok"):
-            raise ValueError(f"Failed to get MotMaster parameters: {response}")
-        param_dict = response.get("params", {})
-        if param_name not in param_dict:
-            raise ValueError(f"Parameter '{param_name}' not found in MotMaster parameters")
-        param_value = param_dict[param_name]
         param_type = type(param_value)
-        print(param_type)
         if param_type == int:
             param = NumberValue(
                 name=param_name,

@@ -70,7 +70,7 @@ class SyntheticCameraServer:
                 print(f"[Camera] Published Frame {frame_count:04d} at {time.strftime('%H:%M:%S')}")
                 
                 # 3. Wait 10 seconds before the next trigger
-                time.sleep(0.5)
+                time.sleep(3)
                 
         except KeyboardInterrupt:
             print("\n[Camera] Shutting down server...")
@@ -83,8 +83,8 @@ if __name__ == "__main__":
     
     # You can tweak the array dimensions and spot parameters here
     server.run_loop(
-        N=15, 
-        M=15, 
+        N=10, 
+        M=10, 
         spacing=10.0,     # pixels between traps
         spot_width=1.0    # Gaussian sigma in pixels
     )

@@ -65,6 +65,11 @@ pythonnet = "=3.0.5"    # .NET integration
 scikit-image = "^0.26.0"
 pyvisa-py = "^0.8.1"
 sipyco = {git = "https://github.com/m-labs/sipyco.git"}
+spinnaker-python = {path = "C:/Users/tweez/Downloads/spinnaker_python-4.3.0.190-cp310-cp310-win_amd64/spinnaker_python-4.3.0.190-cp310-cp310-win_amd64.whl"}
+simple-pyspin = "^0.1.1"
+easypyspin = "^2.0.1"
+opencv-python = "^4.13.0.92"
+rotpy = "^0.2.1"
 
 [build-system]
 requires = ["poetry-core"]

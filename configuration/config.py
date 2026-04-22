@@ -54,7 +54,7 @@ CONFIG = {
             "pub_port": get_next_port(),
         },
         "MotMaster Server": {
-            "active": True,
+            "active": False,
             "script": "../pytweezer/experiment/motmaster_server.py",
             "host": HOST_DICT["mm_pc"],
             "port": 5557,

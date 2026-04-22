@@ -895,6 +895,25 @@ class ZernikeCalibrator:
 
 import cupy as cp
 
+def rotate_coordinates(x, y, angle_deg, center_x=0, center_y=0):
+    angle_rad = np.radians(angle_deg)
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+
+    # Shift to origin
+    x_shifted = x - center_x
+    y_shifted = y - center_y
+
+    # Rotate
+    x_rotated = x_shifted * cos_a - y_shifted * sin_a
+    y_rotated = x_shifted * sin_a + y_shifted * cos_a
+
+    # Shift back
+    x_final = x_rotated + center_x
+    y_final = y_rotated + center_y
+
+    return x_final, y_final
+
 def get_jv_pairing_lap(init, final):
         """
         Solves using the 'lap' library (C++ Jonker-Volgenant implementation).
@@ -951,13 +970,13 @@ def get_jv_pairing_lap(init, final):
 class OptimisationBasedPhasemaskGeneratorGPU:
     def __init__(self,
                  wavelength_um=0.852,
-                 focal_length_mm=10.0,
-                 slm_pitch_um=8,
-                 slm_res=(1200,1920),
-                 input_beam_waist_mm=9.6,
-                 fresnel_f_mm=600.0,
-                 blaze_dx_dy_um=(63.0,7.0),
-                 zernike_coeff_dict={5:-0.858, 6:0.282, 7:-1.725, 8:-0.434, 9:1.033, 10:-0.123, 11:1.048}):
+                 focal_length_mm=17.3,
+                 slm_pitch_um=17,
+                 slm_res=(1024,1024),
+                 input_beam_waist_mm=16,
+                 fresnel_f_mm=1072,
+                 blaze_dx_dy_um=(46.50, 10.54),
+                 zernike_coeff_dict={5:1.195, 6:0.725, 7:0.970, 8:0.478, 9:-1.091, 10:0.303, 11:0.021, 12:0.072, 13:0.049}):
         
         self.lam = wavelength_um
         self.f_mm = focal_length_mm
@@ -1177,7 +1196,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         Generates the phase mask using pure CuPy high-speed matrix multiplication.
         """
         # Unpack once
-        w_n, theta_n, x_n, y_n, _ = trap_terms
+        w_n, theta_n, x_n, y_n, array_shape = trap_terms
         
         # 3. TRANSFER AND CAST TO 32-BIT
         # If your arrays are already on the GPU, cp.asarray does nothing (zero overhead)
@@ -1370,7 +1389,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             # Repack the terms and call the generator.
             terms_gpu = (curr_w, curr_phi, curr_x, curr_y, 0)
             pm_slm = self.generate_phasemask(terms_gpu)
-            composite_pm = self.superimpose([pm_slm, self.fresnel, self.blaze, self.zernike])
+            composite_pm = self.superimpose([pm_slm, self.fresnel, self.blaze])
             composite_pm_uint8 = self.transform_phase_8bit(composite_pm)
             
             # Pull the calculated 2D mask back to host memory (CPU)

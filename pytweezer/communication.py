@@ -82,4 +82,4 @@ class SLMClient:
 
     def get_temperature(self):
         """Sends a simple command with no array payload."""
-        return self._send_multipart_command({"cmd": "GET_TEMP"})
+        return self._send_multipart_command({"cmd": "CHECK_TEMP"})

@@ -535,6 +535,18 @@ files = [
 ]
 
 [[package]]
+name = "easypyspin"
+version = "2.0.1"
+description = "cv2.VideoCapture like wrapper for FLIR Spinnaker SDK"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "EasyPySpin-2.0.1-py3-none-any.whl", hash = "sha256:b142230a5c1a83879509646129a06eac1a638ffa95ec0a548eab0d12fb452f35"},
+    {file = "EasyPySpin-2.0.1.tar.gz", hash = "sha256:23226b7f57203e45bf0f67d73540ba0aef3d1e3de8b069ec741fe49ff9ad583a"},
+]
+
+[[package]]
 name = "executing"
 version = "2.2.1"
 description = "Get the currently executing AST node of a frame, and other information"
@@ -1382,6 +1394,27 @@ files = [
     {file = "numpy-2.3.5-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:f16417ec91f12f814b10bafe79ef77e70113a2f5f7018640e7425ff979253425"},
     {file = "numpy-2.3.5.tar.gz", hash = "sha256:784db1dcdab56bf0517743e746dfb0f885fc68d948aba86eeec2cba234bdf1c0"},
 ]
+
+[[package]]
+name = "opencv-python"
+version = "4.13.0.92"
+description = "Wrapper package for OpenCV python bindings."
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "opencv_python-4.13.0.92-cp37-abi3-macosx_13_0_arm64.whl", hash = "sha256:caf60c071ec391ba51ed00a4a920f996d0b64e3e46068aac1f646b5de0326a19"},
+    {file = "opencv_python-4.13.0.92-cp37-abi3-macosx_14_0_x86_64.whl", hash = "sha256:5868a8c028a0b37561579bfb8ac1875babdc69546d236249fff296a8c010ccf9"},
+    {file = "opencv_python-4.13.0.92-cp37-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:0bc2596e68f972ca452d80f444bc404e08807d021fbba40df26b61b18e01838a"},
+    {file = "opencv_python-4.13.0.92-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:402033cddf9d294693094de5ef532339f14ce821da3ad7df7c9f6e8316da32cf"},
+    {file = "opencv_python-4.13.0.92-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:bccaabf9eb7f897ca61880ce2869dcd9b25b72129c28478e7f2a5e8dee945616"},
+    {file = "opencv_python-4.13.0.92-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:620d602b8f7d8b8dab5f4b99c6eb353e78d3fb8b0f53db1bd258bb1aa001c1d5"},
+    {file = "opencv_python-4.13.0.92-cp37-abi3-win32.whl", hash = "sha256:372fe164a3148ac1ca51e5f3ad0541a4a276452273f503441d718fab9c5e5f59"},
+    {file = "opencv_python-4.13.0.92-cp37-abi3-win_amd64.whl", hash = "sha256:423d934c9fafb91aad38edf26efb46da91ffbc05f3f59c4b0c72e699720706f5"},
+]
+
+[package.dependencies]
+numpy = {version = ">=2", markers = "python_version >= \"3.9\""}
 
 [[package]]
 name = "packaging"
@@ -2452,6 +2485,41 @@ pygments = ">=2.13.0,<3.0.0"
 jupyter = ["ipywidgets (>=7.5.1,<9)"]
 
 [[package]]
+name = "rotpy"
+version = "0.2.1"
+description = "Cython bindings for the Spinnaker camera control API."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "rotpy-0.2.1-cp310-cp310-macosx_10_14_x86_64.whl", hash = "sha256:279eda3a1b4bc3f9146dc72c7dd4ff7b43bae1b3ba8cbfd9ebab70bed3e83fe8"},
+    {file = "rotpy-0.2.1-cp310-cp310-manylinux_2_27_x86_64.whl", hash = "sha256:0245f7bf0c8e72d534f66d92be28f3f5b78f278e32bb1c6d14ad62ae952f608e"},
+    {file = "rotpy-0.2.1-cp310-cp310-win32.whl", hash = "sha256:e902067941291adf1f5b7aefb1c46690cdb78161eb6d7128ad8393dda5e308ac"},
+    {file = "rotpy-0.2.1-cp310-cp310-win_amd64.whl", hash = "sha256:8b9ccf65da9580dcd06d464fbca84291b1cddd96dac137351ac2a721b0786596"},
+    {file = "rotpy-0.2.1-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:4d71d34935203af64020026350d010fe4f108fa31181dede6c845e93352b1a6f"},
+    {file = "rotpy-0.2.1-cp311-cp311-manylinux_2_27_x86_64.whl", hash = "sha256:d40e26c536f31d4e68375d08d46c1a65e7f5eb98da9eb5ec140925b8e33aae66"},
+    {file = "rotpy-0.2.1-cp311-cp311-win32.whl", hash = "sha256:e42501610b0bbe32ed93a0c9e2acd018bcc850076c572b25dfd5593c609f66c0"},
+    {file = "rotpy-0.2.1-cp311-cp311-win_amd64.whl", hash = "sha256:5f6897d58197b3fb2173e585b2eb110be65d62ad31a275fb8dda431d8ca7cdc5"},
+    {file = "rotpy-0.2.1-cp37-cp37m-macosx_10_14_x86_64.whl", hash = "sha256:03e9ff4e6419591e2c9e4133e81a4e85ecb471077294f40d55138db2b0a6829c"},
+    {file = "rotpy-0.2.1-cp37-cp37m-manylinux_2_27_x86_64.whl", hash = "sha256:008361b0adeee80c106990df7436e4bd888a35ccf68721a3ec9e19988426bcf2"},
+    {file = "rotpy-0.2.1-cp37-cp37m-win32.whl", hash = "sha256:91e045f17024d16f09e89914e6fec5ab49d4a283f38711ca6b282f50eceac8b8"},
+    {file = "rotpy-0.2.1-cp37-cp37m-win_amd64.whl", hash = "sha256:a105f96d120440db1d312dc47d118fcc03bc04bf9f3040e89ab00a2beb3fa57b"},
+    {file = "rotpy-0.2.1-cp38-cp38-macosx_10_14_x86_64.whl", hash = "sha256:7e04283ab07cc1af2b0d467846c00f604eee82b34b492fbc659b1e075f533708"},
+    {file = "rotpy-0.2.1-cp38-cp38-manylinux_2_27_x86_64.whl", hash = "sha256:2551ce0241b348b1cef413eabeb3dcff4634ac043bdf05da4b28de83a228315f"},
+    {file = "rotpy-0.2.1-cp38-cp38-win32.whl", hash = "sha256:52b2fa70a39cb1634aebadd66245d5b14d941e469e35168f1eb84e208d19646f"},
+    {file = "rotpy-0.2.1-cp38-cp38-win_amd64.whl", hash = "sha256:8cd9a70f24549bb7fe03e54e24645abdf1fd5a1c0d52872c6adb4e5a3d625fa1"},
+    {file = "rotpy-0.2.1-cp39-cp39-macosx_10_14_x86_64.whl", hash = "sha256:3a6ab291592937a93be0d752b8e024e2889e07d225adef86ed507ba74c1b5fff"},
+    {file = "rotpy-0.2.1-cp39-cp39-manylinux_2_27_x86_64.whl", hash = "sha256:9f2ed40bf6a6baa23408de546f54f75d14689239264f5f65b00a7b2c970760ca"},
+    {file = "rotpy-0.2.1-cp39-cp39-win32.whl", hash = "sha256:1fc21132708438f3d662517382fb8962ddfd1d4afa21c17715c9b288916dbc9f"},
+    {file = "rotpy-0.2.1-cp39-cp39-win_amd64.whl", hash = "sha256:66adb96d8de80a3f802e9cd5767f57bd00934f5a87b377512d48e1610b23b35a"},
+    {file = "rotpy-0.2.1.tar.gz", hash = "sha256:5975f18a6dc3f2af293d10f19dfd79960c92a55259a306e4eeaf0f42ea5d2374"},
+]
+
+[package.extras]
+doc = ["autodocsumm", "cython", "sphinx", "sphinx-copybutton", "sphinx-rtd-theme"]
+test = ["pytest"]
+
+[[package]]
 name = "rpyc"
 version = "6.0.2"
 description = "Remote Python Call (RPyC) is a transparent and symmetric distributed computing library"
@@ -2625,6 +2693,18 @@ doc = ["intersphinx_registry", "jupyterlite-pyodide-kernel", "jupyterlite-sphinx
 test = ["Cython", "array-api-strict (>=2.3.1)", "asv", "gmpy2", "hypothesis (>=6.30)", "meson", "mpmath", "ninja ; sys_platform != \"emscripten\"", "pooch", "pytest (>=8.0.0)", "pytest-cov", "pytest-timeout", "pytest-xdist", "scikit-umfpack", "threadpoolctl"]
 
 [[package]]
+name = "simple-pyspin"
+version = "0.1.1"
+description = "An easy-to-use Pythonic wrapper for the FLIR PySpin Library.  Developed by the Kleckner Lab at UC Merced."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "simple_pyspin-0.1.1-py3-none-any.whl", hash = "sha256:53c365eb2f1fc97514d162720e3b9eb4ce2fc6eba648345ba8e3768b993af25c"},
+    {file = "simple_pyspin-0.1.1.tar.gz", hash = "sha256:31e27d8bede23a07d0c38ffe107827c9cacdf78af24e05295d057d47dc23617f"},
+]
+
+[[package]]
 name = "sipyco"
 version = "1.10"
 description = "Simple Python communications"
@@ -2654,6 +2734,24 @@ files = [
     {file = "six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"},
     {file = "six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"},
 ]
+
+[[package]]
+name = "spinnaker-python"
+version = "4.3.0.190"
+description = "A Python wrapper for the Spinnaker library."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "spinnaker_python-4.3.0.190-cp310-cp310-win_amd64.whl", hash = "sha256:476a9d22aab10178b2dd929c0c72b6e3de392842c574ff96a5104ddb18859293"},
+]
+
+[package.dependencies]
+numpy = ">=1.15"
+
+[package.source]
+type = "file"
+url = "../../Downloads/spinnaker_python-4.3.0.190-cp310-cp310-win_amd64/spinnaker_python-4.3.0.190-cp310-cp310-win_amd64.whl"
 
 [[package]]
 name = "stack-data"
@@ -2857,4 +2955,4 @@ pyzmq = "*"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11.4, <3.14"
-content-hash = "2009115049c4c54007447eadfa4ffa6ed840458b7d5453036c9786df3e0c1651"
+content-hash = "ba69e35b6ee8177c854005243fac7a3171e16ab88a0fc0f559d60b26c0862140"
