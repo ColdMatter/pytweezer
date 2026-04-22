@@ -1389,7 +1389,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             # Repack the terms and call the generator.
             terms_gpu = (curr_w, curr_phi, curr_x, curr_y, 0)
             pm_slm = self.generate_phasemask(terms_gpu)
-            composite_pm = self.superimpose([pm_slm, self.fresnel, self.blaze])
+            composite_pm = self.superimpose([pm_slm, self.fresnel, self.blaze, self.zernike])
             composite_pm_uint8 = self.transform_phase_8bit(composite_pm)
             
             # Pull the calculated 2D mask back to host memory (CPU)
