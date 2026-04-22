@@ -112,11 +112,29 @@ class RearrangementNode(mp.Process):
             return
 
         # Set up phasemask generation
-        self.phasemask = pm.OptimisationBasedPhasemaskGeneratorGPU()
+        self.phasemask = pm.OptimisationBasedPhasemaskGeneratorGPU(
+                 wavelength_um=0.852,
+                 focal_length_mm=17.3,
+                 slm_pitch_um=17,
+                 slm_res=(1024,1024),
+                 input_beam_waist_mm=16,
+                 fresnel_f_mm=1072,
+                 blaze_dx_dy_um=(46.50, 10.54),
+                 zernike_coeff_dict={5:1.195, 6:0.725, 7:0.970, 8:0.478, 9:-1.091, 10:0.303, 11:0.021, 12:0.072, 13:0.049})
 
         # Set up camera
         self.camera = ImagEMX2Camera()
-        self.camera.relinquish_camera()
+        # Setup camera
+        self.camera.setup_acquisition("snap", 1)
+        self.camera.set_trigger_source("ext")
+        self.camera.set_external_exposure_mode()
+        self.camera.enable_em_gain(True)
+        self.camera.enable_direct_em_gain(True)
+        self.camera.set_sensitivity(1200)
+        self.camera.timeout = 60*2
+        X0, Y0, WIDTH, HEIGHT = 50, 70, 384, 384
+        self.camera.set_roi(X0, WIDTH, Y0, HEIGHT)
+        self._log("[Fast SLM Node] Connected to camera server.")
         
         # State variables
         pm_init, terms1, terms2, d0, threshold, grid_positions, array_shape, fps = None, None, None, None, None, None, None, None
@@ -139,22 +157,7 @@ class RearrangementNode(mp.Process):
                     fps = cmd["fps"]
                     self._log("[Fast SLM Node] Arm command received. Starting rearrangement sequence...")
 
-                    # Setup camera
-                    self.camera.reacquire_camera()
-                    self.camera.setup_acquisition("snap", 1)
-                    self.camera.set_trigger_source("ext")
-                    self.camera.set_external_exposure_mode()
-                    self.camera.enable_em_gain(True)
-                    self.camera.enable_direct_em_gain(True)
-                    self.camera.set_sensitivity(1200)
-                    self.camera.timeout = 60*2
-                    X0, Y0, WIDTH, HEIGHT = 50, 70, 384, 384
-                    self.camera.set_roi(X0, WIDTH, Y0, HEIGHT)
-                    self._log("[Fast SLM Node] Connected to camera server.")
-
                     self.do_rearrangement(grid_positions, array_shape, threshold, pm_init, terms1, terms2, d0, fps)
-
-                    self.camera.relinquish_camera()
 
                 elif cmd["type"] == "ARM_SEQUENCE":
                     sequence = cmd["sequence"]
