@@ -43,7 +43,7 @@ class RearrangementNode(mp.Process):
         # 2. Extract Occupancy Mask
         # (Insert your image processing/thresholding logic here)
         try:
-            pixel_sums = an.sum_pixel_values(img_array0, grid_positions, array_shape, window_size=3)[::-1, ::-1]
+            pixel_sums = np.fliplr(an.sum_pixel_values(img_array0, grid_positions, array_shape, window_size=3))
             occ_mask = np.zeros(len(pixel_sums.flatten()), dtype=bool)
             occ_mask[pixel_sums.flatten() > threshold] = True
             self._log("[Fast SLM Node] Occupancy mask extracted.")
