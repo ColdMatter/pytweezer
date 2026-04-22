@@ -33,7 +33,7 @@ class RearrangementNode(mp.Process):
         self._log("[Fast SLM Node] Starting camera acquisition for rearrangement.")
         try:
             self.camera.start_acquisition()
-            img_array0 = self.camera.acquire_n_frames(1, broadcast=True)[0]
+            img_array0 = self.camera.acquire_n_frames(1)[0]
             start1 = time.time()
             self._log("[Fast SLM Node] Image received! Executing pipeline...")
         except Exception as e:
@@ -66,7 +66,7 @@ class RearrangementNode(mp.Process):
         
         self._log(f"[Fast SLM Node] Rearrangement complete. Waiting for reset trigger.")
         self.camera.start_acquisition()
-        img_array1 = self.camera.acquire_n_frames(1, broadcast=True)[0]
+        img_array1 = self.camera.acquire_n_frames(1)[0]
         self.SLM.update_mask(pm_init)
         self._log(f"[Fast SLM Node] Array reset.")
         self._return_images([img_array0, img_array1])
@@ -78,7 +78,7 @@ class RearrangementNode(mp.Process):
         self._log("[Fast SLM Node] Starting camera acquisition for sequence.")
         try:
             self.camera.start_acquisition()
-            img_array = self.camera.acquire_n_frames(1, broadcast=True)[0]
+            img_array = self.camera.acquire_n_frames(1)[0]
             start1 = time.time()
             self._log("[Fast SLM Node] Image received! Executing pipeline...")
         except Exception as e:
@@ -92,7 +92,7 @@ class RearrangementNode(mp.Process):
         
         self._log(f"[Fast SLM Node] Sequence upload complete. Waiting for reset trigger.")
         self.camera.start_acquisition()
-        img_array = self.camera.acquire_n_frames(1, broadcast=True)[0]
+        img_array = self.camera.acquire_n_frames(1)[0]
         self.SLM.update_mask(sequence[0])
         self._log(f"[Fast SLM Node] Array reset.")
 
