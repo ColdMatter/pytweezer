@@ -271,7 +271,7 @@ class ImagEMX2CameraClient(RPCClient):
         self.image_dir = IMAGE_DIRECTORY
         self.imstream = ImageClient(self.stream_name)
         super().__init__(
-            host=self.host, port=self.port, target=target_name, timeout=timeout
+            host=self.host, port=self.port, target_name=target_name, timeout=timeout
         )
 
     def ping(self):
