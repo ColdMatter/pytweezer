@@ -782,18 +782,16 @@ class TweezerExperimentAnalysis:
             photons = electrons/0.7
             photon_rate = (photons/80e-3)/1000
             photon_rates.append(photon_rate)
+            count_rates.append(photon_rate*0.7)
+
         if threshold == 0:
             threshold = detect_loading_threshold(photon_rates)
-        for image in images:
-            counts = sum_pixel_values(image, grid_positions, [n_row, n_col], window_size=window_size)
-            electrons = (counts - b500) * a500
-            photons = electrons/0.7
-            photon_rate = (photons/80e-3)/1000
+
+        for photon_rate in photon_rates:
             atoms = np.zeros_like(photon_rate)
             atoms[photon_rate > threshold] = 1
-            photon_rates.append(photon_rate)
-            count_rates.append(photon_rate*0.7)
             atom_counter += atoms
+            
         loading_probabilities = atom_counter / len(images)
         if show_histogram:
             fig, ax = plt.subplots(1, 3, figsize = (21,5))

@@ -68,36 +68,8 @@ class RearrangementNode(mp.Process):
         self.camera.start_acquisition()
         img_array1 = self.camera.acquire_n_frames(1)[0]
         self.SLM.update_mask(pm_init)
-        self._log(f"[Fast SLM Node] Array reset.")
-        self._return_images([img_array0, img_array1])
-
-    def do_sequence(self, sequence,fps):
-        # Wait for an image to arrive (timeout after 10ms to check Jupyter commands again)
-        # 1. Receive Image from Camera Server
-
-        self._log("[Fast SLM Node] Starting camera acquisition for sequence.")
-        try:
-            self.camera.start_acquisition()
-            img_array = self.camera.acquire_n_frames(1)[0]
-            start1 = time.time()
-            self._log("[Fast SLM Node] Image received! Executing pipeline...")
-        except Exception as e:
-            self._log(f"[Fast SLM Node] Error during camera acquisition: {e}")
-            return
-        
-        # 4. Send directly to SLM Server
-        start1 = time.time()
-        self.SLM.run_sequence(sequence, fps=fps)
-        self._log(f"[Fast SLM Node] SLM upload duration: {(time.time() - start1):.6f} s")
-        
-        self._log(f"[Fast SLM Node] Sequence upload complete. Waiting for reset trigger.")
-        self.camera.start_acquisition()
-        img_array = self.camera.acquire_n_frames(1)[0]
-        self.SLM.update_mask(sequence[0])
-        self._log(f"[Fast SLM Node] Array reset.")
-
-
-
+        self._log(f"[Fast SLM Node] Array reset.")   
+        return [img_array0, img_array1]
 
     def run(self):
         """This runs in a completely separate CPU core and memory space."""
@@ -138,6 +110,9 @@ class RearrangementNode(mp.Process):
         
         # State variables
         pm_init, terms1, terms2, d0, threshold, grid_positions, array_shape, fps = None, None, None, None, None, None, None, None
+
+        # Img buffers for returning to Jupyter
+        imgs = []
         
         self._log("[Fast SLM Node] Ready and waiting for commands.")
         
@@ -156,19 +131,19 @@ class RearrangementNode(mp.Process):
                     array_shape = cmd["initial_array_shape"]
                     fps = cmd["fps"]
                     self._log("[Fast SLM Node] Arm command received. Starting rearrangement sequence...")
+                    img0, img1 = self.do_rearrangement(grid_positions, array_shape, threshold, pm_init, terms1, terms2, d0, fps)
+                    imgs.append([img0, img1])
 
-                    self.do_rearrangement(grid_positions, array_shape, threshold, pm_init, terms1, terms2, d0, fps)
-
-                elif cmd["type"] == "ARM_SEQUENCE":
-                    sequence = cmd["sequence"]
-                    fps = cmd["fps"]
-                    self._log("[Fast SLM Node] Arm sequence command received. Uploading sequence to SLM...")
-                    self.do_sequence(sequence, fps)
+                if cmd["type"] == "GET_IMAGES":
+                    self._log("[Fast SLM Node] Sending images back to Jupyter...")
+                    self._return_images(imgs)
+                    imgs = []  # Clear buffer after sending
                     
                 elif cmd["type"] == "SHUTDOWN":
                     self._log("[Fast SLM Node] Shutting down.")
                     self.camera.close()
                     break
+                
             except mp.queues.Empty:
                 pass
 
