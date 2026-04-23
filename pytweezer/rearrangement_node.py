@@ -69,7 +69,7 @@ class RearrangementNode(mp.Process):
         img_array1 = self.camera.acquire_n_frames(1)[0]
         self.SLM.update_mask(pm_init)
         self._log(f"[Fast SLM Node] Array reset.")   
-        return [img_array0, img_array1]
+        self._return_images([img_array0, img_array1])
 
     def run(self):
         """This runs in a completely separate CPU core and memory space."""
@@ -110,9 +110,6 @@ class RearrangementNode(mp.Process):
         
         # State variables
         pm_init, terms1, terms2, d0, threshold, grid_positions, array_shape, fps = None, None, None, None, None, None, None, None
-
-        # Img buffers for returning to Jupyter
-        imgs = []
         
         self._log("[Fast SLM Node] Ready and waiting for commands.")
         
@@ -131,19 +128,18 @@ class RearrangementNode(mp.Process):
                     array_shape = cmd["initial_array_shape"]
                     fps = cmd["fps"]
                     self._log("[Fast SLM Node] Arm command received. Starting rearrangement sequence...")
-                    img0, img1 = self.do_rearrangement(grid_positions, array_shape, threshold, pm_init, terms1, terms2, d0, fps)
-                    imgs.append([img0, img1])
+                    self.do_rearrangement(grid_positions, array_shape, threshold, pm_init, terms1, terms2, d0, fps)
 
-                if cmd["type"] == "GET_IMAGES":
-                    self._log("[Fast SLM Node] Sending images back to Jupyter...")
-                    self._return_images(imgs)
-                    imgs = []  # Clear buffer after sending
+                elif cmd["type"] == "ARM_SEQUENCE":
+                    sequence = cmd["sequence"]
+                    fps = cmd["fps"]
+                    self._log("[Fast SLM Node] Arm sequence command received. Uploading sequence to SLM...")
+                    self.do_sequence(sequence, fps)
                     
                 elif cmd["type"] == "SHUTDOWN":
                     self._log("[Fast SLM Node] Shutting down.")
                     self.camera.close()
                     break
-                
             except mp.queues.Empty:
                 pass
 
