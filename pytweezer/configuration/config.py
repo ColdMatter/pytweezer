@@ -106,7 +106,7 @@ CONFIG = {
         },
         "Rb HamCam": {
             "active": True,
-            "script": "../pytweezer/servers/imagemx2_server.py",
+            "script": "../pytweezer/servers/imagemx2.py",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -115,7 +115,7 @@ CONFIG = {
         },
         "CaF HamCam": {
             "active": True,
-            "script": "../pytweezer/servers/imagemx2_server.py",
+            "script": "../pytweezer/servers/imagemx2.py",
             "host": HOSTS["caf_mm_pc"],
             "port": get_next_port(),
             "simulate": SIMULATING,

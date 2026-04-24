@@ -5,6 +5,7 @@ import socket
 import time
 from functools import wraps
 from tkinter import NO
+from turtle import st
 from typing import Any, Optional
 from unittest.mock import MagicMock
 
@@ -89,6 +90,7 @@ class ImagEMX2Camera:
     def set_ccd_mode(self, mode: int):
         self.dcam.set_attribute_value("ccd_mode", int(mode))
 
+    @requires_camera
     def enable_em_gain(self, enable: bool = True):
         self.set_ccd_mode(2 if enable else 1)
 
@@ -96,6 +98,7 @@ class ImagEMX2Camera:
     def set_direct_em_gain_mode(self, mode: int):
         self.dcam.set_attribute_value("direct_em_gain_mode", int(mode))
 
+    @requires_camera
     def enable_direct_em_gain(self, enable: bool = True):
         self.set_direct_em_gain_mode(2 if enable else 1)
 
@@ -130,8 +133,8 @@ class ImagEMX2Camera:
         self.dcam.stop_acquisition()
 
     @requires_camera
-    def acquire_n_frames(self, nframes: int, start_frame: int = 0, timeout: float | None = None) -> np.ndarray:
-        self.dcam.wait_for_frame(nframes=int(nframes), timeout=timeout or self.timeout)
+    def acquire_n_frames(self, nframes: int, start_frame: int = 0) -> np.ndarray:
+        self.dcam.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
         images, _infos = self.dcam.read_multiple_images(
             (int(start_frame), int(start_frame) + int(nframes)), return_info=True
         )
@@ -145,7 +148,7 @@ class ImagEMX2Camera:
         autosave: bool = False,
         broadcast: bool = False,
     ) -> np.ndarray:
-        self.dcam.wait_for_frame(n_frames=1, timeout=timeout or self.timeout)
+        self.dcam.wait_for_frame(n_frames=1, timeout=timeout)
         image, _info = self.dcam.read_newest_image(return_info=True)
         image = np.asarray(image)
         if autosave:
@@ -258,7 +261,6 @@ class ImagEMX2CameraClient(RPCClient):
         server_name: str = "ImagEM X2 Camera",
         host: str | None = None,
         port: int | None = None,
-        target_name: Any = "camera",
         timeout: float | None = 5.0,
     ):
 
@@ -267,13 +269,7 @@ class ImagEMX2CameraClient(RPCClient):
 
         self.host = host or server_conf.get("host", "127.0.0.1")
         self.port = int(port or server_conf.get("port", 3251))
-        self.stream_name = server_conf.get("stream_name", "imagemx2")
-        self.image_dir = IMAGE_DIRECTORY
-        self.imstream = ImageClient(self.stream_name)
-        print(self.host, self.port, self.stream_name)
-        super().__init__(
-            host=self.host, port=self.port, target_name=target_name, timeout=timeout
-        )
+        super().__init__(host=self.host, port=self.port, timeout=timeout)
 
     def ping(self):
         return {"ok": True, "host": self.host, "port": self.port, "target": "camera"}
@@ -303,44 +299,88 @@ def run_server(
             image_dir=image_dir,
             timeout=timeout,
         )
-    print(f"ImagEM X2 Camera server running on {host}:{port} with stream '{stream_name}'")
 
     simple_server_loop(
         {"camera": camera},
-        host="10.59.3.1",
+        host=host,
         port=int(port),
         description="ImagEM X2 RPC server",
     )
 
+
+def _resolve_server_name(token: str, conf: dict) -> str:
+    if isinstance(token, str) and token.startswith("Devices/"):
+        return token.split("/", 1)[1]
+    if isinstance(token, str) and token in conf.get("Devices", {}):
+        return token
+    return "ImagEM X2 Camera"
+
+
 def main():
-
-    parser = argparse.ArgumentParser(description="Run ImagEM X2 sipyco RPC server")
-    parser.add_argument("--host", default="127.0.0.1", help="RPC bind host")
-    parser.add_argument("--port", type=int, default=3251, help="RPC bind port")
-    parser.add_argument("--stream-name", default="imagemx2", help="Image stream name")
+    parser = argparse.ArgumentParser(description="ImagEM X2 sipyco RPC server launcher")
     parser.add_argument(
-        "--image-dir", default=None, help="optional TIFF autosave directory"
+        "--name",
+        help="process-manager label or explicit server name",
+        default=None
     )
     parser.add_argument(
-        "--timeout", type=float, default=5.0, help="frame wait timeout in seconds"
+        "--stream-name",
+        default="imagemx2",
+        help="image stream name used by experiment-side clients",
     )
     parser.add_argument(
-        "--simulate", action="store_true", help="use simulated camera backend"
+        "--image-dir", default=IMAGE_DIRECTORY, help="optional TIFF autosave directory"
     )
-    parser.add_argument("--log-level", default="INFO", help="Python log level")
+    parser.add_argument(
+        "--timeout", type=float, default=5, help="frame wait timeout in seconds"
+    )
+    parser.add_argument("--host", default=None, help="override RPC bind host")
+    parser.add_argument("--port", type=int, default=None, help="override RPC bind port")
+    parser.add_argument(
+        "--simulate", action="store_true", help="force synthetic camera backend"
+    )
     args = parser.parse_args()
-    
-    config = ConfigReader.getConfiguration()
-    server_conf = config.get("Devices", {}).get("ImagEM X2 Camera", {})
-    simulate = server_conf.get("simulate", False)
 
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
+    conf = ConfigReader.getConfiguration()
+    
+    if args.name is not None:
+    
+        server_name = _resolve_server_name(args.name, conf)
+        server_conf = conf.get("Devices", {}).get(server_name, {})
+        host = server_conf["host"]
+        port = server_conf["port"]
+        simulate = server_conf["simulate"]
+        timeout = server_conf["timeout"]
+        image_dir = server_conf["image_dir"]
+        stream_name = server_conf["stream_name"]
+    else:
+        host = args.host
+        port = args.port
+        simulate = args.simulate
+        timeout = args.timeout
+        image_dir = args.image_dir
+        stream_name = args.stream_name
+        
+    if host is None or port is None:
+        print("Error: RPC host and port must be specified either via command-line or configuration.")
+        exit(1)
+
+    print(
+        f"Starting ImagEM X2 Camera server with configuration:\n"
+        f"  Host: {host}\n"
+        f"  Port: {port}\n"
+        f"  Stream Name: {stream_name}\n"
+        f"  Image Directory: {args.image_dir or server_conf.get('image_dir', 'None')}\n"
+        f"  Timeout: {timeout} seconds\n"
+        f"  Simulate: {simulate}"
+    )
+
     run_server(
-        host="10.59.3.1",
-        port=args.port,
-        stream_name=args.stream_name,
-        image_dir=args.image_dir,
-        timeout=args.timeout,
+        host=host,
+        port=port,
+        stream_name=stream_name,
+        image_dir=image_dir,
+        timeout=timeout,
         simulate=simulate,
     )
 
