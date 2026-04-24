@@ -10,37 +10,11 @@ port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
 SIMULATING = False
-SERVER_HOST = HOSTS["beast"] if not SIMULATING else HOSTS["localhost"]
+LOCAL = True
+SERVER_HOST = HOSTS["beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
 
 CONFIG = {
-    "GUI": {
-        "Browser": {
-            "active": True,
-            "script": "../pytweezer/GUI/tweezer_browser.py"
-        },
-        "StreamMonitor": {
-            "active": False,
-            "script": "../pytweezer/GUI/streammonitor.py"
-        },
-        "H5 Manager": {
-            "active": False,
-            "script": "../pytweezer/GUI/h5storage.py"
-        },
-        "Property_Editor": {
-            "active": False,
-            "script": "../pytweezer/GUI/property_editor.py"
-        },
-        "Live Plot": {
-            "active": False,
-            "script": "../pytweezer/GUI/viewers/live_plot.py"
-        },
-        "Analysis Manager UI": {
-            "active": True,
-            "script": "../pytweezer/GUI/analysismanager.py"
-        }
-
-    },
     "Servers": {
         "Analysis Manager": {
             "active": True,
@@ -59,22 +33,6 @@ CONFIG = {
             "host": SERVER_HOST,
             "command_port": get_next_port(),
             "pub_port": get_next_port(),
-        },
-        "Rb MotMaster Server": {
-            "active": True,
-            "script": "../pytweezer/experiment/motmaster_server.py",
-            "config_file": "rb_mm_config.json",
-            "host": HOSTS["rb_mm_pc"],
-            "port": get_next_port(),
-            "simulate": SIMULATING
-        },
-        "CaF MotMaster Server": {
-            "active": True,
-            "script": "../pytweezer/experiment/motmaster_server.py",
-            "config_file": "caf_mm_config.json",
-            "host": HOSTS["caf_mm_pc"],
-            "port": get_next_port(),
-            "simulate": SIMULATING
         },
         "Imagehub": {
             "active": True,
@@ -130,9 +88,25 @@ CONFIG = {
         }
     },
     "Devices": {
+         "Rb MotMaster Server": {
+            "active": True,
+            "script": "../pytweezer/experiment/motmaster_server.py",
+            "config_file": "rb_mm_config.json",
+            "host": HOSTS["rb_mm_pc"],
+            "port": get_next_port(),
+            "simulate": SIMULATING
+        },
+        "CaF MotMaster Server": {
+            "active": True,
+            "script": "../pytweezer/experiment/motmaster_server.py",
+            "config_file": "caf_mm_config.json",
+            "host": HOSTS["caf_mm_pc"],
+            "port": get_next_port(),
+            "simulate": SIMULATING
+        },
         "Rb HamCam": {
             "active": True,
-            "script": "../pytweezer/servers/imagemx2_server.py",
+            "script": "../pytweezer/servers/imagemx2.py",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -141,7 +115,7 @@ CONFIG = {
         },
         "CaF HamCam": {
             "active": True,
-            "script": "../pytweezer/servers/imagemx2_server.py",
+            "script": "../pytweezer/servers/imagemx2.py",
             "host": HOSTS["caf_mm_pc"],
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -157,6 +131,32 @@ CONFIG = {
             "stream_name": "bfly",
             "timeout": 5.0,
         },
+    },
+    "GUI": {
+        "Browser": {
+            "active": True,
+            "script": "../pytweezer/GUI/tweezer_browser.py"
+        },
+        "StreamMonitor": {
+            "active": False,
+            "script": "../pytweezer/GUI/streammonitor.py"
+        },
+        "H5 Manager": {
+            "active": False,
+            "script": "../pytweezer/GUI/h5storage.py"
+        },
+        "Property_Editor": {
+            "active": False,
+            "script": "../pytweezer/GUI/property_editor.py"
+        },
+        "Live Plot": {
+            "active": False,
+            "script": "../pytweezer/GUI/viewers/live_plot.py"
+        },
+        "Analysis Manager UI": {
+            "active": True,
+            "script": "../pytweezer/GUI/analysismanager.py"
+        }
     },
     "Viewer": {
         "DummyViewer": {

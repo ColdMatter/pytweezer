@@ -69,7 +69,7 @@ class RearrangementNode(mp.Process):
         img_array1 = self.camera.acquire_n_frames(1)[0]
         self.SLM.update_mask(pm_init)
         self._log(f"[Fast SLM Node] Array reset.")   
-        return [img_array0, img_array1]
+        self._return_images([img_array0, img_array1])
 
     def run(self):
         """This runs in a completely separate CPU core and memory space."""
@@ -95,24 +95,24 @@ class RearrangementNode(mp.Process):
                  zernike_coeff_dict={5:1.195, 6:0.725, 7:0.970, 8:0.478, 9:-1.091, 10:0.303, 11:0.021, 12:0.072, 13:0.049})
 
         # Set up camera
-        self.camera = ImagEMX2Camera()
-        # Setup camera
-        self.camera.setup_acquisition("snap", 1)
-        self.camera.set_trigger_source("ext")
-        self.camera.set_external_exposure_mode()
-        self.camera.enable_em_gain(True)
-        self.camera.enable_direct_em_gain(True)
-        self.camera.set_sensitivity(1200)
-        self.camera.timeout = 60*2
-        X0, Y0, WIDTH, HEIGHT = 50, 70, 384, 384
-        self.camera.set_roi(X0, WIDTH, Y0, HEIGHT)
-        self._log("[Fast SLM Node] Connected to camera server.")
-        
+        try:
+            self.camera = ImagEMX2Camera()
+            self.camera.setup_acquisition("snap", 1)
+            self.camera.set_trigger_source("ext")
+            self.camera.set_external_exposure_mode()
+            self.camera.enable_em_gain(True)
+            self.camera.enable_direct_em_gain(True)
+            self.camera.set_sensitivity(1200)
+            self.camera.timeout = 60*2
+            X0, Y0, WIDTH, HEIGHT = 50, 70, 384, 384
+            self.camera.set_roi(X0, WIDTH, Y0, HEIGHT)
+            self._log("[Fast SLM Node] Camera object intialised.")
+        except Exception as e:
+            self._log(f"[Fast SLM Node] Error connecting to camera: {e}")
+            return
+
         # State variables
         pm_init, terms1, terms2, d0, threshold, grid_positions, array_shape, fps = None, None, None, None, None, None, None, None
-
-        # Img buffers for returning to Jupyter
-        imgs = []
         
         self._log("[Fast SLM Node] Ready and waiting for commands.")
         
@@ -131,19 +131,18 @@ class RearrangementNode(mp.Process):
                     array_shape = cmd["initial_array_shape"]
                     fps = cmd["fps"]
                     self._log("[Fast SLM Node] Arm command received. Starting rearrangement sequence...")
-                    img0, img1 = self.do_rearrangement(grid_positions, array_shape, threshold, pm_init, terms1, terms2, d0, fps)
-                    imgs.append([img0, img1])
+                    self.do_rearrangement(grid_positions, array_shape, threshold, pm_init, terms1, terms2, d0, fps)
 
-                if cmd["type"] == "GET_IMAGES":
-                    self._log("[Fast SLM Node] Sending images back to Jupyter...")
-                    self._return_images(imgs)
-                    imgs = []  # Clear buffer after sending
+                elif cmd["type"] == "ARM_SEQUENCE":
+                    sequence = cmd["sequence"]
+                    fps = cmd["fps"]
+                    self._log("[Fast SLM Node] Arm sequence command received. Uploading sequence to SLM...")
+                    self.do_sequence(sequence, fps)
                     
                 elif cmd["type"] == "SHUTDOWN":
                     self._log("[Fast SLM Node] Shutting down.")
                     self.camera.close()
                     break
-                
             except mp.queues.Empty:
                 pass
 
