@@ -15,8 +15,6 @@ from pytweezer.analysis.print_messages import print_error
 from pytweezer.configuration.config import HOSTS
 from bin.process_tile_base import ProcessTile
 
-
-
 class ProcessManager(BWidget):
     categories = []
 
@@ -74,7 +72,6 @@ class Controller(ProcessManager):
     categories = ["Servers", "Devices"]
     
     def __init__(self, host_name):
-        super().__init__("Controller")
         self.host_addr = HOSTS.get(host_name, None)
         if self.host_addr is None:
             print_error(
@@ -82,6 +79,11 @@ class Controller(ProcessManager):
                 "error",
             )
             return
+        super().__init__("Controller")
+        
+        
+    def check_host(self, params):
+        return params["host"] == self.host_addr
 
 
 def main():
