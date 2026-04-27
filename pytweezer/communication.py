@@ -83,3 +83,79 @@ class SLMClient:
     def get_temperature(self):
         """Sends a simple command with no array payload."""
         return self._send_multipart_command({"cmd": "CHECK_TEMP"})
+
+
+import zmq
+import zmq.asyncio
+import pickle as pkl
+
+class RearrangementNode:
+    def __init__(self, address="tcp://10.59.3.1:2222", timeout_ms=2000):
+        self.context = zmq.asyncio.Context()
+        self.socket = self.context.socket(zmq.REQ)
+        self.socket.connect(address)
+
+    async def initialise(self, terms1, terms2, grid_positions, threshold, d0, fps, roi=[50, 70, 384, 384]):
+        """Sends metadata in the header and the raw bytes in the payload."""
+        
+        w1, theta1, x1, y1, arr_shape1 = terms1
+        w2, theta2, x2, y2, arr_shape2 = terms2
+
+        data1 = np.array([w1.get(), theta1.get(), x1.get(), y1.get()])
+        data2 = np.array([w2.get(), theta2.get(), x2.get(), y2.get()])
+
+        header = {
+            "cmd": "INITIALISE",
+            "dtype1": str(data1.dtype),
+            "dtype2": str(data2.dtype),
+            "shape1": data1.shape,
+            "shape2": data2.shape,
+            "array_shape1": arr_shape1,
+            "array_shape2": arr_shape2,
+            "d0": d0,
+            "fps": fps,
+            "threshold": threshold,
+            "grid_positions": grid_positions,
+            "roi": roi
+        }
+
+        await self.socket.send_multipart([pkl.dumps(header), data1, data2], copy=False)
+        reply = await self.socket.recv_string()
+        print(reply)
+
+    async def arm_rearrangement(self):
+        """Sends a simple command with no array payload."""
+        header = {"cmd": "ARM_REARRANGEMENT"}
+        await self.socket.send_multipart([pkl.dumps(header)])
+
+        print("ARM command sent...")
+        
+        parts = await self.socket.recv_multipart()
+        reply_header = pkl.loads(parts[0])
+        img0 = np.frombuffer(parts[1], dtype=reply_header["img0_dtype"]).reshape(reply_header["img0_shape"])
+        img1 = np.frombuffer(parts[2], dtype=reply_header["img1_dtype"]).reshape(reply_header["img1_shape"])
+        debug_sequence = np.frombuffer(parts[3], dtype=reply_header["debug_sequence_dtype"]).reshape(reply_header["debug_sequence_shape"])
+        occ_mask = np.frombuffer(parts[4], dtype=reply_header["occ_mask_dtype"]).reshape(reply_header["occ_mask_shape"])
+        return img0, img1, debug_sequence, occ_mask
+
+    async def test(self):
+        """Sends a simple command with no array payload."""
+        header = {"cmd": "TEST"}
+        await self.socket.send_multipart([pkl.dumps(header)])
+
+        print("TEST command sent...")
+        
+        parts = await self.socket.recv_multipart()
+        reply_header = pkl.loads(parts[0])
+        img0 = np.frombuffer(parts[1], dtype=reply_header["img0_dtype"]).reshape(reply_header["img0_shape"])
+        img1 = np.frombuffer(parts[2], dtype=reply_header["img1_dtype"]).reshape(reply_header["img1_shape"])
+        
+        print("Images obtained from server.")
+        return img0, img1
+
+    async def shutdown(self):
+        """Sends a shutdown command to the server."""
+        header = {"cmd": "SHUTDOWN"}
+        await self.socket.send_multipart([pkl.dumps(header)])
+        reply = await self.socket.recv_string()
+        print(reply)

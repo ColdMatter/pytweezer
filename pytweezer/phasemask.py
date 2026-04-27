@@ -1321,8 +1321,8 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         """
         start = time.time()
     
-        w1, phi1, x1, y1, _ = terms1
-        w2, phi2, x2, y2, _ = terms2
+        w1, phi1, x1, y1, arr1 = terms1
+        w2, phi2, x2, y2, arr2 = terms2
         occ_mask = cp.asarray(occ_mask)
         
         pos1 = cp.stack((x1, y1), axis=-1)
@@ -1372,11 +1372,12 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         dphi[moving_idx] = cp.asarray(phase_diff / n_steps)
         
         # Load steps for OFF traps (Ramp down weights to 0)
-        dw[off_mask] = cp.asarray(-w1[off_mask] / n_steps)
+        dw[off_mask] = 0.0
+        curr_w[off_mask] = 0.0
         
         phasemasks_sequence = np.empty((n_steps, self.Ny, self.Nx), dtype=np.uint8)
         gpu_sequence = cp.empty((n_steps, self.Ny, self.Nx), dtype=cp.uint8)
-        
+        pm_sequence = cp.empty((n_steps, self.Ny, self.Nx), dtype=cp.float32) # For debugging intermediate phase masks in radians
         
         # 4. THE ULTRA-FAST GPU LOOP
         for n in range(n_steps):
@@ -1387,15 +1388,16 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             curr_y += dy
             
             # Repack the terms and call the generator.
-            terms_gpu = (curr_w, curr_phi, curr_x, curr_y, 0)
+            terms_gpu = (curr_w, curr_phi, curr_x, curr_y, arr1)
             pm_slm = self.generate_phasemask(terms_gpu)
             composite_pm = self.superimpose([pm_slm, self.fresnel, self.blaze, self.zernike])
             composite_pm_uint8 = self.transform_phase_8bit(composite_pm)
             
             # Pull the calculated 2D mask back to host memory (CPU)
             gpu_sequence[n] = composite_pm_uint8
+            pm_sequence[n] = pm_slm
 
         gpu_sequence.get(out=phasemasks_sequence)
             
         print(f"Time Taken for {n_steps} frames: {(time.time() - start)*1000:.4f} ms")
-        return phasemasks_sequence
+        return phasemasks_sequence, pm_sequence
