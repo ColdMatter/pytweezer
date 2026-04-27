@@ -5,7 +5,6 @@ import os
 import time
 import logging
 from PyQt5 import QtWidgets
-from requests import head
 import zmq
 import numpy as np
 from imageio import imwrite

@@ -6,10 +6,8 @@ from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import icon_path
 
 
-class BaseProcessTile(QFrame):
+class ProcessTile(QFrame):
     """Shared process tile with start/stop controls and status polling."""
-
-    LOG_SOURCE = "process-tile"
 
     def __init__(self, script='', name='', active=False, category='', parent=None, tooltip=None):
         self.process = None
@@ -57,13 +55,11 @@ class BaseProcessTile(QFrame):
         print('__del__', self.processname)
         self.killProcess()
 
-    def _log_source(self):
-        return getattr(self, 'LOG_SOURCE', 'process-tile')
 
     def startProcess(self):
         self.terminateProcess()
         print_error(
-            f"{self._log_source()} - startProcess(): Starting {self.processname}.",
+            f"startProcess(): Starting {self.processname}.",
             'bold',
         )
         self.process = subprocess.Popen(['python3', self.script, self.category + self.processname])
