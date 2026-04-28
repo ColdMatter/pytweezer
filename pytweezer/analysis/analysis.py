@@ -802,6 +802,7 @@ class TweezerExperimentAnalysis:
                     ax[0].set_ylabel('Measurements')
                     print(f'Trap ({n}, {m}) Loading Probability : {loading_probabilities[n, m]*100} %')
             ax[1].hist(np.array(photon_rates).ravel(), bins=binning, alpha=0.8)
+            ax[1].axvline(x=threshold, color='red', linestyle='--')
             ax[1].set_xlabel('Photon Rate / kHz')
             ax[1].set_ylabel('Measurements')
             cax = ax[2].matshow(loading_probabilities, cmap='viridis', vmin=0.3)
