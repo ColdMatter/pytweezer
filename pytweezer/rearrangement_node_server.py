@@ -176,7 +176,13 @@ def run_server():
                         "debug_sequence_dtype": str(debug_sequence_cpu.dtype),
                         "debug_sequence_shape": debug_sequence_cpu.shape,
                         "occ_mask_dtype": str(occ_mask.dtype),
-                        "occ_mask_shape": occ_mask.shape
+                        "occ_mask_shape": occ_mask.shape,
+                        "timings": {
+                            "occupancy_extraction_s": (t2 - t1),
+                            "rearrangement_sequence_generation_s": (t3 - t2),
+                            "slm_upload_s": (t4 - t3),
+                            "total_rearrangement_s": (t4 - t1)
+                        }
                     }
 
                     socket.send_multipart([

@@ -136,7 +136,8 @@ class RearrangementNode:
         img1 = np.frombuffer(parts[2], dtype=reply_header["img1_dtype"]).reshape(reply_header["img1_shape"])
         debug_sequence = np.frombuffer(parts[3], dtype=reply_header["debug_sequence_dtype"]).reshape(reply_header["debug_sequence_shape"])
         occ_mask = np.frombuffer(parts[4], dtype=reply_header["occ_mask_dtype"]).reshape(reply_header["occ_mask_shape"])
-        return img0, img1, debug_sequence, occ_mask
+        timings = reply_header["timings"]
+        return img0, img1, debug_sequence, occ_mask, timings
 
     async def test(self):
         """Sends a simple command with no array payload."""
