@@ -6,35 +6,13 @@ import pathlib
 import subprocess
 import sys
 
-import numpy as np
 import zmq
-import pythonnet
-import numbers
 from pytweezer.servers.configreader import ConfigReader
 from pytweezer.experiment.motmaster_interface import MotMasterInterface
 from pycaf.experiment import Experiment
 
-
-# NOTE: these imports will only work with the pythonnet package
-try:
-    import clr
-    from System.Collections.Generic import Dictionary  # type: ignore
-    from System import String, Object  # type: ignore
-    from System import Activator  # type: ignore
-    from System import Int32  # type: ignore
-except Exception as e:
-    print(f"Error: {e} encountered, probably no pythonnet")
-
 # config directory local to the package.
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
-
-
-def _resolve_config_file(config_file: Optional[str]) -> pathlib.Path:
-    candidate = config_file or "rb_mm_config.json"
-    path = pathlib.Path(candidate)
-    if path.is_absolute():
-        return path
-    return CONFIG_DIR / path
 
 
 class DummyMotMasterInterface(MotMasterInterface):
@@ -90,7 +68,7 @@ class DummyMotMasterInterface(MotMasterInterface):
 class MotMasterCommandServer:
     def __init__(
         self,
-        interface: MotMasterInterface,
+        interface: Experiment,
         host: str = "localhost",
         port: int = 5557,
         context: Optional[zmq.Context] = None,
@@ -263,6 +241,69 @@ class MotMasterCommandServer:
                 pass
 
 
+def _is_process_running(process_name: str) -> bool:
+    try:
+        if sys.platform.startswith("win"):
+            result = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            output = result.stdout.lower()
+            return (
+                result.returncode == 0
+                and process_name.lower() in output
+                and "no tasks are running" not in output
+            )
+
+        result = subprocess.run(
+            ["pgrep", "-f", process_name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _start_process(exe_path: str) -> None:
+    subprocess.Popen(
+        [exe_path],
+        cwd=str(pathlib.Path(exe_path).parent),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _ensure_motmaster_running(
+    config_file: str,
+    startup_timeout: float = 15.0,
+    poll_interval: float = 0.5,
+) -> None:
+    with open(config_file, "r") as f:
+        config = json.load(f)
+    exe_path = config["motmaster"]["exe_path"]
+    process_name = pathlib.Path(exe_path).name
+    if _is_process_running(process_name):
+        return None
+
+    print(f"MOTMaster process '{process_name}' not found. Starting it now...")
+    _start_process(exe_path)
+
+    deadline = time.time() + startup_timeout
+    while time.time() < deadline:
+        if _is_process_running(process_name):
+            print(f"MOTMaster process '{process_name}' is running.")
+            return None
+        time.sleep(poll_interval)
+
+    raise RuntimeError(
+        f"Timed out waiting for process '{process_name}' to start from '{exe_path}'."
+    )
+
+
 def run_motmaster_command_server(
     host: str = "0.0.0.0",
     port: int = 5557,
@@ -270,10 +311,11 @@ def run_motmaster_command_server(
     simulate: bool = False,
     config_file: Optional[str] = None,
 ) -> None:
+    _ensure_motmaster_running(config_file)
     if simulate:
         interface = DummyMotMasterInterface(interval=interval)
     else:
-        interface = MotMasterInterface(config_file, interval=interval)
+        interface = Experiment(config_file, interval=interval)
     interface.connect()
     if (not simulate) and interface.motmaster is None:
         raise RuntimeError("Failed to connect to MotMaster.")

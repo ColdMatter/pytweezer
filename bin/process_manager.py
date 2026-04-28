@@ -8,6 +8,8 @@ Runs as a background daemon that keeps servers alive.
 import sys
 import signal
 from PyQt5.QtWidgets import QApplication, QLabel, QGridLayout
+import zmq
+from socket import gethostname
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.servers.configreader import ConfigReader
 from pytweezer.servers import tweezerpath
@@ -20,7 +22,7 @@ from bin.process_tile_base import ProcessTile
 class ProcessManager(BWidget):
     categories = []
 
-    def __init__(self, name):
+    def __init__(self, name) -> None:
         super().__init__(name, create_props=False)
         self.setStyleSheet(
             "Controller {background-color: rgb(195,205,230);color:blue; margin:0px; border:5px solid rgb(0, 0, 80);} "
@@ -35,7 +37,7 @@ class ProcessManager(BWidget):
 
         self.add_processes()
 
-    def check_host(self, params):
+    def check_host(self, host_addr):
         return True
 
     def add_processes(self):
@@ -45,7 +47,8 @@ class ProcessManager(BWidget):
             line = 1
             layout.addWidget(QLabel(category), line, i)
             for name, params in sorted(conf[category].items())[::-1]:
-                if self.check_host(params):
+                host_addr = params.get("host")
+                if self.check_host(host_addr):
                     tooltip = None
                     if "tooltip" in params:
                         tooltip = params["tooltip"]
@@ -70,29 +73,44 @@ class ProcessManager(BWidget):
     def __del__(self):
         print("deleting controller")
         
-class Controller(ProcessManager):
-    categories = ["Servers", "Devices"]
+class ServerManager(ProcessManager):
+    categories = ["Servers"]
     
-    def __init__(self, host_name):
-        super().__init__("Controller")
-        self.host_addr = HOSTS.get(host_name, None)
+class DeviceManager(ProcessManager):
+    categories = ["Devices"]
+    
+    def __init__(self, name) -> None:
+        self.host_name = gethostname()
+        self.host_addr = HOSTS.get(self.host_name, None)
         if self.host_addr is None:
-            print_error(
-                f"Unknown host name '{host_name}' in configuration. No processes will be launched.",
-                "error",
-            )
-            return
+            self.host_addr = "127.0.0.1"
+            print_error(f"Host {self.host_name} not found in config. Defaulting to localhost ({self.host_addr}).", "warning")
+        super().__init__(name)
+        
+    def check_host(self, host_addr):
+        return host_addr == self.host_addr 
+    
+class Dashboard(ProcessManager):
+    categories = ["GUI", "Viewer"]
 
 
 def main():
     args = sys.argv[1:]
     if not args:
-        print("Usage: controller.py <host_name>")
+        print("Usage: process_manager.py <manager_type>")
         sys.exit(1)
 
-    host_name = args[0]
+    manager_type = args[0]
     app = QApplication(sys.argv)
-    Win = Controller(host_name)
+    if manager_type == "server":
+        Win = ServerManager(manager_type)
+    elif manager_type == "device":
+        Win = DeviceManager(manager_type)
+    elif manager_type == "dashboard":
+        Win = Dashboard(manager_type)
+    else:
+        print("Invalid manager type. Use 'server', 'device', or 'dashboard'.")
+        sys.exit(1)
     Win.show()
 
     def on_exit(_signo, _stack_frame):

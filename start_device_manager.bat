@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-poetry run pytweezer-controller dashboard %1
+poetry run pytweezer-run device
 
 
 endlocal
