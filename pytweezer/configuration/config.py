@@ -10,7 +10,7 @@ port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
 SIMULATING = False
-LOCAL = True
+LOCAL = False
 SERVER_HOST = HOSTS["beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
 
@@ -106,21 +106,23 @@ CONFIG = {
         },
         "Rb HamCam": {
             "active": True,
-            "script": "../pytweezer/servers/imagemx2.py",
+            "script": "../pytweezer/drivers/imagemx2.py",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "rb_hamcam",
             "timeout": 5.0,
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
         },
         "CaF HamCam": {
             "active": True,
-            "script": "../pytweezer/servers/imagemx2.py",
+            "script": "../pytweezer/drivers/imagemx2.py",
             "host": HOSTS["caf_mm_pc"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "caf_hamcam",
             "timeout": 5.0,
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
         },
         "Blackfly Camera": {
             "active": False,

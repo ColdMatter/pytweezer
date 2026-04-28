@@ -319,7 +319,7 @@ def _resolve_server_name(token: str, conf: dict) -> str:
 def main():
     parser = argparse.ArgumentParser(description="ImagEM X2 sipyco RPC server launcher")
     parser.add_argument(
-        "--name",
+        "name",
         help="process-manager label or explicit server name",
         default=None
     )

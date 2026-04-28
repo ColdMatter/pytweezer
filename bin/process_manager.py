@@ -17,8 +17,6 @@ from pytweezer.analysis.print_messages import print_error
 from pytweezer.configuration.config import HOSTS
 from bin.process_tile_base import ProcessTile
 
-
-
 class ProcessManager(BWidget):
     categories = []
 
