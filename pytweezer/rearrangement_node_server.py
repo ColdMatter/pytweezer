@@ -175,8 +175,6 @@ def run_server():
                         "img1_shape": img_array1.shape,
                         "debug_sequence_dtype": str(debug_sequence_cpu.dtype),
                         "debug_sequence_shape": debug_sequence_cpu.shape,
-                        "occ_mask_dtype": str(occ_mask.dtype),
-                        "occ_mask_shape": occ_mask.shape,
                         "timings": {
                             "occupancy_extraction_s": (t2 - t1),
                             "rearrangement_sequence_generation_s": (t3 - t2),
@@ -190,7 +188,6 @@ def run_server():
                         img_array0,
                         img_array1,
                         debug_sequence_cpu,
-                        occ_mask
                     ], copy=False)
 
                 elif command == "TEST":
