@@ -134,9 +134,8 @@ class RearrangementNode:
         reply_header = pkl.loads(parts[0])
         img0 = np.frombuffer(parts[1], dtype=reply_header["img0_dtype"]).reshape(reply_header["img0_shape"])
         img1 = np.frombuffer(parts[2], dtype=reply_header["img1_dtype"]).reshape(reply_header["img1_shape"])
-        debug_sequence = np.frombuffer(parts[3], dtype=reply_header["debug_sequence_dtype"]).reshape(reply_header["debug_sequence_shape"])
         timings = reply_header["timings"]
-        return img0, img1, debug_sequence, timings
+        return img0, img1, timings
 
     async def test(self):
         """Sends a simple command with no array payload."""
