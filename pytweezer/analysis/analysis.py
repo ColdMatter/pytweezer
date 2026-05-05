@@ -63,22 +63,14 @@ def detect_bright_points(image_array, threshold=200):
     # Step 2: Label connected components (each bright spot gets a unique label)
     labeled_array, num_features = label(binary_image)
 
-    # Step 3: Find the brightest pixel in each region (brightest pixel corresponds to the highest intensity)
+    # Step 3: Find the centre of mass in each region
     centers = []
     for region_id in range(1, num_features + 1):
-        # Get the coordinates of the pixels in the current region (bright spot)
-        coordinates = np.argwhere(labeled_array == region_id)
-
-        # Find the coordinates of the brightest pixel in this region
-        brightest_pixel = None
-        max_intensity = -1
-        for y, x in coordinates:
-            if image_array[y, x] > max_intensity:
-                max_intensity = image_array[y, x]
-                brightest_pixel = (y, x)
-
-        # Append the brightest pixel's coordinates (y, x) as a tuple
-        centers.append(brightest_pixel)
+        # Calculate the centre of mass for this region
+        com = center_of_mass(image_array, labeled_array, region_id)
+        
+        # Append the centre of mass coordinates (y, x) as a tuple
+        centers.append(com)
     
     centers = np.array(centers)
     
