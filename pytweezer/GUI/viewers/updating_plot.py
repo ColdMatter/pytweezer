@@ -1,3 +1,6 @@
+import argparse
+import sys
+
 from PyQt5 import QtWidgets
 import numpy as np
 from pytweezer.servers import DataClient
@@ -139,7 +142,7 @@ updatePlot()
 
 def main(name):
     #QtGui.QApplication.setGraphicsSystem('raster')
-    app = QtWidgets.QApplication([])
+    app = QtWidgets.QApplication(sys.argv)
     #mw = QtGui.QMainWindow()
     #mw.resize(800,800)
     #init
@@ -149,10 +152,18 @@ def main(name):
 
 ## Start Qt event loop unless running in interactive mode or using pyside.
 if __name__ == '__main__':
-    import sys
 #    if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
 #        QtGui.QApplication.instance().exec_()
-    main('dummyname')
+    if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            'name',
+            nargs='?',
+            default='LivePlot',
+            help='name of this program instance',
+        )
+        args = parser.parse_args()
+        main(args.name)
 
 
 

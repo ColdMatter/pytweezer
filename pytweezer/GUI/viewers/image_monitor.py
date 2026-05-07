@@ -79,11 +79,7 @@ class ImageDisplay(QWidget):
 
         colors = np.array(plt.cm.magma.colors) * 255
         print(self.name)
-        if (
-            self._invert_colors
-            or "Radial_Li_abs" in self.name
-            or "Vertical_Li_abs" in self.name
-        ):
+        if self._invert_colors:
             colors = colors[::-1]
 
         cmap = pg.ColorMap(pos=np.linspace(0.0, 1.0, len(colors)), color=colors)
