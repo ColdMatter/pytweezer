@@ -22,7 +22,9 @@
         },
         "roilist": [
             "/Viewer/TweezerViewer/Viewer/ROI/slice",
-            "/Viewer/DummyViewer/Viewer/ROI/slice"
+            "/Viewer/DummyViewer/Viewer/ROI/slice",
+            "/Image Monitor/ROI/slice",
+            "/Image Monitor 2/ROI/slice"
         ],
         "DataStream": {
             "maxStreamInactive[s]": 1000,
@@ -309,6 +311,82 @@
                 800,
                 800
             ]
+        },
+        "Applet Launcher": {
+            "Applets": {
+                "Image Monitor": {
+                    "script": "pytweezer/GUI/viewers/image_monitor.py",
+                    "active": false,
+                    "description": "Display image streams"
+                },
+                "Updating Plot": {
+                    "script": "pytweezer/GUI/viewers/updating_plot.py",
+                    "active": false,
+                    "description": "Live plot of data streams"
+                },
+                "Image Monitor 2": {
+                    "script": "pytweezer/GUI/viewers/image_monitor.py",
+                    "active": false
+                }
+            }
+        }
+    },
+    "Image Monitor": {
+        "imagestreams": [
+            "--None--"
+        ],
+        "maskstreams": [
+            "--None--"
+        ],
+        "invert_colors": false,
+        "ROIs": [
+            "slice"
+        ],
+        "ROI": {
+            "slice": {
+                "pos": [
+                    0,
+                    0
+                ],
+                "size": [
+                    30,
+                    30
+                ],
+                "color": 4278190335
+            }
+        }
+    },
+    "Updating Plot": {
+        "datastreams": [
+            "Axial_slice"
+        ],
+        "Axial_slice": {
+            "color": 4278190335
+        }
+    },
+    "Image Monitor 2": {
+        "imagestreams": [
+            "--None--"
+        ],
+        "maskstreams": [
+            "--None--"
+        ],
+        "invert_colors": false,
+        "ROIs": [
+            "slice"
+        ],
+        "ROI": {
+            "slice": {
+                "pos": [
+                    0,
+                    0
+                ],
+                "size": [
+                    30,
+                    30
+                ],
+                "color": 4278190335
+            }
         }
     }
 }

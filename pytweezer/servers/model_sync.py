@@ -146,10 +146,6 @@ class ModelSyncServer:
         self.command_socket.bind(f"tcp://{self.bind_host}:{self.command_port}")
         self.publish_socket.bind(f"tcp://{self.bind_host}:{self.publish_port}")
         self._running = True
-        print(
-            f"Model sync server listening: command=tcp://{self.bind_host}:{self.command_port}, "
-            f"publish=tcp://{self.bind_host}:{self.publish_port}"
-        )
 
         while self._running:
             request = self.command_socket.recv_pyobj()

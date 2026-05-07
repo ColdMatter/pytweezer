@@ -17,6 +17,9 @@ from pytweezer.analysis.print_messages import print_error
 from pytweezer.configuration.config import HOSTS
 from bin.process_tile_base import ProcessTile
 
+from pytweezer.logging_utils import get_logger
+logger = get_logger("Process Manager")
+
 class ProcessManager(BWidget):
     categories = []
 
@@ -65,11 +68,11 @@ class ProcessManager(BWidget):
         """on shutdown terminate all server processes first"""
         for p in self.processlist:
             p.terminateProcess()
-        print_error("controller.py: Terminated all server processes.", "info")
+        logger.info("Terminated all server processes.")
         event.accept()
 
     def __del__(self):
-        print("deleting controller")
+        logger.info("Deleting controller")
         
 class ServerManager(ProcessManager):
     categories = ["Servers"]
@@ -82,7 +85,8 @@ class DeviceManager(ProcessManager):
         self.host_addr = HOSTS.get(self.host_name, None)
         if self.host_addr is None:
             self.host_addr = "127.0.0.1"
-            print_error(f"Host {self.host_name} not found in config. Defaulting to localhost ({self.host_addr}).", "warning")
+            # print_error(f"Host {self.host_name} not found in config. Defaulting to localhost ({self.host_addr}).", "warning")
+            logger.warning(f"Host {self.host_name} not found in config. Defaulting to localhost ({self.host_addr}).")
         super().__init__(name)
         
     def check_host(self, host_addr):
