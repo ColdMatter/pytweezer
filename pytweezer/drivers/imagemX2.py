@@ -133,11 +133,22 @@ class ImagEMX2Camera:
         self.dcam.stop_acquisition()
 
     @requires_camera
-    def acquire_n_frames(self, nframes: int, start_frame: int = 0) -> np.ndarray:
+    def acquire_n_frames(self, nframes: int, start_frame: int = 0, autosave: bool = False, broadcast: bool = False) -> np.ndarray:
         self.dcam.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
         images, _infos = self.dcam.read_multiple_images(
             (int(start_frame), int(start_frame) + int(nframes)), return_info=True
         )
+        for i, image in enumerate(images):
+            if autosave:
+                ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir)
+            if broadcast:
+                if self.image_client is None:
+                    LOGGER.error("tried to broadcast image but no client exists")
+                info = {
+                    "timestamp": time.time(),
+                    "index": start_frame + i,
+                }
+                self.image_client.send(image, info)
         return np.asarray(images)
 
     @requires_camera
@@ -155,14 +166,13 @@ class ImagEMX2Camera:
             ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir)
         info = {
             "timestamp": time.time(),
-            "_imgresolution": [1, 1],
-            "_offset": [0, 0],
+            "index": 0
         }
         if exp_info is not None:
             info.update(exp_info)
         if broadcast:
             if self.image_client is None:
-                LOGGER.error("tried to broad image but no client exists")
+                LOGGER.error("tried to broadcasr image but no client exists")
             self.image_client.send(image, info)
         return image
 
