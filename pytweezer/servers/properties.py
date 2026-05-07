@@ -7,8 +7,10 @@ import threading
 import time
 import logging, sys
 from zmq.utils import jsonapi
+
 # logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 from pytweezer.analysis.print_messages import print_error
+
 """Configuration:  deep, fundamental property of the system.
                     (which hardware is running, drivers available)
 
@@ -41,7 +43,7 @@ class PropertyAttribute:
     """
 
     def __init__(self, propname, defaultval, parent=None):
-        """ init
+        """init
 
         Args:
             propname (str): name of the property the attribut should access
@@ -49,6 +51,7 @@ class PropertyAttribute:
                         can be any type a dictionary entry can be (hashable)
                         (needs to be compatible with json)
             parent: usually self. the object which has _props. required for the value property to function
+        # TODO: pass this a props object instead. remove __get__ and __set__, only allow changing via .value for code readability. This change would mean every usage of a propertyattribute would need to change, so it's a big job
         """
         self._default = defaultval
         self._propname = propname
@@ -89,71 +92,38 @@ class Properties(threading.Thread):
 
     @staticmethod
     def _configure_tcp_socket(socket, endpoint):
-        if isinstance(endpoint, str) and endpoint.startswith('tcp://'):
+        if isinstance(endpoint, str) and endpoint.startswith("tcp://"):
             socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
-            if hasattr(zmq, 'TCP_KEEPALIVE_IDLE'):
+            if hasattr(zmq, "TCP_KEEPALIVE_IDLE"):
                 socket.setsockopt(zmq.TCP_KEEPALIVE_IDLE, 60)
-            if hasattr(zmq, 'TCP_KEEPALIVE_INTVL'):
+            if hasattr(zmq, "TCP_KEEPALIVE_INTVL"):
                 socket.setsockopt(zmq.TCP_KEEPALIVE_INTVL, 30)
-            if hasattr(zmq, 'TCP_KEEPALIVE_CNT'):
+            if hasattr(zmq, "TCP_KEEPALIVE_CNT"):
                 socket.setsockopt(zmq.TCP_KEEPALIVE_CNT, 5)
             socket.setsockopt(zmq.RECONNECT_IVL, 100)
             socket.setsockopt(zmq.RECONNECT_IVL_MAX, 2000)
         socket.setsockopt(zmq.LINGER, 0)
 
-    @staticmethod
-    def _extract_tcp_host(endpoint):
-        if not isinstance(endpoint, str) or not endpoint.startswith('tcp://'):
-            return None
-        addr = endpoint[len('tcp://'):]
-        if ':' not in addr:
-            return None
-        return addr.rsplit(':', 1)[0]
-
-    @staticmethod
-    def _replace_tcp_host(endpoint, host):
-        if not isinstance(endpoint, str) or not endpoint.startswith('tcp://'):
-            return endpoint
-        addr = endpoint[len('tcp://'):]
-        if ':' not in addr:
-            return endpoint
-        _old_host, port = addr.rsplit(':', 1)
-        return f'tcp://{host}:{port}'
-
-    def _fetch_initial_properties(self, logger_endpoint, hub_pub_endpoint):
-        endpoints = [logger_endpoint]
-
-        # For remote setups, if Propertylogger endpoint is localhost, try the Propertyhub host.
-        logger_host = self._extract_tcp_host(logger_endpoint)
-        hub_host = self._extract_tcp_host(hub_pub_endpoint)
-        if (
-            logger_host in ('localhost', '127.0.0.1', '0.0.0.0')
-            and hub_host not in (None, 'localhost', '127.0.0.1', '0.0.0.0')
-        ):
-            alt_endpoint = self._replace_tcp_host(logger_endpoint, hub_host)
-            if alt_endpoint not in endpoints:
-                endpoints.append(alt_endpoint)
-
+    def _fetch_initial_properties(self, logger_endpoint):
         last_error = None
-        for endpoint in endpoints:
-            for _attempt in range(3):
-                init_socket = zmqcontext.socket(zmq.REQ)
-                self._configure_tcp_socket(init_socket, endpoint)
-                init_socket.setsockopt(zmq.RCVTIMEO, 2000)
-                init_socket.setsockopt(zmq.SNDTIMEO, 2000)
-                init_socket.connect(endpoint)
-                try:
-                    init_socket.send_string('INIT?')
-                    init_socket.recv_string()
-                    return init_socket.recv_json()
-                except Exception as error:
-                    last_error = error
-                    time.sleep(0.15)
-                finally:
-                    init_socket.close()
+        for _attempt in range(3):
+            init_socket = zmqcontext.socket(zmq.REQ)
+            self._configure_tcp_socket(init_socket, logger_endpoint)
+            init_socket.setsockopt(zmq.RCVTIMEO, 2000)
+            init_socket.setsockopt(zmq.SNDTIMEO, 2000)
+            init_socket.connect(logger_endpoint)
+            try:
+                init_socket.send_string("INIT?")
+                init_socket.recv_string()
+                return init_socket.recv_json()
+            except Exception as error:
+                last_error = error
+                time.sleep(0.15)
+            finally:
+                init_socket.close()
 
         raise RuntimeError(
-            f'init handshake failed via endpoints {endpoints}: {last_error}'
+            f"init handshake failed via endpoint {logger_endpoint}: {last_error}"
         )
 
     def __init__(self, name, initfromfile=False):
@@ -173,10 +143,10 @@ class Properties(threading.Thread):
         # iniitialize dictionaries
         self.properties_lock = threading.Lock()
         # initialize sockets
-        c = conf['Servers']['Propertyhub']
-        host = c['host']
-        pub_port = c['pub_port'] 
-        sub_port = c['sub_port']
+        c = conf["Servers"]["Propertyhub"]
+        host = c["host"]
+        pub_port = c["pub_port"]
+        sub_port = c["sub_port"]
         hub_sub_endpoint = f"tcp://{host}:{sub_port}"
         hub_pub_endpoint = f"tcp://{host}:{pub_port}"
         self.pub_socket = zmqcontext.socket(zmq.PUB)
@@ -188,45 +158,48 @@ class Properties(threading.Thread):
         self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "Prop")
 
         pub_mon = self.pub_socket.get_monitor_socket()
-        pub_mon_thread = threading.Thread(target=event_monitor, args=(pub_mon, 'Props: ' + name, 'PUB'))
+        pub_mon_thread = threading.Thread(
+            target=event_monitor, args=(pub_mon, "Props: " + name, "PUB")
+        )
         pub_mon_thread.start()
         sub_mon = self.sub_socket.get_monitor_socket()
-        sub_mon_thread = threading.Thread(target=event_monitor, args=(sub_mon, 'Props: ' + name, 'SUB'))
+        sub_mon_thread = threading.Thread(
+            target=event_monitor, args=(sub_mon, "Props: " + name, "SUB")
+        )
         sub_mon_thread.start()
 
         time.sleep(0.01)
         if not initfromfile:
-            host = conf['Servers']['Propertylogger'].get('host', 'localhost')
-            port = conf['Servers']['Propertylogger'].get('port', 3106)
+            host = conf["Servers"]["Propertylogger"].get("host", "localhost")
+            port = conf["Servers"]["Propertylogger"].get("port", 3106)
             logger_endpoint = f"tcp://{host}:{port}"
             try:
-                self.properties = self._fetch_initial_properties(logger_endpoint, hub_pub_endpoint)
+                self.properties = self._fetch_initial_properties(logger_endpoint)
             except Exception as error:
                 print_error(
-                    'properties.py init handshake failed ({0}); '
-                    'falling back to property file. '
-                    'Check Servers/Propertylogger/rep reachability for this client.'.format(error),
-                    'warning'
+                    "properties.py init handshake failed ({0}); "
+                    "falling back to property file. "
+                    "Check Servers/Propertylogger/rep reachability for this client.".format(
+                        error
+                    ),
+                    "warning",
                 )
                 self.properties = cr.Properties()
         else:
             self.properties = cr.Properties()
         self.recent_changes = set()  # keeps recent changes
 
-        checkThread = threading.Thread(target=self.check)
-        checkThread.start()
-
         # start socket listening thread
         self.start()
         self.name = name
         if not name in self.properties:
-            n = self.get('/' + name, {})
+            n = self.get("/" + name, {})
         logging.debug(self.properties)
 
         self.crashed = False
 
     def _parsekey(self, key):
-        ''' transform key into list of strings
+        """transform key into list of strings
         each entry is a key for one level of a multilayer dictionary
 
         Args:
@@ -235,17 +208,17 @@ class Properties(threading.Thread):
 
         Returns:
             [(str)] : list of strings
-        '''
+        """
         if type(key) != list:
-            if key[0] != '/':
-                if key[-1] == '/':
+            if key[0] != "/":
+                if key[-1] == "/":
                     key = key[:-1]
-                key = '/' + self.name + '/' + key
-            keys = key.split('/')
+                key = "/" + self.name + "/" + key
+            keys = key.split("/")
         else:
             keys = key
         # if the key started with '/'  an empty entry has to be removed
-        if keys[0] == '':
+        if keys[0] == "":
             keys = keys[1:]
         return keys
 
@@ -270,7 +243,7 @@ class Properties(threading.Thread):
         if self.get(key) != value:
             keys = self._parsekey(key)
             self._set(keys, value)
-            self._send({'keys': keys, 'value': value})
+            self._send({"keys": keys, "value": value})
         # print('properties.py Sending: {} with value {}'.format(key, value))
 
     def _set(self, keys, value):
@@ -282,48 +255,56 @@ class Properties(threading.Thread):
                     prop[key] = {}
                 prop = prop[key]
             # else:
-            if isinstance(value, dict) and 'options' in value.keys():
-                if not keys[-1] in prop: prop[keys[-1]] = {}
+            if isinstance(value, dict) and "options" in value.keys():
+                if not keys[-1] in prop:
+                    prop[keys[-1]] = {}
                 # print('_set received a dict')
                 # print('now setting:', value)
                 prop[keys[-1]] = copy.deepcopy(value)
-            elif keys[-1] in prop and isinstance(prop[keys[-1]], dict) and 'options' in prop[keys[-1]].keys():
+            elif (
+                keys[-1] in prop
+                and isinstance(prop[keys[-1]], dict)
+                and "options" in prop[keys[-1]].keys()
+            ):
                 # print('_set found a dict')
                 # print('which was:', prop[keys[-1]])
                 # print('now setting:', value)
-                if value not in prop[keys[-1]]['options']:
-                    print('value {} not in options {}. no change made to {}'.format(value, prop[keys[-1]]['options'],
-                                                                                    keys[-1]))
+                if value not in prop[keys[-1]]["options"]:
+                    print(
+                        "value {} not in options {}. no change made to {}".format(
+                            value, prop[keys[-1]]["options"], keys[-1]
+                        )
+                    )
                 else:
-                    prop[keys[-1]]['value'] = copy.deepcopy(value)
+                    prop[keys[-1]]["value"] = copy.deepcopy(value)
             else:
                 prop[keys[-1]] = copy.deepcopy(value)
             # for i in range(len(keys)):
             #    self.recent_changes.add('/'+'/'.join(keys[:i+1]))
-            self.recent_changes.add('/' + '/'.join(keys))
+            self.recent_changes.add("/" + "/".join(keys))
 
     def _send(self, data, flags=0):
         # self.pub_socket.send(bytes('Propertychange_'+self.name,'utf8'),flags|zmq.SNDMORE)
-        self.pub_socket.send_string('Propertychange_' + self.name, flags | zmq.SNDMORE)
+        self.pub_socket.send_string("Propertychange_" + self.name, flags | zmq.SNDMORE)
         # print('properties.py sending _send')
         return self.pub_socket.send_json(data, flags)
 
     def delete(self, key):
-        ''' delete an entry including its subentries
+        """delete an entry including its subentries
 
         Args:
             key  (str):  entry to be deleted
 
         Returns:
             None.
-        '''
+        """
         keys = self._parsekey(key)
         self._del(keys)
-        self._send({'delete': keys})
+        self._send({"delete": keys})
 
     def _del(self, keys):
         # print(self.name,' properties._del deleting',keys)
-        ''' delete enty from dictionary '''
+        """delete enty from dictionary"""
         with self.properties_lock:
             prop = self.properties
             for key in keys[:-1]:
@@ -333,7 +314,7 @@ class Properties(threading.Thread):
             # logging.debug(prop)
             if keys[-1] in prop:
                 del prop[keys[-1]]
-            self.recent_changes.add('/' + '/'.join(keys[:-1]))
+            self.recent_changes.add("/" + "/".join(keys[:-1]))
             # for i in range(len(keys)):
             #    self.recent_changes.add('/'+'/'.join(keys[:i+1]))
 
@@ -342,41 +323,23 @@ class Properties(threading.Thread):
         parts = self.sub_socket.recv_multipart(flags=flags)
         if len(parts) < 2:
             return
-        message = parts[0].decode('utf-8', errors='ignore')
-        logging.debug(self.name,' received: ',message)
+        message = parts[0].decode("utf-8", errors="ignore")
+        logging.debug(self.name, " received: ", message)
         try:
             md = jsonapi.loads(parts[1])
         except Exception as error:
-            print_error(f'properties.py malformed property payload: {error}', 'warning')
+            print_error(f"properties.py malformed property payload: {error}", "warning")
             return
-        # in _default_decoder.decode(s)
-        # Triggered by pushing experiment with scan
-        """
-            File "/usr/lib/python3.10/json/__init__.py", line 346, in loads
-                return self._deserialize(msg, lambda buf: jsonapi.loads(buf, **kwargs))
-            File "/home/bali/.local/lib/python3.10/site-packages/zmq/utils/jsonapi.py", line 34, in loads
-                return _default_decoder.decode(s)
-            File "/usr/lib/python3.10/json/decoder.py", line 337, in decode
-                return load(recvd)
-            File "/home/bali/.local/lib/python3.10/site-packages/zmq/sugar/socket.py", line 940, in <lambda>
-                obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-            File "/usr/lib/python3.10/json/decoder.py", line 355, in raw_decode
-                self._recv()
-                self._recv()
-                self.run()
-            raise JSONDecodeError("Expecting value", s, err.value) from None
-            json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-        """
-        logging.debug(self.name,' received: ',message,md)
-        if 'delete' in md:
+        logging.debug(self.name, " received: ", message, md)
+        if "delete" in md:
             # print(self.name,' properties._recv deleting',md['delete'])
-            self._del(md['delete'])
-        elif 'keys' in md and 'value' in md:
-            self._set(md['keys'], md['value'])
+            self._del(md["delete"])
+        elif "keys" in md and "value" in md:
+            self._set(md["keys"], md["value"])
             # logging.debug('setting: ',md['keys'],md['value'])
 
     def get(self, key, defaultvalue=None):
-        """ returns values from dictionary
+        """returns values from dictionary
         for details see set(). Values are always deep copies
 
         Args:
@@ -389,10 +352,10 @@ class Properties(threading.Thread):
         It is a good habit to always give reasonable default values so the property tree can
         create and maintain itself.
         """
-        if key == '/':
+        if key == "/":
             with self.properties_lock:
                 return copy.deepcopy(self.properties)
-        elif key[-1] == '/':
+        elif key[-1] == "/":
             key = key[:-1]
         keys = self._parsekey(key)
         return self._get(keys, defaultvalue)
@@ -406,33 +369,33 @@ class Properties(threading.Thread):
                 for key in keys[:-1]:
                     prop = prop[key]
                 value = copy.deepcopy(prop[keys[-1]])
-                if isinstance(value, dict) and 'options' in value.keys():
+                if isinstance(value, dict) and "options" in value.keys():
                     # print('_get found a dict')
                     # print('which is:',value)
-                    value = value['value']
+                    value = value["value"]
 
                     # prop[keys[-1]]=copy.deepcopy(value['value'])
 
         except KeyError:
-            logging.debug('properties.py key does not exist')
+            logging.debug("properties.py key does not exist")
             self._set(keys, defaultvalue)
-            self._send({'keys': keys, 'value': defaultvalue})
+            self._send({"keys": keys, "value": defaultvalue})
             value = defaultvalue
-            print('tried to _get an unset property {}'.format(keys))
-            if isinstance(value, dict) and 'options' in value.keys():
-                value = value['value']
-            print('setting default value: {}'.format(value))
+            print("tried to _get an unset property {}".format(keys))
+            if isinstance(value, dict) and "options" in value.keys():
+                value = value["value"]
+            print("setting default value: {}".format(value))
         return value
 
     def changes(self, includeparent=True):
-        ''' return keys of all entries that have changed since the last call of this function
+        """return keys of all entries that have changed since the last call of this function
 
         Args:
             includeparent (bool): if True the parent classes will be included in the list of changes
 
         Returns:
             set(): set of changes since last call of this function
-        '''
+        """
         with self.properties_lock:
             changes = self.recent_changes
             self.recent_changes = set()
@@ -440,39 +403,19 @@ class Properties(threading.Thread):
         if includeparent:
             chang = set()
             for key in changes:
-                keys = key[1:].split('/')
+                keys = key[1:].split("/")
                 for i in range(len(keys)):
-                    chang.add('/' + '/'.join(keys[:i + 1]))
+                    chang.add("/" + "/".join(keys[: i + 1]))
             return chang
         else:
             return changes
-
-    def check(self):
-        lastTime = 0
-        timeout = 40
-        interval = 30
-        # while True:
-        #     time.sleep(0.5)
-        #     t = time.time()
-        #     if t - lastTime > interval:
-        #         lastTime = t
-        #         check_time = self.get('/Checker/check_time', 0)
-        #         if abs(check_time - t) > timeout:
-        #             print_error('Property check timeout {}; time.time {}, check_time {}'.format(self.name, t, check_time))
-        #             if self.name == 'ADwindriver' and not self.crashed:
-        #                 self.send_alert_to_mattermost()
-        #             self.crashed = True
-        #         # else:
-        #             # self.crashed = False
-        
-
 
     def run(self):
         while True:
             try:
                 self._recv()
             except Exception as error:
-                print_error(f'properties.py receive loop error: {error}', 'warning')
+                print_error(f"properties.py receive loop error: {error}", "warning")
                 time.sleep(0.05)
 
 
