@@ -1,6 +1,6 @@
 HOSTS = {
     "ph-beast": "10.59.3.1",
-    "IC-CZC4287H3W": "10.59.3.2", # rb pc
+    "ic-czc221cchs": "10.59.3.2", # rb pc
     "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
     
@@ -92,7 +92,7 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
             "config_file": "rb_mm_config.json",
-            "host": HOSTS["IC-CZC4287H3W"],
+            "host": HOSTS["ic-czc221cchs"],
             "port": get_next_port(),
             "simulate": SIMULATING
         },
