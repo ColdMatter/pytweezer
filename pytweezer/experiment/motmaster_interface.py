@@ -53,7 +53,6 @@ class MotMasterInterface:
                 for path in path_info.values():
                     self._add_ref(path)
             elif key == "motmaster":
-                self._ensure_motmaster_running(path_info["exe_path"])
                 self._add_ref(path_info["exe_path"])
                 try:
                     import MOTMaster
@@ -138,8 +137,6 @@ class MotMasterInterface:
                                 print("Too many PicoMotor device detected!")
                         except Exception as e:
                             print(f"Error: {e} encountered")
-        print(self.hardware_controller)
-        self._ensure_motmaster_running
         return None
 
     def disconnect(self) -> None:
