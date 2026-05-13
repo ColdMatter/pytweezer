@@ -1,7 +1,7 @@
 HOSTS = {
-    "beast": "10.59.3.1",
-    "rb_mm_pc": "10.59.3.2",
-    "caf_mm_pc": "10.59.3.5",
+    "ph-beast": "10.59.3.1",
+    "IC-CZC4287H3W": "10.59.3.2", # rb pc
+    "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
     
 }
@@ -9,9 +9,9 @@ HOSTS = {
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-SIMULATING = True
+SIMULATING = False
 LOCAL = False
-SERVER_HOST = HOSTS["beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
+SERVER_HOST = HOSTS["ph-beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
 
 CONFIG = {
@@ -92,7 +92,7 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
             "config_file": "rb_mm_config.json",
-            "host": HOSTS["rb_mm_pc"],
+            "host": HOSTS["IC-CZC4287H3W"],
             "port": get_next_port(),
             "simulate": SIMULATING
         },
@@ -100,7 +100,7 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/experiment/motmaster_server.py",
             "config_file": "caf_mm_config.json",
-            "host": HOSTS["caf_mm_pc"],
+            "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
             "simulate": SIMULATING
         },
@@ -117,7 +117,7 @@ CONFIG = {
         "CaF HamCam": {
             "active": True,
             "script": "../pytweezer/drivers/imagemx2.py",
-            "host": HOSTS["caf_mm_pc"],
+            "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "caf_hamcam",
