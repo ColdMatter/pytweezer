@@ -56,7 +56,7 @@ def run_server():
                                             slm_res=(1024,1024),
                                             input_beam_waist_mm=16,
                                             fresnel_f_mm=1072,
-                                            blaze_dx_dy_um=(46.50, 10.54),
+                                            blaze_dx_dy_um=(40, -8),
                                             zernike_coeff_dict={5:1.195, 6:0.725, 7:0.970, 8:0.478, 9:-1.091, 10:0.303, 11:0.021, 12:0.072, 13:0.049})
                     print("[Rearrangement Node] Phasemask generator initialized.")
 
@@ -139,7 +139,7 @@ def run_server():
 
                     # Generate the rearrangement phasemask sequence
                     try:
-                        sequence, debug_sequence = PM.generate_rearrangement_sequence(terms1, terms2, occ_mask, d0=d0)
+                        sequence = PM.generate_rearrangement_sequence(terms1, terms2, occ_mask, d0=d0)
                         t3 = time.time()
                         print("[Rearrangement Node] Rearrangement sequence generated.")
                     except Exception as e:
@@ -165,16 +165,12 @@ def run_server():
                         print(f"[Rearrangement Node] Proceeding with empty image for reset due to acquisition error.")
                         img_array1 = np.zeros_like(img_array0)
 
-                    debug_sequence_cpu = debug_sequence.get()
-
                     output_header = {
                         "status": "SUCCESS",
                         "img0_dtype": str(img_array0.dtype),
                         "img0_shape": img_array0.shape,
                         "img1_dtype": str(img_array1.dtype),
                         "img1_shape": img_array1.shape,
-                        "debug_sequence_dtype": str(debug_sequence_cpu.dtype),
-                        "debug_sequence_shape": debug_sequence_cpu.shape,
                         "timings": {
                             "occupancy_extraction_s": (t2 - t1),
                             "rearrangement_sequence_generation_s": (t3 - t2),
@@ -187,7 +183,6 @@ def run_server():
                         pkl.dumps(output_header),
                         img_array0,
                         img_array1,
-                        debug_sequence_cpu,
                     ], copy=False)
 
                 elif command == "TEST":

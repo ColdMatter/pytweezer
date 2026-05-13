@@ -71,6 +71,7 @@ pycaf = {git = "https://github.com/ColdMatter/pycaf", branch = "cafmot"}
 simple-pyspin = "^0.1.1"
 easypyspin = "^2.0.1"
 opencv-python = "^4.13.0.92"
+scikit-learn = "^1.8.0"
 
 [build-system]
 requires = ["poetry-core"]
