@@ -14,6 +14,8 @@ import matplotlib.patches as patches
 from rich.progress import track
 from scipy.special import erf
 import datetime
+from sklearn.mixture import GaussianMixture
+from scipy.stats import norm
 
 cloudpath = "C:\\Users\\tweez\\OneDrive - Imperial College London\\"
 tweezer_img_source_dir = "C:\\Users\\tweez\\OneDrive - Imperial College London\\caftweezers\\HamCamImages\\"
@@ -122,7 +124,7 @@ def sum_pixel_values(image_array, grid_positions, grid_shape, window_size=10):
     return pixel_sums
 
 # Function to visualize results with cropping and zooming
-def visualize_results(image_array, grid_positions, margin=50, window_size=5, threshold=150, vmaxfactor = 0.8):
+def visualize_results(image_array, grid_positions, margin=50, window_size=5, threshold=150, vmaxfactor=0.8, index_labels=False):
     # Get bounding box around detected points
     y_vals, x_vals = zip(*grid_positions.values())  # Extract y and x coordinates
     min_y, max_y = min(y_vals), max(y_vals)
@@ -149,7 +151,8 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
     half_size = window_size // 2
     for (i, j), (y, x) in grid_positions.items():
         # Draw grid label
-        ax[1].text(x+5, y, f"({i},{j})", color='white', fontsize=12, weight='bold')
+        if index_labels:
+            ax[1].text(x+5, y, f"({i},{j})", color='white', fontsize=12, weight='bold')
 
         # Draw a 5x5 square centered on (x, y)
         rect0 = patches.Rectangle((x - half_size, y - half_size), window_size, window_size,
@@ -160,22 +163,35 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
         ax[2].add_patch(rect1)
     plt.show()
 
-def detect_loading_threshold(photon_rates):
-    photon_rates = np.array(photon_rates)
-    entries, bin_edges = np.histogram(photon_rates.ravel(), bins=30, range=(photon_rates.min(),photon_rates.max()))
-    entries = entries/sum(entries)
-    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
-    
-    bg_gauss_fit = lambda x, a, b, c: a*np.exp(-(x-b)**2 / (2*c**2))
-    params, _ = curve_fit(bg_gauss_fit, bin_centers, entries, p0=[0.2, bin_centers[0]*1.05, bin_centers[0]*0.1])
+def detect_loading_threshold(counts):
+    counts_2d = counts.reshape(-1, 1)
+    # Initialize and fit the GMM for 2 components
+    gmm = GaussianMixture(n_components=2, covariance_type='spherical')
+    gmm.fit(counts_2d)
 
-    xx = np.linspace(bin_centers[0], bin_centers[-1], 1000)
-    yy = bg_gauss_fit(xx, *params)
+    # Extract the fitted parameters
+    means = gmm.means_.flatten()
+    variances = gmm.covariances_.flatten()
+    weights = gmm.weights_.flatten() # We need these for accurate plotting!
 
-    A, mu, sigma = params
-    loading_threshold = mu + 4*sigma
+    # Identify which mean is the background and which is the signal
+    bg_idx = np.argmin(means)
+    sig_idx = np.argmax(means)
+
+    mu_bg, var_bg = means[bg_idx], variances[bg_idx]
+    mu_sig, var_sig = means[sig_idx], variances[sig_idx]
+    weight_bg, weight_sig = weights[bg_idx], weights[sig_idx]
+
+    # Calculate the intersection point of the two Gaussians (the threshold)
+    a = 1/(2*var_bg) - 1/(2*var_sig)
+    b = mu_sig/var_sig - mu_bg/var_bg
+    c = mu_bg**2 / (2*var_bg) - mu_sig**2 / (2*var_sig) - np.log(np.sqrt(var_sig/var_bg))
+
+    # The quadratic formula yields two roots; we want the one between the means
+    roots = np.roots([a, b, c])
+    threshold = [r for r in roots if mu_bg < r < mu_sig][0]
     
-    return loading_threshold
+    return threshold, [mu_bg, var_bg, weight_bg], [mu_sig, var_sig, weight_sig]
 
 def detect_trap_sites_general(img_array, atom_number, detection_step=100):
     print('Looking for trap sites...')
@@ -762,44 +778,65 @@ class TweezerExperimentAnalysis:
                 ax[1].grid()
         return img_average
     
-    def get_array_loading_probability(self, images, grid_positions, grid_shape, threshold=6.85, window_size=5, binning=20, show_histogram=True):
+    def get_array_loading_probability(self, images, grid_positions, grid_shape, threshold=6.85, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True):
         n_row, n_col = grid_shape
         a500 = 0.00483372
         b500 = 1828.38
         c500 = 13
-        photon_rates, count_rates, atom_counter = [], [], np.zeros(grid_shape)
+
+        photon_rates, count_rates = [], []
         for image in images:
-            counts = sum_pixel_values(image, grid_positions, [n_row, n_col], window_size=window_size)
+            counts = sum_pixel_values(image, grid_positions, grid_shape, window_size=window_size)
             electrons = (counts - b500) * a500
             photons = electrons/0.7
             photon_rate = (photons/80e-3)/1000
             photon_rates.append(photon_rate)
             count_rates.append(photon_rate*0.7)
 
-        if threshold == 0:
-            threshold = detect_loading_threshold(photon_rates)
-
-        for photon_rate in photon_rates:
-            atoms = np.zeros_like(photon_rate)
-            atoms[photon_rate > threshold] = 1
-            atom_counter += atoms
+        photon_rates = np.array(photon_rates)
+        if threshold_detection:
+            threshold, bg_params, sig_params = detect_loading_threshold(photon_rates.flatten())
+            mu_bg, var_bg, weight_bg  = bg_params
+            mu_sig, var_sig, weight_sig = sig_params
             
+        atom_counter = (photon_rates > threshold).astype(int).sum(axis=0)
         loading_probabilities = atom_counter / len(images)
+        tot_photon_rates = photon_rates.flatten()
+
         if show_histogram:
-            fig, ax = plt.subplots(1, 3, figsize = (21,5))
+            fig, ax = plt.subplots(1, 3, figsize = (16,5), constrained_layout=True)
+
             for n in range(n_row):
                 for m in range(n_col):
-                    ax[0].hist(np.array(photon_rates)[:, n, m], bins=binning, alpha=0.6)
+                    ax[0].hist(photon_rates[:, n, m], bins=30, alpha=0.6)
                     ax[0].set_xlabel('Photon Rate / kHz')
                     ax[0].set_ylabel('Measurements')
-                    print(f'Trap ({n}, {m}) Loading Probability : {loading_probabilities[n, m]*100} %')
-            ax[1].hist(np.array(photon_rates).ravel(), bins=binning, alpha=0.8)
-            # Plot a vertical dashed line at the threshold
-            ax[1].axvline(x=threshold, color='red', linestyle='--')
+                    if verbose:
+                        print(f'Trap ({n}, {m}) Loading Probability : {loading_probabilities[n, m]*100:.2f} %')
+
+            if threshold_detection:
+                x_fit = np.linspace(min(tot_photon_rates), max(tot_photon_rates), 1000)
+                pdf_bg = weight_bg * norm.pdf(x_fit, mu_bg, np.sqrt(var_bg))
+                pdf_sig = weight_sig * norm.pdf(x_fit, mu_sig, np.sqrt(var_sig))
+                ax[1].plot(x_fit, pdf_bg + pdf_sig, 'k-', lw=2,)
+                ax[1].plot(x_fit, pdf_bg, 'b--', lw=2, label=f'Background Fit ($\mu$={mu_bg:.1f})')
+                ax[1].plot(x_fit, pdf_sig, 'r--', lw=2, label=f'Signal Fit ($\mu$={mu_sig:.1f})')
+
+            ax[1].hist(tot_photon_rates, bins=binning, density=True, alpha=0.5, color='gray', edgecolor='black', label='Raw Data')
+            ax[1].axvline(x=threshold, color='green', linestyle='--', lw=2, label=f'Threshold ({threshold:.1f} kHz)')
             ax[1].set_xlabel('Photon Rate / kHz')
-            ax[1].set_ylabel('Measurements')
+            ax[1].set_ylabel('Probability Density')
+            ax[1].legend()
+            
             cax = ax[2].matshow(loading_probabilities, cmap='viridis', vmin=0.3)
             fig.colorbar(cax, ax=ax[2])
+
+        if verbose:
+            print(f"\nDetermined Loading Threshold: {threshold:.2f} kHz")
+            print(f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean()*100:.2f} %")
+            print(f"Mean Loading Probability: {loading_probabilities.mean()*100:.2f} %")
+            
+
         return photon_rates, loading_probabilities, threshold
     
     def get_array_loading_probability_general(self, images, grid_positions, threshold=6.85, window_size=5, binning=20):
