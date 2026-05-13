@@ -138,8 +138,8 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
 
     # Crop the image
     cropped_image = image_array[y1:y2, x1:x2]
-    cropped_bin_image = (image_array - image_array.min()) / (image_array.max() - image_array.min())  
-    threshold_bin = (threshold - image_array.min()) / (image_array.max() - image_array.min())
+    cropped_bin_image = (cropped_image - cropped_image.min()) / (cropped_image.max() - cropped_image.min())  
+    threshold_bin = (threshold - cropped_image.min()) / (cropped_image.max() - cropped_image.min())
 
     # Apply a sigmoid function to binarize the image, change parameters to adjust the threshold and sharpness of the sigmoid
     sigmoid = lambda x, a, b: 1 / (1 + np.exp(-a * (x - b)))
