@@ -9,7 +9,7 @@ import sys
 import zmq
 from pytweezer.servers.configreader import ConfigReader
 from pytweezer.experiment.motmaster_interface import MotMasterInterface
-from pycaf.experiment import Experiment
+# from pycaf.experiment import Experiment
 
 # config directory local to the package.
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
@@ -68,7 +68,7 @@ class DummyMotMasterInterface(MotMasterInterface):
 class MotMasterCommandServer:
     def __init__(
         self,
-        interface: Experiment,
+        interface: MotMasterInterface,
         host: str = "localhost",
         port: int = 5557,
         context: Optional[zmq.Context] = None,
@@ -315,7 +315,7 @@ def run_motmaster_command_server(
     if simulate:
         interface = DummyMotMasterInterface(interval=interval)
     else:
-        interface = Experiment(config_file, interval=interval)
+        interface = MotMasterInterface(config_file, interval=interval)
     interface.connect()
     if (not simulate) and interface.motmaster is None:
         raise RuntimeError("Failed to connect to MotMaster.")
