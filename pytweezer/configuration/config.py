@@ -9,7 +9,7 @@ HOSTS = {
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-SIMULATING = False
+SIMULATING = True
 LOCAL = False
 SERVER_HOST = HOSTS["beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
@@ -142,6 +142,10 @@ CONFIG = {
         "StreamMonitor": {
             "active": False,
             "script": "../pytweezer/GUI/streammonitor.py"
+        },
+        "Applet Launcher": {
+            "active": False,
+            "script": "../pytweezer/GUI/applet_launcher.py"
         },
         "H5 Manager": {
             "active": False,

@@ -10,8 +10,7 @@ packages = [
 ]
 
 [tool.poetry.scripts]
-pytweezer-controller = "bin.process_manager:main"
-pytweezer-dashboard = "bin.dashboard:main"
+pytweezer-run = "bin.process_manager:main"
 
 [tool.poetry.dependencies]
 python = "^3.11.4, <3.14"

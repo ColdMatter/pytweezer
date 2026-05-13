@@ -16,7 +16,7 @@ from pytweezer.servers.model_sync import SyncedScheduleModel
 from pytweezer.servers.properties import Properties
 
 
-logger = get_logger(__name__)
+logger = get_logger('pytweezer')
 
 
 class QueueThread(QThread):

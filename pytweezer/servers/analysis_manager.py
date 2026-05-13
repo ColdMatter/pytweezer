@@ -11,6 +11,9 @@ from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import Properties, tweezerpath, zmqcontext
 from pytweezer.servers.configreader import ConfigReader
 
+from pytweezer.logging_utils import get_logger
+logger = get_logger("pytweezer.servers.analysis_manager")
+
 
 class AnalysisManagerService:
     """Standalone analysis process manager controlled over TCP (REQ/REP)."""
@@ -202,17 +205,13 @@ class AnalysisManagerService:
                 pass
 
     def serve_forever(self) -> None:
-        print_error(
-            f"Analysis manager service listening on {self.rep_endpoint}",
-            "info",
-        )
         while self._running:
             try:
                 request = self.socket.recv_json()
             except zmq.Again:
                 continue
             except Exception as error:
-                print_error(f"analysis_manager recv error: {error}", "warning")
+                logger.warning(f"analysis_manager recv error: {error}")
                 continue
 
             try:
