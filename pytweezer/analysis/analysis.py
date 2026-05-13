@@ -124,7 +124,7 @@ def sum_pixel_values(image_array, grid_positions, grid_shape, window_size=10):
     return pixel_sums
 
 # Function to visualize results with cropping and zooming
-def visualize_results(image_array, grid_positions, margin=50, window_size=5, threshold=150, vmaxfactor=0.8, index_labels=False):
+def visualize_results(image_array, grid_positions, margin=50, window_size=5, threshold=150, vmaxfactor=0.8, index_labels=False, bin_sharpness=20, bin_thresh_factor=0.8):
     # Get bounding box around detected points
     y_vals, x_vals = zip(*grid_positions.values())  # Extract y and x coordinates
     min_y, max_y = min(y_vals), max(y_vals)
@@ -138,14 +138,19 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
 
     # Crop the image
     cropped_image = image_array[y1:y2, x1:x2]
-    cropped_bin_image = (cropped_image > threshold)
+    cropped_bin_image = (image_array - image_array.min()) / (image_array.max() - image_array.min())  
+    threshold_bin = (threshold - image_array.min()) / (image_array.max() - image_array.min())
+
+    # Apply a sigmoid function to binarize the image, change parameters to adjust the threshold and sharpness of the sigmoid
+    sigmoid = lambda x, a, b: 1 / (1 + np.exp(-a * (x - b)))
+    img_bin_sigmoid = sigmoid(cropped_bin_image, bin_sharpness, bin_thresh_factor*threshold_bin)
 
     # Adjust positions of grid labels for cropped view
     fig, ax = plt.subplots(1, 3, figsize=(18, 6))
     ax[0].imshow(cropped_image, cmap="gray", extent=[x1, x2, y2, y1], vmax=vmaxfactor*cropped_image.max())
     ax[0].grid(False)
     ax[1].imshow(cropped_image, cmap="gray", extent=[x1, x2, y2, y1], vmax=vmaxfactor*cropped_image.max())  # Use extent to maintain coordinates
-    ax[2].imshow(cropped_bin_image, cmap='viridis', extent=[x1, x2, y2, y1])
+    ax[2].imshow(img_bin_sigmoid, cmap='hot', extent=[x1, x2, y2, y1])
 
     # Draw 5x5 squares and labels
     half_size = window_size // 2
@@ -160,7 +165,6 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
         rect1 = patches.Rectangle((x - half_size, y - half_size), window_size, window_size,
                                  linewidth=1, edgecolor='red', facecolor='none')
         ax[1].add_patch(rect0)
-        ax[2].add_patch(rect1)
     plt.show()
 
 def detect_loading_threshold(counts):
