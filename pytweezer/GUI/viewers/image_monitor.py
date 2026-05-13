@@ -5,7 +5,6 @@ import os
 import time
 import logging
 from PyQt5 import QtWidgets
-from requests import head
 import zmq
 import numpy as np
 from imageio import imwrite
@@ -58,6 +57,7 @@ class ImageDisplay(QWidget):
         self.name = name
         self.imDataDict = {}
         self.imgresolution = [1, 1]
+        self.image_index = -1
         super().__init__(parent)
         btn = QPushButton("SaveImage")
         layout = QVBoxLayout()
@@ -79,28 +79,24 @@ class ImageDisplay(QWidget):
 
         colors = np.array(plt.cm.magma.colors) * 255
         print(self.name)
-        if (
-            self._invert_colors
-            or "Radial_Li_abs" in self.name
-            or "Vertical_Li_abs" in self.name
-        ):
+        if self._invert_colors:
             colors = colors[::-1]
 
         cmap = pg.ColorMap(pos=np.linspace(0.0, 1.0, len(colors)), color=colors)
-        win = pg.GraphicsLayoutWidget()
-        plot = win.addPlot()
+        graphics_layout_widget = pg.GraphicsLayoutWidget()
+        plot: pg.PlotItem = graphics_layout_widget.addPlot()
         plot.setLabel("left", text="y", units="m")
         plot.setLabel("bottom", text="x", units="m")
-        ii = pg.ImageItem(imgdata)
-        self.image_item = ii
+        image_item = pg.ImageItem(imgdata)
+        self.image_item = image_item
         # add a LUT to the image display
         lut = pg.HistogramLUTItem()
-        lut.setImageItem(ii)
-        win.addItem(lut)
-        ii.setRect(PyQt5.QtCore.QRect(0, 0, imgdata.shape[1], imgdata.shape[0]))
-        ii.setLookupTable(cmap.getLookupTable())
+        lut.setImageItem(image_item)
+        graphics_layout_widget.addItem(lut)
+        image_item.setRect(PyQt5.QtCore.QRect(0, 0, imgdata.shape[1], imgdata.shape[0]))
+        image_item.setLookupTable(cmap.getLookupTable())
         print(cmap.getLookupTable())
-        plot.addItem(ii)
+        plot.addItem(image_item)
         self.plot = plot
 
         # add Image mask
@@ -116,24 +112,29 @@ class ImageDisplay(QWidget):
             plot.addItem(roi)
         # \plot.hideAxis('left')
         # plot.hideAxis('bottom')
-        layout.addWidget(win)
+        layout.addWidget(graphics_layout_widget)
 
         self.setLayout(layout)
         # self.show()
-        vb = plot.getViewBox()
+        view_box = plot.getViewBox()
         # we want to keep the aspect ratio correct when plotting images
-        vb.setAspectLocked(True)
-        subscribe_menu = vb.menu.addAction("subscriptions")
+        view_box.setAspectLocked(True)
+        subscribe_menu = view_box.menu.addAction("subscriptions")
         subscribe_menu.triggered.connect(self.subscribe_window)
-        subscribe_menu = vb.menu.addAction("Image masks")
+        subscribe_menu = view_box.menu.addAction("Image masks")
         subscribe_menu.triggered.connect(self.subscribe_mask)
-        subscribe_menu = vb.menu.addAction("configure")
+        subscribe_menu = view_box.menu.addAction("configure")
         subscribe_menu.triggered.connect(self.configureWindow)
+        # add a context menu item with a scroll wheel to select the index of the image to display when multiple images are being streamed
+        index_menu = view_box.menu.addAction("Image Index")
+        index_menu.triggered.connect(self.index_selector)
 
         timer = QtCore.QTimer(self)
         timer.timeout.connect(self.update_image)
         timer.start(10)
         self.timer = timer
+        
+        
 
     def sizeHint(self):
         return QtCore.QSize(800, 700)
@@ -142,6 +143,8 @@ class ImageDisplay(QWidget):
         if self.imgstream.has_new_data():
             while self.imgstream.has_new_data():
                 msg, head, imgdata = self.imgstream.recv()
+                if self.image_index != -1 and head["index"] != self.image_index:
+                    continue
                 self.image_item.setImage(
                     imgdata, autoLevels=True
                 )
@@ -226,6 +229,22 @@ class ImageDisplay(QWidget):
         layout.addWidget(editor)
         d.setLayout(layout)
         d.exec_()
+        
+    
+    def index_selector(self):
+        d = QDialog()
+        layout = QVBoxLayout()
+        d.setWindowTitle("Select Image Index")
+        index_selector = QSpinBox()
+        index_selector.setMinimum(-1)
+        index_selector.setValue(self.image_index)
+        layout.addWidget(index_selector)
+        d.setLayout(layout)
+        index_selector.valueChanged.connect(self.update_image_index)
+        d.exec_()
+        
+    def update_image_index(self, value):
+        self.image_index = value
 
 
 def main(name):

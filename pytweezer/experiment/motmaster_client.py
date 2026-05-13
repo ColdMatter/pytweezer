@@ -15,8 +15,8 @@ class MotMasterClient:
 		try:
 			cr = ConfigReader.getConfiguration()
 			name = f"{system} MotMaster Server"
-			self.host = cr["Servers"][name]["host"]
-			self.port = cr["Servers"][name]["port"]
+			self.host = cr["Devices"][name]["host"]
+			self.port = cr["Devices"][name]["port"]
 		except KeyError as error:
 			raise ValueError(f"Configuration for '{system} MotMaster Server' not found")
 

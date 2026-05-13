@@ -4,12 +4,11 @@ import subprocess
 
 from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import icon_path
+from pytweezer.logging_utils import get_logger
+logger = get_logger("pytweezer.GUI.process_tile_base")
 
-
-class BaseProcessTile(QFrame):
+class ProcessTile(QFrame):
     """Shared process tile with start/stop controls and status polling."""
-
-    LOG_SOURCE = "process-tile"
 
     def __init__(self, script='', name='', active=False, category='', parent=None, tooltip=None):
         self.process = None
@@ -57,15 +56,14 @@ class BaseProcessTile(QFrame):
         print('__del__', self.processname)
         self.killProcess()
 
-    def _log_source(self):
-        return getattr(self, 'LOG_SOURCE', 'process-tile')
 
     def startProcess(self):
         self.terminateProcess()
-        print_error(
-            f"{self._log_source()} - startProcess(): Starting {self.processname}.",
-            'bold',
-        )
+        # print_error(
+        #     f"startProcess(): Starting {self.processname}.",
+        #     'bold',
+        # )
+        logger.info(f"Starting process {self.processname} with script {self.script}")
         self.process = subprocess.Popen(['python3', self.script, self.category + self.processname])
 
     def terminateProcess(self):
@@ -74,29 +72,37 @@ class BaseProcessTile(QFrame):
             try:
                 self.process.wait(timeout=1)
             except Exception as error:
-                print_error(
-                    f"process termination failed killing process {self.processname}",
-                    'error',
-                )
-                print(error)
+                # print_error(
+                #     f"process termination failed killing process {self.processname}",
+                #     'error',
+                # )
+                logger.error(f"process termination failed killing process {self.processname}")
+                # logger.error(error)
                 self.process.kill()
             if self.process.poll() is not None:
-                self.startButton.setStyleSheet("color: gray")
+                self._set_start_button_style("color: gray")
                 self.process = None
 
     def killProcess(self):
         if self.process is not None:
-            print('killing', self.processname)
+            logger.info(f"Killing process {self.processname}")
             self.process.kill()
             if self.process.poll() is not None:
-                self.startButton.setStyleSheet("color: gray")
+                self._set_start_button_style("color: gray")
                 self.process = None
 
     def updateStatus(self):
         if self.process is not None:
             if self.process.poll() is None:
-                self.startButton.setStyleSheet("color: blue")
+                self._set_start_button_style("color: blue")
             else:
-                self.startButton.setStyleSheet("color: red")
+                self._set_start_button_style("color: red")
         else:
-            self.startButton.setStyleSheet("color: gray")
+            self._set_start_button_style("color: gray")
+
+    def _set_start_button_style(self, style):
+        try:
+            self.startButton.setStyleSheet(style)
+        except RuntimeError:
+            # QWidget may already be deleted during teardown.
+            pass

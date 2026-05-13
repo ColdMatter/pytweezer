@@ -6,6 +6,9 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QKeyEvent
 from pytweezer.analysis.print_messages import print_error
 
+from pytweezer.logging_utils import get_logger
+logger = get_logger("pytweezer.GUI.pytweezerQt")
+
 
 class BWidget(QWidget):
     """ base class of pytweezer Widgets
@@ -20,7 +23,7 @@ class BWidget(QWidget):
         try:
             self.restoreGeometry(settings.value("geometry"))
         except:
-            print_error('geometry not found', 'warning')
+            logger.info(f'geometry not found for {name}, using default geometry')
 
     def closeEvent(self,event):
         settings=QtCore.QSettings("pytweezer", self._name)
@@ -41,7 +44,7 @@ class BFrame(QFrame):
             #print(settings.value('geometry'))
             self.restoreGeometry(settings.value("geometry"))
         except:
-            print_error('geometry not found', 'warning')
+            logger.info(f'geometry not found for {name}, using default geometry')
 
     def closeEvent(self,event):
         settings=QtCore.QSettings("pytweezer", self._name)
@@ -58,7 +61,7 @@ class BMainWindow(QMainWindow):
         try:
             self.restoreGeometry(settings.value("geometry"))
         except:
-            print_error('geometry not found', 'warning')
+            logger.info(f'geometry not found for {name}, using default geometry')
         self.setWindowTitle(name)
 
     def closeEvent(self,event):

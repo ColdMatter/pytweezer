@@ -1,10 +1,11 @@
+import logging
+import time
+
+import zmq
+
+from pytweezer.logging_utils import get_logger
 from pytweezer.servers.clients import GenericClient
 from pytweezer.servers.configreader import ConfigReader
-from pytweezer.servers import zmqcontext
-import zmq
-import time
-import inspect
-import os
 
 class MessageClient(GenericClient):
     ''' Standardized way of sending messages over the message stream
@@ -23,15 +24,14 @@ class MessageClient(GenericClient):
         host = c['host']
         pub_port = c['pub_port']
         sub_port = c['sub_port']
-        imgpub = f"tcp://{host}:{pub_port}"
-        imgsub = f"tcp://{host}:{sub_port}"
-        #print(imgpub)
-        self.pub_socket.connect(imgpub)
-        self.sub_socket.connect(imgsub)
+        publish_endpoint = f"tcp://{host}:{sub_port}"
+        subscribe_endpoint = f"tcp://{host}:{pub_port}"
+        self.pub_socket.connect(publish_endpoint)
+        self.sub_socket.connect(subscribe_endpoint)
 
 
     #beware packets might be lost when send via pub and connection is not establishedgtgt
-    def send(self,channel='info',message='', flags=0):    
+    def send(self,channel='info',message='', flags=0):
             ''' distribute over ZMQ
 
             Args:
@@ -42,6 +42,11 @@ class MessageClient(GenericClient):
             '''
             self.pub_socket.send_string(channel+': '+message,flags)
 
+    def send_json(self, channel, payload, flags=0):
+            """Publish a topic plus structured JSON payload."""
+            self.pub_socket.send_string(channel, flags | zmq.SNDMORE)
+            return self.pub_socket.send_json(payload, flags)
+
 
     def recv(self, flags=0,copy=True,track=False):
             """recv a dictionary (and a numpy array)
@@ -51,11 +56,11 @@ class MessageClient(GenericClient):
             """
             try:
                 message = self.sub_socket.recv_string(flags=flags)
-                return message,{}
-
-
+                if self.sub_socket.getsockopt(zmq.RCVMORE):
+                    payload = self.sub_socket.recv_json(flags=flags)
+                    return message, payload
+                return message, {}
             except zmq.ZMQError as e:
-                print('error')
                 if e.errno == zmq.EAGAIN:
                     return None
                 else:
@@ -68,6 +73,12 @@ class MessageClient(GenericClient):
         return self.sub_socket.poll(1)==zmq.POLLIN
 
 _message_client = None
+_LEVELS = {
+    "error": logging.ERROR,
+    "warning": logging.WARNING,
+    "info": logging.INFO,
+    "debug": logging.DEBUG,
+}
 
 
 def _get_default_client_name():
@@ -90,11 +101,13 @@ def get_message_client(name=None):
 
 
 
-def send_msg(msg,errlevel):
-    frame = inspect.stack()[1]
-    module = inspect.getmodule(frame[0])
-    filename = os.path.basename(module.__file__) if module and hasattr(module, '__file__') else '<interactive>'
-    get_message_client().send(errlevel,filename+' '+msg)
+def send_msg(msg, errlevel):
+    logger = get_logger("pytweezer")
+    level = _LEVELS.get(str(errlevel).lower())
+    if level is None:
+        logger.error("messageclient.py: %s is no valid key! Message = %s", errlevel, msg)
+        return
+    logger.log(level, str(msg), stacklevel=2)
 
 #Convenience functions
 #----------------------------
