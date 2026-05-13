@@ -157,7 +157,7 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
     for (i, j), (y, x) in grid_positions.items():
         # Draw grid label
         if index_labels:
-            ax[1].text(x+5, y, f"({i},{j})", color='white', fontsize=12, weight='bold')
+            ax[1].text(x+5, y, f"({i},{j})", color='white', fontsize=6, weight='bold')
 
         # Draw a 5x5 square centered on (x, y)
         rect0 = patches.Rectangle((x - half_size, y - half_size), window_size, window_size,
