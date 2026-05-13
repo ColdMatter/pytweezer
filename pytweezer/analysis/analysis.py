@@ -782,7 +782,7 @@ class TweezerExperimentAnalysis:
                 ax[1].grid()
         return img_average
     
-    def get_array_loading_probability(self, images, grid_positions, grid_shape, threshold=6.85, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True):
+    def get_array_loading_statistics(self, images, grid_positions, grid_shape, threshold=6.85, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True):
         n_row, n_col = grid_shape
         a500 = 0.00483372
         b500 = 1828.38
@@ -798,15 +798,27 @@ class TweezerExperimentAnalysis:
             count_rates.append(photon_rate*0.7)
 
         photon_rates = np.array(photon_rates)
+        tot_photon_rates = photon_rates.flatten()
+
         if threshold_detection:
-            threshold, bg_params, sig_params = detect_loading_threshold(photon_rates.flatten())
+            threshold, bg_params, sig_params = detect_loading_threshold(tot_photon_rates)
             mu_bg, var_bg, weight_bg  = bg_params
             mu_sig, var_sig, weight_sig = sig_params
             
+        else:
+            mu_bg = tot_photon_rates[tot_photon_rates < threshold].mean()
+            mu_sig = tot_photon_rates[tot_photon_rates >= threshold].mean()
+            var_bg = tot_photon_rates[tot_photon_rates < threshold].var()
+            var_sig = tot_photon_rates[tot_photon_rates >= threshold].var()
+
+        prob_false_negative = norm.cdf(threshold, loc=mu_sig, scale=np.sqrt(var_sig))
+        prob_false_positive = 1.0 - norm.cdf(threshold, loc=mu_bg, scale=np.sqrt(var_bg))
+        total_error = (weight_bg * prob_false_positive) + (weight_sig * prob_false_negative)
+        fidelity = 1.0 - total_error
+            
         atom_counter = (photon_rates > threshold).astype(int).sum(axis=0)
         loading_probabilities = atom_counter / len(images)
-        tot_photon_rates = photon_rates.flatten()
-
+        
         if show_histogram:
             fig, ax = plt.subplots(1, 3, figsize = (16,5), constrained_layout=True)
 
@@ -839,7 +851,7 @@ class TweezerExperimentAnalysis:
             print(f"\nDetermined Loading Threshold: {threshold:.2f} kHz")
             print(f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean()*100:.2f} %")
             print(f"Mean Loading Probability: {loading_probabilities.mean()*100:.2f} %")
-            
+            print(f"Detection Fidelity: {fidelity*100:.2f} %")
 
         return photon_rates, loading_probabilities, threshold
     
