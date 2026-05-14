@@ -90,7 +90,13 @@ class DeviceManager(ProcessManager):
         super().__init__(name)
         
     def check_host(self, host_addr):
-        return host_addr == self.host_addr 
+        """
+        make the comparison case-insensitive and ignore whitespace, to be more robust to formatting issues in the config file
+        """
+        if host_addr is None:
+            return False
+        host_addr = host_addr.strip().lower()
+        return host_addr == self.host_addr.strip().lower()
     
 class Dashboard(ProcessManager):
     categories = ["GUI", "Viewer"]
