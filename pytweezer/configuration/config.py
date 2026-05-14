@@ -10,7 +10,7 @@ port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
 SIMULATING = False
-LOCAL = False
+LOCAL = True
 SERVER_HOST = HOSTS["ph-beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
 

@@ -64,7 +64,7 @@ class ProcessTile(QFrame):
         #     'bold',
         # )
         logger.info(f"Starting process {self.processname} with script {self.script}")
-        self.process = subprocess.Popen(['python3', self.script, self.category + self.processname])
+        self.process = subprocess.Popen(['python3', self.script, self.processname])
 
     def terminateProcess(self):
         if self.process is not None:

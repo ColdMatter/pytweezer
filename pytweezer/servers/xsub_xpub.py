@@ -96,7 +96,6 @@ def _terminate_stale_instances(instance_name: str, grace_s: float = 1.5) -> None
 
 def run_server(name, pubbinding_override=None, subbinding_override=None, kill_stale=True):
     conf = ConfigReader.getConfiguration()
-    name = name.split('/')[-1]
     c = conf['Servers'][name]
     host = c['host']
     pub_port = c['pub_port']

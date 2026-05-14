@@ -9,7 +9,7 @@ import sys
 import zmq
 from pytweezer.servers.configreader import ConfigReader
 from pytweezer.experiment.motmaster_interface import MotMasterInterface
-from pycaf.experiment import Experiment
+# from pycaf.experiment import Experiment
 
 # config directory local to the package.
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
@@ -68,7 +68,7 @@ class DummyMotMasterInterface(MotMasterInterface):
 class MotMasterCommandServer:
     def __init__(
         self,
-        interface: Experiment,
+        interface: MotMasterInterface,
         host: str = "localhost",
         port: int = 5557,
         context: Optional[zmq.Context] = None,
@@ -315,7 +315,7 @@ def run_motmaster_command_server(
     if simulate:
         interface = DummyMotMasterInterface(interval=interval)
     else:
-        interface = Experiment(config_file, interval=interval)
+        interface = MotMasterInterface(config_file, interval=interval)
     interface.connect()
     if (not simulate) and interface.motmaster is None:
         raise RuntimeError("Failed to connect to MotMaster.")
@@ -331,10 +331,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--host",
-        default=None,
+        default="127.0.0.1",
         help="Host interface to bind (use 0.0.0.0 for remote clients)",
     )
-    parser.add_argument("--port", type=int, default=None, help="TCP port to bind")
+    parser.add_argument("--port", type=int, default=8888, help="TCP port to bind")
     parser.add_argument(
         "--simulate",
         action="store_true",
@@ -351,12 +351,18 @@ def main() -> None:
 
     from pytweezer.configuration.config import CONFIG
     from pytweezer.servers import tweezerpath
-
-    config_dict = CONFIG["Servers"][f"{args.name} MotMaster Server"]
-    host = args.host or config_dict.get("host")
-    port = args.port or config_dict.get("port")
-    simulate = args.simulate or config_dict.get("simulate", False)
-    interval = args.interval or config_dict.get("interval", 0.1)
+    
+    if args.name is not None:
+        config_dict = CONFIG["Devices"][args.name]
+        host = config_dict["host"]
+        port = config_dict["port"]
+        simulate = config_dict["simulate"]
+        interval = config_dict["interval"]
+    else:
+        host = args.host
+        port = args.port
+        simulate = args.simulate
+        interval = args.interval
     config_file = (
         tweezerpath + "/pytweezer/configuration/" + config_dict.get("config_file")
     )

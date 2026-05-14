@@ -318,14 +318,6 @@ def run_server(
     )
 
 
-def _resolve_server_name(token: str, conf: dict) -> str:
-    if isinstance(token, str) and token.startswith("Devices/"):
-        return token.split("/", 1)[1]
-    if isinstance(token, str) and token in conf.get("Devices", {}):
-        return token
-    return "ImagEM X2 Camera"
-
-
 def main():
     parser = argparse.ArgumentParser(description="ImagEM X2 sipyco RPC server launcher")
     parser.add_argument(
@@ -355,8 +347,8 @@ def main():
     
     if args.name is not None:
     
-        server_name = _resolve_server_name(args.name, conf)
-        server_conf = conf.get("Devices", {}).get(server_name, {})
+        server_name = args.name
+        server_conf = conf["Devices"][server_name]
         host = server_conf["host"]
         port = server_conf["port"]
         simulate = server_conf["simulate"]
