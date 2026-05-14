@@ -138,8 +138,8 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
 
     # Crop the image
     cropped_image = image_array[y1:y2, x1:x2]
-    cropped_bin_image = (cropped_image - cropped_image.min()) / (cropped_image.max() - cropped_image.min())  
-    threshold_bin = (threshold - cropped_image.min()) / (cropped_image.max() - cropped_image.min())
+    cropped_bin_image = (cropped_image - image_array.min()) / (image_array.max() - image_array.min())  
+    threshold_bin = (threshold - image_array.min()) / (image_array.max() - image_array.min())
 
     # Apply a sigmoid function to binarize the image, change parameters to adjust the threshold and sharpness of the sigmoid
     sigmoid = lambda x, a, b: 1 / (1 + np.exp(-a * (x - b)))
@@ -149,8 +149,11 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
     fig, ax = plt.subplots(1, 3, figsize=(18, 6))
     ax[0].imshow(cropped_image, cmap="gray", extent=[x1, x2, y2, y1], vmax=vmaxfactor*cropped_image.max())
     ax[0].grid(False)
+    ax[0].set_title("Raw Image")
     ax[1].imshow(cropped_image, cmap="gray", extent=[x1, x2, y2, y1], vmax=vmaxfactor*cropped_image.max())  # Use extent to maintain coordinates
+    ax[1].set_title("Trap Site Detection")
     ax[2].imshow(img_bin_sigmoid, cmap='hot', extent=[x1, x2, y2, y1])
+    ax[2].set_title("Binarized Image (Sigmoid)")
 
     # Draw 5x5 squares and labels
     half_size = window_size // 2
@@ -852,8 +855,10 @@ class TweezerExperimentAnalysis:
             print(f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean()*100:.2f} %")
             print(f"Mean Loading Probability: {loading_probabilities.mean()*100:.2f} %")
             print(f"Detection Fidelity: {fidelity*100:.2f} %")
+            print(f"Mean Background Photon Rate: {mu_bg:.2f} kHz, Variance: {var_bg:.2f} (kHz)^2")
+            print(f"Mean Signal Photon Rate: {mu_sig:.2f} kHz, Variance: {var_sig:.2f} (kHz)^2")
 
-        return photon_rates, loading_probabilities, threshold
+        return photon_rates, loading_probabilities, threshold, fidelity
     
     def get_array_loading_probability_general(self, images, grid_positions, threshold=6.85, window_size=5, binning=20):
         a500 = 0.00483372
