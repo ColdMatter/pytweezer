@@ -5,7 +5,7 @@ import subprocess
 from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import icon_path
 from pytweezer.logging_utils import get_logger
-logger = get_logger("pytweezer.GUI.process_tile_base")
+logger = get_logger("process_manager")
 
 class ProcessTile(QFrame):
     """Shared process tile with start/stop controls and status polling."""

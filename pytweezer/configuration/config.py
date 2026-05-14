@@ -135,10 +135,10 @@ CONFIG = {
         },
     },
     "GUI": {
-        "Browser": {
-            "active": True,
-            "script": "../pytweezer/GUI/tweezer_browser.py"
-        },
+        # "Browser": {
+        #     "active": True,
+        #     "script": "../pytweezer/GUI/tweezer_browser.py"
+        # },
         "StreamMonitor": {
             "active": False,
             "script": "../pytweezer/GUI/streammonitor.py"
@@ -147,31 +147,31 @@ CONFIG = {
             "active": False,
             "script": "../pytweezer/GUI/applet_launcher.py"
         },
-        "H5 Manager": {
-            "active": False,
-            "script": "../pytweezer/GUI/h5storage.py"
-        },
+        # "H5 Manager": {
+        #     "active": False,
+        #     "script": "../pytweezer/GUI/h5storage.py"
+        # },
         "Property_Editor": {
             "active": False,
             "script": "../pytweezer/GUI/property_editor.py"
         },
-        "Live Plot": {
-            "active": False,
-            "script": "../pytweezer/GUI/viewers/live_plot.py"
-        },
+        # "Live Plot": {
+        #     "active": False,
+        #     "script": "../pytweezer/GUI/viewers/live_plot.py"
+        # },
         "Analysis Manager UI": {
             "active": True,
             "script": "../pytweezer/GUI/analysismanager.py"
         }
     },
     "Viewer": {
-        "DummyViewer": {
-            "active": False,
-            "script": "../pytweezer/GUI/viewers/image_group.py"
-        },
-        "TweezerViewer": {
-            "active": True,
-            "script": "../pytweezer/GUI/viewers/tweezer_image_monitor.py"
-        }
+        # "DummyViewer": {
+        #     "active": False,
+        #     "script": "../pytweezer/GUI/viewers/image_group.py"
+        # },
+        # "TweezerViewer": {
+        #     "active": True,
+        #     "script": "../pytweezer/GUI/viewers/tweezer_image_monitor.py"
+        # }
     }
 }
