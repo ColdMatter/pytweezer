@@ -1511,7 +1511,7 @@ class OptimisationBasedPhasemaskGeneratorGPU3D:
         R2 = X**2 + Y**2
         return cp.exp(- R2 / (2*(self.w0_um/2.355)**2))
     
-    def generate_weighted_array(self, weights, spacing, init_phase_randomness=1.0):
+    def generate_weighted_array(self, weights, spacing, init_phase_randomness=1.0, angle_deg=0):
         """
         Generates a weighted mask indicating where the tweezers should be and
         how strong they should be.
@@ -1524,6 +1524,7 @@ class OptimisationBasedPhasemaskGeneratorGPU3D:
         ypos = np.linspace(-(yspan)/2, (yspan)/2, dim[0])
         Xpos, Ypos = np.meshgrid(xpos, ypos)
         Xn, Yn = Xpos.flatten(), Ypos.flatten()
+        Xn, Yn = rotate_coordinates(Xn, Yn, angle_deg)
         Zn = np.zeros_like(Xn) # For 3D extension, currently all traps are in the same focal plane (z=0)    
         Wn = weights.flatten()
         Thetan = np.random.rand(len(Wn)) * init_phase_randomness * 2 * np.pi
