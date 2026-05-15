@@ -16,6 +16,7 @@ from scipy.special import erf
 import datetime
 from sklearn.mixture import GaussianMixture
 from scipy.stats import norm
+from scipy.ndimage import gaussian_filter, white_tophat
 
 cloudpath = "C:\\Users\\tweez\\OneDrive - Imperial College London\\"
 tweezer_img_source_dir = "C:\\Users\\tweez\\OneDrive - Imperial College London\\caftweezers\\HamCamImages\\"
@@ -288,6 +289,27 @@ def maxwell_boltzmann_cdf(P, Amp, Pc, P_offset):
     term2 = (2.0 / np.sqrt(np.pi)) * sqrt_ratio * np.exp(-ratio)
     
     return Amp * (term1 - term2)
+
+def gaussian_high_pass(image, sigma_blur):
+    """
+    Standard linear high-pass filter.
+    Subtracts a Gaussian-blurred version of the image from itself.
+    """
+    # Create the low-pass background
+    low_pass = gaussian_filter(image, sigma=sigma_blur)
+    
+    # Subtract to get the high-pass, clipping at 0 to prevent negative counts
+    high_pass = image - low_pass
+    return np.clip(high_pass, 0, None)
+
+def morphological_tophat_high_pass(image, feature_size):
+    """
+    Non-linear high-pass filter (Recommended for Tweezer Arrays).
+    Extracts bright features smaller than the feature_size.
+    """
+    # white_tophat requires a footprint (kernel size). 
+    # This should be larger than your atom spot, but smaller than the background glow.
+    return white_tophat(image, size=feature_size)
 
 
 ########################################################################################################################################################################################
@@ -807,17 +829,17 @@ class TweezerExperimentAnalysis:
             threshold, bg_params, sig_params = detect_loading_threshold(tot_photon_rates)
             mu_bg, var_bg, weight_bg  = bg_params
             mu_sig, var_sig, weight_sig = sig_params
+            prob_false_negative = norm.cdf(threshold, loc=mu_sig, scale=np.sqrt(var_sig))
+            prob_false_positive = 1.0 - norm.cdf(threshold, loc=mu_bg, scale=np.sqrt(var_bg))
+            total_error = (weight_bg * prob_false_positive) + (weight_sig * prob_false_negative)
+            fidelity = 1.0 - total_error
             
         else:
             mu_bg = tot_photon_rates[tot_photon_rates < threshold].mean()
             mu_sig = tot_photon_rates[tot_photon_rates >= threshold].mean()
             var_bg = tot_photon_rates[tot_photon_rates < threshold].var()
             var_sig = tot_photon_rates[tot_photon_rates >= threshold].var()
-
-        prob_false_negative = norm.cdf(threshold, loc=mu_sig, scale=np.sqrt(var_sig))
-        prob_false_positive = 1.0 - norm.cdf(threshold, loc=mu_bg, scale=np.sqrt(var_bg))
-        total_error = (weight_bg * prob_false_positive) + (weight_sig * prob_false_negative)
-        fidelity = 1.0 - total_error
+            fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg)))
             
         atom_counter = (photon_rates > threshold).astype(int).sum(axis=0)
         loading_probabilities = atom_counter / len(images)

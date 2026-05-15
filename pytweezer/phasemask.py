@@ -475,6 +475,16 @@ def get_zernike_polynomial(noll_index, rho, theta, mask):
         
     return Z * mask
 
+def rotate_positions(x_n, y_n, angle_degrees):
+    angle_radians = np.radians(angle_degrees)
+    cos_angle = np.cos(angle_radians)
+    sin_angle = np.sin(angle_radians)
+    
+    x_rotated = cos_angle * x_n - sin_angle * y_n
+    y_rotated = sin_angle * x_n + cos_angle * y_n
+    
+    return x_rotated, y_rotated
+
 
 class OptimisationBasedPhasemaskGenerator:
     def __init__(self,
@@ -514,7 +524,7 @@ class OptimisationBasedPhasemaskGenerator:
         R2 = X**2 + Y**2
         return np.exp(- R2 / (2*(self.w0_um/2.355)**2))
     
-    def generate_weighted_array(self, weights, spacing, init_phase_randomness=1.0):
+    def generate_weighted_array(self, weights, spacing, init_phase_randomness=1.0, angle_deg=0):
         """
         Generates a weighted mask indicating where the tweezers should be and
         how strong they should be.
@@ -529,6 +539,10 @@ class OptimisationBasedPhasemaskGenerator:
         Xn, Yn = Xpos.flatten(), Ypos.flatten()
         Wn = weights.flatten()
         Thetan = np.random.rand(len(Wn)) * init_phase_randomness * 2 * np.pi
+
+        # Rotate the positions if an angle is specified
+        if angle_deg != 0:
+            Xn, Yn = rotate_positions(Xn, Yn, angle_deg)
 
         print(f"--- Target Generation ---")
         print(f"Grid: {dim[0]}x{dim[1]}")
