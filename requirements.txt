@@ -1,0 +1,39 @@
+# Lock-derived direct dependencies for creating a local venv without Poetry.
+# Generated from pyproject.toml and poetry.lock.
+# Some hardware/GPU packages may still require matching system support.
+
+pandas==2.2.2
+scipy==1.17.1
+matplotlib==3.8.4
+pylablib==1.4.3
+rich==13.9.4
+paramiko==3.4.1
+tifffile==2026.3.3
+pillow==12.2.0
+pyzmq==27.1.0
+#PyQt5>=5.15.11
+#PyQt5-Qt5==5.15.2
+ipykernel==6.28.0
+ipywidgets==8.1.5
+tqdm==4.67.3
+h5py==3.16.0
+#cupy-cuda13x==14.0.1
+lap==0.5.13
+termcolor==3.3.0
+qscintilla==2.14.1
+pyperclip==1.11.0
+uncertainties==3.2.3
+imageio==2.37.3
+pydantic==2.10.5
+pythonnet==3.0.5
+scikit-image==0.26.0
+pyvisa-py==0.8.1
+magicmock==0.3
+#rotpy==0.2.1
+#simple-pyspin==0.1.1
+#easypyspin==2.0.1
+opencv-python==4.13.0.92
+scikit-learn==1.8.0
+pycaf @ git+https://github.com/ColdMatter/pycaf@72197af9bc54cce6be19f4d0506efd333f9ab2e3
+sipyco @ git+https://github.com/m-labs/sipyco.git@ce454bb64257b1bcef3703f258aaf7fa4ee0c275
+zmq==0.0.0

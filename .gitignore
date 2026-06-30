@@ -2,3 +2,13 @@ __pycache__/
 *.pyc
 configuration/configfile.py
 .vscode/
+venv/
+Image Data/
+Image data/
+
+# OS junk
+.DS_Store
+
+# compiled extensions / build artifacts (rebuilt per-platform with `make`)
+*.so
+*.o

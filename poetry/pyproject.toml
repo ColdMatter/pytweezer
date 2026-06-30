@@ -1,0 +1,77 @@
+[tool.poetry]
+name = "pytweezer"
+version = "0.2.1"
+description = "Pytweezer package"
+authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
+readme = "README.md"
+packages = [
+	{ include = "pytweezer" },
+	{ include = "bin" },
+]
+
+[tool.poetry.scripts]
+pytweezer-run = "bin.process_manager:main"
+
+[tool.poetry.dependencies]
+python = "^3.11.4, <3.14"
+
+# --- Core Data Science & Math ---
+pandas = "=2.2.2"
+scipy = "^1.17.1"
+
+
+# --- Visualization ---
+matplotlib = "=3.8.4"
+
+# --- Hardware & Automation ---
+pylablib = "=1.4.3"
+
+# --- Utilities & Networking ---
+rich = "=13.9.4"
+paramiko = "=3.4.1"     # SSH client
+tifffile = "^2026.1.28"
+pillow = "^12.1.0"
+pyzmq = "^27.1.0"
+
+# --- Qt Stuff ---
+PyQt5 = "=5.15.10"
+PyQt5-qt5 = "=5.15.2"
+
+
+# --- Jupyter Support ---
+ipykernel = "=6.28.0"
+ipywidgets = "=8.1.5"
+tqdm = "^4.67.3"
+h5py = "^3.15.1"
+cupy-cuda13x = "^14.0.1"
+lap = "^0.5.13"
+termcolor = "^3.3.0"
+qscintilla = "^2.14.1"
+pyperclip = "^1.11.0"
+uncertainties = "^3.2.3"
+imageio = "^2.37.3"
+zmq = "^0.0.0"
+
+# --- Utilities & Networking ---
+pydantic = "=2.10.5"
+# rich = "=13.9.4"
+# paramiko = "=3.4.1"     # SSH client
+# rpyc = "=5.3.0"
+# plumbum = "=1.8.3"
+pythonnet = "=3.0.5"    # .NET integration
+# wakepy = "=0.9.1"       # from pip section
+# iso8601 = "=2.1.0"      # from pip section
+scikit-image = "^0.26.0"
+pyvisa-py = "^0.8.1"
+sipyco = {git = "https://github.com/m-labs/sipyco.git"}
+magicmock = "^0.3"
+rotpy = "^0.2.1"
+pycaf = {git = "https://github.com/ColdMatter/pycaf", branch = "cafmot"}
+simple-pyspin = "^0.1.1"
+easypyspin = "^2.0.1"
+opencv-python = "^4.13.0.92"
+scikit-learn = "^1.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
