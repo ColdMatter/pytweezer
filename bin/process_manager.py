@@ -5,10 +5,7 @@ Launches and manages all server processes (Model Sync, MotMaster, Hubs, Loggers,
 Runs as a background daemon that keeps servers alive.
 """
 
-import sys
-import signal
-from PyQt5.QtWidgets import QApplication, QLabel, QGridLayout
-import zmq
+from PyQt5.QtWidgets import QLabel, QGridLayout
 from socket import gethostname
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.servers.configreader import ConfigReader
@@ -65,10 +62,10 @@ class ProcessManager(BWidget):
                     layout.addWidget(process, line, i)
 
     def closeEvent(self, event):
-        """on shutdown terminate all server processes first"""
+        """on shutdown terminate all managed processes first"""
         for p in self.processlist:
             p.terminateProcess()
-        logger.info("Terminated all server processes.")
+        logger.info("Terminated all %s processes.", "/".join(self.categories) or "managed")
         event.accept()
 
     def __del__(self):
@@ -98,40 +95,6 @@ class DeviceManager(ProcessManager):
         host_addr = host_addr.strip().lower()
         return host_addr == self.host_addr.strip().lower()
     
-class Dashboard(ProcessManager):
-    categories = ["GUI", "Viewer"]
-
-
-def main():
-    args = sys.argv[1:]
-    if not args:
-        print("Usage: process_manager.py <manager_type>")
-        sys.exit(1)
-
-    manager_type = args[0]
-    app = QApplication(sys.argv)
-    if manager_type == "server":
-        Win = ServerManager(manager_type)
-    elif manager_type == "device":
-        Win = DeviceManager(manager_type)
-    elif manager_type == "dashboard":
-        Win = Dashboard(manager_type)
-    else:
-        print("Invalid manager type. Use 'server', 'device', or 'dashboard'.")
-        sys.exit(1)
-    Win.show()
-
-    def on_exit(_signo, _stack_frame):
-        print(f"Closing controller")
-        Win.close()
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, on_exit)
-    app.exec_()
-
-
-if __name__ == "__main__":
-    if sys.flags.interactive != 1:
-        main()
-    else:
-        print("Running in interactive mode. Controller won't be started.")
+# ``ServerManager`` and ``DeviceManager`` are embedded as tabs by ``bin/gui.py``
+# (the ``pytweezer-server`` / ``pytweezer-client`` entry points). This module no
+# longer has its own CLI dispatch; keep the classes importable as reusable panels.

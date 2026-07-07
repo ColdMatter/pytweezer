@@ -9,7 +9,7 @@ HOSTS = {
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-SIMULATING = False
+SIMULATING = True
 LOCAL = True
 SERVER_HOST = HOSTS["ph-beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
@@ -22,18 +22,25 @@ CONFIG = {
             "host": SERVER_HOST,
             "port": get_next_port()
         },
-        "Experiment Manager": {
+        "Device Status": {
             "active": True,
-            "script": "../pytweezer/servers/experiment_manager.py",
-            "host": SERVER_HOST
-        },
-        "Model Sync": {
-            "active": True,
-            "script": "../pytweezer/servers/model_sync.py",
+            "script": "../pytweezer/servers/device_status.py",
             "host": SERVER_HOST,
-            "command_port": get_next_port(),
             "pub_port": get_next_port(),
+            "poll_interval": 2.0,
         },
+        # "Experiment Manager": {
+        #     "active": True,
+        #     "script": "../pytweezer/servers/experiment_manager.py",
+        #     "host": SERVER_HOST
+        # },
+        # "Model Sync": {
+        #     "active": True,
+        #     "script": "../pytweezer/servers/model_sync.py",
+        #     "host": SERVER_HOST,
+        #     "command_port": get_next_port(),
+        #     "pub_port": get_next_port(),
+        # },
         "Imagehub": {
             "active": True,
             "host": SERVER_HOST,
@@ -90,7 +97,8 @@ CONFIG = {
     "Devices": {
          "Rb MotMaster Server": {
             "active": True,
-            "script": "../pytweezer/experiment/motmaster_server.py",
+            "script": "../pytweezer/servers/device_server.py",
+            "driver": "motmaster",
             "config_file": "rb_mm_config.json",
             "host": HOSTS["IC-CZC4287H3W"],
             "port": get_next_port(),
@@ -98,7 +106,8 @@ CONFIG = {
         },
         "CaF MotMaster Server": {
             "active": True,
-            "script": "../pytweezer/experiment/motmaster_server.py",
+            "script": "../pytweezer/servers/device_server.py",
+            "driver": "motmaster",
             "config_file": "caf_mm_config.json",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
@@ -106,7 +115,8 @@ CONFIG = {
         },
         "Rb HamCam": {
             "active": True,
-            "script": "../pytweezer/drivers/imagemx2.py",
+            "script": "../pytweezer/servers/device_server.py",
+            "driver": "imagemx2",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -116,7 +126,8 @@ CONFIG = {
         },
         "CaF HamCam": {
             "active": True,
-            "script": "../pytweezer/drivers/imagemx2.py",
+            "script": "../pytweezer/servers/device_server.py",
+            "driver": "imagemx2",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -126,7 +137,8 @@ CONFIG = {
         },
         "Blackfly Camera": {
             "active": False,
-            "script": "../pytweezer/drivers/bfly2.py",
+            "script": "../pytweezer/servers/device_server.py",
+            "driver": "blackfly",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -140,11 +152,11 @@ CONFIG = {
         #     "script": "../pytweezer/GUI/tweezer_browser.py"
         # },
         "StreamMonitor": {
-            "active": False,
+            "active": True,
             "script": "../pytweezer/GUI/streammonitor.py"
         },
         "Applet Launcher": {
-            "active": False,
+            "active": True,
             "script": "../pytweezer/GUI/applet_launcher.py"
         },
         # "H5 Manager": {
@@ -164,14 +176,4 @@ CONFIG = {
             "script": "../pytweezer/GUI/analysismanager.py"
         }
     },
-    "Viewer": {
-        # "DummyViewer": {
-        #     "active": False,
-        #     "script": "../pytweezer/GUI/viewers/image_group.py"
-        # },
-        # "TweezerViewer": {
-        #     "active": True,
-        #     "script": "../pytweezer/GUI/viewers/tweezer_image_monitor.py"
-        # }
-    }
 }

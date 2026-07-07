@@ -388,5 +388,19 @@
                 "color": 4278190335
             }
         }
+    },
+    "Applet Launcher": {
+        "Applets": {
+            "Image Monitor": {
+                "script": "pytweezer/GUI/viewers/image_monitor.py",
+                "active": false,
+                "description": "Display image streams"
+            },
+            "Updating Plot": {
+                "script": "pytweezer/GUI/viewers/updating_plot.py",
+                "active": false,
+                "description": "Live plot of data streams"
+            }
+        }
     }
 }

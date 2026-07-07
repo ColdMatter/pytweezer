@@ -10,7 +10,6 @@ import sys
 import subprocess
 
 import numpy as np
-import zmq
 from configuration.device_db import device_db
 from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import DataClient, Properties
@@ -59,7 +58,7 @@ class Experiment:
     _save_results_h5 = True
     _results_h5_dir = ""
 
-    def __init__(self, props, motmaster_client: Optional[MotMasterClient] = None, context: Optional[zmq.Context] = None):
+    def __init__(self, props, motmaster_client: Optional[MotMasterClient] = None):
         self.name = self.__class__.__name__
         self._props = Properties("Experiments/" + self.name)
         self._dataq = DataClient("Experiment/" + self.name)
@@ -74,7 +73,7 @@ class Experiment:
         self._rep = 0
         self._experiment_params: dict = {}
         if self.motmaster_script is not None and self._motmaster_client is None:
-            self._motmaster_client = MotMasterClient(context=context)
+            self._motmaster_client = MotMasterClient()
         if self._motmaster_client is not None:
             self._motmaster_client.set_script(self.motmaster_script)
         self.result_channels: dict[str, Union[ResultChannel, ImageResultChannel]] = {}
@@ -217,11 +216,9 @@ class Experiment:
         This method should be used to set up the experiment, e.g. by calling setattr_device and defining any other necessary attributes that will be constant throughout the experiment.
         """
         if self.motmaster_script is not None:
-            response = self._motmaster_client.get_params()
-            if response.get("ok"):
-                params = response.get("params", {})
-                for param_name in params.keys():
-                    self.setattr_mm_param(param_name, params[param_name])
+            params = self._motmaster_client.get_params()
+            for param_name in params.keys():
+                self.setattr_mm_param(param_name, params[param_name])
 
     def pre_run(self):
         """

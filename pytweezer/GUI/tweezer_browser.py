@@ -430,7 +430,7 @@ class ExperimentWindow(QWidget):
         # self.scanCombo.setCurrentText("--NONE--")
         # self.nRepsQSB.setValue(0)
         print("Resetting parameters to default values")
-        mm_default_params = self.experiment._motmaster_client.get_params()['params']
+        mm_default_params = self.experiment._motmaster_client.get_params()
         print("Default parameters from MotMaster:", mm_default_params)
         for box in self.mm_boxes:
             box: FloatBox

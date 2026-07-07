@@ -10,18 +10,20 @@ packages = [
 ]
 
 [tool.poetry.scripts]
-pytweezer-run = "bin.process_manager:main"
+pytweezer-server = "bin.gui:server_main"
+pytweezer-client = "bin.gui:client_main"
+pytweezer-device = "pytweezer.servers.device_server:main"
 
 [tool.poetry.dependencies]
 python = "^3.11.4, <3.14"
 
 # --- Core Data Science & Math ---
-pandas = "=2.2.2"
+pandas = "=2.2.3"
 scipy = "^1.17.1"
 
 
 # --- Visualization ---
-matplotlib = "=3.8.4"
+matplotlib = "^3.9.2"
 
 # --- Hardware & Automation ---
 pylablib = "=1.4.3"
@@ -65,7 +67,6 @@ scikit-image = "^0.26.0"
 pyvisa-py = "^0.8.1"
 sipyco = {git = "https://github.com/m-labs/sipyco.git"}
 magicmock = "^0.3"
-rotpy = "^0.2.1"
 pycaf = {git = "https://github.com/ColdMatter/pycaf", branch = "cafmot"}
 simple-pyspin = "^0.1.1"
 easypyspin = "^2.0.1"

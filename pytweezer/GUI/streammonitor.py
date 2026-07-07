@@ -1,4 +1,5 @@
 """ Monitor the content of streams """
+import sys
 import json
 from collections import deque
 from PyQt5 import QtCore
@@ -179,19 +180,25 @@ class LogMonitor(QWidget):
 
 
 
+def make_stream_monitor(name, parent=None):
+    """Build the nested stream-monitor tab widget without owning a QApplication.
+
+    Returns a QTabWidget with Image/Data/Command/Message stream views plus a
+    Logs view, so it can be shown standalone or embedded as a tab in a larger
+    window.
+    """
+    tabs = QTabWidget(parent)
+    tabs.addTab(StreamMonitor(name, 'Image'), "Image")
+    tabs.addTab(StreamMonitor(name, 'Data'), "Data")
+    tabs.addTab(StreamMonitor(name, 'Command'), "Command")
+    tabs.addTab(StreamMonitor(name, 'Message'), "Message")
+    tabs.addTab(LogMonitor(name), "Logs")
+    return tabs
+
+
 def main(name):
     qApp = QApplication(sys.argv)
-    Win = QTabWidget()
-    image = StreamMonitor(name,'Image')
-    Win.addTab(image,"Image")
-    image = StreamMonitor(name,'Data')
-    Win.addTab(image,"Data")
-    image = StreamMonitor(name,'Command')
-    Win.addTab(image,"Command")
-    image = StreamMonitor(name,'Message')
-    Win.addTab(image,"Message")
-    logs = LogMonitor(name)
-    Win.addTab(logs, "Logs")
+    Win = make_stream_monitor(name)
     Win.show()
     qApp.exec_()
 
@@ -199,7 +206,6 @@ def main(name):
 
 
 if __name__ == '__main__':
-    import sys
     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
         main('StreamMonitor')
 
