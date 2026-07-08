@@ -8,20 +8,46 @@ import sys
 
 from sipyco.pc_rpc import simple_server_loop
 from pytweezer.servers.configreader import ConfigReader
+from pytweezer.servers.simulated_device import simulate
 from pytweezer.experiment.motmaster_interface import MotMasterInterface
 # from pycaf.experiment import Experiment
 
 # config directory local to the package.
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
 
+#: Methods where returning bare None would be a poor fake (e.g. scan_* methods
+#: that real callers iterate over, or dict-returning parameter lookups).
+_MOTMASTER_SIMULATE_DEFAULTS = {
+    "get_motmaster_dictionary": dict,
+    "get_params_csdict": dict,
+    "get_laser_set_points_tcl": dict,
+    "get_laser_set_points_wml": dict,
+    "get_laser_frequencies_actual": dict,
+    "python_to_cs_dict": dict,
+    "scan_tcl_laser_set_points": list,
+    "scan_wm_laser_set_points": list,
+    "scan_wm_laser_set_points_with_motmaster_values": list,
+    "scan_wm_laser_set_points_with_motmaster_multiple_parameters": list,
+    "scan_picomotor_steps": list,
+}
 
-class DummyMotMasterInterface(MotMasterInterface):
+
+@simulate(MotMasterInterface, defaults=_MOTMASTER_SIMULATE_DEFAULTS)
+class SimulatedMotMasterInterface:
+    """Simulated MotMaster backend. Any MotMasterInterface method not defined
+    here is auto-stubbed by @simulate so this class can never silently drift
+    out of sync with it (unlike its predecessor, this class does not subclass
+    MotMasterInterface, so an un-overridden method never falls through to
+    real hardware-touching code).
+    """
 
     def __init__(self, interval: Union[int, float] = 0.1) -> None:
-        pass
+        self.interval = interval
+        self.motmaster = None
+        self.script = None
 
     def connect(self) -> None:
-        print("DummyMotMasterInterface: connect called.")
+        print("SimulatedMotMasterInterface: connect called.")
         self.motmaster = None
         self.script = None
         return None
@@ -31,14 +57,9 @@ class DummyMotMasterInterface(MotMasterInterface):
         script: str,
     ):
         print(
-            f"DummyMotMasterInterface: set_motmaster_experiment called with script '{script}'"
+            f"SimulatedMotMasterInterface: set_motmaster_experiment called with script '{script}'"
         )
         self.script = script
-        return None
-
-    def set_motmaster_dictionary(self):
-        print("DummyMotMasterInterface: set_motmaster_dictionary called")
-        self.parameter_dictionary = {}
         return None
 
     def start_motmaster_experiment(
@@ -46,7 +67,7 @@ class DummyMotMasterInterface(MotMasterInterface):
         parameters: Optional[dict] = None,
     ):
         print(
-            f"DummyMotMasterInterface: start_motmaster_experiment called with script '{self.script}'"
+            f"SimulatedMotMasterInterface: start_motmaster_experiment called with script '{self.script}'"
         )
         return None
 
@@ -54,12 +75,12 @@ class DummyMotMasterInterface(MotMasterInterface):
         return {"param1": 1, "param2": 2.0}
 
     def disconnect(self) -> None:
-        print("DummyMotMasterInterface: disconnect called")
+        print("SimulatedMotMasterInterface: disconnect called")
         return None
 
     def save_pattern_info(self, save_folder, file_tag, task_nr):
         print(
-            "DummyMotMasterInterface: save_pattern_info called "
+            "SimulatedMotMasterInterface: save_pattern_info called "
             f"(save_folder={save_folder}, file_tag={file_tag}, task_nr={task_nr})"
         )
         return None
@@ -137,7 +158,7 @@ def run_motmaster_command_server(
 ) -> None:
     _ensure_motmaster_running(config_file)
     if simulate:
-        interface = DummyMotMasterInterface(interval=interval)
+        interface = SimulatedMotMasterInterface(interval=interval)
     else:
         interface = MotMasterInterface(config_file, interval=interval)
     interface.connect()

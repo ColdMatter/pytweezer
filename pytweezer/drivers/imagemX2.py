@@ -7,7 +7,6 @@ from functools import wraps
 from tkinter import NO
 from turtle import st
 from typing import Any, Optional
-from unittest.mock import MagicMock
 
 from imageio import config
 import numpy as np
@@ -17,6 +16,7 @@ from sipyco.pc_rpc import Client as RPCClient, simple_server_loop
 
 from pytweezer.servers import ImageClient
 from pytweezer.servers.configreader import ConfigReader
+from pytweezer.servers.simulated_device import simulate
 
 IMAGE_DIRECTORY = (
     "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/HamCamImages"
@@ -188,12 +188,24 @@ class ImagEMX2Camera:
         tiff.imwrite(filename, image)
 
 
+@simulate(ImagEMX2Camera)
 class SimulatedImagEMX2Camera:
-    """Drop-in simulated backend with the same control interface as ImagEMX2Camera."""
+    """Drop-in simulated backend with the same control interface as
+    ImagEMX2Camera. Any ImagEMX2Camera method not defined here (e.g.
+    set_ccd_mode, enable_em_gain, set_sensitivity, ...) is auto-stubbed by
+    @simulate so this class can never silently drift out of sync with it.
+    """
 
-    def __init__(self, image_dir: str | None = None, timeout: float = 5.0):
+    def __init__(
+        self,
+        image_dir: str | None = None,
+        timeout: float = 5.0,
+        stream_name: Optional[str] = None,
+    ):
         self.image_dir = image_dir or IMAGE_DIRECTORY
         self.timeout = timeout
+        self.stream_name = stream_name
+        self.image_client = ImageClient(stream_name) if stream_name else None
         self._shape = (256, 256)
         self._nframes = 1
         self._running = False
@@ -202,32 +214,15 @@ class SimulatedImagEMX2Camera:
     def close(self):
         self._running = False
 
+    def relinquish_camera(self):
+        self.close()
+        return {"ok": True, "relinquished": True}
+
+    def reacquire_camera(self):
+        return {"ok": True, "relinquished": False}
+
     def set_roi(self, x0: int, width: int, y0: int, height: int):
         self._shape = (int(height), int(width))
-
-    def set_ccd_mode(self, mode: int):
-        return None
-
-    def enable_em_gain(self, enable: bool = True):
-        return None
-
-    def set_direct_em_gain_mode(self, mode: int):
-        return None
-
-    def enable_direct_em_gain(self, enable: bool = True):
-        return None
-
-    def set_sensitivity(self, sensitivity: int):
-        return None
-
-    def set_trigger_source(self, source: str):
-        return None
-
-    def set_exposure_time(self, exposure: float):
-        return None
-
-    def set_external_exposure_mode(self):
-        return None
 
     def setup_acquisition(self, acq_mode: str, nframes: int):
         self._nframes = max(1, int(nframes))
@@ -250,13 +245,50 @@ class SimulatedImagEMX2Camera:
             image += amp * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2.0 * sigma**2))
         return np.clip(image, 0.0, 65535.0).astype(np.uint16)
 
-    def acquire_n_frames(self, nframes: int, start_frame: int = 0) -> np.ndarray:
-        del start_frame
+    def acquire_n_frames(
+        self,
+        nframes: int,
+        start_frame: int = 0,
+        autosave: bool = False,
+        broadcast: bool = False,
+    ) -> np.ndarray:
         if not self._running:
             raise RuntimeError("Simulated camera is not running")
         count = max(1, int(nframes))
         time.sleep(0.1 * count)
-        return np.stack([self._generate_frame() for _ in range(count)], axis=0)
+        images = [self._generate_frame() for _ in range(count)]
+        for i, image in enumerate(images):
+            if autosave:
+                ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir)
+            if broadcast:
+                if self.image_client is None:
+                    LOGGER.error("tried to broadcast image but no client exists")
+                else:
+                    info = {"timestamp": time.time(), "index": start_frame + i}
+                    self.image_client.send(image, info)
+        return np.stack(images, axis=0)
+
+    def acquire_single_frame(
+        self,
+        timeout=None,
+        exp_info: dict[str, Any] | None = None,
+        autosave: bool = False,
+        broadcast: bool = False,
+    ) -> np.ndarray:
+        if not self._running:
+            raise RuntimeError("Simulated camera is not running")
+        image = self._generate_frame()
+        if autosave:
+            ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir)
+        info = {"timestamp": time.time(), "index": 0}
+        if exp_info is not None:
+            info.update(exp_info)
+        if broadcast:
+            if self.image_client is None:
+                LOGGER.error("tried to broadcast image but no client exists")
+            else:
+                self.image_client.send(image, info)
+        return image
 
     @staticmethod
     def save_tiff(image: np.ndarray, image_dir: str | None = None, run_no: int = 0):

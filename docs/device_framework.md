@@ -39,6 +39,11 @@ pytweezer/servers/device_client.py       (generic client factory)
 └── get_device(name, host=None, port=None, target_name=AutoTarget, timeout=None)
       -> sipyco.pc_rpc.Client (transparent RPC proxy)
 
+pytweezer/servers/simulated_device.py    (generic simulated-backend mechanism)
+├── public_methods(real_cls, exclude=())   introspects real_cls's public methods
+└── simulate(real_cls, exclude=(), defaults=None)   class decorator: auto-stub
+      any public method of real_cls a decorated class doesn't already define
+
 bin/process_manager.py            DeviceManager (host-filtered start/stop tiles)
 bin/process_tile_base.py          ProcessTile (subprocess: python <script> <name>)
 pytweezer/servers/device_status.py DeviceStatusServer/-Client (cross-PC up/down feed)
@@ -76,7 +81,7 @@ actually selects the behavior.
 
 | `"driver"` | Factory | Backend built | Target name |
 |---|---|---|---|
-| `"motmaster"` | `_make_motmaster` | `MotMasterInterface` / `DummyMotMasterInterface` (if `simulate`) | `"motmaster"` |
+| `"motmaster"` | `_make_motmaster` | `MotMasterInterface` / `SimulatedMotMasterInterface` (if `simulate`) | `"motmaster"` |
 | `"imagemx2"` | `_make_imagemx2` | `ImagEMX2Camera` / `SimulatedImagEMX2Camera` (if `simulate`) | `"camera"` |
 | `"blackfly"` | `_make_blackfly` | `Blackfly` | `"camera"` |
 
@@ -100,10 +105,47 @@ never fail just because one driver's hardware library is absent. Only launching
 `_ensure_motmaster_running()` (which launches the real `MOTMaster.exe`) in the
 non-simulate branch — a simulated MotMaster server never touches real hardware.
 
+### `simulate()`: one mechanism for every driver's simulated backend
+
+`pytweezer/servers/simulated_device.py` provides a class decorator,
+`simulate(real_cls, *, exclude=(), defaults=None)`, used to build both
+`SimulatedMotMasterInterface` (`pytweezer/experiment/motmaster_server.py`) and
+`SimulatedImagEMX2Camera` (`pytweezer/drivers/imagemX2.py`). Rather than
+hand-copying every method of the real backend class into a parallel
+`Simulated*` class — which drifts out of sync silently as the real class
+changes — `simulate()` inspects `real_cls`'s public methods at class
+*definition* time (never an instance, so it never touches hardware) and
+injects a safe, logging, no-op stub for every one the decorated class doesn't
+already define itself:
+
+```python
+@simulate(ImagEMX2Camera)
+class SimulatedImagEMX2Camera:
+    def __init__(self, image_dir=None, timeout=5.0, stream_name=None):
+        ...
+    def _generate_frame(self) -> np.ndarray:
+        ...  # Gaussian-noise background + scattered atom blobs
+    def acquire_n_frames(self, nframes, start_frame=0, autosave=False, broadcast=False):
+        ...
+    # set_ccd_mode, enable_em_gain, set_sensitivity, ... are all auto-stubbed
+```
+
+Only methods with genuinely interesting fake behavior need a hand-written
+body; everything else stays interface-complete automatically, and stubs
+return plain `None`/`dict`/`list` values (never a `unittest.mock.Mock`) so
+they remain serializable by `sipyco.pyon` when a client calls them over RPC —
+a bare `MagicMock`/`create_autospec` object is **not** PYON-encodable and
+breaks every unconfigured RPC call, which is why this repo doesn't use one as
+the literal RPC target. `defaults={method_name: value_or_zero_arg_callable}`
+overrides the stub's return value for methods where `None` would be a poor
+fake (e.g. `dict`/`list` for methods real callers expect to iterate over).
+
 ### Adding a new driver type
 
 1. Write the backend class as normal (own module, own connect/acquire/etc.
-   methods) — no RPC or config code in it.
+   methods) — no RPC or config code in it. If it needs a simulated variant,
+   write a small `Simulated<X>` class decorated with `@simulate(<X>)` next to
+   it, hand-implementing only the methods with interesting fake behavior.
 2. Add one `_make_<driver>(name, conf)` factory to `device_server.py` that
    builds the backend from `conf` and returns a `DeviceServerSpec`. Import the
    backend module lazily, inside the factory.
@@ -208,7 +250,8 @@ migrated onto it.
 |------|------|
 | `pytweezer/servers/device_server.py` | Generic server launcher: `DRIVER_REGISTRY`, `build_spec`, `resolve_device`, `run_device_server`, `main`. |
 | `pytweezer/servers/device_client.py` | Generic client factory: `get_device`, `get_device_config`. |
-| `pytweezer/experiment/motmaster_server.py` | MotMaster backend classes (`MotMasterInterface`, `DummyMotMasterInterface`) + legacy standalone `main()`. |
+| `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator, `public_methods`. |
+| `pytweezer/experiment/motmaster_server.py` | MotMaster backend classes (`MotMasterInterface`, `SimulatedMotMasterInterface`) + legacy standalone `main()`. |
 | `pytweezer/drivers/imagemX2.py` | ImagEM X2 backend classes (`ImagEMX2Camera`, `SimulatedImagEMX2Camera`) + legacy standalone `main()`. |
 | `pytweezer/drivers/bfly2.py` | Blackfly backend class + legacy standalone `main()`. |
 | `pytweezer/experiment/motmaster_client.py` | `MotMasterClient` — pre-framework client with back-compat aliases. |

@@ -55,7 +55,7 @@ class DeviceServerSpec:
 
 def _make_motmaster(name, conf):
     from pytweezer.experiment.motmaster_server import (
-        DummyMotMasterInterface,
+        SimulatedMotMasterInterface,
         MotMasterInterface,
         _ensure_motmaster_running,
     )
@@ -66,7 +66,7 @@ def _make_motmaster(name, conf):
     config_file = tweezerpath + "/pytweezer/configuration/" + conf["config_file"]
 
     if simulate:
-        interface = DummyMotMasterInterface(interval=interval)
+        interface = SimulatedMotMasterInterface(interval=interval)
     else:
         # Only touch real hardware when not simulating.
         _ensure_motmaster_running(config_file)
