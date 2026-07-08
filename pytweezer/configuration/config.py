@@ -108,7 +108,7 @@ CONFIG = {
         }
     },
     "Devices": {
-         "Rb MotMaster Server": {
+         "Rb MotMaster": {
             "active": True,
             "script": "../pytweezer/servers/device_server.py",
             "driver": "motmaster",
@@ -117,7 +117,7 @@ CONFIG = {
             "port": get_next_port(),
             "simulate": SIMULATING
         },
-        "CaF MotMaster Server": {
+        "CaF MotMaster": {
             "active": True,
             "script": "../pytweezer/servers/device_server.py",
             "driver": "motmaster",
@@ -148,7 +148,7 @@ CONFIG = {
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
         },
-        "Blackfly Camera": {
+        "Blackfly": {
             "active": False,
             "script": "../pytweezer/servers/device_server.py",
             "driver": "blackfly",

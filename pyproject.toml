@@ -14,6 +14,7 @@ pytweezer-server = "bin.gui:server_main"
 pytweezer-client = "bin.gui:client_main"
 pytweezer-device = "pytweezer.servers.device_server:main"
 pytweezer-logger = "pytweezer.servers.logger_server:main"
+pytweezer-kill-stale = "bin.kill_stale:main"
 
 [tool.poetry.dependencies]
 python = "^3.11.4, <3.14"

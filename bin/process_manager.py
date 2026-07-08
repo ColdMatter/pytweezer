@@ -22,12 +22,9 @@ class ProcessManager(BWidget):
 
     def __init__(self, name) -> None:
         super().__init__(name, create_props=False)
-        self.setStyleSheet(
-            "Controller {background-color: rgb(195,205,230);color:blue; margin:0px; border:5px solid rgb(0, 0, 80);} "
-        )
         layout = QGridLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(1)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
         self.setLayout(layout)
 
         self.processlist = []
@@ -43,7 +40,9 @@ class ProcessManager(BWidget):
         layout = self.layout()
         for i, category in enumerate(self.categories):
             line = 1
-            layout.addWidget(QLabel(category), line, i)
+            heading = QLabel(category.upper())
+            heading.setProperty("role", "heading")
+            layout.addWidget(heading, line, i)
             for name, params in sorted(conf[category].items())[::-1]:
                 host_addr = params.get("host")
                 if self.check_host(host_addr):

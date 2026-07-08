@@ -1,6 +1,7 @@
 """ Monitor the content of streams """
 import sys
 import json
+import datetime
 from collections import deque
 from PyQt5 import QtCore
 from PyQt5.QtGui import *
@@ -8,6 +9,7 @@ from PyQt5.QtWidgets import *
 from pytweezer.servers import DataClient,ImageClient,CommandClient
 from pytweezer.servers.messageclient import MessageClient
 from pytweezer.GUI.pytweezerQt import BWidget
+from pytweezer.GUI.theme import UI_FONT_FAMILY, UI_FONT_POINT_SIZE
 from pytweezer.logging_utils import get_daily_log_path
 
 
@@ -47,7 +49,27 @@ class StreamMonitor(QWidget):
                 self.text.setPlainText('\n'.join(self.msglist))
 
 
+def _format_timestamp(raw):
+    """Human-friendly ``YYYY-MM-DD HH:MM:SS`` from an ISO timestamp string.
+
+    Log timestamps arrive as ``isoformat(timespec="milliseconds")`` (e.g.
+    ``2026-07-08T13:23:00.123+01:00``); this drops the sub-second precision,
+    the timezone offset, and the ``T`` separator. Falls back to the raw value
+    if it can't be parsed.
+    """
+    if not raw:
+        return ""
+    try:
+        return datetime.datetime.fromisoformat(raw).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return str(raw)
+
+
 class LogMonitor(QWidget):
+    # Column index of the (stretchy) message column, used by the double-click
+    # detail dialog and the per-item alignment tweak.
+    MESSAGE_COL = 4
+
     def __init__(self, name, parent=None):
         super().__init__(parent)
         self.stream = MessageClient(name)
@@ -56,15 +78,26 @@ class LogMonitor(QWidget):
 
         layout = QVBoxLayout()
         layout.addWidget(QLabel('Logs'))
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
-            ["Timestamp", "Level", "Host", "Process", "Logger", "Message"]
+            ["Timestamp", "Level", "Host", "Process", "Message"]
         )
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setContextMenuPolicy(QtCore.Qt.ActionsContextMenu)
+        # Give each row room for two lines so longer messages wrap rather than
+        # being clipped to one; hover/double-click still reveal the full text.
+        # Measure with a QFont matching the app stylesheet (QSS font settings
+        # don't show up in a widget's default QFontMetrics), and set it on the
+        # table so rendered and measured line heights agree. The extra pixels
+        # cover the cell's own top/bottom margins.
+        self.table.setWordWrap(True)
+        row_font = QFont(UI_FONT_FAMILY, UI_FONT_POINT_SIZE)
+        self.table.setFont(row_font)
+        self._row_height = QFontMetrics(row_font).lineSpacing() * 2 + 12
+        self.table.verticalHeader().setDefaultSectionSize(self._row_height)
 
         copy_action = QAction("Copy", self.table)
         copy_action.setShortcut(QKeySequence.Copy)
@@ -77,8 +110,7 @@ class LogMonitor(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.Stretch)
+        header.setSectionResizeMode(self.MESSAGE_COL, QHeaderView.Stretch)
 
         layout.addWidget(self.table)
         self.setLayout(layout)
@@ -107,18 +139,20 @@ class LogMonitor(QWidget):
         row = 0 if prepend else self.table.rowCount()
         self.table.insertRow(row)
 
+        message = str(payload.get("message", ""))
         values = [
-            payload.get("timestamp", ""),
+            _format_timestamp(payload.get("timestamp", "")),
             payload.get("level", ""),
             payload.get("host", ""),
             payload.get("module", ""),
-            payload.get("logger", ""),
-            payload.get("message", ""),
+            message,
         ]
 
         for col, value in enumerate(values):
             item = QTableWidgetItem(str(value))
-            if col == 5:
+            # Hover any cell in the row to read the full (untruncated) message.
+            item.setToolTip(message)
+            if col == self.MESSAGE_COL:
                 item.setTextAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
             self.table.setItem(row, col, item)
 
@@ -159,7 +193,7 @@ class LogMonitor(QWidget):
         QApplication.clipboard().setText(item.text())
 
     def _show_message_dialog(self, row, _column):
-        item = self.table.item(row, 5)
+        item = self.table.item(row, self.MESSAGE_COL)
         message = item.text() if item else ""
 
         dialog = QDialog(self)

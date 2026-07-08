@@ -400,6 +400,14 @@
                 "script": "pytweezer/GUI/viewers/updating_plot.py",
                 "active": false,
                 "description": "Live plot of data streams"
+            },
+            "Image Monitor 2": {
+                "script": "pytweezer/GUI/viewers/image_monitor.py",
+                "active": false
+            },
+            "bdvgbr": {
+                "script": "pytweezer/GUI/viewers/image_monitor.py",
+                "active": false
             }
         }
     }
