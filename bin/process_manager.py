@@ -73,7 +73,12 @@ class ProcessManager(BWidget):
         
 class ServerManager(ProcessManager):
     categories = ["Servers"]
-    
+
+class LoggerManager(ProcessManager):
+    # Loggers own their own devices and run on the server PC alongside InfluxDB,
+    # so — like ServerManager — no host filtering.
+    categories = ["Loggers"]
+
 class DeviceManager(ProcessManager):
     categories = ["Devices"]
     

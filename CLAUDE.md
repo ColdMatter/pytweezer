@@ -140,3 +140,26 @@ commented out — treat it as present-but-inactive, not dead code to remove.
 `pytweezer/logging_utils.py`'s `get_logger(name)` is the standard logger factory
 used everywhere (not bare `logging.getLogger`) — it adds structured JSONL file
 output under `logs/` (or `$PYTWEEZER_LOG_DIR`) in addition to console output.
+
+### InfluxDB metric logging (separate from the above)
+
+Durable time-series values go into a self-hosted **InfluxDB 2.x**, via a framework
+that deliberately mirrors the device framework. Don't confuse this with the pub/sub
+"loggers" above (`datalogger`/`imagelogger`/`propertylogger`), which monitor ZMQ
+streams and are **not** forwarded to InfluxDB — Influx logging is entirely opt-in.
+
+- `pytweezer/servers/influx_client.py` — `InfluxWriter` (the single write path;
+  writes never raise) and the notebook convenience `log(measurement, **fields)`.
+  Connection config is the `INFLUXDB` block in `configuration/config.py`
+  (env-var overridable).
+- `pytweezer/loggers/` — the generic `Logger` base (`base.py`) and concrete
+  subclasses that each **own their own device** (e.g. `ni_adc_logger.py`, an NI
+  ADC via `nidaqmx`), analogous to `pytweezer/drivers/`. Loggers do not poll
+  existing device RPC servers; to log off an existing driver (e.g. a camera), give
+  that driver its own `InfluxWriter` instead.
+- `pytweezer/servers/logger_server.py` — the launcher with `LOGGER_REGISTRY`
+  (`"logger"` key → subclass factory) and dual-mode `main()`, exactly analogous
+  to `device_server.py`. `CONFIG["Loggers"]` is its config category, surfaced as
+  the **Loggers** tab (`LoggerManager`, server PC only).
+
+Full writeup, including the self-hosted InfluxDB one-command setup: `docs/influx_logging.md`.

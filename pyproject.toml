@@ -13,6 +13,7 @@ packages = [
 pytweezer-server = "bin.gui:server_main"
 pytweezer-client = "bin.gui:client_main"
 pytweezer-device = "pytweezer.servers.device_server:main"
+pytweezer-logger = "pytweezer.servers.logger_server:main"
 
 [tool.poetry.dependencies]
 python = "^3.11.4, <3.14"
@@ -71,6 +72,8 @@ simple-pyspin = "^0.1.1"
 easypyspin = "^2.0.1"
 opencv-python = "^4.13.0.92"
 pytest = "^9.1.1"
+influxdb-client = "^1.50.0"
+nidaqmx = "^1.5.0"
 
 [build-system]
 requires = ["poetry-core"]

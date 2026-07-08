@@ -35,7 +35,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from bin.process_manager import ServerManager, DeviceManager
+from bin.process_manager import ServerManager, DeviceManager, LoggerManager
 from pytweezer.GUI.applet_launcher import AppletLauncher
 from pytweezer.GUI.streammonitor import make_stream_monitor
 from pytweezer.servers.configreader import ConfigReader
@@ -315,6 +315,7 @@ def build_server_gui():
         [
             ("Servers", ServerManager("server")),
             ("Devices", DeviceManager("device")),
+            ("Loggers", LoggerManager("logger")),
             ("Device Status", DeviceStatusPanel()),
             ("Streams", make_stream_monitor("StreamMonitor")),
             ("Applets", AppletLauncher("Applet Launcher")),
