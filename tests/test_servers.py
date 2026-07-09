@@ -110,6 +110,11 @@ def test_get_device_config_unknown_lists_available(fake_client_config):
     assert "Rb HamCam" in str(exc.value)
 
 
+@pytest.mark.parametrize("query", ["rbhamcam", "RB HAMCAM", "  rb   hamcam  "])
+def test_get_device_config_lenient_match(fake_client_config, query):
+    assert device_client.get_device_config(query)["port"] == 5000
+
+
 def test_get_device_uses_config_host_and_port(fake_client_config, monkeypatch):
     captured = {}
 
@@ -122,6 +127,19 @@ def test_get_device_uses_config_host_and_port(fake_client_config, monkeypatch):
     assert client == "CLIENT"
     assert captured["host"] == "1.2.3.4"
     assert captured["port"] == 5000
+
+
+def test_get_device_lenient_match(fake_client_config, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        device_client,
+        "RPCClient",
+        lambda host, port, target_name=None, timeout=None: captured.update(
+            host=host, port=port
+        ),
+    )
+    device_client.get_device("rb hamcam")
+    assert captured == {"host": "1.2.3.4", "port": 5000}
 
 
 def test_get_device_overrides_win_over_config(fake_client_config, monkeypatch):
@@ -145,6 +163,34 @@ def test_get_device_no_port_raises(monkeypatch):
     )
     with pytest.raises(ValueError, match="no 'port' configured"):
         device_client.get_device("NoPort")
+
+
+def test_get_device_async_uses_config_host_and_port(fake_client_config, monkeypatch):
+    import asyncio
+
+    captured = {}
+
+    class FakeAsyncioClient:
+        async def connect_rpc(self, host, port, target_name=None):
+            captured.update(host=host, port=port, target_name=target_name)
+
+    monkeypatch.setattr(device_client, "AsyncioClient", FakeAsyncioClient)
+    client = asyncio.run(device_client.get_device_async("Rb HamCam"))
+    assert isinstance(client, FakeAsyncioClient)
+    assert captured["host"] == "1.2.3.4"
+    assert captured["port"] == 5000
+
+
+def test_get_device_async_no_port_raises(monkeypatch):
+    monkeypatch.setattr(
+        device_client.ConfigReader,
+        "getConfiguration",
+        staticmethod(lambda: {"Devices": {"NoPort": {"host": "1.2.3.4"}}}),
+    )
+    import asyncio
+
+    with pytest.raises(ValueError, match="no 'port' configured"):
+        asyncio.run(device_client.get_device_async("NoPort"))
 
 
 # --------------------------------------------------------------------------- #

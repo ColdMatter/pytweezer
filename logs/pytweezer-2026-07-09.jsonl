@@ -16,3 +16,21 @@
 {"timestamp": "2026-07-09T09:09:12.340+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
 {"timestamp": "2026-07-09T09:09:12.356+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "pytweezer.GUI.pytweezerQt", "module": "pytweezerQt", "message": "geometry not found for HeadlessTest, using default geometry"}
 {"timestamp": "2026-07-09T09:09:16.711+01:00", "level": "WARNING", "host": "twalker-laptop", "logger": "device server", "module": "device_server", "message": "Running ImagEM X2 camera 'imagemx2' in SIMULATION MODE"}
+{"timestamp": "2026-07-09T21:45:02.343+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T21:45:02.347+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T21:45:02.349+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T21:45:02.351+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T21:45:02.398+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "pytweezer.GUI.pytweezerQt", "module": "pytweezerQt", "message": "geometry not found for HeadlessTest, using default geometry"}
+{"timestamp": "2026-07-09T21:45:07.355+01:00", "level": "WARNING", "host": "twalker-laptop", "logger": "device server", "module": "device_server", "message": "Running ImagEM X2 camera 'imagemx2' in SIMULATION MODE"}
+{"timestamp": "2026-07-09T21:58:38.428+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T21:58:38.435+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T21:58:38.439+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T21:58:38.442+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T21:58:38.456+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "pytweezer.GUI.pytweezerQt", "module": "pytweezerQt", "message": "geometry not found for HeadlessTest, using default geometry"}
+{"timestamp": "2026-07-09T21:58:42.269+01:00", "level": "WARNING", "host": "twalker-laptop", "logger": "device server", "module": "device_server", "message": "Running ImagEM X2 camera 'imagemx2' in SIMULATION MODE"}
+{"timestamp": "2026-07-09T22:03:02.535+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T22:03:02.539+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T22:03:02.541+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T22:03:02.544+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T22:03:02.556+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "pytweezer.GUI.pytweezerQt", "module": "pytweezerQt", "message": "geometry not found for HeadlessTest, using default geometry"}
+{"timestamp": "2026-07-09T22:03:06.251+01:00", "level": "WARNING", "host": "twalker-laptop", "logger": "device server", "module": "device_server", "message": "Running ImagEM X2 camera 'imagemx2' in SIMULATION MODE"}

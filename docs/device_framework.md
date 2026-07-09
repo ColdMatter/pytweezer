@@ -35,9 +35,11 @@ pytweezer/servers/device_server.py      (generic server launcher)
 └── main()                 CLI entry: pytweezer-device <name>
 
 pytweezer/servers/device_client.py       (generic client factory)
-├── get_device_config(name)
-└── get_device(name, host=None, port=None, target_name=AutoTarget, timeout=None)
-      -> sipyco.pc_rpc.Client (transparent RPC proxy)
+├── get_device_config(name)   lenient config-key lookup (via resolve_device)
+├── get_device(name, host=None, port=None, target_name=AutoTarget, timeout=None)
+│     -> sipyco.pc_rpc.Client (transparent RPC proxy)
+└── get_device_async(name, host=None, port=None, target_name=AutoTarget)
+      -> sipyco.pc_rpc.AsyncioClient (coroutine methods; concurrent servers)
 
 pytweezer/servers/simulated_device.py    (generic simulated-backend mechanism)
 ├── public_methods(real_cls, exclude=())   introspects real_cls's public methods
@@ -249,12 +251,54 @@ since every device server in this framework exposes exactly one target
 name.
 
 `get_device_config(name)` is available if you just want the raw config dict
-(host/port/driver/etc.) without connecting.
+(host/port/driver/etc.) without connecting. It goes through the same
+`resolve_device` lookup as the server side, so it accepts the same
+whitespace-/case-insensitive matches (`RbHamCam`, `rb hamcam`, `RB HAMCAM` all
+resolve to `"Rb HamCam"`) and raises `KeyError` listing the valid names on a
+typo — `get_device`/`get_device_async` inherit this for free since both call
+`get_device_config` internally.
 
-Unknown device names raise `KeyError` listing the valid names (same pattern as
-`resolve_device`, but this lookup is **exact-match only** — it does not apply
-the lenient normalization, since callers here are code, not a human typing a
-CLI arg).
+### Concurrent devices: `get_device_async`
+
+`get_device(...)` returns a blocking client — the calling script doesn't move
+past an RPC call until that call's full remote execution finishes. That's a
+problem for something like starting two independent MotMaster sequencers "in
+parallel": each is its own device server process, so the hardware doesn't
+contend, but a blocking client only *issues* the second call after the first
+one's `Go()` has already returned.
+
+`get_device_async(name, host=None, port=None, target_name=AutoTarget)` is the
+same lookup and config resolution, but returns a `sipyco.pc_rpc.AsyncioClient`
+whose RPC methods are coroutines. Connect several and drive them with
+`asyncio.gather` so the calls are issued together instead of one waiting on
+the other's reply:
+
+```python
+import asyncio
+from pytweezer.servers.device_client import get_device_async
+
+async def main():
+    mm1 = await get_device_async("Rb MotMaster Server")
+    mm2 = await get_device_async("CaF MotMaster Server")
+    try:
+        await asyncio.gather(
+            mm1.start_motmaster_experiment(),
+            mm2.start_motmaster_experiment(),
+        )
+    finally:
+        await mm1.close_rpc()
+        await mm2.close_rpc()
+
+asyncio.run(main())
+```
+
+No server-side change is needed for this — each device already runs its own
+`simple_server_loop`, so the concurrency only needed solving on the client.
+Fine to call from scripts/notebooks; the GUI is PyQt5 with no `qasync`
+integration, so calling from GUI code would need a worker thread. See
+`async_device_comms_notes.md` (repo root) for the fuller investigation
+(including why `AsyncioClient` still awaits each reply — the win is running
+calls to *different* servers concurrently, not skipping replies).
 
 ### Relationship to `MotMasterClient`
 
@@ -283,7 +327,7 @@ migrated onto it.
 | File | Role |
 |------|------|
 | `pytweezer/servers/device_server.py` | Generic server launcher: `DRIVER_REGISTRY`, `build_spec`, `resolve_device`, `run_device_server`, `main`. |
-| `pytweezer/servers/device_client.py` | Generic client factory: `get_device`, `get_device_config`. |
+| `pytweezer/servers/device_client.py` | Generic client factory: `get_device`, `get_device_async`, `get_device_config`. |
 | `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`. |
 | `pytweezer/experiment/motmaster_server.py` | MotMaster backend classes (`MotMasterInterface`, `SimulatedMotMasterInterface`) + legacy standalone `main()`. |
 | `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`, `requires_camera`. |
