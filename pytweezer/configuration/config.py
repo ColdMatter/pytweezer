@@ -11,8 +11,8 @@ HOSTS = {
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-SIMULATING = True
-LOCAL = True
+SIMULATING = False # set to True to run in simulation mode (no real devices, no real cameras, etc.)
+LOCAL = False
 SERVER_HOST = HOSTS["ph-beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
 # Self-hosted InfluxDB 2.x connection. Every value can be overridden by an
