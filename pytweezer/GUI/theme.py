@@ -21,6 +21,7 @@ conveyed by colour alone.
 STATE_STYLE = {
     "running": ("#2ecc71", "Running"),
     "up": ("#2ecc71", "Running"),
+    "starting": ("#f5a623", "Starting"),
     "stopped": ("#6b6c76", "Stopped"),
     "down": ("#6b6c76", "Stopped"),
     "crashed": ("#e74c3c", "Crashed"),
@@ -160,6 +161,10 @@ QFrame#ProcessTile {
 QFrame#ProcessTile[state="running"],
 QFrame#ProcessTile[state="up"] {
     border-left: 4px solid #2ecc71;
+}
+
+QFrame#ProcessTile[state="starting"] {
+    border-left: 4px solid #f5a623;
 }
 
 QFrame#ProcessTile[state="crashed"] {

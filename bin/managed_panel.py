@@ -45,8 +45,18 @@ from pytweezer.logging_utils import get_logger
 
 logger = get_logger("managed_panel")
 
-# States that mean "the process is up", for the toggle button and its label.
+# States that mean "the process is fully up".
 RUNNING_STATES = ("running", "up")
+
+# States where the toggle should offer "Stop" (i.e. clicking it terminates):
+# a running process, or one still coming up.
+ACTIVE_STATES = RUNNING_STATES + ("starting",)
+
+# How long a feed-driven row stays "Starting" after a start request before it
+# accepts a "down"/"stopped" reading as a genuine failed start. Covers the gap
+# between the device subprocess spawning and its RPC server becoming reachable
+# (camera/hardware init can take several seconds).
+_STARTING_GRACE_S = 30.0
 
 # Column heading for the name column, per config category.
 _ITEM_LABEL = {"Servers": "Server", "Loggers": "Logger", "Devices": "Device"}
@@ -105,6 +115,7 @@ class ManagedRow(QFrame):
         self.name = name
         self.controllable = controllable
         self._self_polling = False
+        self._starting_since = None  # monotonic time of last start, or None
         self.timer = None
 
         self.setObjectName("ProcessTile")
@@ -181,6 +192,23 @@ class ManagedRow(QFrame):
 
     def apply_status(self, state, address=None, last_seen=None):
         """Externally driven status update (device feed / reachability probe)."""
+        # While waiting for a just-started service to come up, keep showing
+        # "Starting" instead of the feed's transient "down" — otherwise a start
+        # reads as stopped → running → stopped → running. A real "up" clears the
+        # window; exceeding the grace period accepts the feed as a failed start.
+        if self._starting_since is not None:
+            if state in RUNNING_STATES:
+                self._starting_since = None
+            elif self.process is not None and self.process.poll() is not None:
+                # We own this subprocess and it has already exited — the start
+                # failed, so surface it now instead of waiting out the grace.
+                self._starting_since = None
+                self.process = None
+                state = "crashed"
+            elif time.monotonic() - self._starting_since < _STARTING_GRACE_S:
+                state = "starting"
+            else:
+                self._starting_since = None
         self._set_state(state)
         if address is not None:
             self.addressLabel.setText(address)
@@ -189,7 +217,7 @@ class ManagedRow(QFrame):
 
     def _toggle(self):
         state = self.property("state")
-        if state in RUNNING_STATES:
+        if state in ACTIVE_STATES:
             self.terminateProcess()
         else:
             self.startProcess()
@@ -200,12 +228,20 @@ class ManagedRow(QFrame):
         self.terminateProcess()
         logger.info(f"Starting process {self.name} with script {self.script}")
         self.process = subprocess.Popen(['python3', self.script, self.name])
-        # Reflect the new state immediately; self-poll (if any) will confirm or
-        # flip it to "crashed" on the next tick if the child dies at once.
-        self._poll_self() if self._self_polling else self._set_state("running")
+        if self._self_polling:
+            # The subprocess *is* the service, so liveness is the truth.
+            self._poll_self()
+        else:
+            # Feed-driven (device): the subprocess has spawned but its RPC
+            # server isn't reachable yet — show "Starting" until the feed
+            # confirms it (see apply_status).
+            self._starting_since = time.monotonic()
+            self._set_state("starting")
 
     def terminateProcess(self):
+        self._starting_since = None
         if self.process is not None:
+            logger.info(f"Stopping process {self.name}")
             self.process.terminate()
             try:
                 self.process.wait(timeout=1)
@@ -240,9 +276,9 @@ class ManagedRow(QFrame):
     def _update_toggle(self, state):
         if self.toggleButton is None:
             return
-        running = state in RUNNING_STATES
-        self.toggleButton.setText("Stop" if running else "Start")
-        self.toggleButton.setProperty("kind", "stop" if running else "start")
+        active = state in ACTIVE_STATES
+        self.toggleButton.setText("Stop" if active else "Start")
+        self.toggleButton.setProperty("kind", "stop" if active else "start")
         self.toggleButton.style().unpolish(self.toggleButton)
         self.toggleButton.style().polish(self.toggleButton)
 
