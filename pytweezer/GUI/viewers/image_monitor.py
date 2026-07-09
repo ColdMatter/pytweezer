@@ -105,7 +105,7 @@ class ImageDisplay(Applet):
         # we want to keep the aspect ratio correct when plotting images
         view_box.setAspectLocked(True)
         view_box.menu.addAction("subscriptions").triggered.connect(
-            self.open_subscription_editor
+            lambda: self.open_subscription_editor()
         )
         view_box.menu.addAction("Image masks").triggered.connect(self.subscribe_mask)
         view_box.menu.addAction("configure").triggered.connect(self.open_config_editor)

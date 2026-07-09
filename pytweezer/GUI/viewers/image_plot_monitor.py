@@ -97,7 +97,7 @@ class ImagePlotDisplay(Applet):
         self.setLayout(layout)
 
         view_box.menu.addAction("Image subscriptions").triggered.connect(
-            self.open_subscription_editor
+            lambda: self.open_subscription_editor()
         )
         view_box.menu.addAction("Top plot subscriptions").triggered.connect(
             lambda: self.open_subscription_editor("topstreams")

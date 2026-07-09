@@ -35,7 +35,7 @@ class LivePlot(Applet):
 
         vb = self.plot.getViewBox()
         vb.menu.addAction("subscriptions").triggered.connect(
-            self.open_subscription_editor
+            lambda: self.open_subscription_editor()
         )
         vb.menu.addAction("configure").triggered.connect(self.open_config_editor)
 
