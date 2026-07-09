@@ -10,3 +10,9 @@
 {"timestamp": "2026-07-09T08:17:24.834+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
 {"timestamp": "2026-07-09T08:17:24.848+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "pytweezer.GUI.pytweezerQt", "module": "pytweezerQt", "message": "geometry not found for HeadlessTest, using default geometry"}
 {"timestamp": "2026-07-09T08:17:26.928+01:00", "level": "WARNING", "host": "twalker-laptop", "logger": "device server", "module": "device_server", "message": "Running ImagEM X2 camera 'imagemx2' in SIMULATION MODE"}
+{"timestamp": "2026-07-09T09:09:12.330+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T09:09:12.334+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T09:09:12.337+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T09:09:12.340+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "Process Manager", "module": "process_manager", "message": "Deleting controller"}
+{"timestamp": "2026-07-09T09:09:12.356+01:00", "level": "INFO", "host": "twalker-laptop", "logger": "pytweezer.GUI.pytweezerQt", "module": "pytweezerQt", "message": "geometry not found for HeadlessTest, using default geometry"}
+{"timestamp": "2026-07-09T09:09:16.711+01:00", "level": "WARNING", "host": "twalker-laptop", "logger": "device server", "module": "device_server", "message": "Running ImagEM X2 camera 'imagemx2' in SIMULATION MODE"}
