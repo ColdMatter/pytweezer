@@ -20,7 +20,7 @@ pytweezer-kill-stale = "bin.kill_stale:main"
 python = "^3.11.4, <3.14"
 
 # --- Core Data Science & Math ---
-pandas = "=2.2.3"
+pandas = "^2.2.3"
 scipy = "^1.17.1"
 
 
@@ -28,11 +28,11 @@ scipy = "^1.17.1"
 matplotlib = "^3.9.2"
 
 # --- Hardware & Automation ---
-pylablib = "=1.4.3"
+pylablib = "^1.4.3"
 
 # --- Utilities & Networking ---
-rich = "=13.9.4"
-paramiko = "=3.4.1"     # SSH client
+rich = "^13.9.4"
+paramiko = "^3.4.1"     # SSH client
 tifffile = "^2026.1.28"
 pillow = "^12.1.0"
 pyzmq = "^27.1.0"
@@ -43,8 +43,8 @@ PyQt5-qt5 = "=5.15.2"
 
 
 # --- Jupyter Support ---
-ipykernel = "=6.28.0"
-ipywidgets = "=8.1.5"
+ipykernel = "^7.3"
+ipywidgets = "^8.1.5"
 tqdm = "^4.67.3"
 h5py = "^3.15.1"
 cupy-cuda13x = "^14.0.1"
@@ -57,14 +57,14 @@ imageio = "^2.37.3"
 zmq = "^0.0.0"
 
 # --- Utilities & Networking ---
-pydantic = "=2.10.5"
-# rich = "=13.9.4"
-# paramiko = "=3.4.1"     # SSH client
-# rpyc = "=5.3.0"
-# plumbum = "=1.8.3"
-pythonnet = "=3.0.5"    # .NET integration
-# wakepy = "=0.9.1"       # from pip section
-# iso8601 = "=2.1.0"      # from pip section
+pydantic = "^2.10.5"
+# rich = "^13.9.4"
+# paramiko = "^3.4.1"     # SSH client
+# rpyc = "^5.3.0"
+# plumbum = "^1.8.3"
+pythonnet = "^3.0.5"    # .NET integration
+# wakepy = "^0.9.1"       # from pip section
+# iso8601 = "^2.1.0"      # from pip section
 scikit-image = "^0.26.0"
 pyvisa-py = "^0.8.1"
 sipyco = {git = "https://github.com/m-labs/sipyco.git"}
