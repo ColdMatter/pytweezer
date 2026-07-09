@@ -5,10 +5,16 @@ configuration/configfile.py
 venv/
 Image Data/
 Image data/
-
+Rnd-Venv/
 # OS junk
 .DS_Store
-
+Local_files/
+poetry/
+scripts/
+tests/
 # compiled extensions / build artifacts (rebuilt per-platform with `make`)
 *.so
 *.o
+
+cpp_implementations/Pixel_Summing/build/
+cpp_implementations/Pixel_Summing/*.egg-info/
