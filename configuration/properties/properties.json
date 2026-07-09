@@ -17,6 +17,10 @@
                 "second_image_": {
                     "timestamp": 1775062793.8260915,
                     "parts": 3
+                },
+                "rb_hamcam": {
+                    "timestamp": 1783523978.2946951,
+                    "parts": 3
                 }
             }
         },
@@ -32,24 +36,7 @@
         }
     },
     "Analysis": {
-        "Image": {
-            "first_image": {
-                "script": "imageselector.py",
-                "active": true,
-                "imagestreams": [
-                    "imagemx2"
-                ],
-                "SelectedImage": 1
-            },
-            "second_image": {
-                "script": "imageselector.py",
-                "active": true,
-                "imagestreams": [
-                    "imagemx2"
-                ],
-                "SelectedImage": 2
-            }
-        },
+        "Image": {},
         "Data": {},
         "analysisdir": "C:\\Users\\tweez\\ColdMatter\\pytweezer/pytweezer/analysis/"
     },
@@ -307,9 +294,9 @@
         "PropertyEditor": {
             "Geometry": [
                 0,
-                49,
-                800,
-                800
+                0,
+                828,
+                554
             ]
         },
         "Applet Launcher": {
@@ -333,7 +320,7 @@
     },
     "Image Monitor": {
         "imagestreams": [
-            "--None--"
+            "rb_hamcam"
         ],
         "maskstreams": [
             "--None--"
@@ -345,8 +332,8 @@
         "ROI": {
             "slice": {
                 "pos": [
-                    0,
-                    0
+                    32.92564533198302,
+                    37.62930895083775
                 ],
                 "size": [
                     30,
@@ -366,7 +353,8 @@
     },
     "Image Monitor 2": {
         "imagestreams": [
-            "--None--"
+            "--None--",
+            "rb_hamcam"
         ],
         "maskstreams": [
             "--None--"
@@ -404,11 +392,18 @@
             "Image Monitor 2": {
                 "script": "pytweezer/GUI/viewers/image_monitor.py",
                 "active": false
+            }
+        }
+    },
+    "Analysis Manager UI": {
+        "Image": {
+            "first_image": {
+                "active": false
             },
-            "bdvgbr": {
-                "script": "pytweezer/GUI/viewers/image_monitor.py",
+            "second_image": {
                 "active": false
             }
         }
-    }
+    },
+    "ExitTestApplet": {}
 }

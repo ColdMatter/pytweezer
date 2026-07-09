@@ -93,7 +93,9 @@ def _make_imagemx2(name, conf):
 
     if simulate:
         logger.warning("Running ImagEM X2 camera %r in SIMULATION MODE", name)
-        camera = SimulatedImagEMX2Camera(image_dir=image_dir, timeout=timeout)
+        camera = SimulatedImagEMX2Camera(
+            stream_name=stream_name, image_dir=image_dir, timeout=timeout
+        )
     else:
         camera = ImagEMX2Camera(
             stream_name=stream_name, image_dir=image_dir, timeout=timeout

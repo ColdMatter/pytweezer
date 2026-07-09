@@ -192,7 +192,8 @@ calls the same factory.
 | `bin/gui.py` | Shell, `ServerStatusPanel`, `DeviceStatusPanel`, builders, `server_main`/`client_main`. |
 | `bin/process_manager.py` | `ProcessManager`/`ServerManager`/`DeviceManager` panels. CLI `main()` retired. |
 | `bin/process_tile_base.py` | `ProcessTile` — one start/stop tile + local status polling. |
-| `pytweezer/GUI/applet_launcher.py` | `AppletLauncher` panel (applet subprocess manager). |
+| `pytweezer/GUI/applet_launcher.py` | `AppletLauncher` panel (applet subprocess manager). See [`applets.md`](applets.md). |
+| `pytweezer/GUI/applet.py` | `Applet` base class + `run_applet()` entry helper for viewer/plot applets. |
 | `pytweezer/GUI/streammonitor.py` | `make_stream_monitor()` factory + `StreamMonitor`/`LogMonitor`. |
 | `pytweezer/servers/device_status.py` | `DeviceStatusServer` (poll + PUB) + `DeviceStatusClient` (SUB). |
 | `pytweezer/servers/reachability.py` | `is_reachable()` — shared TCP liveness probe. |

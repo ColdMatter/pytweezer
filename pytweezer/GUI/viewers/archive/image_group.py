@@ -5,9 +5,9 @@ from pytweezer import *
 from pytweezer.servers import Properties,PropertyAttribute, tweezerpath, icon_path
 from pytweezer.servers.configreader import ConfigReader
 from pytweezer.GUI.viewers.image_monitor import ImageDisplay
-from pytweezer.GUI.viewers.updating_plot import LivePlot
+from pytweezer.GUI.viewers.live_plot import LivePlot
 from pytweezer.GUI.pytweezerQt import BMainWindow
-from pytweezer.GUI.viewers.parameterbox import ParameterBox, ImageDataBox, CamPropsBox
+from pytweezer.GUI.viewers.archive.parameterbox import ParameterBox, ImageDataBox, CamPropsBox
 import  subprocess
 import os
 import importlib.util

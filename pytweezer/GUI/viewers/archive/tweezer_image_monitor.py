@@ -6,7 +6,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5 import QtCore, QtWidgets
 
-from pytweezer.GUI.viewers.image_group import ImageWindow
+from pytweezer.GUI.viewers.archive.image_group import ImageWindow
 from pytweezer.GUI.viewers.image_monitor import ImageDisplay
 from pytweezer.servers import DataClient, PropertyAttribute
 

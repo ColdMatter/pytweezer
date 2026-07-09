@@ -82,7 +82,7 @@ actually selects the behavior.
 | `"driver"` | Factory | Backend built | Target name |
 |---|---|---|---|
 | `"motmaster"` | `_make_motmaster` | `MotMasterInterface` / `SimulatedMotMasterInterface` (if `simulate`) | `"motmaster"` |
-| `"imagemx2"` | `_make_imagemx2` | `ImagEMX2Camera` / `SimulatedImagEMX2Camera` (if `simulate`) | `"camera"` |
+| `"imagemx2"` | `_make_imagemx2` | `ImagEMX2Camera` / `SimulatedImagEMX2Camera` (if `simulate`) — both built on the generic `Camera` base, see below | `"camera"` |
 | `"blackfly"` | `_make_blackfly` | `Blackfly` | `"camera"` |
 
 Each factory returns a `DeviceServerSpec(target_name, target, description,
@@ -139,6 +139,40 @@ breaks every unconfigured RPC call, which is why this repo doesn't use one as
 the literal RPC target. `defaults={method_name: value_or_zero_arg_callable}`
 overrides the stub's return value for methods where `None` would be a poor
 fake (e.g. `dict`/`list` for methods real callers expect to iterate over).
+
+`simulate()` is MRO-aware: it only stubs a method the decorated class does not
+already provide *itself or via a base class*. That's what lets a per-driver
+simulated class inherit real fake behaviour from a shared base (e.g.
+`SimulatedCamera`) and get only the driver's *extra* methods stubbed — see the
+`Camera` abstraction above.
+
+### Cameras: the shared `Camera` abstraction
+
+Camera drivers don't each reimplement ROI/trigger/acquisition/broadcast logic.
+`pytweezer/drivers/camera_base.py` defines:
+
+- `Camera(ABC)` — owns everything generic to a camera server: image
+  broadcasting onto the ZMQ stream, TIFF autosave, the autosave/broadcast
+  acquisition loop (`acquire_n_frames`/`acquire_single_frame`), and the
+  connect/relinquish/reacquire lifecycle. It declares the small set of
+  hardware-specific hooks a concrete driver must implement: `_connect`/
+  `_disconnect`, `set_roi`, `set_trigger_source`, `set_exposure_time`,
+  `setup_acquisition`, `start_acquisition`/`stop_acquisition`, and
+  `_read_frames` (the raw grab). The live hardware handle lives on
+  `self._backend` (`None` == relinquished).
+- `SimulatedCamera(Camera)` — a single, one-size-fits-all synthetic backend
+  that implements those hooks with generated frames, usable for **any** camera
+  in simulation mode.
+- `simulated_camera_for(real_cls)` — returns a `SimulatedCamera` subclass with
+  `real_cls`'s *extra* methods (beyond the `Camera` interface, e.g. the
+  ImagEM's EM-gain setters) auto-stubbed via `@simulate`. This is how
+  `SimulatedImagEMX2Camera` is defined — one line, no hand-written per-driver
+  simulated class.
+
+A concrete camera driver (e.g. `ImagEMX2Camera` in `imagemX2.py`) is therefore
+just the thin dcam→hooks translation shim plus its camera-specific extras.
+**A new camera type** is: subclass `Camera`, implement the hooks over its SDK,
+and set `SimulatedX = simulated_camera_for(X)` — no bespoke simulated class.
 
 ### Adding a new driver type
 
@@ -250,9 +284,10 @@ migrated onto it.
 |------|------|
 | `pytweezer/servers/device_server.py` | Generic server launcher: `DRIVER_REGISTRY`, `build_spec`, `resolve_device`, `run_device_server`, `main`. |
 | `pytweezer/servers/device_client.py` | Generic client factory: `get_device`, `get_device_config`. |
-| `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator, `public_methods`. |
+| `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`. |
 | `pytweezer/experiment/motmaster_server.py` | MotMaster backend classes (`MotMasterInterface`, `SimulatedMotMasterInterface`) + legacy standalone `main()`. |
-| `pytweezer/drivers/imagemX2.py` | ImagEM X2 backend classes (`ImagEMX2Camera`, `SimulatedImagEMX2Camera`) + legacy standalone `main()`. |
+| `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`, `requires_camera`. |
+| `pytweezer/drivers/imagemX2.py` | ImagEM X2 dcam shim (`ImagEMX2Camera` on `Camera`) + `SimulatedImagEMX2Camera = simulated_camera_for(...)` + legacy standalone `main()`. |
 | `pytweezer/drivers/bfly2.py` | Blackfly backend class + legacy standalone `main()`. |
 | `pytweezer/experiment/motmaster_client.py` | `MotMasterClient` — pre-framework client with back-compat aliases. |
 | `pytweezer/configuration/config.py` | `CONFIG["Devices"]` — `driver`/`host`/`port`/`active`/... per device. |

@@ -66,7 +66,7 @@ class DummyCamera:
             "_imgindex": index,
         }  # TODO all cam settings
 
-        self.imstream.send(im, info)
+        self.imstream.send(info, im)
         # print('camera time stamp:',image_stamp)
 
     def close(self):

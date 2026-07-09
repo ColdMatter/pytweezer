@@ -35,7 +35,7 @@ class ImageRotate():
                 head["_offset"] = [offxrot, offyrot]
 
                 # send the image
-                self.imageq.send(np.abs(img_rot),head,channel='_')
+                self.imageq.send(head,np.abs(img_rot),channel='_')
 
 
 def main_run(name):

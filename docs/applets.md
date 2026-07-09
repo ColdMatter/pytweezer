@@ -1,0 +1,157 @@
+# pytweezer applet framework
+
+How viewer/plot **applets** are defined, launched, and managed. Complements
+[`gui_architecture.md`](gui_architecture.md), which covers the GUI shell that
+embeds the **Applets** tab, and [`device_framework.md`](device_framework.md),
+whose "one base + one launcher" shape this mirrors on the display side.
+
+## What an applet is
+
+An **applet** is a small, standalone process that runs **locally on a lab PC**,
+subscribes to one or more data/image streams on the messaging fabric, and
+displays them live (an image viewer, a live plot, …). Applets are pure
+*consumers*: they never own hardware and never publish — they `subscribe()` to
+streams that device servers and analysis processes publish through the
+Image/Data hubs (see `pytweezer/servers/clients.py`).
+
+Because a stream is fanned out to every subscriber by the XSUB/XPUB hubs, any
+number of applets on any number of PCs can watch the same stream at once. Where
+an applet runs is decided by **which machine's Applet Launcher started it** —
+unlike devices (whose PC is pinned by `CONFIG["Devices"][name]["host"]`), applets
+are deliberately local and per-operator.
+
+## Component map
+
+```
+pytweezer/GUI/applet.py                 (base class + entry-point helper)
+├── Applet(QWidget)      props + title + geometry + poll timer + menu dialogs
+│   ├── stream_category  "Image" | "Data"  (which stream catalog to browse)
+│   ├── poll_interval    ms between poll() calls (0 = no timer)
+│   ├── init_gui()             hook: build widgets
+│   ├── poll()                 hook: pull new stream data, refresh display
+│   ├── update_subscriptions() hook: (re)apply stream subscriptions
+│   ├── open_subscription_editor(streamkey=None)  shared "subscriptions" dialog
+│   └── open_config_editor()                      shared "configure" dialog
+└── run_applet(applet_cls, default_name)   parse <name> argv, run Qt loop
+
+pytweezer/GUI/viewers/                   (the applet scripts themselves)
+├── image_monitor.py   ImageDisplay(Applet)   image streams  (stream_category="Image")
+└── live_plot.py       LivePlot(Applet)        data streams   (stream_category="Data")
+      (viewers/archive/ holds retired/experimental viewers — ignore them)
+
+pytweezer/GUI/applet_launcher.py         (the manager panel)
+└── AppletLauncher(BWidget)   add/start/stop/restart applet subprocesses;
+                              applet list persisted in Properties under "Applets"
+```
+
+## The base class: `Applet`
+
+Every applet subclasses `Applet` (a plain `QWidget`). The base handles the
+machinery that used to be copy-pasted into each viewer:
+
+- a `Properties(name)` connection, exposed as **both** `self.props` and
+  `self._props` (the latter is what `PropertyAttribute` descriptors read);
+- the **window title**, set to `name` — so the title always matches the label
+  in the Applet Launcher;
+- **geometry persistence** via `QSettings("pytweezer", name)` (restored in
+  `__init__`, saved in `closeEvent`);
+- a repeating **poll timer** that calls `self.poll()` every `poll_interval` ms;
+- the shared **"subscriptions"** and **"configure"** context-menu dialogs.
+
+A subclass describes only *what* it shows, by overriding a few hooks:
+
+| Hook | When it runs | What to do |
+|---|---|---|
+| `init_gui(self)` | once, after props + title are ready | build widgets, create stream clients, wire menu actions |
+| `poll(self)` | every `poll_interval` ms | pull new stream data (`has_new_data()` / `recv()`) and update the display |
+| `update_subscriptions(self)` | after either dialog closes | unsubscribe + re-subscribe the stream clients from the current property list |
+
+Class attributes tune behavior:
+
+- `stream_category` — `"Image"` or `"Data"`. Chooses which catalog the
+  subscription editor lists, and the default Properties key the subscription
+  list lives under (`<category>.lower() + "streams"`, i.e. `imagestreams` /
+  `datastreams`).
+- `poll_interval` — ms between `poll()` calls; set `0` for an applet driven
+  purely by Qt signals.
+
+### Minimal example
+
+```python
+from pytweezer.servers import DataClient
+from pytweezer.GUI.applet import Applet, run_applet
+
+class MyPlot(Applet):
+    stream_category = "Data"
+    poll_interval = 10
+
+    def init_gui(self):
+        self.stream = DataClient(self.name)
+        ...  # build widgets; wire menu -> self.open_subscription_editor / self.open_config_editor
+        self.update_subscriptions()
+
+    def update_subscriptions(self):
+        self.stream.unsubscribe()
+        for ch in self.props.get("datastreams", []):
+            self.stream.subscribe(ch)
+
+    def poll(self):
+        if self.stream.has_new_data():
+            msg, info, array = self.stream.recv()
+            ...  # draw
+
+def main(name):                 # config-/launcher-driven entry
+    run_applet(MyPlot, default_name=name)
+
+if __name__ == "__main__":      # standalone CLI entry
+    run_applet(MyPlot, default_name="MyPlot")
+```
+
+`run_applet` is the single entry point: it parses the `name` positional arg
+(supplied by the launcher — see below), constructs the applet, and runs the Qt
+event loop. Keep both a `main(name)` (called by tooling that imports the module)
+and the `__main__` guard.
+
+## Launching & management: the Applet Launcher
+
+`pytweezer/GUI/applet_launcher.py`'s `AppletLauncher` is the panel surfaced as
+the **Applets** tab in both the server and client GUIs. It is a subprocess
+manager, closely analogous to `ProcessTile`/`DeviceManager` on the device side:
+
+- **Storage.** The list of applets lives in **Properties** under the `"Applets"`
+  key: `{ name: {"script": ..., "active": bool, "description": ...}, ... }`.
+  `_ensure_defaults()` seeds it from `DEFAULT_APPLETS` the first time.
+- **Launch model.** Starting an applet runs
+  `subprocess.Popen([sys.executable, script_path, name], cwd=tweezerpath)` —
+  i.e. `python <script> <name>`. **`name` is the applet's label, its Properties
+  namespace, and its window title, all at once.** Two applets with different
+  names therefore get independent property subtrees, subscriptions, and saved
+  geometry, even if they run the same script.
+- **Script resolution.** Relative `script` paths resolve against `tweezerpath`;
+  a missing script is reported and the row marked `missing`.
+- **Controls.** The name column's checkbox = active/start-stop; `add` (with an
+  optional template from `DEFAULT_APPLETS`), `del`, and `restart` buttons; a
+  1 s timer reconciles each row's status against `process.poll()`.
+- **Auto-start & teardown.** On open, every applet marked `"active": True` is
+  started (`_start_active_applets`); on close, all child processes are
+  terminated (`closeEvent`). This is why the GUI shell's teardown must call the
+  panel's `close()` — see `gui_architecture.md`.
+
+### Adding an applet
+
+- **New instance of an existing viewer** (e.g. a second image monitor): just add
+  it in the launcher UI, or add an entry to `DEFAULT_APPLETS` so it's offered as
+  a template. No code.
+- **New applet type:** add a script under `pytweezer/GUI/viewers/` whose class
+  subclasses `Applet`, implement `init_gui`/`poll`/`update_subscriptions`, end
+  with `run_applet(...)`, then point a launcher entry at it. Optionally add it to
+  `DEFAULT_APPLETS` as a template.
+
+## Not to be confused with…
+
+- **The `GUI` config category** (`CONFIG["GUI"]`, e.g. the Applet Launcher
+  itself, StreamMonitor) — those are standalone GUI *tools* started by
+  `ProcessTile`, not applets. The launcher is the tool; the applets are what it
+  launches.
+- **Loggers** (`pytweezer/loggers/`) — those also consume streams/hardware but
+  write to InfluxDB rather than displaying; see `influx_logging.md`.

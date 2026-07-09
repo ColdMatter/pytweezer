@@ -2,16 +2,17 @@ from imageio import imread
 from pytweezer.servers import ImageClient
 from pytweezer.servers import CommandClient,DataClient
 from pytweezer.servers import Properties,PropertyAttribute
-from pytweezer.analysis.print_messages import print_error
+from pytweezer.logging_utils import get_logger
 import time
 from termcolor import colored
 import copy
 import argparse
+import logging
 import numpy as np
 from scipy.ndimage import rotate
-import logging, sys
-logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 from sipyco.pc_rpc import Client as RPCClient, simple_server_loop
+
+LOGGER = get_logger("bfly2")
 
 try:
     import rotpy
@@ -21,9 +22,7 @@ except:
     class pc2():
         ''' dummy class in case driver is not installed '''
         def __init__(self):
-            print_error('blackfly driver not installed', 'error')
-
-LOGGER = logging.getLogger(__name__)
+            LOGGER.error('blackfly driver not installed')
 
 class Blackfly():
     ''' Driver based on rotpy's python bindings of of the Spinnaker SDK
@@ -114,7 +113,7 @@ class Blackfly():
                     except rotpy.system.SpinnakerAPIException as e:
                         print(e)
                 else:
-                    print_error('bfly2.py {}: Node {} not writable.'.format(self.serial, key), 'warning')
+                    LOGGER.warning('bfly2.py %s: Node %s not writable.', self.serial, key)
 
             # II. It's a SpinEnumNode, set the 'value' from the dict
             elif "options" in val:
@@ -123,7 +122,7 @@ class Blackfly():
                     enum_item = node.get_entry_by_name(val['value'])
                     node.set_node_value(enum_item)
                 else:
-                    print_error('bfly2.py {}: Node {} not writable.'.format(self.serial, key), 'warning')
+                    LOGGER.warning('bfly2.py %s: Node %s not writable.', self.serial, key)
 
             # III. it's a SpinTreeNode, we iterate on
             else:
@@ -173,7 +172,7 @@ class Blackfly():
             return imc
 
         except Exception as e:
-            print_error('Cam {0}: Error get image: {1}'.format(self.serial, e), 'warning')
+            LOGGER.warning('Cam %s: Error get image: %s', self.serial, e)
             return None
 
     def initialize_cam(self):

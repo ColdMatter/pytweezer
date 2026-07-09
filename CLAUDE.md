@@ -10,15 +10,23 @@ MotMaster experiment sequencers) across multiple lab PCs.
 
 ## Commands
 
-This project uses Poetry. There is no configured linter, formatter, or automated
-test suite (no pytest config; `tests/` holds notebooks and ad hoc scripts, not a
-runnable suite). Verify changes by actually running them through Poetry.
+This project uses Poetry. There is no configured linter or formatter. There is a
+real pytest suite under `tests/` (`conftest.py` sets `QT_QPA_PLATFORM=offscreen`
+before any PyQt5 import, so Qt widget tests run headless) — run it after
+touching code it covers, and add cases there instead of writing one-off
+verification scripts when the change fits its scope.
 
 ```bash
 poetry install                      # (re)generate console scripts after editing pyproject.toml
+poetry run pytest tests/ -q         # run the test suite
 poetry run python <script>.py       # run any script inside the venv
 poetry env info                     # show the venv path (env name looks like pytweezer-<hash>-py3.13)
 ```
+
+For behavior the suite doesn't cover (hardware drivers, multi-process
+server/hub interaction, anything needing a real device), fall back to running
+it manually through Poetry — but check `tests/` first; it may already exercise
+what you're about to hand-verify.
 
 Entry points (`[tool.poetry.scripts]` in `pyproject.toml`):
 
@@ -39,8 +47,33 @@ the Qt loop ends (see "Non-daemon threads" below). If you're capturing output
 from a script that goes through that path, `sys.stdout.flush()` before exit or
 the output will be lost when piped.
 
+**Don't run multi-line Python through `python -c`.** In this environment a `-c`
+string with embedded or leading newlines frequently returns empty output — this
+is a real quoting/flushing failure, not a cosmetic "shell quirk," and rerunning
+the same `-c` command with slightly different quoting will not fix it. Do not
+diagnose it as an environment glitch and move on. Instead, for anything beyond a
+single trivial expression, write a `.py` file to the scratchpad dir (see the
+Scratchpad section) and run it with `poetry run python <file>.py`. A script file
+runs identically every time, shows full tracebacks, and can be re-read/edited.
+Keep `-c` only for one true one-liner with no newlines. When a script's output
+matters, end it with `sys.stdout.flush()` (or `print(..., flush=True)`).
+
 Pyright type checking is explicitly off (`pyrightconfig.json`); don't expect or
 enforce type-check cleanliness.
+
+## Writing docs and comments
+
+Docstrings and comments are for the next user or developer reading the code cold.
+Write what helps *them*: what a module/function does, how to use it, the
+non-obvious constraints, and the gotchas that would otherwise cost someone an
+afternoon. Do **not** write documentation that narrates the conversation or task
+that produced the code — no "why no X", no justifying a choice against an
+alternative that was only ever discussed in chat, no "see Y for the one place we
+weighed Z", no changelog-style notes about what was changed or considered. If a
+design decision genuinely needs recording, state the constraint as a present-tense
+fact ("sums use `float64` to avoid integer overflow on raw camera counts"), not as
+a defense of the decision. When in doubt, ask whether the sentence would still
+make sense to someone who has never seen this task — if not, cut it.
 
 ## Architecture
 
@@ -123,6 +156,28 @@ explicit `.sync()` before that hard exit, or the write never reaches disk.
 Full writeup, including the panel teardown chain and the two status-panel
 mechanisms (`ServerStatusPanel` client-probe vs `DeviceStatusPanel` server-published
 feed): `docs/gui_architecture.md`.
+
+### Applet framework (viewers/plots)
+
+Applets are small **local** processes that subscribe to data/image streams and
+display them live (image viewer, live plot). They mirror the device framework's
+"one base class + one launcher" shape on the display side:
+
+- `pytweezer/GUI/applet.py` — `Applet(QWidget)` base class every applet
+  subclasses. It owns the `Properties(name)` connection, window title (= `name`),
+  geometry persistence, a `poll()` timer, and the shared subscription/configure
+  dialogs; subclasses override `init_gui`/`poll`/`update_subscriptions` and set
+  `stream_category` (`"Image"`/`"Data"`). `run_applet(cls, default_name)` is the
+  standard `main`, parsing the `name` argv the launcher passes.
+- `pytweezer/GUI/viewers/` — the applet scripts (`image_monitor.py`
+  `ImageDisplay`, `live_plot.py` `LivePlot`). `viewers/archive/` holds
+  retired/experimental viewers — leave them alone.
+- `pytweezer/GUI/applet_launcher.py` — `AppletLauncher` panel (the **Applets**
+  tab). Launches each applet as `python <script> <name>`; the applet list is
+  persisted in Properties under the `"Applets"` key, seeded from
+  `DEFAULT_APPLETS`. `name` is the label, Properties namespace, and title at once.
+
+Full writeup: `docs/applets.md`.
 
 ### Messaging fabric
 

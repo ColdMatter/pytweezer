@@ -114,16 +114,6 @@ class ManagedRow(QFrame):
         layout.setContentsMargins(10, 6, 10, 6)
         layout.setSpacing(10)
 
-        self.dot = QLabel("●")
-        self.dot.setObjectName("StatusDot")
-        self.dot.setFixedWidth(14)
-        layout.addWidget(self.dot)
-
-        self.stateLabel = QLabel()
-        self.stateLabel.setObjectName("StatusLabel")
-        self.stateLabel.setMinimumWidth(90)
-        layout.addWidget(self.stateLabel)
-
         name_label = QLabel(name)
         if tooltip:
             name_label.setToolTip(tooltip)
@@ -141,6 +131,18 @@ class ManagedRow(QFrame):
             layout.addWidget(self.lastSeenLabel)
 
         layout.addStretch(1)
+
+        # Status (dot + label) sits on the right, grouped with the Control
+        # toggle so the readout and the action that changes it are together.
+        self.dot = QLabel("●")
+        self.dot.setObjectName("StatusDot")
+        self.dot.setFixedWidth(14)
+        layout.addWidget(self.dot)
+
+        self.stateLabel = QLabel()
+        self.stateLabel.setObjectName("StatusLabel")
+        self.stateLabel.setMinimumWidth(80)
+        layout.addWidget(self.stateLabel)
 
         self.toggleButton = None
         if controllable:
@@ -245,21 +247,27 @@ class ManagedRow(QFrame):
         self.toggleButton.style().polish(self.toggleButton)
 
 
-def _header_row(columns, controllable):
+def _header_row(left_columns, controllable):
     row = QHBoxLayout()
     row.setContentsMargins(10, 0, 10, 0)
     row.setSpacing(10)
-    for title, width in columns:
+    for title, width in left_columns:
         label = QLabel(title)
         label.setProperty("role", "heading")
         label.setMinimumWidth(width)
         row.addWidget(label)
     row.addStretch(1)
+    # "Status" heading spans the row's dot (14) + spacing (10) + label (80) so
+    # it lines up above the right-hand status readout, next to "Control".
+    status = QLabel("Status")
+    status.setProperty("role", "heading")
+    status.setMinimumWidth(14 + 10 + 80)
+    row.addWidget(status)
     if controllable:
-        controls = QLabel("Control")
-        controls.setProperty("role", "heading")
-        controls.setFixedWidth(72)
-        row.addWidget(controls)
+        control = QLabel("Control")
+        control.setProperty("role", "heading")
+        control.setFixedWidth(72)
+        row.addWidget(control)
     return row
 
 
@@ -286,7 +294,7 @@ class ControlPanel(BWidget):
         self.setLayout(outer)
 
         item_label = _ITEM_LABEL.get(category, "Name")
-        columns = [("", 14), ("Status", 90), (item_label, 150), ("Address", 170)]
+        columns = [(item_label, 150), ("Address", 170)]
         outer.addLayout(_header_row(columns, controllable))
 
         conf = ConfigReader.getConfiguration()
@@ -363,7 +371,7 @@ class DevicesPanel(BWidget):
         outer.setSpacing(6)
         self.setLayout(outer)
 
-        columns = [("", 14), ("Status", 90), ("Device", 150), ("Address", 170), ("Last seen", 80)]
+        columns = [("Device", 150), ("Address", 170), ("Last seen", 80)]
         outer.addLayout(_header_row(columns, controllable=True))
 
         conf = ConfigReader.getConfiguration()

@@ -10,7 +10,6 @@ from socket import gethostname
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.servers.configreader import ConfigReader
 from pytweezer.servers import tweezerpath
-from pytweezer.analysis.print_messages import print_error
 from pytweezer.configuration.config import HOSTS
 from bin.process_tile_base import ProcessTile
 
@@ -86,7 +85,6 @@ class DeviceManager(ProcessManager):
         self.host_addr = HOSTS.get(self.host_name, None)
         if self.host_addr is None:
             self.host_addr = "127.0.0.1"
-            # print_error(f"Host {self.host_name} not found in config. Defaulting to localhost ({self.host_addr}).", "warning")
             logger.warning(f"Host {self.host_name} not found in config. Defaulting to localhost ({self.host_addr}).")
         super().__init__(name)
         

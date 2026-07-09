@@ -1,84 +1,74 @@
-import argparse
-import datetime
-import sys
-import os
-import time
-import logging
-from PyQt5 import QtWidgets
-import zmq
-import numpy as np
-from imageio import imwrite
+"""Image-viewer applet: subscribes to image streams and displays them live.
 
-from PyQt5 import QtGui, QtCore
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
-from PyQt5.QtWidgets import QVBoxLayout, QWidget, QPushButton, QDialog
-from PyQt5.QtCore import Qt
+Built on :class:`pytweezer.GUI.applet.Applet` — see ``docs/applets.md``.
+"""
+
+import numpy as np
+from PyQt5 import QtCore
+from PyQt5.QtWidgets import (
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QDialog,
+    QSpinBox,
+)
 import PyQt5
 import pyqtgraph as pg
-from pyqtgraph.dockarea import DockArea, Dock
-import matplotlib.image as mpli
 import matplotlib.pyplot as plt
 
-# import pyximport; pyximport.install(setup_args={"script_args":["--compiler=unix"],"include_dirs":np.get_include()}, reload_support=True)
-# from gaussfit import gaussian_fit
-# from pytweezer import servers
-from pytweezer.servers import ImageClient, Properties, tweezerpath, PropertyAttribute
-from pytweezer.GUI.viewers.zmq_ROI import zmq_ROI
-from pytweezer.GUI.property_editor import PropEdit
-from pytweezer.GUI.subscription_editor import SubscriptionEditor
-import imageio
-import cProfile
+from pytweezer.servers import ImageClient, tweezerpath, PropertyAttribute
+from pytweezer.GUI.viewers.archive.zmq_ROI import zmq_ROI
+from pytweezer.GUI.viewers.data_sidebar import DataSidebar
+from pytweezer.GUI.applet import Applet, run_applet
 
 
-class ImageDisplay(QWidget):
-    """self updating Image display Window
+class ImageDisplay(Applet):
+    """Self-updating image display applet.
 
-    Args:
-        imagestreams (list of strings): names of the image streams the wiever should display
-        parent (QWidget-like):      see Qt documentation
-
-    Returns:
-        None
+    Subscribes to the image streams named in the ``imagestreams`` property and
+    to optional mask streams (``maskstreams``), drawing them live with a
+    colormap, histogram LUT, and configurable ROIs.
     """
+
+    stream_category = "Image"
+    poll_interval = 10
 
     _maxlevels = PropertyAttribute("maxlevels", 255.0)
     _autolevels = PropertyAttribute("autolevels", False)
-    _imagestreams = PropertyAttribute("imagestreams", [""])
     _imgpath = PropertyAttribute("/Servers/Imagepath", tweezerpath + "/../Data")
     _roilist = PropertyAttribute("ROIs", ["slice"])
     _imagestreams = PropertyAttribute("imagestreams", ["--None--"])
     _maskstreams = PropertyAttribute("maskstreams", ["--None--"])
     _invert_colors = PropertyAttribute("invert_colors", False)
+    _show_sidebar = PropertyAttribute("show_sidebar", False)
 
-    def __init__(self, name, parent=None):
-        self._props = Properties(name)
-        self.props = self._props
-        self.name = name
+    def init_gui(self):
         self.imDataDict = {}
         self.imgresolution = [1, 1]
         self.image_index = -1
-        super().__init__(parent)
+
         btn = QPushButton("SaveImage")
         layout = QVBoxLayout()
         layout.addWidget(btn)
         # btn.clicked.connect(self.saveCurrentImage)
 
+        # Image and its data sidebar sit side by side; the sidebar is hidden by
+        # default and toggled from the view-box context menu.
+        content = QHBoxLayout()
+        layout.addLayout(content)
+        self.sidebar = DataSidebar(self._props, self.name)
+        self.sidebar.setVisible(bool(self._show_sidebar))
+        content.addWidget(self.sidebar)
+
         self.imgstream = ImageClient("imageviewer")
         self.maskstream = ImageClient("imageviewermask")
-        for stream in self._imagestreams:
-            self.imgstream.subscribe(stream)
-        for stream in self._maskstreams:
-            self.maskstream.subscribe(stream)
-        print("subscribed")
+        self.update_subscriptions()
         if self.imgstream.has_new_data():
             imgdata, head = self.imgstream.recv()
-            print("recieved")
         else:
             imgdata = np.ones((100, 100))
 
         colors = np.array(plt.cm.magma.colors) * 255
-        print(self.name)
         if self._invert_colors:
             colors = colors[::-1]
 
@@ -95,13 +85,11 @@ class ImageDisplay(QWidget):
         graphics_layout_widget.addItem(lut)
         image_item.setRect(PyQt5.QtCore.QRect(0, 0, imgdata.shape[1], imgdata.shape[0]))
         image_item.setLookupTable(cmap.getLookupTable())
-        print(cmap.getLookupTable())
         plot.addItem(image_item)
         self.plot = plot
 
         # add Image mask
         maskdat = np.zeros(imgdata.shape)
-        # maskdat[20:25]=1
         mask = pg.ImageItem(maskdat)
         mask.setLookupTable(np.array([[0, 0, 255, 0], [0, 255, 255, 255]]))
         plot.addItem(mask)
@@ -110,45 +98,51 @@ class ImageDisplay(QWidget):
             roi = zmq_ROI(self.name + "/ROI/" + region, invertible=True)
             roi.addScaleHandle((1, 1), center=(0, 0))
             plot.addItem(roi)
-        # \plot.hideAxis('left')
-        # plot.hideAxis('bottom')
-        layout.addWidget(graphics_layout_widget)
+        content.addWidget(graphics_layout_widget, 1)
 
         self.setLayout(layout)
-        # self.show()
         view_box = plot.getViewBox()
         # we want to keep the aspect ratio correct when plotting images
         view_box.setAspectLocked(True)
-        subscribe_menu = view_box.menu.addAction("subscriptions")
-        subscribe_menu.triggered.connect(self.subscribe_window)
-        subscribe_menu = view_box.menu.addAction("Image masks")
-        subscribe_menu.triggered.connect(self.subscribe_mask)
-        subscribe_menu = view_box.menu.addAction("configure")
-        subscribe_menu.triggered.connect(self.configureWindow)
-        # add a context menu item with a scroll wheel to select the index of the image to display when multiple images are being streamed
-        index_menu = view_box.menu.addAction("Image Index")
-        index_menu.triggered.connect(self.index_selector)
+        view_box.menu.addAction("subscriptions").triggered.connect(
+            self.open_subscription_editor
+        )
+        view_box.menu.addAction("Image masks").triggered.connect(self.subscribe_mask)
+        view_box.menu.addAction("configure").triggered.connect(self.open_config_editor)
+        # scroll-wheel selector for the image index when several images are streamed
+        view_box.menu.addAction("Image Index").triggered.connect(self.index_selector)
+        view_box.menu.addAction("Data sidebar").triggered.connect(self.toggle_sidebar)
+        view_box.menu.addAction("Data sidebar subscriptions").triggered.connect(
+            self.sidebar.edit_subscriptions
+        )
 
-        timer = QtCore.QTimer(self)
-        timer.timeout.connect(self.update_image)
-        timer.start(10)
-        self.timer = timer
-        
-        
+    def toggle_sidebar(self):
+        show = not self.sidebar.isVisible()
+        self.sidebar.setVisible(show)
+        self._show_sidebar = show
 
     def sizeHint(self):
         return QtCore.QSize(800, 700)
 
-    def update_image(self):
+    def update_subscriptions(self):
+        """Re-apply image and mask stream subscriptions from Properties."""
+        self.imgstream.unsubscribe()
+        self.imgstream.subscribe(self._imagestreams)
+        self.maskstream.unsubscribe()
+        self.maskstream.subscribe(self._maskstreams)
+        self.sidebar.update_subscriptions()
+
+    def subscribe_mask(self):
+        self.open_subscription_editor("maskstreams")
+
+    def poll(self):
+        self.sidebar.update()
         if self.imgstream.has_new_data():
             while self.imgstream.has_new_data():
                 msg, head, imgdata = self.imgstream.recv()
                 if self.image_index != -1 and head["index"] != self.image_index:
                     continue
-                self.image_item.setImage(
-                    imgdata, autoLevels=True
-                )
-                # self.image.setImage(imgdata, autoLevels=True, levels=(0, self._maxlevels))
+                self.image_item.setImage(imgdata, autoLevels=True)
                 self.image_item.resetTransform()
                 try:
                     self.imgresolution = head["_imgresolution"]
@@ -166,7 +160,6 @@ class ImageDisplay(QWidget):
                         h * self.imgresolution[1],
                     )
                 )
-                # print(imgdata)
                 self.imgdata = imgdata
         self.update_mask()
 
@@ -187,50 +180,11 @@ class ImageDisplay(QWidget):
                     )
                 )
                 self.mask.setImage(imgdata, autoLevels=False, levels=(0, 1))
-                self.mask.setImage(imgdata, autoLevels=False, levels=(0, 1))
 
     def saveCurrentImage(self):
         """Save the current image as png using current time as filename"""
-        # img=self.imgdata.T[::-1]
-        # img=img+img.min()
-        # img=img*2**16/img.max()
-        # imageio.imwrite(self._imgpath+'/image%i.png'%time.time(),img.astype('uint16'))
-        # path = self._imgpath+'/image%i.png'%time.time()
-        # print('Viewer saving image',self._imgpath+'/'+path)
-        # img = self.imgdata
-        # imwrite(path, img)
         pass
 
-    def subscribe_window(self):
-        self._subscribe_win("imagestreams")
-        self.imgstream.unsubscribe()
-        self.imgstream.subscribe(self._imagestreams)
-
-    def subscribe_mask(self):
-        self._subscribe_win("maskstreams")
-        self.maskstream.unsubscribe()
-        self.maskstream.subscribe(self._maskstreams)
-
-    def _subscribe_win(self, key, category="Image"):
-        d = QDialog()
-        layout = QVBoxLayout()
-        d.setWindowTitle("Dialog")
-        editor = SubscriptionEditor(self._props, category, streamkey=key)
-        layout.addWidget(editor)
-        d.setLayout(layout)
-        # d.setWindowModality(QtGui.ApplicationModal)
-        d.exec_()
-
-    def configureWindow(self):
-        d = QDialog()
-        d.setWindowTitle("Dialog")
-        layout = QVBoxLayout()
-        editor = PropEdit("/" + self.name + "/")
-        layout.addWidget(editor)
-        d.setLayout(layout)
-        d.exec_()
-        
-    
     def index_selector(self):
         d = QDialog()
         layout = QVBoxLayout()
@@ -242,26 +196,14 @@ class ImageDisplay(QWidget):
         d.setLayout(layout)
         index_selector.valueChanged.connect(self.update_image_index)
         d.exec_()
-        
+
     def update_image_index(self, value):
         self.image_index = value
 
 
 def main(name):
-    logging.info("Started.")
-    app = QtWidgets.QApplication(sys.argv)
-    camWin = ImageDisplay(name)
-    camWin.show()
-    app.exec_()
+    run_applet(ImageDisplay, default_name=name)
 
 
-## Start Qt event loop unless running in interactive mode or using pyside.
 if __name__ == "__main__":
-    import sys
-
-    if (sys.flags.interactive != 1) or not hasattr(QtCore, "PYQT_VERSION"):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("name", nargs=1, help="name of this program instance")
-        args = parser.parse_args()
-        name = args.name[0]
-        main(name)
+    run_applet(ImageDisplay, default_name="Image Monitor")

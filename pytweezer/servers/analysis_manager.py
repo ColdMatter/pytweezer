@@ -7,7 +7,6 @@ from typing import Any
 
 import zmq
 
-from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import Properties, tweezerpath, zmqcontext
 from pytweezer.servers.configreader import ConfigReader
 

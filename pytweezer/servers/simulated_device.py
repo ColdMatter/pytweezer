@@ -56,6 +56,20 @@ def _default_stub(name: str, default_return: Any = None) -> Callable:
     return stub
 
 
+def _provides(cls: type, name: str) -> bool:
+    """True if ``cls`` already defines ``name`` itself or via a (non-``object``)
+    base class. Lets :func:`simulate` compose with a shared simulated base:
+    methods a base already implements are left intact instead of being
+    clobbered by a no-op stub.
+    """
+    for klass in cls.__mro__:
+        if klass is object:
+            continue
+        if name in klass.__dict__:
+            return True
+    return False
+
+
 def simulate(
     real_cls: type,
     *,
@@ -75,7 +89,7 @@ def simulate(
 
     def decorator(cls: type) -> type:
         for name in public_methods(real_cls, exclude=exclude):
-            if name in cls.__dict__:
+            if _provides(cls, name):
                 continue
             setattr(cls, name, _default_stub(name, defaults.get(name)))
         cls._simulates = real_cls

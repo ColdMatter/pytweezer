@@ -97,6 +97,44 @@ QTabBar::tab:hover {
     color: #e6e6e6;
 }
 
+/* Panels live in dock widgets so they can be dragged out into their own
+   windows; style their title bars and the drag separators to match. Do NOT
+   override titlebar-normal-icon here — that icon *is* the float/undock button,
+   and hiding it removes the one-click way to pop a tab out into its own
+   window. */
+QDockWidget {
+    color: #c8c8d0;
+    font-weight: 600;
+}
+
+QDockWidget::title {
+    background: #24252c;
+    padding: 6px 26px 6px 10px;
+    border-bottom: 1px solid #33343d;
+}
+
+QDockWidget::float-button {
+    subcontrol-position: right center;
+    subcontrol-origin: margin;
+    right: 4px;
+    icon-size: 14px;
+}
+
+QDockWidget::float-button:hover {
+    background: #383944;
+    border-radius: 3px;
+}
+
+QMainWindow::separator {
+    background: #33343d;
+    width: 4px;
+    height: 4px;
+}
+
+QMainWindow::separator:hover {
+    background: #5b8def;
+}
+
 QLabel {
     background: transparent;
 }

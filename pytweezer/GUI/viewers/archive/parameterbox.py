@@ -5,7 +5,7 @@ from pytweezer.GUI.pytweezerQt import BWidget, BFrame
 from PyQt5.QtCore import *
 import PyQt5.QtCore as QtCore
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
-from pytweezer.GUI.viewers.live_plot import PlotDataEditor
+from pytweezer.GUI.viewers.archive.live_plot import PlotDataEditor
 from pytweezer.GUI.property_editor import PropEdit, PropSelector
 from pytweezer.servers import DataClient, Properties
 
