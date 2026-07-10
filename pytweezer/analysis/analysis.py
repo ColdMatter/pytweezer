@@ -826,14 +826,21 @@ class TweezerExperimentAnalysis:
         tot_photon_rates = photon_rates.flatten()
 
         if threshold_detection:
-            threshold, bg_params, sig_params = detect_loading_threshold(tot_photon_rates)
-            mu_bg, var_bg, weight_bg  = bg_params
-            mu_sig, var_sig, weight_sig = sig_params
-            prob_false_negative = norm.cdf(threshold, loc=mu_sig, scale=np.sqrt(var_sig))
-            prob_false_positive = 1.0 - norm.cdf(threshold, loc=mu_bg, scale=np.sqrt(var_bg))
-            total_error = (weight_bg * prob_false_positive) + (weight_sig * prob_false_negative)
-            fidelity = 1.0 - total_error
-            
+            try:
+                threshold, bg_params, sig_params = detect_loading_threshold(tot_photon_rates)
+                mu_bg, var_bg, weight_bg  = bg_params
+                mu_sig, var_sig, weight_sig = sig_params
+                prob_false_negative = norm.cdf(threshold, loc=mu_sig, scale=np.sqrt(var_sig))
+                prob_false_positive = 1.0 - norm.cdf(threshold, loc=mu_bg, scale=np.sqrt(var_bg))
+                total_error = (weight_bg * prob_false_positive) + (weight_sig * prob_false_negative)
+                fidelity = 1.0 - total_error
+            except Exception as e:
+                mu_bg = tot_photon_rates[tot_photon_rates < threshold].mean()
+                mu_sig = tot_photon_rates[tot_photon_rates >= threshold].mean()
+                var_bg = tot_photon_rates[tot_photon_rates < threshold].var()
+                var_sig = tot_photon_rates[tot_photon_rates >= threshold].var()
+                fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg)))
+                
         else:
             mu_bg = tot_photon_rates[tot_photon_rates < threshold].mean()
             mu_sig = tot_photon_rates[tot_photon_rates >= threshold].mean()
@@ -849,9 +856,9 @@ class TweezerExperimentAnalysis:
 
             for n in range(n_row):
                 for m in range(n_col):
-                    ax[0].hist(photon_rates[:, n, m], bins=30, alpha=0.6)
+                    ax[0].hist(photon_rates[:, n, m], bins=40, density=True, alpha=0.6, range=(min(tot_photon_rates), max(tot_photon_rates)))
                     ax[0].set_xlabel('Photon Rate / kHz')
-                    ax[0].set_ylabel('Measurements')
+                    ax[0].set_ylabel('Probability Density')
                     if verbose:
                         print(f'Trap ({n}, {m}) Loading Probability : {loading_probabilities[n, m]*100:.2f} %')
 
@@ -873,7 +880,7 @@ class TweezerExperimentAnalysis:
             fig.colorbar(cax, ax=ax[2])
 
         if verbose:
-            print(f"\nDetermined Loading Threshold: {threshold:.2f} kHz")
+            print(f"\Detected Loading Threshold: {threshold:.2f} kHz")
             print(f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean()*100:.2f} %")
             print(f"Mean Loading Probability: {loading_probabilities.mean()*100:.2f} %")
             print(f"Detection Fidelity: {fidelity*100:.2f} %")

@@ -18,3 +18,4 @@ tests/
 
 cpp_implementations/Pixel_Summing/build/
 cpp_implementations/Pixel_Summing/*.egg-info/
+SDK/

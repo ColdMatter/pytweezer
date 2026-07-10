@@ -247,7 +247,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
                 Z_mode = get_zernike_polynomial(noll_index, rho, theta, mask)
                 total_phase += coeff * Z_mode
 
-        return total_phase % (2 * cp.pi) - cp.pi
+        return (total_phase % (2 * cp.pi) - cp.pi).astype(cp.float32)
 
     def generate_fresnel_lens_phasemask(self, focal_length_mm):
         """
@@ -263,7 +263,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         R_squared = X_slm**2 + Y_slm**2
         fresnel_phase = (k / (2 * f_um)) * R_squared
         
-        return fresnel_phase % (2*cp.pi) - cp.pi
+        return (fresnel_phase % (2*cp.pi) - cp.pi).astype(cp.float32)
     
     def generate_blazed_grating_phasemask(self, dx_um, dy_um):
         """
@@ -280,7 +280,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         # 3. Calculate the blazed grating phase profile
         k = 2 * cp.pi / self.lam
         blazed_phase = k * (X_slm * cp.sin(theta_x) + Y_slm * cp.sin(theta_y))
-        return blazed_phase % (2*cp.pi) - cp.pi
+        return (blazed_phase % (2*cp.pi) - cp.pi).astype(cp.float32)
     
     def superposition_optimization(self, target, max_iter=30, damping=0.4, verbose=True):
         """
@@ -391,7 +391,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         # This leverages NVIDIA's highly optimized cuBLAS backend instantly
         U_tot = Y_term.T @ X_phase      
         
-        return cp.angle(U_tot)
+        return cp.angle(U_tot).astype(cp.float32)
 
     def simulate_focal_plane(self, pm_slm, Nx_pad=2048, Ny_pad=2048, show=False, zoom_pixels=100, cmap='viridis'):
         am_slm = cp.asarray(self.generate_source_amplitude())
