@@ -194,6 +194,101 @@ def test_get_device_async_no_port_raises(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# device_client: composite sub-devices are addressed by their own names
+# --------------------------------------------------------------------------- #
+
+_COMPOSITE_DEVICES = {
+    "Devices": {
+        "Rb HamCam": {"driver": "imagemx2", "host": "1.2.3.4", "port": 5000},
+        "Rb Feedback Rig": {
+            "driver": "composite",
+            "host": "1.2.3.9",
+            "port": 6000,
+            "devices": {
+                "Rb Feedback Cam": {"driver": "imagemx2", "role": "camera"},
+                "Rb Feedback DAC": {"driver": "nidac", "role": "dac"},
+            },
+            "coordinator": "camera_dac_feedback",
+        },
+    }
+}
+
+
+@pytest.fixture
+def composite_client_config(monkeypatch):
+    monkeypatch.setattr(
+        device_client.ConfigReader,
+        "getConfiguration",
+        staticmethod(lambda: _COMPOSITE_DEVICES),
+    )
+
+
+@pytest.fixture
+def captured_rpc(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        device_client,
+        "RPCClient",
+        lambda host, port, target_name=None, timeout=None: captured.update(
+            host=host, port=port, target_name=target_name
+        ),
+    )
+    return captured
+
+
+@pytest.mark.parametrize(
+    "name, target",
+    [("Rb Feedback Cam", "rbfeedbackcam"), ("Rb Feedback DAC", "rbfeedbackdac")],
+)
+def test_get_device_sub_device_uses_composite_endpoint(
+    composite_client_config, captured_rpc, name, target
+):
+    device_client.get_device(name)
+    # host/port come from the composite that serves it; the target selects the device.
+    assert captured_rpc == {"host": "1.2.3.9", "port": 6000, "target_name": target}
+
+
+def test_get_device_composite_resolves_to_coordinator(composite_client_config, captured_rpc):
+    device_client.get_device("Rb Feedback Rig")
+    assert captured_rpc["target_name"] == "coordinator"
+
+
+def test_get_device_plain_device_still_uses_autotarget(composite_client_config, captured_rpc):
+    device_client.get_device("Rb HamCam")
+    assert captured_rpc["target_name"] is device_client.AutoTarget
+    assert captured_rpc["port"] == 5000
+
+
+def test_get_device_explicit_target_name_wins(composite_client_config, captured_rpc):
+    device_client.get_device("Rb Feedback Rig", target_name="rbfeedbackcam")
+    assert captured_rpc["target_name"] == "rbfeedbackcam"
+
+
+def test_get_device_config_finds_sub_device(composite_client_config):
+    assert device_client.get_device_config("Rb Feedback DAC")["role"] == "dac"
+
+
+def test_get_device_coordinatorless_composite_names_its_sub_devices(monkeypatch, captured_rpc):
+    conf = {
+        "Devices": {
+            "Rig": {
+                "driver": "composite",
+                "host": "h",
+                "port": 1,
+                "devices": {"Cam": {"driver": "imagemx2"}},
+            }
+        }
+    }
+    monkeypatch.setattr(
+        device_client.ConfigReader, "getConfiguration", staticmethod(lambda: conf)
+    )
+    with pytest.raises(KeyError) as exc:
+        device_client.get_device("Rig")
+    assert "has no coordinator" in str(exc.value)
+    assert "Cam" in str(exc.value)
+
+
+# --------------------------------------------------------------------------- #
 # device_status.build_snapshot (state machine, is_reachable stubbed)
 # --------------------------------------------------------------------------- #
 

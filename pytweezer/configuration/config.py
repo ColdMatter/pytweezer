@@ -11,6 +11,13 @@ HOSTS = {
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
+# Categories whose entries all run the same launcher script, so their config entries
+# omit "script" entirely. For Devices the "driver" key is what selects behavior.
+# Use ConfigReader.script_for(category, params) rather than params["script"].
+DEFAULT_SCRIPTS = {
+    "Devices": "../pytweezer/servers/device_server.py",
+}
+
 SIMULATING = False # set to True to run in simulation mode (no real devices, no real cameras, etc.)
 LOCAL = False
 SERVER_HOST = HOSTS["ph-beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
@@ -107,10 +114,13 @@ CONFIG = {
             "host": SERVER_HOST,
         }
     },
+    # Every device is launched by pytweezer/servers/device_server.py (see
+    # DEFAULT_SCRIPTS above), so entries carry no "script": the "driver" key selects
+    # the behavior. Device names must be unique across the whole category, including
+    # composite sub-devices, because get_device() addresses them all by name.
     "Devices": {
          "Rb MotMaster": {
             "active": True,
-            "script": "../pytweezer/servers/device_server.py",
             "driver": "motmaster",
             "config_file": "rb_mm_config.json",
             "host": HOSTS["IC-CZC4287H3W"],
@@ -119,7 +129,6 @@ CONFIG = {
         },
         "CaF MotMaster": {
             "active": True,
-            "script": "../pytweezer/servers/device_server.py",
             "driver": "motmaster",
             "config_file": "caf_mm_config.json",
             "host": HOSTS["ph-bonesaw"],
@@ -128,7 +137,6 @@ CONFIG = {
         },
         "Rb HamCam": {
             "active": True,
-            "script": "../pytweezer/servers/device_server.py",
             "driver": "imagemx2",
             "host": SERVER_HOST,
             "port": get_next_port(),
@@ -139,7 +147,6 @@ CONFIG = {
         },
         "CaF HamCam": {
             "active": True,
-            "script": "../pytweezer/servers/device_server.py",
             "driver": "imagemx2",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
@@ -150,13 +157,41 @@ CONFIG = {
         },
         "Blackfly": {
             "active": False,
-            "script": "../pytweezer/servers/device_server.py",
             "driver": "blackfly",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "bfly",
             "timeout": 5.0,
+        },
+        # A composite device: one process, one port, several devices sharing it. The
+        # coordinator holds direct references to the backends, so a camera->DAC
+        # feedback step never crosses a socket. Sub-devices stay addressable by their
+        # own names -- get_device("Rb Feedback Cam") -- while "role" is how the
+        # coordinator looks them up.
+        # New devices must be appended: get_next_port() assigns in declaration order,
+        # so inserting above would renumber every device below.
+        # See docs/device_framework.md.
+        "Rb Feedback Rig": {
+            "active": False,
+            "driver": "composite",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "devices": {
+                "Rb Feedback Cam": {
+                    "driver": "imagemx2",
+                    "role": "camera",
+                    "stream_name": "rb_feedback_cam",
+                    "timeout": 5.0,
+                },
+                "Rb Feedback DAC": {
+                    "driver": "nidac",
+                    "role": "dac",
+                    "channels": ["Dev1/ao0"],
+                },
+            },
+            "coordinator": "camera_dac_feedback",
         },
     },
     # Background InfluxDB loggers. Each entry runs pytweezer/servers/logger_server.py,

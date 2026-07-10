@@ -91,6 +91,10 @@ drivers). `pytweezer/configuration/config.py` is the single source of truth:
 - `CONFIG["Devices"]`: one entry per physical device (MotMaster sequencers,
   cameras), each with its own `host` — **this is what determines which PC a
   device's server actually runs on**, independent of where the GUI is launched.
+  Device entries carry **no `"script"`** (every device runs `device_server.py`;
+  `"driver"` selects the behavior), so anything spawning a process must call
+  `ConfigReader.script_for(category, params)` rather than indexing
+  `params["script"]` — see `DEFAULT_SCRIPTS` in `config.py`.
 - `CONFIG["GUI"]`: standalone GUI tool entries (StreamMonitor, Applet Launcher, etc).
 
 Don't confuse this with the **root** `configuration/` directory — that holds
@@ -123,16 +127,28 @@ boilerplate, there's a generic pair:
   `CONFIG["Devices"][name]["driver"]`, looks it up in `DRIVER_REGISTRY` (maps a
   driver key like `"motmaster"`/`"imagemx2"`/`"blackfly"` to a factory that lazily
   imports the real backend and builds a `DeviceServerSpec`), then runs
-  `sipyco.pc_rpc.simple_server_loop`. Every device's `CONFIG` entry points
-  `"script"` at this same file — `"driver"` is what actually differentiates
-  behavior. Backend imports are lazy per-factory so an unavailable hardware lib
-  (e.g. `rotpy` for the Blackfly) never breaks importing the launcher itself.
-  `resolve_device(name)` does whitespace-/case-insensitive config-key matching
-  so CLI callers don't need to quote/space-match names exactly.
-- `pytweezer/servers/device_client.py` — `get_device(name)` looks up the same
-  config entry and returns a transparent `sipyco.pc_rpc.Client` using
-  `AutoTarget` (safe because every device server exposes exactly one RPC
-  target). Prefer this over hand-built `Client(...)` calls in new experiment code.
+  `sipyco.pc_rpc.simple_server_loop`. Every device runs this same file — `"driver"`
+  is what differentiates behavior. Backend imports are lazy per-factory so an
+  unavailable hardware lib (e.g. `rotpy` for the Blackfly) never breaks importing
+  the launcher itself. `resolve_device(name)` does whitespace-/case-insensitive
+  matching so CLI callers don't need to quote/space-match names exactly, and
+  accepts only *launchable* (top-level) devices.
+- `pytweezer/servers/device_client.py` — `get_device(name)` returns a transparent
+  `sipyco.pc_rpc.Client` for any device, resolved by name through
+  `device_server.resolve_address`. Prefer this over hand-built `Client(...)` calls
+  in new experiment code.
+
+**Composite devices.** A `"driver": "composite"` entry runs several devices in one
+process (one sipyco target each) plus an optional *coordinator* holding direct
+references to them, so a camera→DAC feedback step never serializes a frame. Its
+sub-devices live under `"devices"` but are named and addressed exactly like
+top-level ones — `get_device("Rb Feedback Cam")`, no target name — because
+`device_index()` flattens both into one namespace. **Device names must therefore be
+unique across the whole category.** Coordinators find their backends by each
+sub-config's `"role"`, not by device name. Note that a synchronous RPC method stalls
+*every* target on its server, since sipyco is single-threaded asyncio and runs plain
+`def` methods inline; `allow_parallel` does not change this and is inert until a
+target method is `async def`.
 
 Full writeup: `docs/device_framework.md`.
 

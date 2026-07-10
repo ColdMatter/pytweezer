@@ -41,7 +41,7 @@ def _managed_scripts():
     scripts = {}
     for category in MANAGED_CATEGORIES:
         for name, params in conf.get(category, {}).items():
-            script = params.get("script")
+            script = ConfigReader.script_for(category, params)
             if not script:
                 continue
             raw_path = tweezerpath + "/bin/" + script

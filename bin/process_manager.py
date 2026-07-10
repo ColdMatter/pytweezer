@@ -49,7 +49,7 @@ class ProcessManager(BWidget):
                     if "tooltip" in params:
                         tooltip = params["tooltip"]
                     process = ProcessTile(
-                        tweezerpath + "/bin/" + params["script"],
+                        tweezerpath + "/bin/" + ConfigReader.script_for(category, params),
                         name,
                         params["active"],
                         category + "/",

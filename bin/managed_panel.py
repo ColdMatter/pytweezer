@@ -341,7 +341,7 @@ class ControlPanel(BWidget):
             port = _status_port(params)
             row = ManagedRow(
                 pname,
-                script=tweezerpath + "/bin/" + params["script"],
+                script=tweezerpath + "/bin/" + ConfigReader.script_for(category, params),
                 active=params.get("active", False),
                 tooltip=params.get("tooltip"),
                 controllable=controllable,
@@ -416,7 +416,11 @@ class DevicesPanel(BWidget):
             local = self.check_host(params.get("host"))
             row = ManagedRow(
                 pname,
-                script=tweezerpath + "/bin/" + params["script"] if local else None,
+                script=(
+                    tweezerpath + "/bin/" + ConfigReader.script_for("Devices", params)
+                    if local
+                    else None
+                ),
                 active=params.get("active", False) if local else False,
                 tooltip=params.get("tooltip"),
                 controllable=local,
