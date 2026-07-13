@@ -53,8 +53,7 @@ is a real quoting/flushing failure, not a cosmetic "shell quirk," and rerunning
 the same `-c` command with slightly different quoting will not fix it. Do not
 diagnose it as an environment glitch and move on. Instead, for anything beyond a
 single trivial expression, write a `.py` file to the scratchpad dir (see the
-Scratchpad section) and run it with `poetry run python <file>.py`. A script file
-runs identically every time, shows full tracebacks, and can be re-read/edited.
+Scratchpad section) and run it with `poetry run python <file>.py`.
 Keep `-c` only for one true one-liner with no newlines. When a script's output
 matters, end it with `sys.stdout.flush()` (or `print(..., flush=True)`).
 

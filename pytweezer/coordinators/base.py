@@ -55,6 +55,22 @@ class Coordinator:
         self.targets = targets
         self.conf = conf or {}
 
+    def require_role(self, role):
+        """Return the backend registered under ``role``, or raise a clear error.
+
+        The error names the roles the composite actually provides and how to add
+        the missing one, since a coordinator/config role mismatch is otherwise an
+        opaque ``KeyError`` deep in construction.
+        """
+        try:
+            return self.targets[role]
+        except KeyError:
+            raise KeyError(
+                f"{type(self).__name__} needs a sub-device with role {role!r}; this "
+                f"composite provides roles: {sorted(self.targets) or '(none)'}. Set "
+                f'"role": {role!r} on the relevant entry in the composite\'s "devices" block.'
+            ) from None
+
     def shutdown(self) -> None:
         """Release anything the coordinator holds on its backends.
 

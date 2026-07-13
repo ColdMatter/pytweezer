@@ -40,7 +40,8 @@ pytweezer/servers/device_server.py      (generic server launcher)
 
 pytweezer/coordinators/                  (in-process device coordination)
 ├── base.py           Coordinator: holds direct refs to a composite's backends
-└── camera_dac_feedback.py   CameraDACFeedback: worked example (image -> DAC)
+├── camera_dac_feedback.py   CameraDACFeedback: worked example (image -> DAC)
+└── rearrangement.py         Rearrangement: camera + SLM atom-rearrangement loop
 
 pytweezer/servers/device_client.py       (generic client factory)
 ├── get_device_config(name)   lenient config-key lookup (via resolve_device)
@@ -79,7 +80,7 @@ Each entry in `CONFIG["Devices"]` (`pytweezer/configuration/config.py`) has a
 },
 ```
 
-Device entries carry **no `"script"`**. Every device is launched by the same file,
+Every device is launched by the same file,
 `pytweezer/servers/device_server.py`, so that path is the `"Devices"` entry in
 `DEFAULT_SCRIPTS` (`config.py`) and `"driver"` is what actually selects the
 behavior. Anything that needs to spawn a process — `ProcessTile`, `ManagedRow`,
@@ -100,6 +101,7 @@ included, because `get_device` addresses every device by name (see below).
 | `"imagemx2"` | `_make_imagemx2` | `ImagEMX2Camera` / `SimulatedImagEMX2Camera` (if `simulate`) — both built on the generic `Camera` base, see below | `"camera"` |
 | `"blackfly"` | `_make_blackfly` | `Blackfly` | `"camera"` |
 | `"nidac"` | `_make_nidac` | `SimulatedNIDAC` (real NI analog-output driver not written yet) | `"dac"` |
+| `"slm"` | `_make_slm` | `SLM` (Meadowlark Blink SDK) / `SimulatedSLM` (if `simulate`) | `"slm"` |
 | `"composite"` | `_make_composite` | several sub-devices + optional coordinator | one per sub-device |
 
 Each factory returns a `DeviceServerSpec(target_name, target, description,
@@ -293,15 +295,51 @@ For a sub-device that entry holds only its driver settings — `host`/`port` bel
 the composite serving it, so use `get_device` or `resolve_address` rather than
 reading them off the dict.
 
-### Concurrent devices: `get_device_async`
+### Concurrent devices: `run_parallel`
 
 `get_device(...)` returns a blocking client — the calling script doesn't move
 past an RPC call until that call's full remote execution finishes. That's a
 problem for something like starting two independent MotMaster sequencers "in
 parallel": each is its own device server process, so the hardware doesn't
 contend, but a blocking client only *issues* the second call after the first
-one's `Go()` has already returned.
+one's `Go()` has already returned. It's a hard requirement, not just a speed-up,
+when one call cannot return until another fires — e.g. a MotMaster armed in
+trigger mode, whose `Go()` blocks until a second MotMaster's sequence triggers it.
 
+The ergonomic path is `run_parallel` (in `pytweezer/parallel.py`): it runs
+zero-argument callables in one thread each and returns their results in order.
+Because every device is its own server process, a `get_device` call is just a
+blocking socket round-trip whose `recv` releases the GIL, so the threads overlap
+for real — no `async`/`await`, and it works from the PyQt5 GUI (which has no
+`qasync`). `after(delay, call)` staggers one call's start to win the arm-before-
+trigger race:
+
+```python
+from pytweezer.parallel import run_parallel, after
+from pytweezer.servers.device_client import get_device
+
+cam = get_device("Rb HamCam")
+mm1 = get_device("Rb MotMaster Server")
+mm2 = get_device("CaF MotMaster Server")
+
+cam.start_acquisition()          # arm the camera (returns immediately)
+mm1.set_trigger_mode(True)       # mm1's Go() will wait for a hardware trigger
+
+frame, _, _ = run_parallel(
+    lambda: cam.acquire_n_frames(1),               # blocks reading the frame
+    mm1.start_motmaster_experiment,                # armed; waits for trigger
+    after(0.05, mm2.start_motmaster_experiment),   # fires 50 ms later
+)
+```
+
+Each parallel call must use a **different** client — a single sipyco `Client` is
+not thread-safe. Pass `timeout=` for an overall deadline (raises `TimeoutError`,
+abandoning the still-running daemon threads). A single failing call re-raises its
+own exception; several raise an `ExceptionGroup`.
+
+#### Lower-level async alternative: `get_device_async`
+
+If you'd rather drive the servers with `asyncio` directly,
 `get_device_async(name, host=None, port=None, target_name=AutoTarget)` is the
 same lookup and config resolution, but returns a `sipyco.pc_rpc.AsyncioClient`
 whose RPC methods are coroutines. Connect several and drive them with
@@ -416,10 +454,13 @@ A composite with no coordinator has nothing to serve under its own name, so
 ### Writing a coordinator
 
 Subclass `Coordinator` (`pytweezer/coordinators/base.py`), reach the backends
-through `self.targets[<role>]`, register the class in `COORDINATOR_REGISTRY`, and
-name that key from the config's `"coordinator"` field.
+through `self.require_role(<role>)`, register the class in `COORDINATOR_REGISTRY`,
+and name that key from the config's `"coordinator"` field.
 `pytweezer/coordinators/camera_dac_feedback.py` is the worked example: `arm()`,
 `measure()`, `control()`, `image_to_dac()`, and `run_n()`.
+`pytweezer/coordinators/rearrangement.py` (`Rearrangement`) is a real one — a
+camera + Blink SLM atom-rearrangement loop, with the GPU stack imported lazily so
+it degrades gracefully off the GPU host; see `docs/rearrangement_coordinator.md`.
 
 Three constraints, all consequences of how sipyco serves targets:
 
@@ -489,7 +530,9 @@ for free.
 | `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`. |
 | `pytweezer/coordinators/base.py` | `Coordinator` — base for in-process coordination of a composite's backends. |
 | `pytweezer/coordinators/camera_dac_feedback.py` | `CameraDACFeedback` — worked example: frame mean → proportional DAC correction. |
+| `pytweezer/coordinators/rearrangement.py` | `Rearrangement` — camera + SLM atom-rearrangement loop (lazy GPU stack). See `docs/rearrangement_coordinator.md`. |
 | `pytweezer/drivers/ni_dac.py` | `SimulatedNIDAC`; the real NI analog-output driver belongs here. |
+| `pytweezer/drivers/slm.py` | `SLM` (Meadowlark Blink SDK) + `SimulatedSLM`. |
 | `pytweezer/experiment/motmaster_server.py` | MotMaster backend classes (`MotMasterInterface`, `SimulatedMotMasterInterface`) + legacy standalone `main()`. |
 | `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`, `requires_camera`. |
 | `pytweezer/drivers/imagemX2.py` | ImagEM X2 dcam shim (`ImagEMX2Camera` on `Camera`) + `SimulatedImagEMX2Camera = simulated_camera_for(...)` + legacy standalone `main()`. |

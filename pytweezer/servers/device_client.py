@@ -23,9 +23,11 @@ sipyco targets exist::
 ``target_name`` is resolved from the config and only needs passing to reach a target
 the config doesn't name.
 
-:func:`get_device_async` is the ``asyncio`` counterpart, for driving two or
-more device servers concurrently (e.g. starting two MotMaster sequences in
-parallel)::
+For driving two or more device servers concurrently (e.g. starting two MotMaster
+sequences in parallel), prefer :func:`pytweezer.parallel.run_parallel` — it runs
+blocking :func:`get_device` clients in threads with no ``async``/``await`` and
+works from the GUI. :func:`get_device_async` is the lower-level ``asyncio``
+counterpart if you want to drive the servers with coroutines directly::
 
     async def main():
         mm1 = await get_device_async("Rb MotMaster Server")

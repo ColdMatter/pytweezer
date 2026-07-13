@@ -135,16 +135,6 @@ CONFIG = {
             "port": get_next_port(),
             "simulate": SIMULATING
         },
-        "Rb HamCam": {
-            "active": True,
-            "driver": "imagemx2",
-            "host": SERVER_HOST,
-            "port": get_next_port(),
-            "simulate": SIMULATING,
-            "stream_name": "rb_hamcam",
-            "timeout": 5.0,
-            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
-        },
         "CaF HamCam": {
             "active": True,
             "driver": "imagemx2",
@@ -164,34 +154,34 @@ CONFIG = {
             "stream_name": "bfly",
             "timeout": 5.0,
         },
-        # A composite device: one process, one port, several devices sharing it. The
-        # coordinator holds direct references to the backends, so a camera->DAC
-        # feedback step never crosses a socket. Sub-devices stay addressable by their
-        # own names -- get_device("Rb Feedback Cam") -- while "role" is how the
-        # coordinator looks them up.
-        # New devices must be appended: get_next_port() assigns in declaration order,
-        # so inserting above would renumber every device below.
-        # See docs/device_framework.md.
-        "Rb Feedback Rig": {
+        # Atom-rearrangement rig: a rearrangement camera and the Blink SLM in one
+        # process, with the rearrangement coordinator streaming GPU-computed phase
+        # frames straight to slm.update_mask() (no socket). Needs cupy/lap + a CUDA
+        # GPU on this host to arm; status()/test() work without them. The SLM is
+        # addressable on its own as get_device("Rb SLM"). See
+        # docs/rearrangement_coordinator.md.
+        "Rb Rearrangement Rig": {
             "active": False,
             "driver": "composite",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
             "devices": {
-                "Rb Feedback Cam": {
+                "Rb HamCam": {
                     "driver": "imagemx2",
                     "role": "camera",
-                    "stream_name": "rb_feedback_cam",
+                    "stream_name": "rb_hamcam",
                     "timeout": 5.0,
+                    "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
                 },
-                "Rb Feedback DAC": {
-                    "driver": "nidac",
-                    "role": "dac",
-                    "channels": ["Dev1/ao0"],
+                "Rb SLM": {
+                    "driver": "slm",
+                    "role": "slm",
+                    # sdk_dll / lut_file / board_number default to the lab's Blink Plus
+                    # install (see pytweezer/drivers/slm.py); override here if needed.
                 },
             },
-            "coordinator": "camera_dac_feedback",
+            "coordinator": "rearrangement",
         },
     },
     # Background InfluxDB loggers. Each entry runs pytweezer/servers/logger_server.py,

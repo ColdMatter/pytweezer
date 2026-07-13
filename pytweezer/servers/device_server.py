@@ -130,39 +130,35 @@ def _make_imagemx2(name, conf):
     )
 
 
-def _make_blackfly(name, conf):
-    from rotpy.system import SpinSystem
 
-    from pytweezer.drivers.bfly2 import Blackfly
+def _make_slm(name, conf):
+    simulate = conf.get("simulate", False)
+    if simulate:
+        from pytweezer.drivers.slm import SimulatedSLM
 
-    camera = Blackfly(serial=12345678, system=SpinSystem())
-    return DeviceServerSpec(
-        target_name="camera",
-        target=camera,
-        description="Blackfly RPC server",
-    )
-
-
-def _make_nidac(name, conf):
-    channels = list(conf.get("channels", []))
-
-    if not conf.get("simulate", False):
-        raise NotImplementedError(
-            f"Device {name!r}: no real NI analog-output driver exists yet. Write it "
-            "in pytweezer/drivers/ni_dac.py (mirroring pytweezer/loggers/ni_adc_logger.py's "
-            "nidaqmx.Task ownership, with ao_channels.add_ao_voltage_chan), or set "
-            "'simulate': True to use SimulatedNIDAC."
+        logger.warning("Running SLM %r in SIMULATION MODE", name)
+        slm = SimulatedSLM(
+            width=conf.get("width", 1024),
+            height=conf.get("height", 1024),
+            depth=conf.get("depth", 8),
         )
+    else:
+        from pytweezer.drivers.slm import SLM, DEFAULT_SDK_DLL, DEFAULT_LUT_FILE
 
-    from pytweezer.drivers.ni_dac import SimulatedNIDAC
-
-    logger.warning("Running NI DAC %r in SIMULATION MODE", name)
-    dac = SimulatedNIDAC(channels)
+        slm = SLM(
+            sdk_dll=conf.get("sdk_dll", DEFAULT_SDK_DLL),
+            lut_file=conf.get("lut_file", DEFAULT_LUT_FILE),
+            board_number=conf.get("board_number", 1),
+            timeout_ms=conf.get("timeout_ms", 5000),
+            wait_for_trigger=conf.get("wait_for_trigger", False),
+            flip_immediate=conf.get("flip_immediate", False),
+            output_pulse=conf.get("output_pulse", False),
+        )
     return DeviceServerSpec(
-        target_name="dac",
-        target=dac,
-        description="NI DAC RPC server",
-        teardown=lambda: _safe(dac.close),
+        target_name="slm",
+        target=slm,
+        description="SLM RPC server",
+        teardown=lambda: _safe(slm.close),
     )
 
 
@@ -264,19 +260,20 @@ DRIVER_REGISTRY = {
     "imagemx2": _make_imagemx2,
     "blackfly": _make_blackfly,
     "nidac": _make_nidac,
+    "slm": _make_slm,
     "composite": _make_composite,
 }
 
 
-def _make_camera_dac_feedback(targets, conf):
-    from pytweezer.coordinators.camera_dac_feedback import CameraDACFeedback
+def _make_rearrangement(targets, conf):
+    from pytweezer.coordinators.rearrangement import Rearrangement
 
-    return CameraDACFeedback(targets, conf)
+    return Rearrangement(targets, conf)
 
 
 #: Maps a composite device's ``"coordinator"`` config key to its factory.
 COORDINATOR_REGISTRY = {
-    "camera_dac_feedback": _make_camera_dac_feedback,
+    "rearrangement": _make_rearrangement,
 }
 
 
