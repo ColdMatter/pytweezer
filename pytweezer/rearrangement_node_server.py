@@ -13,6 +13,8 @@ import asyncio
 import threading
 import queue
 
+import sum_pixel_values_cpp as sum_cpp
+
 update_state_kernel = cp.ElementwiseKernel(
     'float32 dw, float32 dphi, float32 dx, float32 dy, float32 ds',
     'float32 w, float32 phi, float32 x, float32 y',
@@ -246,7 +248,12 @@ def run_server():
                     # Extract occupancy mask
                     try:
                         img = an.morphological_tophat_high_pass(img_array0, feature_size=10)
-                        pixel_sums = np.fliplr(an.sum_pixel_values(img, grid_positions, arr_shape1, window_size=3))
+                        # previous Pythonic implementation of sum_pixel_values 
+                        # pixel_sums = np.fliplr(an.sum_pixel_values(img, grid_positions, arr_shape1, window_size=3))
+
+                        # the C++ accelerated version
+                        pixel_sums = np.fliplr(sum_cpp.sum_pixel_values(img, grid_positions, arr_shape1, window_size=3))
+
                         occ_mask = np.zeros(len(pixel_sums.flatten()), dtype=bool)
                         occ_mask[pixel_sums.flatten() > threshold] = True
                         occ_mask = cp.asarray(occ_mask)

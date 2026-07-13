@@ -80,6 +80,28 @@ class SLMClient:
         self.socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
         return reply
 
+    def preload_sequence(self, sequence):
+        """ Returns the reply dict, which
+        includes the server-measured upload time."""
+        if not isinstance(sequence, np.ndarray):
+            raise ValueError("Sequence must be a NumPy array.")
+        if len(sequence.shape) != 3:
+            raise ValueError("Sequence must be a 3D array (frames, height, width).")
+
+        header = {
+            "cmd": "PRELOAD_SEQUENCE",
+            "dtype": str(sequence.dtype),
+            "shape": sequence.shape,
+        }
+
+        expected_upload_time_ms = sequence.shape[0] * 100 + 5000
+        self.socket.setsockopt(zmq.RCVTIMEO, expected_upload_time_ms)
+
+        reply = self._send_multipart_command(header, array=sequence)
+
+        self.socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
+        return reply
+
     def get_temperature(self):
         """Sends a simple command with no array payload."""
         return self._send_multipart_command({"cmd": "CHECK_TEMP"})
