@@ -10,8 +10,8 @@ sipyco proxy::
     cam.close_rpc()               # release the socket when done
 
 **Every device is addressed by its own name**, whether it has a server to itself or
-shares one with other devices. A composite device (``"driver": "composite"``) runs
-several devices in one process so they can drive each other without RPC, but its
+shares one with other devices. A composite device (an entry with a ``"devices"``
+sub-dict) runs several devices in one process so they can drive each other without RPC, but its
 sub-devices are named in config exactly like any other device and reached the same
 way — the caller never needs to know which process a device lives in, or that
 sipyco targets exist::
@@ -88,7 +88,7 @@ def _resolve_endpoint(name, host, port, target_name):
     if target_name is AutoTarget:
         if address.target_name is not None:
             target_name = address.target_name
-        elif owner.get("driver") == "composite":
+        elif "devices" in owner:
             sub_devices = ", ".join(sorted(owner.get("devices") or {})) or "(none)"
             raise KeyError(
                 f"Composite device {name!r} has no coordinator, so there is nothing to "

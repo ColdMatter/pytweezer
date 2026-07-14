@@ -27,7 +27,17 @@ CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
 
 class MotMasterInterface:
     def __init__(self, config_file: str, interval: Union[int, float] = 0.1) -> None:
-        with open(config_file, "r") as f:
+        # ``config_file`` names a JSON file in the package ``configuration/`` dir; an
+        # absolute path is taken as-is. Bringing the device up — making sure the
+        # MOTMaster application is running, then connecting — happens here, so a
+        # constructed interface is a connected one (as with the other drivers).
+        # ``_ensure_motmaster_running`` is imported lazily to avoid a circular import
+        # (the server module imports this class at module load).
+        from pytweezer.experiment.motmaster_server import _ensure_motmaster_running
+
+        config_path = CONFIG_DIR / config_file
+        _ensure_motmaster_running(str(config_path))
+        with open(config_path, "r") as f:
             self.config = json.load(f)
         self.script_root = pathlib.Path(self.config["script_root_path"])
         self.interval = interval
@@ -35,6 +45,9 @@ class MotMasterInterface:
         self.hardware_controller = None
         self.script = None
         self.script_path = None
+        self.connect()
+        if self.motmaster is None:
+            raise RuntimeError("Failed to connect to MotMaster.")
 
     def _add_ref(self, path: str) -> None:
         _path = pathlib.Path(path)

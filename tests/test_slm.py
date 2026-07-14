@@ -49,15 +49,23 @@ def test_simulated_slm_close_marks_disconnected():
 # Device factory
 # --------------------------------------------------------------------------- #
 
+#: A device config entry for the SLM, both real and simulated backends named.
+_SLM_CONF = {
+    "class": "pytweezer.drivers.slm:SLM",
+    "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
+    "teardown": "close",
+}
+
+
 def test_make_slm_simulated():
-    spec = device_server.build_spec("SLM", conf={"driver": "slm", "simulate": True})
-    assert list(spec.targets) == ["slm"]
-    assert isinstance(spec.targets["slm"], SimulatedSLM)
+    spec = device_server.build_spec("SLM", conf={**_SLM_CONF, "simulate": True})
+    (target,) = spec.targets.values()
+    assert isinstance(target, SimulatedSLM)
 
 
 def test_make_slm_teardown_closes():
-    spec = device_server.build_spec("SLM", conf={"driver": "slm", "simulate": True})
-    slm = spec.targets["slm"]
+    spec = device_server.build_spec("SLM", conf={**_SLM_CONF, "simulate": True})
+    (slm,) = spec.targets.values()
     spec.teardown()
     assert not slm.is_connected()
 
@@ -66,4 +74,4 @@ def test_make_slm_real_requires_sdk(monkeypatch):
     # The real branch tries to load the Blink DLL in SLM._connect; without the SDK
     # that raises. Assert the factory attempts the real path (not silently sim).
     with pytest.raises(Exception):
-        device_server.build_spec("SLM", conf={"driver": "slm", "simulate": False})
+        device_server.build_spec("SLM", conf={**_SLM_CONF, "simulate": False})

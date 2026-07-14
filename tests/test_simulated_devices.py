@@ -11,21 +11,26 @@ live RPC call.
 import pytest
 from sipyco import pyon
 
-from pytweezer.servers.device_server import _make_imagemx2, _make_motmaster
+from pytweezer.servers import device_server
 from pytweezer.servers.simulated_device import public_methods
 
-#: driver key -> (factory, minimal simulate=True conf). "blackfly" is
-#: excluded: its factory has no simulate support today.
-FACTORIES = {
-    "motmaster": (_make_motmaster, {"simulate": True, "config_file": "unused.json"}),
-    "imagemx2": (_make_imagemx2, {"simulate": True}),
+#: driver key -> minimal simulate=True conf, built through the same
+#: device_server.build_spec path used in production.
+SIM_CONFS = {
+    "motmaster": {
+        "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+        "simulate": True,
+    },
+    "imagemx2": {
+        "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
+        "simulate": True,
+    },
 }
 
 
-@pytest.mark.parametrize("driver", sorted(FACTORIES))
+@pytest.mark.parametrize("driver", sorted(SIM_CONFS))
 def test_simulated_backend_methods_are_pyon_safe(driver):
-    factory, conf = FACTORIES[driver]
-    spec = factory(driver, conf)
+    spec = device_server.build_spec(driver, conf=SIM_CONFS[driver])
     target = spec.target
 
     try:

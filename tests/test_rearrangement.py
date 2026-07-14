@@ -190,15 +190,20 @@ def test_shutdown_stops_camera_when_initialised():
 # --------------------------------------------------------------------------- #
 
 SIM_RIG = {
-    "driver": "composite",
     "simulate": True,
     "devices": {
         "Rb Rearrangement Cam": {
-            "driver": "imagemx2", "role": "camera", "stream_name": None, "timeout": 2.0,
+            "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
+            "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
+            "role": "camera", "stream_name": None, "timeout": 2.0,
         },
-        "Rb SLM": {"driver": "slm", "role": "slm"},
+        "Rb SLM": {
+            "class": "pytweezer.drivers.slm:SLM",
+            "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
+            "teardown": "close", "role": "slm",
+        },
     },
-    "coordinator": "rearrangement",
+    "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
 }
 
 

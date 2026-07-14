@@ -96,3 +96,32 @@ def simulate(
         return cls
 
     return decorator
+
+
+def default_simulated(real_cls: type) -> type:
+    """Return a hardware-free simulated stand-in generated from ``real_cls``.
+
+    Every public method becomes a logging no-op stub (via :func:`simulate`), and the
+    constructor accepts and ignores any arguments so a device config's keyword
+    entries pass through harmlessly without touching hardware. This is the default
+    used whenever a driver has **no** hand-written simulated class, so simulation is
+    always available; write an explicit ``Simulated<X>`` (decorated with
+    ``@simulate(<X>)``) only when the fake needs interesting behavior — synthesized
+    camera frames, a remembered SLM mask, etc.
+
+    The stand-in does **not** subclass ``real_cls``, so none of its
+    hardware-touching code (including ``__init__``) can run by accident.
+    """
+
+    @simulate(real_cls)
+    class _Simulated:
+        def __init__(self, *args, **kwargs):
+            logger.debug(
+                "%s: constructed (args=%r, kwargs=%r)",
+                type(self).__name__,
+                args,
+                kwargs,
+            )
+
+    _Simulated.__name__ = _Simulated.__qualname__ = f"Simulated{real_cls.__name__}"
+    return _Simulated

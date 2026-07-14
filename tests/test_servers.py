@@ -9,7 +9,6 @@ import socket
 import pytest
 
 from pytweezer.servers import device_client, device_server
-from pytweezer.servers.device_server import DeviceServerSpec
 from pytweezer.servers.reachability import is_reachable
 
 
@@ -19,8 +18,16 @@ from pytweezer.servers.reachability import is_reachable
 
 _FAKE_DEVICES = {
     "Devices": {
-        "Rb HamCam": {"driver": "imagemx2", "host": "1.2.3.4", "port": 5000},
-        "CaF MotMaster Server": {"driver": "motmaster", "host": "1.2.3.5", "port": 6000},
+        "Rb HamCam": {
+            "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
+            "host": "1.2.3.4",
+            "port": 5000,
+        },
+        "CaF MotMaster Server": {
+            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
+            "host": "1.2.3.5",
+            "port": 6000,
+        },
     }
 }
 
@@ -43,7 +50,7 @@ def test_normalize_collapses_whitespace_and_case():
 def test_resolve_device_exact_match(fake_config):
     name, conf = device_server.resolve_device("Rb HamCam")
     assert name == "Rb HamCam"
-    assert conf["driver"] == "imagemx2"
+    assert conf["class"] == "pytweezer.drivers.imagemX2:ImagEMX2Camera"
 
 
 @pytest.mark.parametrize("query", ["rbhamcam", "RB HAMCAM", "  rb   hamcam  "])
@@ -61,30 +68,60 @@ def test_resolve_device_unknown_lists_available(fake_config):
 
 
 # --------------------------------------------------------------------------- #
-# device_server: build_spec error handling
+# device_server: build_spec class loading and error handling
 # --------------------------------------------------------------------------- #
 
-def test_build_spec_missing_driver_key():
-    with pytest.raises(KeyError, match="no 'driver' key"):
+def test_build_spec_missing_class_key():
+    with pytest.raises(KeyError, match="no 'class'"):
         device_server.build_spec("thing", conf={"host": "x", "port": 1})
 
 
-def test_build_spec_unknown_driver():
-    with pytest.raises(KeyError, match="Unknown driver"):
-        device_server.build_spec("thing", conf={"driver": "does-not-exist"})
+def test_build_spec_simulate_without_sim_class_generates_stand_in():
+    # No "sim_class": build_spec generates a hardware-free stand-in from "class"
+    # rather than erroring. The real SLM is never constructed (its __init__ would
+    # try to load the Blink DLL); the stand-in's public methods are no-ops.
+    from pytweezer.drivers.slm import SLM
+
+    spec = device_server.build_spec(
+        "SLM", conf={"class": "pytweezer.drivers.slm:SLM", "simulate": True}
+    )
+    backend = spec.target
+    assert type(backend)._simulates is SLM
+    assert not isinstance(backend, SLM)
+    assert backend.update_mask(object()) is None  # stubbed no-op, no hardware
 
 
-def test_build_spec_dispatches_to_registered_factory(monkeypatch):
-    calls = {}
+def test_build_spec_loads_and_constructs_class_from_config():
+    # A backend named "module:Class" is imported and constructed from the config
+    # keys that match its __init__ parameters; a "teardown" method is wired up.
+    spec = device_server.build_spec(
+        "SLM",
+        conf={
+            "class": "pytweezer.drivers.slm:SimulatedSLM",
+            "teardown": "close",
+            "width": 64,
+            "height": 32,
+        },
+    )
+    slm = spec.target
+    assert slm.get_dimensions() == {"width": 64, "height": 32, "depth": 8}
+    assert slm.is_connected()
+    spec.teardown()
+    assert not slm.is_connected()
 
-    def fake_factory(name, conf):
-        calls["args"] = (name, conf)
-        return DeviceServerSpec(target_name="t", target=object(), description="d")
 
-    monkeypatch.setitem(device_server.DRIVER_REGISTRY, "fake", fake_factory)
-    spec = device_server.build_spec("thing", conf={"driver": "fake", "x": 1})
-    assert calls["args"] == ("thing", {"driver": "fake", "x": 1})
-    assert spec.target_name == "t"
+def test_build_spec_sim_class_used_when_simulating():
+    spec = device_server.build_spec(
+        "SLM",
+        conf={
+            "class": "pytweezer.drivers.slm:SLM",
+            "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
+            "simulate": True,
+        },
+    )
+    from pytweezer.drivers.slm import SimulatedSLM
+
+    assert isinstance(spec.target, SimulatedSLM)
 
 
 # --------------------------------------------------------------------------- #
@@ -199,16 +236,19 @@ def test_get_device_async_no_port_raises(monkeypatch):
 
 _COMPOSITE_DEVICES = {
     "Devices": {
-        "Rb HamCam": {"driver": "imagemx2", "host": "1.2.3.4", "port": 5000},
+        "Rb HamCam": {
+            "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
+            "host": "1.2.3.4",
+            "port": 5000,
+        },
         "Rb Feedback Rig": {
-            "driver": "composite",
             "host": "1.2.3.9",
             "port": 6000,
             "devices": {
-                "Rb Feedback Cam": {"driver": "imagemx2", "role": "camera"},
-                "Rb Feedback DAC": {"driver": "nidac", "role": "dac"},
+                "Rb Feedback Cam": {"class": "pkg:Cam", "role": "camera"},
+                "Rb Feedback DAC": {"class": "pkg:Dac", "role": "dac"},
             },
-            "coordinator": "camera_dac_feedback",
+            "coordinator": "pkg:CameraDacFeedback",
         },
     }
 }
@@ -272,10 +312,9 @@ def test_get_device_coordinatorless_composite_names_its_sub_devices(monkeypatch,
     conf = {
         "Devices": {
             "Rig": {
-                "driver": "composite",
                 "host": "h",
                 "port": 1,
-                "devices": {"Cam": {"driver": "imagemx2"}},
+                "devices": {"Cam": {"class": "pkg:Cam"}},
             }
         }
     }

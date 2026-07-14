@@ -9,25 +9,43 @@ boilerplate, this module provides a single launcher:
 * The **device manager** launches the same thing: each device's ``script`` in the
   config points here, so ``ProcessTile`` runs ``python device_server.py <name>``.
 
-Adding a *new device instance* means only editing ``config.py``. Adding a new
-*driver type* means only adding one factory to :data:`DRIVER_REGISTRY` — the
-driver module itself needs no launch code, just its backend class.
+A device's config entry points directly at its backend class, so adding a device
+or a whole new driver type means editing only ``config.py``. A plain device entry
+carries:
 
-Each factory turns a device's config dict into a :class:`DeviceServerSpec`
-(the sipyco target object, its target name, a description, and an optional
-teardown callable). Backend modules are imported lazily inside their factory so
-that importing this launcher never pulls in a hardware library that may be
-absent (e.g. ``rotpy`` for the Blackfly, ``pylablib`` for the ImagEM).
+* ``"class"``: the real backend, as a ``"module.path:ClassName"`` string.
+* ``"sim_class"`` (optional): the simulated/dummy backend, same form. When the
+  entry sets ``"simulate": True`` this class is used instead of ``"class"``. If it
+  is omitted, a hardware-free stand-in is generated from ``"class"`` automatically
+  (see :func:`~pytweezer.servers.simulated_device.default_simulated`), so a device
+  can always be simulated; supply ``"sim_class"`` only for an interesting fake.
+* ``"teardown"`` (optional): the name of a zero-argument method to call when the
+  server stops (e.g. ``"close"``, ``"disconnect"``).
+* driver-specific keyword arguments (``stream_name``, ``sdk_dll``, …).
 
-The ``"composite"`` driver (:func:`_make_composite`) serves several devices from one
-process and one port, one RPC target each, optionally alongside a *coordinator*
-target (:data:`COORDINATOR_REGISTRY`) that drives those backends through direct
-Python calls rather than RPC. That is how a camera-to-DAC feedback step avoids
-serializing a frame. Sub-devices stay individually addressable:
-``get_device("Rb Feedback Rig", target_name="camera")``. See ``docs/device_framework.md``.
+:func:`build_spec` imports the chosen class and constructs it **automatically**: it
+reads ``__init__``'s signature and passes the config entries whose keys match
+parameter names, so no per-driver "unpack the config into the constructor" glue is
+needed. Anything a backend needs beyond receiving those values — resolving a path,
+starting a helper process, connecting to hardware — it does in its own ``__init__``
+from the arguments it is given (e.g. the MotMaster interface takes a config-file
+name, resolves it, ensures the app is running, and connects). Classes are named as
+strings and imported lazily — only when actually built — so importing this launcher
+never pulls in a hardware library that may be absent (e.g. ``pylablib`` for the
+ImagEM).
+
+A **composite** device (any entry with a ``"devices"`` sub-dict) serves several
+devices from one process and one port, one RPC target each, optionally alongside a
+*coordinator* target — a class named by ``"coordinator"`` (again ``"module:Class"``)
+that drives those backends through direct Python calls rather than RPC. That is how
+a camera-to-SLM step avoids serializing a frame. Sub-devices stay
+individually addressable: ``get_device("RbHamCam")``. See
+``docs/device_framework.md``.
 """
 
 import argparse
+import importlib
+import inspect
 import signal
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional
@@ -72,112 +90,76 @@ class DeviceServerSpec:
 
 
 # --------------------------------------------------------------------------- #
-# Driver factories: config dict -> DeviceServerSpec
+# Backend construction from config
 # --------------------------------------------------------------------------- #
 
-def _make_motmaster(name, conf):
-    from pytweezer.experiment.motmaster_server import (
-        SimulatedMotMasterInterface,
-        MotMasterInterface,
-        _ensure_motmaster_running,
-    )
-    from pytweezer.servers import tweezerpath
+def _backend_class(name, conf):
+    """Return the backend class ``conf`` selects.
 
-    simulate = conf.get("simulate", False)
-    interval = conf.get("interval") or 0.1
-    config_file = tweezerpath + "/pytweezer/configuration/" + conf["config_file"]
+    Normally this is the class named by ``"class"``. In simulation mode
+    (``conf["simulate"]``) it is the class named by ``"sim_class"`` if given, else a
+    hardware-free stand-in generated from the real class by
+    :func:`~pytweezer.servers.simulated_device.default_simulated` — so a device can
+    always be simulated whether or not it ships a hand-written simulated class.
+    """
+    if conf.get("simulate", False):
+        sim_path = conf.get("sim_class")
+        if sim_path:
+            return _load(sim_path)
+        # No hand-written simulated class: generate a stand-in from the real one.
+        from pytweezer.servers.simulated_device import default_simulated
 
-    if simulate:
-        interface = SimulatedMotMasterInterface(interval=interval)
-    else:
-        # Only touch real hardware when not simulating.
-        _ensure_motmaster_running(config_file)
-        interface = MotMasterInterface(config_file, interval=interval)
-    interface.connect()
-    if (not simulate) and interface.motmaster is None:
-        raise RuntimeError("Failed to connect to MotMaster.")
-
-    return DeviceServerSpec(
-        target_name="motmaster",
-        target=interface,
-        description="MotMaster command server",
-        teardown=lambda: _safe(interface.disconnect),
-    )
+        return default_simulated(_load(_require_class(name, conf)))
+    return _load(_require_class(name, conf))
 
 
-def _make_imagemx2(name, conf):
-    from pytweezer.drivers.imagemX2 import ImagEMX2Camera, SimulatedImagEMX2Camera
-
-    simulate = conf.get("simulate", False)
-    timeout = conf.get("timeout", 5.0)
-    image_dir = conf.get("image_dir")
-    stream_name = conf.get("stream_name", "imagemx2")
-
-    if simulate:
-        logger.warning("Running ImagEM X2 camera %r in SIMULATION MODE", name)
-        camera = SimulatedImagEMX2Camera(
-            stream_name=stream_name, image_dir=image_dir, timeout=timeout
+def _require_class(name, conf):
+    path = conf.get("class")
+    if not path:
+        raise KeyError(
+            f"Device {name!r} has no 'class'; expected a 'module.path:ClassName' "
+            "string naming its backend"
         )
-    else:
-        camera = ImagEMX2Camera(
-            stream_name=stream_name, image_dir=image_dir, timeout=timeout
-        )
-
-    return DeviceServerSpec(
-        target_name="camera",
-        target=camera,
-        description="ImagEM X2 RPC server",
-    )
+    return path
 
 
+def _load(path):
+    """Import and return the object named by a ``"module.path:attr"`` string."""
+    module_name, _, attr = path.partition(":")
+    if not attr:
+        raise ValueError(f"Backend path {path!r} must be 'module.path:ClassName'")
+    return getattr(importlib.import_module(module_name), attr)
 
-def _make_slm(name, conf):
-    simulate = conf.get("simulate", False)
-    if simulate:
-        from pytweezer.drivers.slm import SimulatedSLM
 
-        logger.warning("Running SLM %r in SIMULATION MODE", name)
-        slm = SimulatedSLM(
-            width=conf.get("width", 1024),
-            height=conf.get("height", 1024),
-            depth=conf.get("depth", 8),
-        )
-    else:
-        from pytweezer.drivers.slm import SLM, DEFAULT_SDK_DLL, DEFAULT_LUT_FILE
+def _config_kwargs(cls, conf):
+    """Config entries whose keys name a parameter of ``cls.__init__``.
 
-        slm = SLM(
-            sdk_dll=conf.get("sdk_dll", DEFAULT_SDK_DLL),
-            lut_file=conf.get("lut_file", DEFAULT_LUT_FILE),
-            board_number=conf.get("board_number", 1),
-            timeout_ms=conf.get("timeout_ms", 5000),
-            wait_for_trigger=conf.get("wait_for_trigger", False),
-            flip_immediate=conf.get("flip_immediate", False),
-            output_pulse=conf.get("output_pulse", False),
-        )
-    return DeviceServerSpec(
-        target_name="slm",
-        target=slm,
-        description="SLM RPC server",
-        teardown=lambda: _safe(slm.close),
-    )
+    This is the automatic "unpack the config into the constructor" step: framework
+    keys like ``class``/``sim_class``/``simulate``/``host``/``port``/``teardown`` are
+    dropped simply because they are not constructor parameters, and every backend
+    keeps ownership of its own defaults (an absent key just isn't passed).
+    """
+    params = set(inspect.signature(cls).parameters)
+    return {key: value for key, value in conf.items() if key in params}
 
 
 def _make_composite(name, conf):
     """Build one server exposing several targets from one config entry.
 
-    ``conf["devices"]`` maps a *device name* to an ordinary per-driver config dict;
-    each is dispatched through :data:`DRIVER_REGISTRY` as usual. Sub-devices are
-    named exactly like top-level devices and are reached the same way —
-    ``get_device("Rb Feedback Cam")`` — because :func:`device_index` flattens them
-    into the same namespace. Their RPC target name is :func:`composite_target_name`
-    of that device name. Sub-configs inherit the composite's ``simulate`` flag
-    unless they set their own.
+    ``conf["devices"]`` maps a *device name* to an ordinary device config dict (its
+    own ``"class"``/``"sim_class"`` etc.); each is built through :func:`build_spec`
+    as usual. Sub-devices are named exactly like top-level devices and are reached
+    the same way — ``get_device("Rb Feedback Cam")`` — because :func:`device_index`
+    flattens them into the same namespace. Their RPC target name is
+    :func:`composite_target_name` of that device name. Sub-configs inherit the
+    composite's ``simulate`` flag unless they set their own.
 
-    ``conf["coordinator"]`` optionally names a :data:`COORDINATOR_REGISTRY` entry; the
-    coordinator is constructed with direct references to the backend objects, so its
-    methods drive them with plain Python calls rather than RPC. It receives them keyed
-    by each sub-config's ``"role"`` (defaulting to the device name), so a coordinator
-    asks for ``targets["camera"]`` regardless of what that camera is called in config.
+    ``conf["coordinator"]`` optionally names a coordinator class as a
+    ``"module.path:ClassName"`` string; it is constructed as ``cls(roles, conf)``
+    with direct references to the backend objects, so its methods drive them with
+    plain Python calls rather than RPC. It receives them keyed by each sub-config's
+    ``"role"`` (defaulting to the device name), so a coordinator asks for
+    ``targets["camera"]`` regardless of what that camera is called in config.
     """
     sub_confs = conf.get("devices")
     if not sub_confs:
@@ -215,7 +197,7 @@ def _make_composite(name, conf):
 
     try:
         for device_name, sub_conf in sub_confs.items():
-            if sub_conf.get("driver") == "composite":
+            if "devices" in sub_conf:
                 raise ValueError(
                     f"Composite device {name!r}: sub-device {device_name!r} may not "
                     "itself be a composite"
@@ -236,9 +218,9 @@ def _make_composite(name, conf):
             if sub_spec.teardown is not None:
                 teardowns.append(sub_spec.teardown)
 
-        coordinator_key = conf.get("coordinator")
-        if coordinator_key is not None:
-            coordinator = _build_coordinator(coordinator_key, name, roles, conf)
+        coordinator_path = conf.get("coordinator")
+        if coordinator_path is not None:
+            coordinator = _load(coordinator_path)(roles, conf)
             _check_target_callable(name, coordinator_name, coordinator)
             targets[coordinator_name] = coordinator
             teardowns.append(coordinator.shutdown)
@@ -252,40 +234,6 @@ def _make_composite(name, conf):
         description=conf.get("description", f"composite device server {name!r}"),
         teardown=teardown_all,
     )
-
-
-#: Maps a device's ``"driver"`` config key to the factory that builds its server.
-DRIVER_REGISTRY = {
-    "motmaster": _make_motmaster,
-    "imagemx2": _make_imagemx2,
-    "blackfly": _make_blackfly,
-    "nidac": _make_nidac,
-    "slm": _make_slm,
-    "composite": _make_composite,
-}
-
-
-def _make_rearrangement(targets, conf):
-    from pytweezer.coordinators.rearrangement import Rearrangement
-
-    return Rearrangement(targets, conf)
-
-
-#: Maps a composite device's ``"coordinator"`` config key to its factory.
-COORDINATOR_REGISTRY = {
-    "rearrangement": _make_rearrangement,
-}
-
-
-def _build_coordinator(key, device_name, targets, conf):
-    try:
-        factory = COORDINATOR_REGISTRY[key]
-    except KeyError:
-        raise KeyError(
-            f"Unknown coordinator {key!r} for device {device_name!r}; "
-            f"registered coordinators: {sorted(COORDINATOR_REGISTRY)}"
-        ) from None
-    return factory(targets, conf)
 
 
 def _check_target_name(composite_name, device_name):
@@ -397,7 +345,7 @@ def device_index():
         index[key] = address
 
     for name, conf in devices.items():
-        if conf.get("driver") == "composite":
+        if "devices" in conf:
             coordinator = (
                 _coordinator_target_name(conf) if conf.get("coordinator") else None
             )
@@ -467,26 +415,34 @@ def build_spec(name, conf=None):
     """Return the :class:`DeviceServerSpec` for the device named ``name``.
 
     ``conf`` defaults to that device's ``CONFIG["Devices"]`` entry; pass an
-    explicit dict to override. The device's ``"driver"`` key selects the factory.
+    explicit dict to override. An entry with a ``"devices"`` sub-dict is a composite
+    (see :func:`_make_composite`); otherwise the backend named by the config's
+    ``"class"``/``"sim_class"`` is imported and constructed automatically.
     """
     if conf is None:
         name, conf = resolve_device(name)
 
-    driver = conf.get("driver")
-    if driver is None:
-        raise KeyError(
-            f"Device {name!r} has no 'driver' key; expected one of "
-            f"{sorted(DRIVER_REGISTRY)}"
-        )
-    try:
-        factory = DRIVER_REGISTRY[driver]
-    except KeyError:
-        raise KeyError(
-            f"Unknown driver {driver!r} for device {name!r}; "
-            f"registered drivers: {sorted(DRIVER_REGISTRY)}"
-        ) from None
+    if "devices" in conf:
+        return _make_composite(name, conf)
 
-    return factory(name, conf)
+    cls = _backend_class(name, conf)
+    if conf.get("simulate", False):
+        logger.warning("Running device %r in SIMULATION MODE", name)
+
+    backend = cls(**_config_kwargs(cls, conf))
+
+    teardown = None
+    teardown_method = conf.get("teardown")
+    if teardown_method is not None:
+        method = getattr(backend, teardown_method)
+        teardown = lambda: _safe(method)  # noqa: E731 — small local teardown wrapper
+
+    return DeviceServerSpec(
+        target_name=conf.get("target_name", "device"),
+        target=backend,
+        description=conf.get("description", f"{name} RPC server"),
+        teardown=teardown,
+    )
 
 
 def run_device_server(name, host=None, port=None, allow_parallel=None):

@@ -25,10 +25,10 @@ One composite device, `"Rb Rearrangement Rig"` in `CONFIG["Devices"]`, running o
 process on the GPU/SLM host:
 
 ```
-Rb Rearrangement Rig            (driver: composite)
-├── Rb Rearrangement Cam        (driver: imagemx2, role: camera)
-├── Rb SLM                      (driver: slm,      role: slm)
-└── coordinator                 (coordinator: rearrangement)
+Rb Rearrangement Rig            (composite: has a "devices" sub-dict)
+├── Rb Rearrangement Cam        (class: ...imagemX2:ImagEMX2Camera, role: camera)
+├── Rb SLM                      (class: ...slm:SLM,                 role: slm)
+└── coordinator                 (coordinator: ...rearrangement:Rearrangement)
 ```
 
 - **`pytweezer/drivers/slm.py`** — `SLM` wraps the Blink C-wrapper SDK directly as a

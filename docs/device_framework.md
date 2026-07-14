@@ -17,24 +17,21 @@ boilerplate; the client side had the same duplication (`MotMasterClient`, one
 per device type).
 
 Now there is **one generic server launcher** and **one generic client factory**.
-Adding a new *instance* of an existing device type is a config-only change;
-adding a new *driver type* is one factory function.
+A device's config entry points directly at its backend class, so both adding a new
+*instance* and adding a new *driver type* are config-only changes.
 
 ## Component map
 
 ```
 pytweezer/configuration/config.py
-  CONFIG["Devices"] = { name: {"driver": ..., "host":..., "port":..., ...}, ... }
+  CONFIG["Devices"] = { name: {"class": "module:Class", "host":..., "port":..., ...}, ... }
 
 pytweezer/servers/device_server.py      (generic server launcher)
-├── DRIVER_REGISTRY   driver-key -> factory(name, conf) -> DeviceServerSpec
-├── _make_motmaster / _make_imagemx2 / _make_blackfly / _make_nidac  (lazy imports)
+├── build_spec(name)       config -> DeviceServerSpec (imports "class"/"sim_class", constructs it)
 ├── _make_composite   several devices in one process, one target each
-├── COORDINATOR_REGISTRY  coordinator-key -> factory(targets, conf) -> Coordinator
 ├── device_index()         flat {name -> DeviceAddress} incl. composite sub-devices
 ├── resolve_address(name)  any addressable device -> DeviceAddress
 ├── resolve_device(name)   launchable (top-level) device only
-├── build_spec(name)       config -> DeviceServerSpec
 ├── run_device_server(name, host=None, port=None, allow_parallel=None)  blocks
 └── main()                 CLI entry: pytweezer-device <name>
 
@@ -52,8 +49,10 @@ pytweezer/servers/device_client.py       (generic client factory)
 
 pytweezer/servers/simulated_device.py    (generic simulated-backend mechanism)
 ├── public_methods(real_cls, exclude=())   introspects real_cls's public methods
-└── simulate(real_cls, exclude=(), defaults=None)   class decorator: auto-stub
-      any public method of real_cls a decorated class doesn't already define
+├── simulate(real_cls, exclude=(), defaults=None)   class decorator: auto-stub
+│     any public method of real_cls a decorated class doesn't already define
+└── default_simulated(real_cls)   generate a full no-op stand-in from real_cls
+      (used when a device config has no "sim_class")
 
 bin/process_manager.py            DeviceManager (host-filtered start/stop tiles)
 bin/process_tile_base.py          ProcessTile (subprocess: python <script> <name>)
@@ -64,13 +63,15 @@ pytweezer/servers/device_status.py DeviceStatusServer/-Client (cross-PC up/down 
 
 ### Config shape
 
-Each entry in `CONFIG["Devices"]` (`pytweezer/configuration/config.py`) has a
-`"driver"` key alongside the usual `host`/`port`/`active`:
+Each entry in `CONFIG["Devices"]` (`pytweezer/configuration/config.py`) names its
+backend class with `"class"` (a `"module.path:ClassName"` string), alongside the
+usual `host`/`port`/`active`:
 
 ```python
 "Rb HamCam": {
     "active": True,
-    "driver": "imagemx2",
+    "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
+    "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
     "host": SERVER_HOST,
     "port": get_next_port(),
     "simulate": SIMULATING,
@@ -80,34 +81,45 @@ Each entry in `CONFIG["Devices"]` (`pytweezer/configuration/config.py`) has a
 },
 ```
 
+The config keys `build_spec` reads:
+
+| Key | Meaning |
+|---|---|
+| `"class"` | Real backend, `"module.path:ClassName"`. Required. |
+| `"sim_class"` | Simulated/dummy backend, same form. Used instead of `"class"` when `"simulate": True`; if absent, a hardware-free stand-in is generated from `"class"` (`simulated_device.default_simulated`), so simulation is always available. Supply this only for an interesting fake. |
+| `"teardown"` | Name of a zero-argument method run when the server stops (e.g. `"close"`, `"disconnect"`). Optional. |
+| `"target_name"` | RPC target label (cosmetic for a single-device server; clients auto-select the sole target). Defaults to `"device"`. |
+| `"description"` | sipyco server description. Defaults to `"<name> RPC server"`. |
+| anything else | Passed to the backend constructor if its name matches an `__init__` parameter (e.g. `stream_name`, `sdk_dll`). |
+
 Every device is launched by the same file,
 `pytweezer/servers/device_server.py`, so that path is the `"Devices"` entry in
-`DEFAULT_SCRIPTS` (`config.py`) and `"driver"` is what actually selects the
-behavior. Anything that needs to spawn a process — `ProcessTile`, `ManagedRow`,
-`process_cleanup` — asks `ConfigReader.script_for(category, params)` rather than
-indexing `params["script"]`, so it works for categories that still name a script
-per entry (`Servers`, `GUI`) and for those that don't.
+`DEFAULT_SCRIPTS` (`config.py`). Anything that needs to spawn a process —
+`ProcessTile`, `ManagedRow`, `process_cleanup` — asks
+`ConfigReader.script_for(category, params)` rather than indexing
+`params["script"]`, so it works for categories that still name a script per entry
+(`Servers`, `GUI`) and for those that don't.
 
 **Device names must be unique across the whole category**, composite sub-devices
 included, because `get_device` addresses every device by name (see below).
 
-### `DRIVER_REGISTRY`: driver key → factory
+### `build_spec`: config → backend → `DeviceServerSpec`
 
-`device_server.py` maps a `"driver"` string to a factory function:
+`build_spec(name)` imports the class named by `"class"` (or `"sim_class"` when
+simulating) and constructs it **automatically**: it reads the constructor's
+signature and passes the config entries whose keys match parameter names. No
+per-driver glue function is involved. Anything a backend needs beyond receiving
+those values — resolving a path, starting a helper process, connecting to
+hardware — it does in its own `__init__` from the arguments it is given. For
+example `MotMasterInterface(config_file, interval)` resolves `config_file` against
+the package `configuration/` dir, ensures `MOTMaster.exe` is running, and connects,
+all in `__init__`; the config just passes `"config_file": "rb_mm_config.json"`.
 
-| `"driver"` | Factory | Backend built | Target name |
-|---|---|---|---|
-| `"motmaster"` | `_make_motmaster` | `MotMasterInterface` / `SimulatedMotMasterInterface` (if `simulate`) | `"motmaster"` |
-| `"imagemx2"` | `_make_imagemx2` | `ImagEMX2Camera` / `SimulatedImagEMX2Camera` (if `simulate`) — both built on the generic `Camera` base, see below | `"camera"` |
-| `"blackfly"` | `_make_blackfly` | `Blackfly` | `"camera"` |
-| `"nidac"` | `_make_nidac` | `SimulatedNIDAC` (real NI analog-output driver not written yet) | `"dac"` |
-| `"slm"` | `_make_slm` | `SLM` (Meadowlark Blink SDK) / `SimulatedSLM` (if `simulate`) | `"slm"` |
-| `"composite"` | `_make_composite` | several sub-devices + optional coordinator | one per sub-device |
-
-Each factory returns a `DeviceServerSpec(target_name, target, description,
-teardown=None)`, or `DeviceServerSpec(targets={...}, ...)` for the multi-target
-form. Either way `spec.targets` is the normalized `{target_name: target}` dict that
-gets served, and `run_device_server` does the generic part:
+The result is a `DeviceServerSpec(target_name, target, description,
+teardown=None)`, or `DeviceServerSpec(targets={...}, ...)` for the composite
+multi-target form. Either way `spec.targets` is the normalized
+`{target_name: target}` dict that gets served, and `run_device_server` does the
+generic part:
 
 ```python
 spec = build_spec(name)                  # config -> DeviceServerSpec
@@ -116,15 +128,17 @@ simple_server_loop(spec.targets, host=host, port=port,
 # ... then, in finally: spec.teardown() if provided (e.g. MotMaster disconnect)
 ```
 
-**Backend imports are lazy** (inside each factory, not at module top). This
-matters because `_make_blackfly` imports `rotpy`, a hardware library that may
-not be installed on every machine — importing `device_server.py` itself must
-never fail just because one driver's hardware library is absent. Only launching
-*that specific* device pulls in its library.
+**Backends are imported lazily** — the class string is resolved only when that
+device is actually built. This matters because a driver like the ImagEM pulls in
+`pylablib`, a hardware library that may not be installed on every machine —
+importing `device_server.py` itself must never fail just because one driver's
+hardware library is absent. Only launching *that specific* device pulls in its
+library.
 
-**Simulate-mode is respected per driver.** `_make_motmaster` only calls
-`_ensure_motmaster_running()` (which launches the real `MOTMaster.exe`) in the
-non-simulate branch — a simulated MotMaster server never touches real hardware.
+**Simulate-mode is a config choice, not launcher logic.** `"simulate": True`
+selects `"sim_class"` (or an auto-generated stand-in if there is none), so a
+simulated device never touches real hardware — the simulated MotMaster doesn't
+launch `MOTMaster.exe`, and the simulated camera synthesizes frames.
 
 ### `simulate()`: one mechanism for every driver's simulated backend
 
@@ -198,22 +212,22 @@ and set `SimulatedX = simulated_camera_for(X)` — no bespoke simulated class.
 ### Adding a new driver type
 
 1. Write the backend class as normal (own module, own connect/acquire/etc.
-   methods) — no RPC or config code in it. If it needs a simulated variant,
-   write a small `Simulated<X>` class decorated with `@simulate(<X>)` next to
-   it, hand-implementing only the methods with interesting fake behavior.
-2. Add one `_make_<driver>(name, conf)` factory to `device_server.py` that
-   builds the backend from `conf` and returns a `DeviceServerSpec`. Import the
-   backend module lazily, inside the factory.
-3. Register it: `DRIVER_REGISTRY["<driver>"] = _make_<driver>`.
-4. Add device instances to `CONFIG["Devices"]` with `"driver": "<driver>"`.
+   methods) — no RPC or config code in it. Give its constructor parameter names
+   that match the config keys you intend to pass, and do any further setup (path
+   resolution, starting a helper process, connecting) inside `__init__` from those
+   arguments. If it needs a simulated variant with interesting fake behavior, write
+   a small `Simulated<X>` class decorated with `@simulate(<X>)` next to it (omit it
+   entirely and a no-op stand-in is generated automatically).
+2. Add device instances to `CONFIG["Devices"]` pointing `"class"` (and, if it has
+   one, `"sim_class"`) at those classes.
 
-No new console script, no new argparse, no new `simple_server_loop` call.
+No factory, no new console script, no new argparse, no `simple_server_loop` call.
 
 ### Adding a new instance of an existing driver type
 
-Config-only: add an entry to `CONFIG["Devices"]` with an existing `"driver"`
-value and that driver's expected keys (see the table above / factory source for
-which config keys each factory reads). **Append it**, don't insert: ports come
+Config-only: add an entry to `CONFIG["Devices"]` reusing the same `"class"` (and
+`"sim_class"`) and that backend's expected constructor keys (see its `__init__`).
+**Append it**, don't insert: ports come
 from `get_next_port()` in declaration order, so inserting renumbers every device
 below.
 
@@ -406,22 +420,25 @@ named and reached exactly like any other device.
 ```python
 "Rb Feedback Rig": {
     "active": False,
-    "driver": "composite",
     "host": SERVER_HOST,
     "port": get_next_port(),
     "simulate": SIMULATING,
     "devices": {
-        "Rb Feedback Cam": {"driver": "imagemx2", "role": "camera",
+        "Rb Feedback Cam": {"class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
+                            "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
+                            "role": "camera",
                             "stream_name": "rb_feedback_cam", "timeout": 5.0},
-        "Rb Feedback DAC": {"driver": "nidac", "role": "dac",
-                            "channels": ["Dev1/ao0"]},
+        "Rb Feedback DAC": {"class": "pytweezer.drivers.ni_dac:NIDAC",
+                            "sim_class": "pytweezer.drivers.ni_dac:SimulatedNIDAC",
+                            "role": "dac", "channels": ["Dev1/ao0"]},
     },
-    "coordinator": "camera_dac_feedback",
+    "coordinator": "pytweezer.coordinators.camera_dac_feedback:CameraDACFeedback",
 },
 ```
 
-Each `"devices"` sub-entry is an ordinary per-driver config, dispatched through the
-same `DRIVER_REGISTRY`, and is **named like a top-level device**. Its RPC target
+An entry is a composite exactly when it has a `"devices"` sub-dict. Each sub-entry
+is an ordinary device config (its own `"class"`/`"sim_class"`), built through
+`build_spec` like any other, and is **named like a top-level device**. Its RPC target
 name is that name folded to be wire-safe (`composite_target_name`: whitespace
 stripped, lowercased — sipyco rejects target names containing spaces), but nothing
 outside this module needs to know that. Sub-configs inherit the composite's
@@ -454,8 +471,9 @@ A composite with no coordinator has nothing to serve under its own name, so
 ### Writing a coordinator
 
 Subclass `Coordinator` (`pytweezer/coordinators/base.py`), reach the backends
-through `self.require_role(<role>)`, register the class in `COORDINATOR_REGISTRY`,
-and name that key from the config's `"coordinator"` field.
+through `self.require_role(<role>)`, and point the composite's `"coordinator"`
+config field at the class as a `"module.path:ClassName"` string. `build_spec`
+imports it and constructs it as `cls(roles, conf)`.
 `pytweezer/coordinators/camera_dac_feedback.py` is the worked example: `arm()`,
 `measure()`, `control()`, `image_to_dac()`, and `run_n()`.
 `pytweezer/coordinators/rearrangement.py` (`Rearrangement`) is a real one — a
@@ -525,9 +543,9 @@ for free.
 
 | File | Role |
 |------|------|
-| `pytweezer/servers/device_server.py` | Generic server launcher: `DRIVER_REGISTRY`, `COORDINATOR_REGISTRY`, `build_spec`, `resolve_device`, `run_device_server`, `main`. |
+| `pytweezer/servers/device_server.py` | Generic server launcher: `build_spec` (imports the config's `"class"`/`"sim_class"` and constructs it), `resolve_device`, `run_device_server`, `main`. |
 | `pytweezer/servers/device_client.py` | Generic client factory: `get_device`, `get_device_async`, `get_device_config`. |
-| `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`. |
+| `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`, `default_simulated` (auto-generated stand-in when a device has no `sim_class`). |
 | `pytweezer/coordinators/base.py` | `Coordinator` — base for in-process coordination of a composite's backends. |
 | `pytweezer/coordinators/camera_dac_feedback.py` | `CameraDACFeedback` — worked example: frame mean → proportional DAC correction. |
 | `pytweezer/coordinators/rearrangement.py` | `Rearrangement` — camera + SLM atom-rearrangement loop (lazy GPU stack). See `docs/rearrangement_coordinator.md`. |
@@ -538,7 +556,7 @@ for free.
 | `pytweezer/drivers/imagemX2.py` | ImagEM X2 dcam shim (`ImagEMX2Camera` on `Camera`) + `SimulatedImagEMX2Camera = simulated_camera_for(...)` + legacy standalone `main()`. |
 | `pytweezer/drivers/bfly2.py` | Blackfly backend class + legacy standalone `main()`. |
 | `pytweezer/experiment/motmaster_client.py` | `MotMasterClient` — pre-framework client with back-compat aliases. |
-| `pytweezer/configuration/config.py` | `CONFIG["Devices"]` — `driver`/`host`/`port`/`active`/... per device. |
+| `pytweezer/configuration/config.py` | `CONFIG["Devices"]` — `class`/`sim_class`/`host`/`port`/`active`/... per device. |
 | `bin/process_manager.py` | `DeviceManager` — host-filtered start/stop tiles (unchanged besides the shared script path). |
 | `pyproject.toml` | `pytweezer-device = "pytweezer.servers.device_server:main"` console script. |
 

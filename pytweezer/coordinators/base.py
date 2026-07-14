@@ -21,8 +21,9 @@ called ``"Rb Feedback Cam"`` in config and served under that name to RPC clients
 One coordinator class therefore works across rigs whose devices are named
 differently.
 
-Register the subclass in ``device_server.COORDINATOR_REGISTRY`` and name it from
-the composite's ``"coordinator"`` config key.
+Point the composite's ``"coordinator"`` config key at the subclass as a
+``"module.path:ClassName"`` string; ``build_spec`` imports and constructs it as
+``cls(roles, conf)``.
 
 Three constraints on subclasses:
 

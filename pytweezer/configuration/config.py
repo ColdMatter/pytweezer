@@ -12,7 +12,7 @@ port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
 # Categories whose entries all run the same launcher script, so their config entries
-# omit "script" entirely. For Devices the "driver" key is what selects behavior.
+# omit "script" entirely. For Devices the "class" key names the backend to serve.
 # Use ConfigReader.script_for(category, params) rather than params["script"].
 DEFAULT_SCRIPTS = {
     "Devices": "../pytweezer/servers/device_server.py",
@@ -115,13 +115,20 @@ CONFIG = {
         }
     },
     # Every device is launched by pytweezer/servers/device_server.py (see
-    # DEFAULT_SCRIPTS above), so entries carry no "script": the "driver" key selects
-    # the behavior. Device names must be unique across the whole category, including
-    # composite sub-devices, because get_device() addresses them all by name.
+    # DEFAULT_SCRIPTS above), so entries carry no "script". Instead each entry names
+    # its backend class directly as "class" (a "module.path:ClassName" string), plus
+    # an optional "sim_class" used when "simulate" is True (if omitted, a no-op
+    # stand-in is generated from "class") and an optional "teardown" method run at
+    # shutdown. Any remaining keys whose names match the backend's
+    # __init__ parameters are passed to it. Device names must be unique across the
+    # whole category, including composite sub-devices, because get_device()
+    # addresses them all by name.
     "Devices": {
          "Rb MotMaster": {
             "active": True,
-            "driver": "motmaster",
+            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
+            "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+            "teardown": "disconnect",
             "config_file": "rb_mm_config.json",
             "host": HOSTS["IC-CZC4287H3W"],
             "port": get_next_port(),
@@ -129,7 +136,9 @@ CONFIG = {
         },
         "CaF MotMaster": {
             "active": True,
-            "driver": "motmaster",
+            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
+            "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+            "teardown": "disconnect",
             "config_file": "caf_mm_config.json",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
@@ -137,22 +146,14 @@ CONFIG = {
         },
         "CaF HamCam": {
             "active": True,
-            "driver": "imagemx2",
+            "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
+            "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "caf_hamcam",
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
-        },
-        "Blackfly": {
-            "active": False,
-            "driver": "blackfly",
-            "host": SERVER_HOST,
-            "port": get_next_port(),
-            "simulate": SIMULATING,
-            "stream_name": "bfly",
-            "timeout": 5.0,
         },
         # Atom-rearrangement rig: a rearrangement camera and the Blink SLM in one
         # process, with the rearrangement coordinator streaming GPU-computed phase
@@ -162,26 +163,28 @@ CONFIG = {
         # docs/rearrangement_coordinator.md.
         "Rb Rearrangement Rig": {
             "active": False,
-            "driver": "composite",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
             "devices": {
                 "Rb HamCam": {
-                    "driver": "imagemx2",
+                    "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
+                    "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
                     "role": "camera",
                     "stream_name": "rb_hamcam",
                     "timeout": 5.0,
                     "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
                 },
                 "Rb SLM": {
-                    "driver": "slm",
+                    "class": "pytweezer.drivers.slm:SLM",
+                    "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
+                    "teardown": "close",
                     "role": "slm",
                     # sdk_dll / lut_file / board_number default to the lab's Blink Plus
                     # install (see pytweezer/drivers/slm.py); override here if needed.
                 },
             },
-            "coordinator": "rearrangement",
+            "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
         },
     },
     # Background InfluxDB loggers. Each entry runs pytweezer/servers/logger_server.py,
