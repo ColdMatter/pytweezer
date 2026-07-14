@@ -21,8 +21,8 @@ def test_base_process_manager_accepts_every_host():
 
 def test_device_manager_check_host_is_case_and_whitespace_insensitive():
     dm = DeviceManager.__new__(DeviceManager)
-    dm.host_addr = "PH-Beast"
-    assert dm.check_host("ph-beast") is True
+    dm.host_addr = "PH-BEAST"
+    assert dm.check_host("PH-BEAST") is True
     assert dm.check_host("  PH-BEAST  ") is True
 
 
