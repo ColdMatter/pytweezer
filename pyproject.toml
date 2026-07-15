@@ -71,6 +71,7 @@ simple-pyspin = "^0.1.1"
 easypyspin = "^2.0.1"
 opencv-python = "^4.13.0.92"
 scikit-learn = "^1.8.0"
+thorlabs-tsi-sdk = {path = "C:/Users/tweez/Documents/Scientific Camera Interfaces/SDK/Python Toolkit/thorlabs_tsi_camera_python_sdk_package.zip"}
 
 [build-system]
 requires = ["poetry-core"]
