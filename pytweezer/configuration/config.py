@@ -1,7 +1,7 @@
 import os
 
 HOSTS = {
-    "ph-beast": "10.59.3.1",
+    "PH-BEAST": "10.59.3.1",
     "IC-CZC4287H3W": "10.59.3.2", # rb pc
     "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
@@ -20,7 +20,7 @@ DEFAULT_SCRIPTS = {
 
 SIMULATING = False # set to True to run in simulation mode (no real devices, no real cameras, etc.)
 LOCAL = False
-SERVER_HOST = HOSTS["ph-beast"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
+SERVER_HOST = HOSTS["PH-BEAST"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
 # Self-hosted InfluxDB 2.x connection. Every value can be overridden by an
 # environment variable so the token need not be hardcoded in a real deployment;
@@ -162,7 +162,7 @@ CONFIG = {
         # addressable on its own as get_device("Rb SLM"). See
         # docs/rearrangement_coordinator.md.
         "Rb Rearrangement Rig": {
-            "active": False,
+            "active": True,
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,

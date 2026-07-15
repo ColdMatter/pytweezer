@@ -21,6 +21,10 @@
                 "rb_hamcam": {
                     "timestamp": 1783523978.2946951,
                     "parts": 3
+                },
+                "caf_hamcam": {
+                    "timestamp": 1783597733.521804,
+                    "parts": 3
                 }
             }
         },
@@ -39,30 +43,6 @@
         "Image": {},
         "Data": {},
         "analysisdir": "C:\\Users\\tweez\\ColdMatter\\pytweezer/pytweezer/analysis/"
-    },
-    "BaliBrowser": {
-        "Looper": {},
-        "experiments_dir": "/home/twalker/RbCaF/pytweezer/experiments",
-        "testval": 3,
-        "testlist": [],
-        "Geometry": [
-            1920,
-            372,
-            1920,
-            1031
-        ],
-        "OpenWindows": [
-            "C:/Users/cafmot/pytweezer/pytweezer/experiments/rbbasic_test.py"
-        ],
-        "rbbasic_test": {
-            "Geo": [
-                0,
-                0,
-                785,
-                559
-            ],
-            "minimized": false
-        }
     },
     "Viewer": {
         "TweezerViewer": {
@@ -146,88 +126,6 @@
             }
         }
     },
-    "Experiments": {
-        "RBBasicTest": {
-            "scans": {
-                "mot_duration": {
-                    "parameters": [
-                        "tMOTccValue",
-                        "--NONE--",
-                        "--NONE--"
-                    ],
-                    "starts": [
-                        0.0,
-                        0.0,
-                        0.48
-                    ],
-                    "ends": [
-                        0.0,
-                        0.0,
-                        0.48
-                    ],
-                    "stepsl": [
-                        5,
-                        0,
-                        0
-                    ],
-                    "listgenerators": [
-                        "np.linspace(0.0,0.4,5)",
-                        "np.linspace(0.0,0.0,5)",
-                        "np.linspace(0.48,0.48,5)"
-                    ],
-                    "Randomize": false,
-                    "number_scans": 3,
-                    "nDscan": false,
-                    "snake_scan": false
-                }
-            },
-            "PatternLength": 26000.0,
-            "last_set": "tTweezerExposure: 10000.0",
-            "TCLBlockStart": 0,
-            "tScanCount": 0,
-            "tRbOffsetVoltageRep": 1.675,
-            "tRbOffsetVoltageCool": 3.3,
-            "tMOTccValue": 0.48,
-            "tcMOTccValue": 0.48,
-            "tMOTccSwitch": 5.5,
-            "tShimXccValue": 9.878,
-            "tShimYccValue": -2.375,
-            "tShimZccValue": -0.038,
-            "tMolassesShimXccValue": 10.0,
-            "tMolassesShimYccValue": 3.29,
-            "tMolassesShimZccValue": 0.35,
-            "tMOTCool": 3.7,
-            "tMOTRep": 3.86,
-            "tMOTCoolVVA": 1.829,
-            "tMOTRepVVA": 2.901,
-            "tImgCool": 1.84,
-            "tImgRep": 0.028,
-            "tImgCoolVVA": 0.405,
-            "tImgRepVVA": 1.05,
-            "tMolCool": 0.272,
-            "tMolRep": 1.855,
-            "tMolCoolVVA": 0.438,
-            "tMolRepVVA": 1.973,
-            "tTweezerSetVCO": 9.0,
-            "tTweezerLoadVCO": 9.0,
-            "tTweezerImgVCO": 9.0,
-            "tRbMOTStart": 10.0,
-            "tDropTime": 10.0,
-            "tRbRedMOTDuration": 100.0,
-            "tMolassesDelay": 1.0,
-            "tRbRedMolassesDuration": 5000.0,
-            "tImgTOF": 1.0,
-            "tMOTExposure": 1.0,
-            "tTweezerExposure": 10000.0,
-            "_totalrun": 97
-        },
-        "_task": 31
-    },
-    "Manager": {
-        "ExperimentQ": {
-            "current_scan": []
-        }
-    },
     "Live Plot": {
         "Plot 0": {
             "datastreams": [
@@ -295,8 +193,8 @@
             "Geometry": [
                 0,
                 0,
-                828,
-                554
+                697,
+                447
             ]
         },
         "Applet Launcher": {
@@ -332,8 +230,8 @@
         "ROI": {
             "slice": {
                 "pos": [
-                    32.92564533198302,
-                    37.62930895083775
+                    11.362338639954956,
+                    60.1063150789687
                 ],
                 "size": [
                     30,
@@ -341,7 +239,11 @@
                 ],
                 "color": 4278190335
             }
-        }
+        },
+        "sidebarstreams": [
+            "--None--"
+        ],
+        "show_sidebar": false
     },
     "Updating Plot": {
         "datastreams": [
@@ -404,6 +306,5 @@
                 "active": false
             }
         }
-    },
-    "ExitTestApplet": {}
+    }
 }
