@@ -11,13 +11,6 @@ HOSTS = {
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-# Categories whose entries all run the same launcher script, so their config entries
-# omit "script" entirely. For Devices the "class" key names the backend to serve.
-# Use ConfigReader.script_for(category, params) rather than params["script"].
-DEFAULT_SCRIPTS = {
-    "Devices": "../pytweezer/servers/device_server.py",
-}
-
 SIMULATING = False # set to True to run in simulation mode (no real devices, no real cameras, etc.)
 LOCAL = False
 SERVER_HOST = HOSTS["PH-BEAST"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
@@ -49,18 +42,6 @@ CONFIG = {
             "pub_port": get_next_port(),
             "poll_interval": 2.0,
         },
-        # "Experiment Manager": {
-        #     "active": True,
-        #     "script": "../pytweezer/servers/experiment_manager.py",
-        #     "host": SERVER_HOST
-        # },
-        # "Model Sync": {
-        #     "active": True,
-        #     "script": "../pytweezer/servers/model_sync.py",
-        #     "host": SERVER_HOST,
-        #     "command_port": get_next_port(),
-        #     "pub_port": get_next_port(),
-        # },
         "Imagehub": {
             "active": True,
             "host": SERVER_HOST,
@@ -114,8 +95,7 @@ CONFIG = {
             "host": SERVER_HOST,
         }
     },
-    # Every device is launched by pytweezer/servers/device_server.py (see
-    # DEFAULT_SCRIPTS above), so entries carry no "script". Instead each entry names
+    # Each entry names
     # its backend class directly as "class" (a "module.path:ClassName" string), plus
     # an optional "sim_class" used when "simulate" is True (if omitted, a no-op
     # stand-in is generated from "class") and an optional "teardown" method run at
