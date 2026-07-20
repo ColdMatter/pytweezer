@@ -8,6 +8,13 @@ HOSTS = {
 
 }
 
+# Categories whose entries all run the same launcher script, so their config entries
+# omit "script" entirely. For Devices the "class" key names the backend to serve.
+# Use ConfigReader.script_for(category, params) rather than params["script"].
+DEFAULT_SCRIPTS = {
+    "Devices": "../pytweezer/servers/device_server.py",
+} # TODO: this isn't actually needed but breaks the servers if removed
+
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
