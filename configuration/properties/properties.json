@@ -25,6 +25,10 @@
                 "caf_hamcam": {
                     "timestamp": 1783597733.521804,
                     "parts": 3
+                },
+                "rb_thorcam": {
+                    "timestamp": 1784555702.3943694,
+                    "parts": 3
                 }
             }
         },
@@ -36,11 +40,24 @@
         ],
         "DataStream": {
             "maxStreamInactive[s]": 1000,
-            "active": {}
+            "active": {
+                "rbstats": {
+                    "timestamp": 1784555702.395687,
+                    "parts": 2
+                }
+            }
         }
     },
     "Analysis": {
-        "Image": {},
+        "Image": {
+            "rbstats": {
+                "script": "image_stats.py",
+                "active": true,
+                "imagestreams": [
+                    "rb_thorcam"
+                ]
+            }
+        },
         "Data": {},
         "analysisdir": "C:\\Users\\tweez\\ColdMatter\\pytweezer/pytweezer/analysis/"
     },
@@ -155,6 +172,15 @@
             ],
             "running_average_window_size": 5,
             "running_average": true
+        },
+        "datastreams": [
+            "rbstats"
+        ],
+        "Axial_slice": {
+            "color": 4278190335
+        },
+        "rbstats": {
+            "color": 4278190335
         }
     },
     "GUI": {
@@ -193,8 +219,8 @@
             "Geometry": [
                 0,
                 0,
-                697,
-                447
+                828,
+                552
             ]
         },
         "Applet Launcher": {
@@ -218,7 +244,7 @@
     },
     "Image Monitor": {
         "imagestreams": [
-            "rb_hamcam"
+            "rb_thorcam"
         ],
         "maskstreams": [
             "--None--"
@@ -283,17 +309,12 @@
         "Applets": {
             "Image Monitor": {
                 "script": "pytweezer/GUI/viewers/image_monitor.py",
-                "active": false,
+                "active": true,
                 "description": "Display image streams"
             },
-            "Updating Plot": {
-                "script": "pytweezer/GUI/viewers/updating_plot.py",
-                "active": false,
-                "description": "Live plot of data streams"
-            },
-            "Image Monitor 2": {
-                "script": "pytweezer/GUI/viewers/image_monitor.py",
-                "active": false
+            "Live Plot": {
+                "script": "pytweezer/GUI/viewers/live_plot.py",
+                "active": true
             }
         }
     },
@@ -304,6 +325,9 @@
             },
             "second_image": {
                 "active": false
+            },
+            "rbstats": {
+                "active": true
             }
         }
     }

@@ -1,5 +1,6 @@
 import argparse
 
+import pylablib as pll
 import pylablib.devices.Thorlabs as thorcam
 from sipyco.pc_rpc import Client as RPCClient, simple_server_loop
 
@@ -11,6 +12,9 @@ from pytweezer.drivers.camera_base import (
 from pytweezer.servers.configreader import ConfigReader
 
 from pytweezer.logging_utils import get_logger
+
+THORLABS_DLL_PATH = "C:\\Program Files\\Thorlabs\\Scientific Imaging\\Scientific Camera Support\\Scientific Camera Interfaces\\SDK\\Python Toolkit\\dlls\\64_lib"
+pll.par["devices/dlls/thorlabs_tlcam"] = THORLABS_DLL_PATH
 
 IMAGE_DIRECTORY = (
     "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/ThorCamImages"
@@ -68,8 +72,8 @@ class ThorLabsCamera(Camera):
         self._backend.set_exposure(exposure)
 
     @requires_camera
-    def setup_acquisition(self, acq_mode: str, nframes: int):
-        self._backend.setup_acquisition(acq_mode, int(nframes))
+    def setup_acquisition(self, nframes: int):
+        self._backend.setup_acquisition(int(nframes))
 
     @requires_camera
     def start_acquisition(self):
