@@ -1,0 +1,377 @@
+import argparse
+import logging
+import os
+import socket
+import time
+from functools import wraps
+from tkinter import NO
+from turtle import st
+from typing import Any, Optional
+from unittest.mock import MagicMock
+
+from imageio import config
+import numpy as np
+import pylablib as pll
+import pylablib.devices.Thorlabs as tlcam
+import tifffile as tiff
+from sipyco.pc_rpc import Client as RPCClient, simple_server_loop
+
+from pytweezer.servers import ImageClient
+from pytweezer.servers.configreader import ConfigReader
+
+THORCAM_DLL_PATH = "C:\\Program Files\\Thorlabs\\Scientific Imaging\\Scientific Camera Support\\Scientific Camera Interfaces\\SDK\\Python Toolkit\\dlls\\64_lib"
+
+IMAGE_DIRECTORY = (
+    "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/ThorCamImages"
+)
+
+LOGGER = logging.getLogger(__name__)
+
+pll.par["devices/dlls/thorlabs_tlcam"] = THORCAM_DLL_PATH
+
+def requires_camera(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        self._require_camera()
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
+
+class ThorCamera:
+    """Low-level wrapper around the Thorlabs TLCamera driver."""
+
+    def __init__(
+        self,
+        image_dir: str | None = None,
+        timeout: float = 5.0,
+        stream_name: Optional[str] = None,
+    ):
+        self.image_dir = image_dir or IMAGE_DIRECTORY
+        self.timeout = timeout
+        self.thorcamlist = tlcam.list_cameras_tlcam()
+        self.tlcam: tlcam.ThorlabsTLCamera
+        self._open_camera()
+        self.stream_name = stream_name
+        if stream_name:
+            self.image_client = ImageClient(stream_name)
+
+    def _open_camera(self):
+        try:
+            self.tlcam = tlcam.ThorlabsTLCamera(serial=self.thorcamlist[0])
+            self.tlcam.open()
+        except Exception as exc:
+            self.tlcam = None
+            raise RuntimeError("Could not connect to Thorlabs TLCamera") from exc
+
+    def _require_camera(self):
+        if self.tlcam is None:
+            raise RuntimeError("Thorlabs TLCamera connection has been relinquished")
+
+    def close(self):
+        try:
+            if self.tlcam is not None:
+                self.tlcam.close()
+        except Exception:
+            LOGGER.exception("Failed to close Thorlabs TLCamera cleanly")
+        finally:
+            self.tlcam = None
+
+    def relinquish_camera(self):
+        self.close()
+        return {"ok": True, "relinquished": True}
+
+    def reacquire_camera(self):
+        if self.tlcam is None:
+            self._open_camera()
+        return {"ok": True, "relinquished": False}
+
+    @requires_camera
+    def set_roi(self, x0: int, width: int, y0: int, height: int):
+        self.tlcam.set_roi(x0, x0 + width - 1, y0, y0 + height - 1)
+
+    @requires_camera
+    def set_trigger_source(self, source: str):
+        self.tlcam.set_trigger_mode(source)
+
+    @requires_camera
+    def set_exposure_time(self, exposure: float):
+        self.tlcam.set_exposure(exposure)
+
+    @requires_camera
+    def setup_acquisition(self, acq_mode: str, nframes: int):
+        self.tlcam.setup_acquisition(acq_mode, int(nframes))
+
+    @requires_camera
+    def start_acquisition(self):
+        self.tlcam.start_acquisition()
+
+    @requires_camera
+    def stop_acquisition(self):
+        self.tlcam.stop_acquisition()
+
+    @requires_camera
+    def acquire_n_frames(self, nframes: int, start_frame: int = 0, autosave: bool = False, broadcast: bool = False) -> np.ndarray:
+        self.tlcam.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
+        images, _infos = self.tlcam.read_multiple_images(
+            (int(start_frame), int(start_frame) + int(nframes)), return_info=True
+        )
+        for i, image in enumerate(images):
+            if autosave:
+                ThorCamera.save_tiff(image=image, image_dir=self.image_dir)
+            if broadcast:
+                if self.image_client is None:
+                    LOGGER.error("tried to broadcast image but no client exists")
+                info = {
+                    "timestamp": time.time(),
+                    "index": start_frame + i,
+                }
+                self.image_client.send(image, info)
+        return np.asarray(images)
+
+    @requires_camera
+    def acquire_single_frame(
+        self,
+        timeout=None,
+        exp_info: dict[str, Any] | None = None,
+        autosave: bool = False,
+        broadcast: bool = False,
+    ) -> np.ndarray:
+        self.tlcam.wait_for_frame(n_frames=1, timeout=timeout)
+        image, _info = self.tlcam.read_newest_image(return_info=True)
+        image = np.asarray(image)
+        if autosave:
+            ThorCamera.save_tiff(image=image, image_dir=self.image_dir)
+        info = {
+            "timestamp": time.time(),
+            "index": 0
+        }
+        if exp_info is not None:
+            info.update(exp_info)
+        if broadcast:
+            if self.image_client is None:
+                LOGGER.error("tried to broadcasr image but no client exists")
+            self.image_client.send(image, info)
+        return image
+
+    @staticmethod
+    def save_tiff(image: np.ndarray, image_dir: str | None = None, run_no: int = 0):
+        image_dir = image_dir or IMAGE_DIRECTORY
+        i = 1
+        while os.path.exists(
+            os.path.join(image_dir, f"HamTweezer{run_no:04d}_{i}.tif")
+        ):
+            i += 1
+        filename = os.path.join(image_dir, f"HamTweezer{run_no:04d}_{i}.tif")
+        tiff.imwrite(filename, image)
+
+
+class SimulatedThorCamera:
+    """Drop-in simulated backend with the same control interface as ThorCamera."""
+
+    def __init__(self, image_dir: str | None = None, timeout: float = 5.0):
+        self.image_dir = image_dir or IMAGE_DIRECTORY
+        self.timeout = timeout
+        self._shape = (256, 256)
+        self._nframes = 1
+        self._running = False
+        self._rng = np.random.default_rng()
+
+    def close(self):
+        self._running = False
+
+    def set_roi(self, x0: int, width: int, y0: int, height: int):
+        self._shape = (int(height), int(width))
+
+    def set_ccd_mode(self, mode: int):
+        return None
+
+    def enable_em_gain(self, enable: bool = True):
+        return None
+
+    def set_direct_em_gain_mode(self, mode: int):
+        return None
+
+    def enable_direct_em_gain(self, enable: bool = True):
+        return None
+
+    def set_sensitivity(self, sensitivity: int):
+        return None
+
+    def set_trigger_source(self, source: str):
+        return None
+
+    def set_exposure_time(self, exposure: float):
+        return None
+
+    def set_external_exposure_mode(self):
+        return None
+
+    def setup_acquisition(self, acq_mode: str, nframes: int):
+        self._nframes = max(1, int(nframes))
+
+    def start_acquisition(self):
+        self._running = True
+
+    def stop_acquisition(self):
+        self._running = False
+
+    def _generate_frame(self) -> np.ndarray:
+        h, w = self._shape
+        image = self._rng.normal(loc=120.0, scale=9.0, size=(h, w)).astype(np.float32)
+        y, x = np.mgrid[0:h, 0:w]
+        for _ in range(12):
+            cy = self._rng.integers(20, max(21, h - 20))
+            cx = self._rng.integers(20, max(21, w - 20))
+            amp = self._rng.uniform(80.0, 280.0)
+            sigma = self._rng.uniform(1.3, 2.5)
+            image += amp * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2.0 * sigma**2))
+        return np.clip(image, 0.0, 65535.0).astype(np.uint16)
+
+    def acquire_n_frames(self, nframes: int, start_frame: int = 0) -> np.ndarray:
+        del start_frame
+        if not self._running:
+            raise RuntimeError("Simulated camera is not running")
+        count = max(1, int(nframes))
+        time.sleep(0.1 * count)
+        return np.stack([self._generate_frame() for _ in range(count)], axis=0)
+
+    @staticmethod
+    def save_tiff(image: np.ndarray, image_dir: str | None = None, run_no: int = 0):
+        ThorCamera.save_tiff(image=image, image_dir=image_dir, run_no=run_no)
+
+
+class ThorCameraClient(RPCClient):
+    """Experiment-side RPC client with direct access to camera methods."""
+
+    def __init__(
+        self,
+        server_name: str = "Thor Camera",
+        host: str | None = None,
+        port: int | None = None,
+        timeout: float | None = 5.0,
+    ):
+
+        conf = ConfigReader.getConfiguration()
+        server_conf = conf.get("Devices", {}).get(server_name, {})
+
+        self.host = host or server_conf.get("host", "127.0.0.1")
+        self.port = int(port or server_conf.get("port", 3251))
+        super().__init__(host=self.host, port=self.port, timeout=timeout)
+
+    def ping(self):
+        return {"ok": True, "host": self.host, "port": self.port, "target": "camera"}
+
+
+def run_server(
+    host: str,
+    port: int,
+    stream_name: str = "imagemx2",
+    image_dir: str | None = None,
+    timeout: float = 5.0,
+    simulate: bool = False,
+):
+    LOGGER.info(
+        "Starting Thor Camera RPC server host=%s port=%s stream=%s simulate=%s",
+        host,
+        port,
+        stream_name,
+        simulate,
+    )
+    if simulate:
+        LOGGER.warning("Running Thor Camera server in SIMULATION MODE")
+        camera = SimulatedThorCamera(image_dir=image_dir, timeout=timeout)
+    else:
+        camera = ThorCamera(
+            stream_name=stream_name,
+            image_dir=image_dir,
+            timeout=timeout,
+        )
+
+    simple_server_loop(
+        {"camera": camera},
+        host=host,
+        port=int(port),
+        description="Thor Camera RPC server",
+    )
+
+
+def _resolve_server_name(token: str, conf: dict) -> str:
+    if isinstance(token, str) and token.startswith("Devices/"):
+        return token.split("/", 1)[1]
+    if isinstance(token, str) and token in conf.get("Devices", {}):
+        return token
+    return "Thor Camera"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Thor Camera sipyco RPC server launcher")
+    parser.add_argument(
+        "name",
+        help="process-manager label or explicit server name",
+        default=None
+    )
+    parser.add_argument(
+        "--stream-name",
+        default="thorcam",
+        help="image stream name used by experiment-side clients",
+    )
+    parser.add_argument(
+        "--image-dir", default=IMAGE_DIRECTORY, help="optional TIFF autosave directory"
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=5, help="frame wait timeout in seconds"
+    )
+    parser.add_argument("--host", default=None, help="override RPC bind host")
+    parser.add_argument("--port", type=int, default=None, help="override RPC bind port")
+    parser.add_argument(
+        "--simulate", action="store_true", help="force synthetic camera backend"
+    )
+    args = parser.parse_args()
+
+    conf = ConfigReader.getConfiguration()
+    
+    if args.name is not None:
+    
+        server_name = _resolve_server_name(args.name, conf)
+        server_conf = conf.get("Devices", {}).get(server_name, {})
+        host = server_conf["host"]
+        port = server_conf["port"]
+        simulate = server_conf["simulate"]
+        timeout = server_conf["timeout"]
+        image_dir = server_conf["image_dir"]
+        stream_name = server_conf["stream_name"]
+    else:
+        host = args.host
+        port = args.port
+        simulate = args.simulate
+        timeout = args.timeout
+        image_dir = args.image_dir
+        stream_name = args.stream_name
+        
+    if host is None or port is None:
+        print("Error: RPC host and port must be specified either via command-line or configuration.")
+        exit(1)
+
+    print(
+        f"Starting Thor Camera server with configuration:\n"
+        f"  Host: {host}\n"
+        f"  Port: {port}\n"
+        f"  Stream Name: {stream_name}\n"
+        f"  Image Directory: {args.image_dir or server_conf.get('image_dir', 'None')}\n"
+        f"  Timeout: {timeout} seconds\n"
+        f"  Simulate: {simulate}"
+    )
+
+    run_server(
+        host=host,
+        port=port,
+        stream_name=stream_name,
+        image_dir=image_dir,
+        timeout=timeout,
+        simulate=simulate,
+    )
+
+
+if __name__ == "__main__":
+    main()
