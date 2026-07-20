@@ -27,7 +27,7 @@
                     "parts": 3
                 },
                 "rb_thorcam": {
-                    "timestamp": 1784555702.3943694,
+                    "timestamp": 1784564311.8386505,
                     "parts": 3
                 }
             }
@@ -42,7 +42,7 @@
             "maxStreamInactive[s]": 1000,
             "active": {
                 "rbstats": {
-                    "timestamp": 1784555702.395687,
+                    "timestamp": 1784564311.8416429,
                     "parts": 2
                 }
             }
@@ -314,7 +314,7 @@
             },
             "Live Plot": {
                 "script": "pytweezer/GUI/viewers/live_plot.py",
-                "active": true
+                "active": false
             }
         }
     },

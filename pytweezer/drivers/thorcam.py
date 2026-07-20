@@ -23,7 +23,7 @@ IMAGE_DIRECTORY = (
 LOGGER = get_logger("thorcam")
 
 
-class ThorLabsCamera(Camera):
+class ThorCam(Camera):
     """ThorLabs shim: translates the generic :class:`Camera` interface to the
     ThorLabs camera's pylablib driver, plus any camera-specific controls."""
     
@@ -94,10 +94,10 @@ class ThorLabsCamera(Camera):
 
 #: One-size-fits-all simulated camera, with the ThorLabs camera's controls
 #: auto-stubbed so the simulated surface matches the real driver.
-SimulatedThorLabsCamera = simulated_camera_for(ThorLabsCamera)
+SimulatedThorLabsCamera = simulated_camera_for(ThorCam)
 
 
-class ThorLabsCameraClient(RPCClient):
+class ThorCamClient(RPCClient):
     """Experiment-side RPC client with direct access to camera methods."""
 
     def __init__(
@@ -122,7 +122,7 @@ class ThorLabsCameraClient(RPCClient):
 def run_server(
     host: str,
     port: int,
-    stream_name: str = "thorlabscamera",
+    stream_name: str = "thorcam",
     image_dir: str | None = None,
     timeout: float = 5.0,
     simulate: bool = False,
@@ -140,7 +140,7 @@ def run_server(
             stream_name=stream_name, image_dir=image_dir, timeout=timeout
         )
     else:
-        camera = ThorLabsCamera(
+        camera = ThorCam(
             stream_name=stream_name,
             image_dir=image_dir,
             timeout=timeout,
@@ -163,7 +163,7 @@ def main():
     )
     parser.add_argument(
         "--stream-name",
-        default="thorlabscamera",
+        default="thorcam",
         help="image stream name used by experiment-side clients",
     )
     parser.add_argument(

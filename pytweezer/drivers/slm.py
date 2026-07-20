@@ -152,6 +152,7 @@ class SLM:
         ret1 = self._lib.ImageWriteComplete(self.board_number, self.timeout_ms)
         if ret1 != 1:
             raise RuntimeError("SLM ImageWriteComplete failed")
+        LOGGER.info("Updated mask to SLM board %d", mask.shape[1], mask.shape[0], self.board_number)
 
     def preload_sequence(self, mask_sequence: np.ndarray) -> None:
         """Upload a whole ``(n, H, W)`` sequence into the SLM's on-board memory.
@@ -186,6 +187,7 @@ class SLM:
             self.update_mask(seq[i])
             if period:
                 time.sleep(period)
+            LOGGER.info("Updated sequence frame %d/%d", i + 1, n)
 
     def get_temperature(self) -> float:
         self._require_slm()
