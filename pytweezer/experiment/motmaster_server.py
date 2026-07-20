@@ -3,295 +3,194 @@ import time
 from typing import Optional, Union
 import json
 import pathlib
+import subprocess
 import sys
-import threading
 
-import numpy as np
-import zmq
+from sipyco.pc_rpc import simple_server_loop
+from pytweezer.servers.configreader import ConfigReader
+from pytweezer.servers.simulated_device import simulate
+from pytweezer.experiment.motmaster_interface import MotMasterInterface
+# from pycaf.experiment import Experiment
 
-# NOTE: these imports will only work with the pythonnet package
-try:
-    import clr
-    from System.Collections.Generic import Dictionary
-    from System import String, Object
-    from System import Activator
-except Exception as e:
-    print(f"Error: {e} encountered, probably no pythonnet")
+# config directory local to the package.
+CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
 
-# config dir is relative to the root of the repository, which is added to the path when pytweezer is installed, so should be findable from anywhere in the code using a relative path from the root. If this becomes an issue we can add some code to find the config dir based on the location of this file.
-CONFIG_DIR = "pytweezer/configuration"
-PROPERTIES_FILE = CONFIG_DIR + "/configuration.json"
-DEFAULTS_FILE = CONFIG_DIR + "/defaults.json"
-EXPERIMENTS_FILE = CONFIG_DIR + "/experiments.json"
+#: Methods where returning bare None would be a poor fake (e.g. scan_* methods
+#: that real callers iterate over, or dict-returning parameter lookups).
+_MOTMASTER_SIMULATE_DEFAULTS = {
+    "get_motmaster_dictionary": dict,
+    "get_params_csdict": dict,
+    "get_laser_set_points_tcl": dict,
+    "get_laser_set_points_wml": dict,
+    "get_laser_frequencies_actual": dict,
+    "python_to_cs_dict": dict,
+    "scan_tcl_laser_set_points": list,
+    "scan_wm_laser_set_points": list,
+    "scan_wm_laser_set_points_with_motmaster_values": list,
+    "scan_wm_laser_set_points_with_motmaster_multiple_parameters": list,
+    "scan_picomotor_steps": list,
+}
 
 
-class MotMasterInterface:
+@simulate(MotMasterInterface, defaults=_MOTMASTER_SIMULATE_DEFAULTS)
+class SimulatedMotMasterInterface:
+    """Simulated MotMaster backend. Any MotMasterInterface method not defined
+    here is auto-stubbed by @simulate so this class can never silently drift
+    out of sync with it (unlike its predecessor, this class does not subclass
+    MotMasterInterface, so an un-overridden method never falls through to
+    real hardware-touching code).
+    """
+
     def __init__(self, interval: Union[int, float] = 0.1) -> None:
-        with open(PROPERTIES_FILE, "r") as f:
-            self.config = json.load(f)
-        self.root = pathlib.Path(self.config["script_root_path"])
         self.interval = interval
         self.motmaster = None
         self.script = None
 
-    def _add_ref(self, path: str) -> None:
-        _path = pathlib.Path(path)
-        sys.path.append(_path.parent)
-        clr.AddReference(path)
-        return None
-
     def connect(self) -> None:
-        for path in self.config["dll_paths"].values():
-            clr.AddReference(path)
-        for key, path_info in self.config.items():
-            if key == "dll_paths":
-                for path in path_info.values():
-                    self._add_ref(path)
-            elif key == "motmaster":
-                self._add_ref(path_info["exe_path"])
-                try:
-                    import MOTMaster
-
-                    self.motmaster = Activator.GetObject(
-                        MOTMaster.Controller, path_info["remote_path"]
-                    )
-                    print("Connected to MotMaster.")
-                except Exception as e:
-                    print(f"Error: {e} encountered")
-            elif key == "caf_hardware_controller":
-                self._add_ref(path_info["exe_path"])
-                try:
-                    import MoleculeMOTHadwareControl
-
-                    self.hardware_controller = Activator.GetObject(
-                        MoleculeMOTHadwareControl.Controller, path_info["remote_path"]
-                    )
-                except Exception as e:
-                    print(f"Error: {e} encountered")
-
-    def disconnect(self) -> None:
-        self.stage.close()
-        return None
-
-    def set_motmaster_experiment(
-        self,
-        script: str,
-    ):
-        self.script = script
-        path = str(self.root.joinpath(f"{script}.cs"))
-        try:
-            self.motmaster.SetScriptPath(path)
-            print(f"MotMaster script set to {script}.")
-        except Exception as e:
-            print(f"Error: {e} encountered")
-        return None
-
-    def get_motmaster_dictionary(self):
-        self.parameter_dictionary = self.motmaster.GetParameters()
-        # self.parameter_dictionary = Dictionary[String, Object]()
-        # with open(DEFAULTS_FILE, "r") as f:
-        #     default_parameters = json.load(f)
-        # for key, value in default_parameters.items():
-        #     self.parameter_dictionary[key] = value
-
-    def set_motmaster_dictionary(self):
-        d = self.get_params()
-        pars = Dictionary[String, Object]()
-        for key, value in d.items():
-            pars[key] = value
-        self.parameter_dictionary = pars
-        return None
-
-    def start_motmaster_experiment(
-        self,
-    ):
-        if self.script is None:
-            raise ValueError(
-                "MotMaster script not set. Please call set_motmaster_experiment first."
-            )
-        try:
-
-            self.motmaster.Go()
-            time.sleep(self.interval)
-        except Exception as e:
-            print(f"Error starting MotMaster experiment {self.script}: {e}")
-        return None
-
-    def get_params(self):
-        return dict(self.motmaster.GetParameters())
-    
-class  DummyMotMasterInterface(MotMasterInterface):
-    
-    def __init__(self, interval: Union[int, float] = 0.1) -> None:
-        pass
-    
-    def connect(self) -> None:
-        print("DummyMotMasterInterface: connect called, but no connection made.")
+        print("SimulatedMotMasterInterface: connect called.")
         self.motmaster = None
         self.script = None
         return None
-    
+
     def set_motmaster_experiment(
         self,
         script: str,
     ):
-        print(f"DummyMotMasterInterface: set_motmaster_experiment called with script '{script}', but no experiment set.")
+        print(
+            f"SimulatedMotMasterInterface: set_motmaster_experiment called with script '{script}'"
+        )
         self.script = script
         return None
-    
-    def set_motmaster_dictionary(self):
-        print("DummyMotMasterInterface: set_motmaster_dictionary called, but no dictionary set.")
-        self.parameter_dictionary = {}
-        return None
-    
+
     def start_motmaster_experiment(
         self,
+        parameters: Optional[dict] = None,
     ):
-        print(f"DummyMotMasterInterface: start_motmaster_experiment called with script '{self.script}', but no experiment started.")
+        print(
+            f"SimulatedMotMasterInterface: start_motmaster_experiment called with script '{self.script}'"
+        )
         return None
-    
+
     def get_params(self):
-        print("DummyMotMasterInterface: get_params called, but no parameters to return.")
-        return {}
-    
+        return {"param1": 1, "param2": 2.0}
+
     def disconnect(self) -> None:
-        print("DummyMotMasterInterface: disconnect called, but no connection to close.")
+        print("SimulatedMotMasterInterface: disconnect called")
+        return None
+
+    def save_pattern_info(self, save_folder, file_tag, task_nr):
+        print(
+            "SimulatedMotMasterInterface: save_pattern_info called "
+            f"(save_folder={save_folder}, file_tag={file_tag}, task_nr={task_nr})"
+        )
         return None
 
 
-class MotMasterCommandServer:
-    def __init__(
-        self,
-        interface: MotMasterInterface,
-        host: str = "localhost",
-        port: int = 5557,
-        context: Optional[zmq.Context] = None,
-    ) -> None:
-        self.interface = interface
-        self.host = host
-        self.port = port
-        self.address = f"tcp://{host}:{port}"
-        self.context = context or zmq.Context.instance()
-        self.socket = self.context.socket(zmq.REP)
-        self._running = False
-        self._experiment_thread: Optional[threading.Thread] = None
-
-    def _run_experiment(self) -> None:
-        self.interface.start_motmaster_experiment()
-
-    def _handle_request(self, request: dict) -> dict:
-        command = request.get("command")
-
-        if command == "ping":
-            return {"ok": True, "command": command, "status": "alive"}
-
-        if command == "get_status":
-            experiment_running = bool(
-                self._experiment_thread and self._experiment_thread.is_alive()
+def _is_process_running(process_name: str) -> bool:
+    try:
+        if sys.platform.startswith("win"):
+            result = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
+                check=False,
+                capture_output=True,
+                text=True,
             )
-            return {
-                "ok": True,
-                "command": command,
-                "server_running": self._running,
-                "experiment_running": experiment_running,
-                "script": self.interface.script,
-            }
-
-        if command == "set_script":
-            script = request.get("script")
-            if not script:
-                raise ValueError("'script' is required for set_script")
-            self.interface.set_motmaster_experiment(script)
-            return {"ok": True, "command": command, "script": script}
-
-        if command == "get_params":
-            return {"ok": True, "command": command, "params": self.interface.get_params()}
-
-        if command == "start_experiment":
-            if self._experiment_thread and self._experiment_thread.is_alive():
-                return {
-                    "ok": False,
-                    "command": command,
-                    "error": "Experiment already running",
-                    "script": self.interface.script,
-                }
-
-            self._experiment_thread = threading.Thread(
-                target=self._run_experiment,
-                name="motmaster-start-experiment",
-                daemon=True,
+            output = result.stdout.lower()
+            return (
+                result.returncode == 0
+                and process_name.lower() in output
+                and "no tasks are running" not in output
             )
-            self._experiment_thread.start()
-            return {
-                "ok": True,
-                "command": command,
-                "script": self.interface.script,
-                "started": True,
-            }
 
-        if command == "shutdown":
-            self._running = False
-            return {"ok": True, "command": command}
+        result = subprocess.run(
+            ["pgrep", "-f", process_name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+    except Exception:
+        return False
 
-        raise ValueError(f"Unknown command '{command}'")
 
-    def serve_forever(self) -> None:
-        self.socket.bind(self.address)
-        self._running = True
-        print(f"MotMaster command server listening on {self.address}")
-        poller = zmq.Poller()
-        poller.register(self.socket, zmq.POLLIN)
+def _start_process(exe_path: str) -> None:
+    subprocess.Popen(
+        [exe_path],
+        cwd=str(pathlib.Path(exe_path).parent),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
-        try:
-            while self._running:
-                # Use a polling timeout so KeyboardInterrupt is handled promptly.
-                events = dict(poller.poll(timeout=2000))
-                if self.socket not in events:
-                    continue
 
-                request = self.socket.recv_json()
-                try:
-                    if not isinstance(request, dict):
-                        raise ValueError("Request must be a JSON object")
-                    response = self._handle_request(request)
-                except Exception as error:
-                    response = {"ok": False, "error": str(error)}
-                self.socket.send_json(response)
-        except KeyboardInterrupt:
-            print("Keyboard interrupt received. Stopping server.")
-            self._running = False
-        finally:
-            self.socket.close()
-            try:
-                self.interface.disconnect()
-            except Exception:
-                # Connection teardown should not mask shutdown.
-                pass
+def _ensure_motmaster_running(
+    config_file: str,
+    startup_timeout: float = 15.0,
+    poll_interval: float = 0.5,
+) -> None:
+    with open(config_file, "r") as f:
+        config = json.load(f)
+    exe_path = config["motmaster"]["exe_path"]
+    process_name = pathlib.Path(exe_path).name
+    if _is_process_running(process_name):
+        return None
+
+    print(f"MOTMaster process '{process_name}' not found. Starting it now...")
+    _start_process(exe_path)
+
+    deadline = time.time() + startup_timeout
+    while time.time() < deadline:
+        if _is_process_running(process_name):
+            print(f"MOTMaster process '{process_name}' is running.")
+            return None
+        time.sleep(poll_interval)
+
+    raise RuntimeError(
+        f"Timed out waiting for process '{process_name}' to start from '{exe_path}'."
+    )
 
 
 def run_motmaster_command_server(
-    host: str = "0.0.0.0", port: int = 5557, interval: Union[int, float] = 0.1, simulate: bool = False
+    host: str = "0.0.0.0",
+    port: int = 5557,
+    interval: Union[int, float] = 0.1,
+    simulate: bool = False,
+    config_file: Optional[str] = None,
 ) -> None:
+    _ensure_motmaster_running(config_file)
     if simulate:
-        interface = DummyMotMasterInterface(interval=interval)
+        interface = SimulatedMotMasterInterface(interval=interval)
     else:
-        interface = MotMasterInterface(interval=interval)
+        interface = MotMasterInterface(config_file, interval=interval)
     interface.connect()
     if (not simulate) and interface.motmaster is None:
         raise RuntimeError("Failed to connect to MotMaster.")
 
-    server = MotMasterCommandServer(interface=interface, host=host, port=port)
-    server.serve_forever()
+    try:
+        simple_server_loop(
+            {"motmaster": interface},
+            host=host,
+            port=port,
+            description="MotMaster command server",
+        )
+    finally:
+        try:
+            interface.disconnect()
+        except Exception:
+            # Connection teardown should not mask shutdown.
+            pass
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run MotMaster ZeroMQ command server")
+    parser = argparse.ArgumentParser(description="Run MotMaster sipyco RPC server")
+    parser.add_argument(
+        "--name", nargs="?", default=None, help="name of this program instance"
+    )
     parser.add_argument(
         "--host",
-        default="0.0.0.0",
+        default="127.0.0.1",
         help="Host interface to bind (use 0.0.0.0 for remote clients)",
     )
-    parser.add_argument("--port", type=int, default=5557, help="TCP port to bind")
+    parser.add_argument("--port", type=int, default=8888, help="TCP port to bind")
     parser.add_argument(
         "--simulate",
         action="store_true",
@@ -300,19 +199,38 @@ def main() -> None:
     parser.add_argument(
         "--interval",
         type=float,
-        default=0.1,
+        default=None,
         help="Delay after starting MotMaster experiment (seconds)",
     )
-    args = parser.parse_args()
+
+    args, _unknown = parser.parse_known_args()
+
+    from pytweezer.configuration.config import CONFIG
+    from pytweezer.servers import tweezerpath
+    
+    if args.name is not None:
+        config_dict = CONFIG["Devices"][args.name]
+        host = config_dict["host"]
+        port = config_dict["port"]
+        simulate = config_dict["simulate"]
+        interval = config_dict["interval"]
+    else:
+        host = args.host
+        port = args.port
+        simulate = args.simulate
+        interval = args.interval
+    config_file = (
+        tweezerpath + "/pytweezer/configuration/" + config_dict.get("config_file")
+    )
 
     run_motmaster_command_server(
-        host=args.host,
-        port=args.port,
-        interval=args.interval,
-        simulate=args.simulate,
+        host=host,
+        port=port,
+        interval=interval,
+        simulate=simulate,
+        config_file=config_file,
     )
 
 
 if __name__ == "__main__":
     main()
-    

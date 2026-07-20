@@ -1,0 +1,334 @@
+{
+    "Servers": {
+        "Propertylogger": {
+            "check_interval": 10,
+            "logginginterval[s]": 1
+        },
+        "ImageStream": {
+            "active": {
+                "imagemx2": {
+                    "timestamp": 1775063539.78219,
+                    "parts": 3
+                },
+                "first_image_": {
+                    "timestamp": 1775062793.827092,
+                    "parts": 3
+                },
+                "second_image_": {
+                    "timestamp": 1775062793.8260915,
+                    "parts": 3
+                },
+                "rb_hamcam": {
+                    "timestamp": 1783523978.2946951,
+                    "parts": 3
+                },
+                "caf_hamcam": {
+                    "timestamp": 1783597733.521804,
+                    "parts": 3
+                },
+                "rb_thorcam": {
+                    "timestamp": 1784555702.3943694,
+                    "parts": 3
+                }
+            }
+        },
+        "roilist": [
+            "/Viewer/TweezerViewer/Viewer/ROI/slice",
+            "/Viewer/DummyViewer/Viewer/ROI/slice",
+            "/Image Monitor/ROI/slice",
+            "/Image Monitor 2/ROI/slice"
+        ],
+        "DataStream": {
+            "maxStreamInactive[s]": 1000,
+            "active": {
+                "rbstats": {
+                    "timestamp": 1784555702.395687,
+                    "parts": 2
+                }
+            }
+        }
+    },
+    "Analysis": {
+        "Image": {
+            "rbstats": {
+                "script": "image_stats.py",
+                "active": true,
+                "imagestreams": [
+                    "rb_thorcam"
+                ]
+            }
+        },
+        "Data": {},
+        "analysisdir": "C:\\Users\\tweez\\ColdMatter\\pytweezer/pytweezer/analysis/"
+    },
+    "Viewer": {
+        "TweezerViewer": {
+            "Parameterbox": "Viewer/TweezerViewer/ParBox",
+            "ParBox": {
+                "ydata": [
+                    ""
+                ],
+                "datastreams": [
+                    ""
+                ]
+            },
+            "imagestreams": null,
+            "ImageDisplay": "Viewer/TweezerViewer/Viewer",
+            "Viewer": {
+                "imagestreams": [
+                    "imagemx2"
+                ],
+                "maskstreams": [
+                    "--None--"
+                ],
+                "invert_colors": false,
+                "ROIs": [
+                    "slice"
+                ],
+                "ROI": {
+                    "slice": {
+                        "pos": [
+                            -64.83288785312342,
+                            23.879410079830677
+                        ],
+                        "size": [
+                            6.486987846579069,
+                            7.364357448932552
+                        ],
+                        "color": 4278190335
+                    }
+                },
+                "positionstreams": [
+                    "--None--"
+                ],
+                "tweezer_square_size": 6.0,
+                "show_tweezer_grid": true
+            }
+        },
+        "DummyViewer": {
+            "Parameterbox": "Viewer/DummyViewer/ParBox",
+            "ParBox": {
+                "ydata": [
+                    ""
+                ],
+                "datastreams": [
+                    ""
+                ]
+            },
+            "ImageDisplay": "Viewer/DummyViewer/Viewer",
+            "Viewer": {
+                "imagestreams": [
+                    "--None--"
+                ],
+                "maskstreams": [
+                    "--None--"
+                ],
+                "invert_colors": false,
+                "ROIs": [
+                    "slice"
+                ],
+                "ROI": {
+                    "slice": {
+                        "pos": [
+                            0,
+                            0
+                        ],
+                        "size": [
+                            30,
+                            30
+                        ],
+                        "color": 4278190335
+                    }
+                }
+            }
+        }
+    },
+    "Live Plot": {
+        "Plot 0": {
+            "datastreams": [
+                "Experiment/RBBasicTest.start"
+            ],
+            "ydata": [
+                "None"
+            ],
+            "rolling_buffer_length": 30,
+            "N_curves": 1,
+            "linecolors": [
+                [
+                    55,
+                    126,
+                    184
+                ],
+                [
+                    166,
+                    206,
+                    227
+                ],
+                [
+                    255,
+                    127,
+                    0
+                ]
+            ],
+            "running_average_window_size": 5,
+            "running_average": true
+        },
+        "datastreams": [
+            "rbstats"
+        ],
+        "Axial_slice": {
+            "color": 4278190335
+        },
+        "rbstats": {
+            "color": 4278190335
+        }
+    },
+    "GUI": {
+        "H5Storage": {
+            "datastreams": [],
+            "h5file": "Set Filename",
+            "Singledatastreams": [],
+            "imagestreams": [],
+            "x-axis": {
+                "current_selection": "--None--"
+            },
+            "y-axis 0": {
+                "current_selection": "--None--",
+                "linewidth": 1,
+                "color": 4278255615,
+                "Symbol": "o",
+                "SymbolSize": 5
+            },
+            "y-axis 1": {
+                "current_selection": "--None--",
+                "linewidth": 1,
+                "color": 4278255615,
+                "Symbol": "o",
+                "SymbolSize": 5
+            },
+            "y-axis 2": {
+                "current_selection": "--None--",
+                "linewidth": 1,
+                "color": 4278255615,
+                "Symbol": "o",
+                "SymbolSize": 5
+            },
+            "CurrentTab": 0
+        },
+        "PropertyEditor": {
+            "Geometry": [
+                0,
+                0,
+                828,
+                552
+            ]
+        },
+        "Applet Launcher": {
+            "Applets": {
+                "Image Monitor": {
+                    "script": "pytweezer/GUI/viewers/image_monitor.py",
+                    "active": false,
+                    "description": "Display image streams"
+                },
+                "Updating Plot": {
+                    "script": "pytweezer/GUI/viewers/updating_plot.py",
+                    "active": false,
+                    "description": "Live plot of data streams"
+                },
+                "Image Monitor 2": {
+                    "script": "pytweezer/GUI/viewers/image_monitor.py",
+                    "active": false
+                }
+            }
+        }
+    },
+    "Image Monitor": {
+        "imagestreams": [
+            "rb_thorcam"
+        ],
+        "maskstreams": [
+            "--None--"
+        ],
+        "invert_colors": false,
+        "ROIs": [
+            "slice"
+        ],
+        "ROI": {
+            "slice": {
+                "pos": [
+                    11.362338639954956,
+                    60.1063150789687
+                ],
+                "size": [
+                    30,
+                    30
+                ],
+                "color": 4278190335
+            }
+        },
+        "sidebarstreams": [
+            "--None--"
+        ],
+        "show_sidebar": false
+    },
+    "Updating Plot": {
+        "datastreams": [
+            "Axial_slice"
+        ],
+        "Axial_slice": {
+            "color": 4278190335
+        }
+    },
+    "Image Monitor 2": {
+        "imagestreams": [
+            "--None--",
+            "rb_hamcam"
+        ],
+        "maskstreams": [
+            "--None--"
+        ],
+        "invert_colors": false,
+        "ROIs": [
+            "slice"
+        ],
+        "ROI": {
+            "slice": {
+                "pos": [
+                    0,
+                    0
+                ],
+                "size": [
+                    30,
+                    30
+                ],
+                "color": 4278190335
+            }
+        }
+    },
+    "Applet Launcher": {
+        "Applets": {
+            "Image Monitor": {
+                "script": "pytweezer/GUI/viewers/image_monitor.py",
+                "active": true,
+                "description": "Display image streams"
+            },
+            "Live Plot": {
+                "script": "pytweezer/GUI/viewers/live_plot.py",
+                "active": true
+            }
+        }
+    },
+    "Analysis Manager UI": {
+        "Image": {
+            "first_image": {
+                "active": false
+            },
+            "second_image": {
+                "active": false
+            },
+            "rbstats": {
+                "active": true
+            }
+        }
+    }
+}

@@ -4,28 +4,36 @@ version = "0.2.1"
 description = "Pytweezer package"
 authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
 readme = "README.md"
+packages = [
+	{ include = "pytweezer" },
+	{ include = "bin" },
+]
+
+[tool.poetry.scripts]
+pytweezer-server = "bin.gui:server_main"
+pytweezer-client = "bin.gui:client_main"
+pytweezer-device = "pytweezer.servers.device_server:main"
+pytweezer-logger = "pytweezer.servers.logger_server:main"
+pytweezer-kill-stale = "bin.kill_stale:main"
 
 [tool.poetry.dependencies]
-python = ">=3.11.4,<3.14"
+python = "^3.11.4, <3.14"
 
 # --- Core Data Science & Math ---
-numpy = "=1.26.4"
-pandas = "=2.2.2"
-scipy = "=1.13.1"
+pandas = "^2.2.3"
+scipy = "^1.17.1"
 
 
 # --- Visualization ---
-matplotlib = "=3.8.4"
+matplotlib = "^3.9.2"
 
 # --- Hardware & Automation ---
-pyvisa = "=1.14.1"
-pylablib = "=1.4.3"
+pylablib = "^1.4.3"
 
 # --- Utilities & Networking ---
-rich = "=13.9.4"
-paramiko = "=3.4.1"     # SSH client
+rich = "^13.9.4"
+paramiko = "^3.4.1"     # SSH client
 tifffile = "^2026.1.28"
-diffractio = "^1.0.0"
 pillow = "^12.1.0"
 pyzmq = "^27.1.0"
 
@@ -35,24 +43,38 @@ PyQt5-qt5 = "=5.15.2"
 
 
 # --- Jupyter Support ---
-ipykernel = "=6.28.0"
-ipywidgets = "=8.1.5"
+ipykernel = "^7.3"
+ipywidgets = "^8.1.5"
 tqdm = "^4.67.3"
 h5py = "^3.15.1"
+cupy-cuda13x = "^14.0.1"
+lap = "^0.5.13"
+termcolor = "^3.3.0"
+qscintilla = "^2.14.1"
+pyperclip = "^1.11.0"
+uncertainties = "^3.2.3"
+imageio = "^2.37.3"
 zmq = "^0.0.0"
 
 # --- Utilities & Networking ---
-pydantic = "=2.10.5"
-# rich = "=13.9.4"
-# paramiko = "=3.4.1"     # SSH client
-# rpyc = "=5.3.0"
-# plumbum = "=1.8.3"
-pythonnet = "=3.0.5"    # .NET integration
-# wakepy = "=0.9.1"       # from pip section
-# iso8601 = "=2.1.0"      # from pip section
-
-
-
+pydantic = "^2.10.5"
+# rich = "^13.9.4"
+# paramiko = "^3.4.1"     # SSH client
+# rpyc = "^5.3.0"
+# plumbum = "^1.8.3"
+pythonnet = "^3.0.5"    # .NET integration
+# wakepy = "^0.9.1"       # from pip section
+# iso8601 = "^2.1.0"      # from pip section
+scikit-image = "^0.26.0"
+pyvisa-py = "^0.8.1"
+sipyco = {git = "https://github.com/m-labs/sipyco.git"}
+pycaf = {git = "https://github.com/ColdMatter/pycaf", branch = "cafmot"}
+simple-pyspin = "^0.1.1"
+easypyspin = "^2.0.1"
+opencv-python = "^4.13.0.92"
+pytest = "^9.1.1"
+influxdb-client = "^1.50.0"
+nidaqmx = "^1.5.0"
 
 [build-system]
 requires = ["poetry-core"]

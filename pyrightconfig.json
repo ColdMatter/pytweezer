@@ -1,0 +1,10 @@
+{
+  "stubPath": "typings",
+  "typeCheckingMode": "off",
+  "exclude": [
+    "**/.venv",
+    "**/__pycache__",
+    "**/node_modules", 
+    "**/.*"
+  ]
+}

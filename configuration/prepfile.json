@@ -1,0 +1,25 @@
+ [
+
+    {
+        "task": 55,
+        "label": "time: 1.0",
+        "expName": "dummy_cam",
+        "run": 0,
+        "priority": 0,
+        "args": {
+            "count": false,
+            "width": 7.0,
+            "time": 1.0
+        },
+        "nRuns": 1,
+        "scanpars": [],
+        "scanvals": [],
+        "nReps": 0,
+        "scansequence": [],
+        "repetition": 0,
+        "terminated": false,
+        "filepath": "/home/twalker/balic/scripts/balic/experiments/softwaretest/dummy_cam.py",
+        "status": "Queued",
+        "dueDateTime": "Mon Mar 16 12:33:47 2026"
+    }
+]
