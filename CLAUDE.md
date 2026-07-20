@@ -91,9 +91,11 @@ drivers). `pytweezer/configuration/config.py` is the single source of truth:
   cameras), each with its own `host` — **this is what determines which PC a
   device's server actually runs on**, independent of where the GUI is launched.
   Device entries carry **no `"script"`** (every device runs `device_server.py`;
-  `"driver"` selects the behavior), so anything spawning a process must call
-  `ConfigReader.script_for(category, params)` rather than indexing
-  `params["script"]` — see `DEFAULT_SCRIPTS` in `config.py`.
+  `"driver"` selects the behavior). Every other category names its `"script"`
+  explicitly, so the only place that supplies the device launcher is the
+  `DEVICE_SERVER_SCRIPT` constant in `pytweezer/servers/configreader.py` — device
+  spawn sites (`DevicesPanel`, `DeviceManager`, `process_cleanup`) reference it
+  directly rather than indexing `params["script"]`.
 - `CONFIG["GUI"]`: standalone GUI tool entries (StreamMonitor, Applet Launcher, etc).
 
 Don't confuse this with the **root** `configuration/` directory — that holds

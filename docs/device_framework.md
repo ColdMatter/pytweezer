@@ -93,12 +93,12 @@ The config keys `build_spec` reads:
 | anything else | Passed to the backend constructor if its name matches an `__init__` parameter (e.g. `stream_name`, `sdk_dll`). |
 
 Every device is launched by the same file,
-`pytweezer/servers/device_server.py`, so that path is the `"Devices"` entry in
-`DEFAULT_SCRIPTS` (`config.py`). Anything that needs to spawn a process —
-`ProcessTile`, `ManagedRow`, `process_cleanup` — asks
-`ConfigReader.script_for(category, params)` rather than indexing
-`params["script"]`, so it works for categories that still name a script per entry
-(`Servers`, `GUI`) and for those that don't.
+`pytweezer/servers/device_server.py`. Because device entries omit `"script"`
+while every other category names one, that path lives in exactly one place — the
+`DEVICE_SERVER_SCRIPT` constant in `pytweezer/servers/configreader.py`. Device
+spawn sites (`DevicesPanel`, the legacy `DeviceManager`, and the generic
+`process_cleanup` loop) reference it directly; Servers/Loggers/GUI spawn sites
+read their own `params["script"]`.
 
 **Device names must be unique across the whole category**, composite sub-devices
 included, because `get_device` addresses every device by name (see below).
@@ -524,12 +524,12 @@ for free.
 
 ## How this fits the rest of the system
 
-- **`DeviceManager`** (`bin/process_manager.py`) still does its own host
-  filtering (`check_host`) and start/stop tile management. Every device's tile
-  launches the same `device_server.py`, supplied by
-  `ConfigReader.script_for("Devices", params)` since device entries carry no
-  `"script"`. A composite is one tile; its sub-devices are not separately
-  launchable.
+- **`DevicesPanel`** (`bin/managed_panel.py`, the live Devices tab; the legacy
+  `DeviceManager` in `bin/process_manager.py` is the earlier equivalent) does its
+  own host filtering (`check_host`) and start/stop tile management. Every device's
+  tile launches the same `device_server.py` via the `DEVICE_SERVER_SCRIPT`
+  constant, since device entries carry no `"script"`. A composite is one tile;
+  its sub-devices are not separately launchable.
 - **`DeviceStatusServer`** (`pytweezer/servers/device_status.py`) independently
   TCP-probes `host:port` for every top-level `CONFIG["Devices"]` entry to publish a
   cross-PC up/down feed — it does not use `get_device`/RPC calls, just raw

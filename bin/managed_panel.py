@@ -37,7 +37,7 @@ from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
 from pytweezer.configuration.config import HOSTS
 from pytweezer.servers import tweezerpath
-from pytweezer.servers.configreader import ConfigReader
+from pytweezer.servers.configreader import ConfigReader, DEVICE_SERVER_SCRIPT
 from pytweezer.servers.device_status import DeviceStatusClient
 from pytweezer.servers.reachability import is_reachable
 
@@ -341,7 +341,7 @@ class ControlPanel(BWidget):
             port = _status_port(params)
             row = ManagedRow(
                 pname,
-                script=tweezerpath + "/bin/" + ConfigReader.script_for(category, params),
+                script=tweezerpath + "/bin/" + params["script"],
                 active=params.get("active", False),
                 tooltip=params.get("tooltip"),
                 controllable=controllable,
@@ -417,7 +417,7 @@ class DevicesPanel(BWidget):
             row = ManagedRow(
                 pname,
                 script=(
-                    tweezerpath + "/bin/" + ConfigReader.script_for("Devices", params)
+                    tweezerpath + "/bin/" + DEVICE_SERVER_SCRIPT
                     if local
                     else None
                 ),
