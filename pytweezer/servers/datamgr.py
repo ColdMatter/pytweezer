@@ -1,11 +1,13 @@
 import datetime
 
 from pytweezer.servers import Properties,DataClient,ImageClient
+from pytweezer.logging_utils import get_logger
 import time
 import numpy as np
 import h5py
-from pytweezer.analysis.print_messages import print_error
 import pandas as pd
+
+logger = get_logger("pytweezer.servers.datamgr")
 
 class DataSummary:
     """ summarize dataflow of multiple input channels
@@ -45,12 +47,10 @@ class DataSummary:
         if DataSummary.data_update_checks % 1000 == 0:
             DataSummary.data_update_checks = 0
             # if not DataSummary.got_data:
-            #    print_error('datamgr.py - recvData(): No data arrived within approx. 50 sec.', 'warning')
+            #    logger.warning('recvData(): No data arrived within approx. 50 sec.')
             DataSummary.got_data = False
         while self.dataq.has_new_data():
             recvmsg=self.dataq.recv()
-            #print(f'recvmsg: {recvmsg}')
-            #print_error('datamgr.py - recvData(): Data incomming: {0}'.format(recvmsg), 'weak')
             A=None
             if len(recvmsg)==2:
                 msg,dic=recvmsg
@@ -115,7 +115,7 @@ class DataSummary:
         while len(self.incompleteData) >0 and ('_endtime' in self.incompleteData[0]
                                   and time.time() > self.incompleteData[0]['_endtime']+self.props.get('timeout', 1))\
                 or self.lastupdate + self.props.get('timeout_without_endtime', 60) < time.time():
-            print_error('datamgr.py - _processCompleteData(): Some data has not arrived.', 'warning')
+            logger.warning('_processCompleteData(): Some data has not arrived.')
             self.completeData.append(self.incompleteData.pop(0))
             self.lastupdate = time.time()
 
@@ -149,16 +149,16 @@ class DataSummary:
 
             with h5py.File(filename, 'a') as f:
                 f.create_dataset(folder + '/' + self.name + '%i' % time.time(), data=data_pandas)
-                print_error('savetoFile(): Saving completed!', 'success')
+                logger.info('savetoFile(): Saving completed!')
             return True
 
         except Exception as e:
-            print_error('savetoFile(): pandas saving failed: {0}'.format(e), 'error')
+            logger.error('savetoFile(): pandas saving failed: %s', e)
             error = True
-            print_error('savetoFile(): Trying with old routine now...', 'info')
+            logger.info('savetoFile(): Trying with old routine now...')
 
         if len(data) == 0:
-            print_error('datamgr.py - savetoFile(): No data to be stored.', 'warning')
+            logger.warning('savetoFile(): No data to be stored.')
             return True
 
         if error:
@@ -168,8 +168,10 @@ class DataSummary:
                     dataset = file.create_dataset(folder + '/' + self.name + '%i' % time.time(), (len(data), ),
                                                   tabletype)
                 except Exception as e:
-                    print_error('datamgr.py - savetoFile(): Error while creating dataset with len(data)={0}'
-                                ',\n{1},\ntabletype={2}'.format(len(data), e, tabletype), 'error')
+                    logger.error(
+                        'savetoFile(): Error while creating dataset with len(data)=%s,\n%s,\ntabletype=%s',
+                        len(data), e, tabletype,
+                    )
                     return False
                 try:
                     index = 0
@@ -185,10 +187,11 @@ class DataSummary:
                                         if k != '_expName':  # BaLi's little helper wrongly emits lists
                                             for i, v_i in enumerate(v):
                                                 if "{}{}".format(k,i) not in np.array(flist)[:, 0]:
-                                                    print_error('datamgr.py - savetoFile(): Can\'t save k={0}, i={1},'
-                                                                ' v_i={2}, v={3}, the column doesn\'t exist. Continuing'
-                                                                ' to the next entry...'.format(k, i, v_i, v),
-                                                                'warning')
+                                                    logger.warning(
+                                                        "savetoFile(): Can't save k=%s, i=%s, v_i=%s, v=%s, "
+                                                        "the column doesn't exist. Continuing to the next entry...",
+                                                        k, i, v_i, v,
+                                                    )
                                                     continue
                                                 if type(v_i) == str:
                                                     dataset["{}{}".format(k, i), index] = v_i.encode("ascii",
@@ -201,8 +204,7 @@ class DataSummary:
                                         dataset[k, index] = v
                                 # unpack lists, they should usually be short
                             except Exception as e:
-                                print_error('datamgr.py - savetoFile(): Cannot store k={0}, v={1};'
-                                            ' {2}.'.format(k, v, e), 'error')
+                                logger.error('savetoFile(): Cannot store k=%s, v=%s; %s.', k, v, e)
                         index += 1
                         if progress + 0.1 < (enum + 1) / len(data) \
                            or (datetime.datetime.now() - last_output).seconds / 60. > 5:
@@ -210,12 +212,13 @@ class DataSummary:
                             progress = (enum + 1) / len(data)
                             last_output = datetime.datetime.now()
                             end = start + (datetime.datetime.now() - start) / (enum + 1) * len(data)
-                            print_error('datamgr.py - savetoFile(): {0} %,\tshould be done at'
-                                        ' {1}.'.format(np.round(100 * progress, 1), end), 'info')
+                            logger.info(
+                                'savetoFile(): %s %%,\tshould be done at %s.',
+                                np.round(100 * progress, 1), end,
+                            )
                     return True
                 except Exception as e:
-                    print_error('datamgr.py - savetoFile(): Error while saving into h5 '
-                                'file,\n{0}'.format(e), 'error')
+                    logger.error('savetoFile(): Error while saving into h5 file,\n%s', e)
                     return False
 
     def loadFromFile(self, filepath, name, summary):
@@ -236,9 +239,9 @@ class DataSummary:
                                 v.extend(keylist[k])
                                 run[k] = list(set(v))
                             except Exception as e:
-                                print_error('datamgr.py - _determineFormatstring(): Error {0}'.format(e), 'error')
-                                print_error('\n\nkeylist[k] = {0}\n\nv = {1}'.format(keylist[k], v), 'weak')
-                                print_error('\n\nlist(set(keylist[k] + v)) = {0}'.format(list(set(keylist[k] + v))), 'weak')
+                                logger.error('_determineFormatstring(): Error %s', e)
+                                logger.debug('keylist[k] = %s\nv = %s', keylist[k], v)
+                                logger.debug('list(set(keylist[k] + v)) = %s', list(set(keylist[k] + v)))
             keylist.update(run)
         #print('\n\nkeylist:', keylist)
         # unpack all float and int value types
@@ -277,7 +280,7 @@ class DataSummary:
         for col in fset[counts > 1]:
             dt = [elt[1] for elt in flist if elt[0] == col]
 
-        print_error('datamgr.py - get_unique_flist(): Not storing unambiguous columns {0}.'.format(types), 'warning')
+        logger.warning('get_unique_flist(): Not storing unambiguous columns %s.', types)
 
         fset = fset[counts == 1]
         print(flist)
@@ -326,7 +329,7 @@ class SingleDataSummary(DataSummary):
             success = super().savetoFile(filename,folder)
             return success
         except Exception as e:
-            print_error('datamgr.py - SingleDataSummary - savetoFile(): Error while saving into h5 file,\n{0}'.format(e), 'error')
+            logger.error('SingleDataSummary - savetoFile(): Error while saving into h5 file,\n%s', e)
             return False
         # self.clear()
 

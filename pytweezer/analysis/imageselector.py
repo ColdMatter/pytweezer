@@ -37,7 +37,7 @@ class ImageSlice():
                 msgstr,head,img=msg
 
                 if head['_imgindex']==self._index:
-                    self.imageq.send(img,head,channel='_')
+                    self.imageq.send(head,img,channel='_')
 
 
 def main_run(name):

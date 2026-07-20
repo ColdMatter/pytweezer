@@ -4,7 +4,7 @@ from PIL import Image
 import re
 from typing import Any, Dict
 from scipy.optimize import curve_fit
-from scipy.ndimage import center_of_mass, label
+from scipy.ndimage import center_of_mass, label, white_tophat
 import matplotlib.pyplot as plt
 import scipy.constants as cn
 import os
@@ -112,6 +112,17 @@ def detect_trap_sites(img_array, grid_shape, detection_step = 100):
             return grid_positions, detection_threshold
 
 # Sum pixel values in a 5x5 region around each detected center
+def morphological_tophat_high_pass(image_array, feature_size=10):
+    """White top-hat high-pass: keep bright features up to ``feature_size`` pixels,
+    subtract the slowly-varying background larger than that.
+
+    Used before occupancy thresholding so a spatially uneven background doesn't bias
+    per-trap pixel sums. ``feature_size`` is the structuring-element size in pixels
+    (roughly the diameter of a single trap spot).
+    """
+    return white_tophat(image_array, size=int(feature_size))
+
+
 def sum_pixel_values(image_array, grid_positions, grid_shape, window_size=10):
     half_size = window_size // 2
     pixel_sums = np.zeros(grid_shape, dtype=int)  # Create empty 2D array

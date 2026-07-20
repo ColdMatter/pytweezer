@@ -5,15 +5,11 @@ Launches and manages all server processes (Model Sync, MotMaster, Hubs, Loggers,
 Runs as a background daemon that keeps servers alive.
 """
 
-import sys
-import signal
-from PyQt5.QtWidgets import QApplication, QLabel, QGridLayout
-import zmq
+from PyQt5.QtWidgets import QLabel, QGridLayout
 from socket import gethostname
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.servers.configreader import ConfigReader
 from pytweezer.servers import tweezerpath
-from pytweezer.analysis.print_messages import print_error
 from pytweezer.configuration.config import HOSTS
 from bin.process_tile_base import ProcessTile
 
@@ -25,12 +21,9 @@ class ProcessManager(BWidget):
 
     def __init__(self, name) -> None:
         super().__init__(name, create_props=False)
-        self.setStyleSheet(
-            "Controller {background-color: rgb(195,205,230);color:blue; margin:0px; border:5px solid rgb(0, 0, 80);} "
-        )
         layout = QGridLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(1)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
         self.setLayout(layout)
 
         self.processlist = []
@@ -46,7 +39,9 @@ class ProcessManager(BWidget):
         layout = self.layout()
         for i, category in enumerate(self.categories):
             line = 1
-            layout.addWidget(QLabel(category), line, i)
+            heading = QLabel(category.upper())
+            heading.setProperty("role", "heading")
+            layout.addWidget(heading, line, i)
             for name, params in sorted(conf[category].items())[::-1]:
                 host_addr = params.get("host")
                 if self.check_host(host_addr):
@@ -54,7 +49,7 @@ class ProcessManager(BWidget):
                     if "tooltip" in params:
                         tooltip = params["tooltip"]
                     process = ProcessTile(
-                        tweezerpath + "/bin/" + params["script"],
+                        tweezerpath + "/bin/" + ConfigReader.script_for(category, params),
                         name,
                         params["active"],
                         category + "/",
@@ -65,10 +60,10 @@ class ProcessManager(BWidget):
                     layout.addWidget(process, line, i)
 
     def closeEvent(self, event):
-        """on shutdown terminate all server processes first"""
+        """on shutdown terminate all managed processes first"""
         for p in self.processlist:
             p.terminateProcess()
-        logger.info("Terminated all server processes.")
+        logger.info("Terminated all %s processes.", "/".join(self.categories) or "managed")
         event.accept()
 
     def __del__(self):
@@ -76,7 +71,12 @@ class ProcessManager(BWidget):
         
 class ServerManager(ProcessManager):
     categories = ["Servers"]
-    
+
+class LoggerManager(ProcessManager):
+    # Loggers own their own devices and run on the server PC alongside InfluxDB,
+    # so — like ServerManager — no host filtering.
+    categories = ["Loggers"]
+
 class DeviceManager(ProcessManager):
     categories = ["Devices"]
     
@@ -85,7 +85,6 @@ class DeviceManager(ProcessManager):
         self.host_addr = HOSTS.get(self.host_name, None)
         if self.host_addr is None:
             self.host_addr = "127.0.0.1"
-            # print_error(f"Host {self.host_name} not found in config. Defaulting to localhost ({self.host_addr}).", "warning")
             logger.warning(f"Host {self.host_name} not found in config. Defaulting to localhost ({self.host_addr}).")
         super().__init__(name)
         
@@ -98,40 +97,6 @@ class DeviceManager(ProcessManager):
         host_addr = host_addr.strip().lower()
         return host_addr == self.host_addr.strip().lower()
     
-class Dashboard(ProcessManager):
-    categories = ["GUI", "Viewer"]
-
-
-def main():
-    args = sys.argv[1:]
-    if not args:
-        print("Usage: process_manager.py <manager_type>")
-        sys.exit(1)
-
-    manager_type = args[0]
-    app = QApplication(sys.argv)
-    if manager_type == "server":
-        Win = ServerManager(manager_type)
-    elif manager_type == "device":
-        Win = DeviceManager(manager_type)
-    elif manager_type == "dashboard":
-        Win = Dashboard(manager_type)
-    else:
-        print("Invalid manager type. Use 'server', 'device', or 'dashboard'.")
-        sys.exit(1)
-    Win.show()
-
-    def on_exit(_signo, _stack_frame):
-        print(f"Closing controller")
-        Win.close()
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, on_exit)
-    app.exec_()
-
-
-if __name__ == "__main__":
-    if sys.flags.interactive != 1:
-        main()
-    else:
-        print("Running in interactive mode. Controller won't be started.")
+# ``ServerManager`` and ``DeviceManager`` are embedded as tabs by ``bin/gui.py``
+# (the ``pytweezer-server`` / ``pytweezer-client`` entry points). This module no
+# longer has its own CLI dispatch; keep the classes importable as reusable panels.

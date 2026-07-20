@@ -1,16 +1,8 @@
-from PyQt5 import QtGui, QtCore,QtWidgets
+from PyQt5 import QtGui, QtCore
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
-import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui
 from pytweezer.servers import Properties
-import copy
-#app = QtGui.QApplication([])
-import pyqtgraph.parametertree.parameterTypes as pTypes
-from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
-from math import *
-import numpy as np
-from pytweezer.GUI.table_parameter import *
 import time
 
 ## test subclassing parameters

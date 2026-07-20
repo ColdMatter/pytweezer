@@ -242,14 +242,14 @@ class ImageClient(DataClient):
     def __init__(self, name, **kwargs):
         super().__init__(name, **kwargs)
 
-    def send(self, data, header={}, channel="", flags=0, copy=True, track=False):
+    def send(self, header, data, channel="", flags=0, copy=True, track=False):
         """distribute ove ZMQ
 
         Args:
+            header (dict) :
+                dictionary with additional info about the data (must be json serializable)
             data (np.array):
                 data array to be send (must be numpy array, will be converted to bytes and reconstructed on the other side according to the header info)
-            header (dict) :
-                optionsl dictionary with additional info about the data (must be json serializable)
             channel (string):
                 subchannel (will be appended to name when sending)
             flags (int):
