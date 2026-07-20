@@ -95,7 +95,7 @@ drivers). `pytweezer/configuration/config.py` is the single source of truth:
   cameras), each with its own `host` — **this is what determines which PC a
   device's server actually runs on**, independent of where the GUI is launched.
   Device entries carry **no `"script"`** (every device runs `device_server.py`;
-  `"driver"` selects the behavior). Every other category names its `"script"`
+  its `"class"` selects the behavior). Every other category names its `"script"`
   explicitly, so the only place that supplies the device launcher is the
   `DEVICE_SERVER_SCRIPT` constant in `pytweezer/servers/configreader.py` — device
   spawn sites (`DevicesPanel`, `process_cleanup`) reference it
@@ -132,13 +132,14 @@ Rather than each driver module hand-rolling its own RPC server/client
 boilerplate, there's a generic pair:
 
 - `pytweezer/servers/device_server.py` — `run_device_server(name)` reads
-  `CONFIG["Devices"][name]["driver"]`, looks it up in `DRIVER_REGISTRY` (maps a
-  driver key like `"motmaster"`/`"imagemx2"`/`"blackfly"` to a factory that lazily
-  imports the real backend and builds a `DeviceServerSpec`), then runs
-  `sipyco.pc_rpc.simple_server_loop`. Every device runs this same file — `"driver"`
-  is what differentiates behavior. Backend imports are lazy per-factory so an
-  unavailable hardware lib (e.g. `rotpy` for the Blackfly) never breaks importing
-  the launcher itself. `resolve_device(name)` does whitespace-/case-insensitive
+  `CONFIG["Devices"][name]["class"]` (a `"module.path:ClassName"` string), imports
+  it lazily, and builds it into a `DeviceServerSpec` by matching config keys against
+  its `__init__` signature, then runs `sipyco.pc_rpc.simple_server_loop`. Every
+  device runs this same file — `"class"` is what differentiates behavior. Imports
+  happen only when that specific device is built, so an unavailable hardware lib
+  (e.g. `pylablib` for the ImagEM) never breaks importing the launcher itself. When
+  `"simulate": True`, `"sim_class"` is used instead (or, if absent, a no-op stand-in
+  auto-generated from `"class"`). `resolve_device(name)` does whitespace-/case-insensitive
   matching so CLI callers don't need to quote/space-match names exactly, and
   accepts only *launchable* (top-level) devices.
 - `pytweezer/servers/device_client.py` — `get_device(name)` returns a transparent
@@ -146,7 +147,7 @@ boilerplate, there's a generic pair:
   `device_server.resolve_address`. Prefer this over hand-built `Client(...)` calls
   in new experiment code.
 
-**Composite devices.** A `"driver": "composite"` entry runs several devices in one
+**Composite devices.** A `"devices"` sub-dict entry runs several devices in one
 process (one sipyco target each) plus an optional *coordinator* holding direct
 references to them, so a camera→DAC feedback step never serializes a frame. Its
 sub-devices live under `"devices"` but are named and addressed exactly like
