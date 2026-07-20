@@ -1,53 +1,27 @@
 import argparse
 import time
-from typing import Optional, Union
+from typing import Callable, Optional, Tuple, Union
 import json
 import pathlib
 import subprocess
 import sys
 
-from sipyco.pc_rpc import simple_server_loop
+import zmq
 from pytweezer.servers.configreader import ConfigReader
-from pytweezer.servers.simulated_device import simulate
 from pytweezer.experiment.motmaster_interface import MotMasterInterface
 # from pycaf.experiment import Experiment
 
 # config directory local to the package.
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
 
-#: Methods where returning bare None would be a poor fake (e.g. scan_* methods
-#: that real callers iterate over, or dict-returning parameter lookups).
-_MOTMASTER_SIMULATE_DEFAULTS = {
-    "get_motmaster_dictionary": dict,
-    "get_params_csdict": dict,
-    "get_laser_set_points_tcl": dict,
-    "get_laser_set_points_wml": dict,
-    "get_laser_frequencies_actual": dict,
-    "python_to_cs_dict": dict,
-    "scan_tcl_laser_set_points": list,
-    "scan_wm_laser_set_points": list,
-    "scan_wm_laser_set_points_with_motmaster_values": list,
-    "scan_wm_laser_set_points_with_motmaster_multiple_parameters": list,
-    "scan_picomotor_steps": list,
-}
 
-
-@simulate(MotMasterInterface, defaults=_MOTMASTER_SIMULATE_DEFAULTS)
-class SimulatedMotMasterInterface:
-    """Simulated MotMaster backend. Any MotMasterInterface method not defined
-    here is auto-stubbed by @simulate so this class can never silently drift
-    out of sync with it (unlike its predecessor, this class does not subclass
-    MotMasterInterface, so an un-overridden method never falls through to
-    real hardware-touching code).
-    """
+class DummyMotMasterInterface(MotMasterInterface):
 
     def __init__(self, interval: Union[int, float] = 0.1) -> None:
-        self.interval = interval
-        self.motmaster = None
-        self.script = None
+        pass
 
     def connect(self) -> None:
-        print("SimulatedMotMasterInterface: connect called.")
+        print("DummyMotMasterInterface: connect called.")
         self.motmaster = None
         self.script = None
         return None
@@ -57,9 +31,14 @@ class SimulatedMotMasterInterface:
         script: str,
     ):
         print(
-            f"SimulatedMotMasterInterface: set_motmaster_experiment called with script '{script}'"
+            f"DummyMotMasterInterface: set_motmaster_experiment called with script '{script}'"
         )
         self.script = script
+        return None
+
+    def set_motmaster_dictionary(self):
+        print("DummyMotMasterInterface: set_motmaster_dictionary called")
+        self.parameter_dictionary = {}
         return None
 
     def start_motmaster_experiment(
@@ -67,7 +46,7 @@ class SimulatedMotMasterInterface:
         parameters: Optional[dict] = None,
     ):
         print(
-            f"SimulatedMotMasterInterface: start_motmaster_experiment called with script '{self.script}'"
+            f"DummyMotMasterInterface: start_motmaster_experiment called with script '{self.script}'"
         )
         return None
 
@@ -75,15 +54,191 @@ class SimulatedMotMasterInterface:
         return {"param1": 1, "param2": 2.0}
 
     def disconnect(self) -> None:
-        print("SimulatedMotMasterInterface: disconnect called")
+        print("DummyMotMasterInterface: disconnect called")
         return None
 
     def save_pattern_info(self, save_folder, file_tag, task_nr):
         print(
-            "SimulatedMotMasterInterface: save_pattern_info called "
+            "DummyMotMasterInterface: save_pattern_info called "
             f"(save_folder={save_folder}, file_tag={file_tag}, task_nr={task_nr})"
         )
         return None
+
+
+class MotMasterCommandServer:
+    def __init__(
+        self,
+        interface: MotMasterInterface,
+        host: str = "localhost",
+        port: int = 5557,
+        context: Optional[zmq.Context] = None,
+    ) -> None:
+        self.interface = interface
+        self.host = host
+        self.port = port
+        self.address = f"tcp://{host}:{port}"
+        self.context = context or zmq.Context.instance()
+        self.socket = self.context.socket(zmq.REP)
+        self._running = False
+
+    def _invoke_interface_method(
+        self,
+        method_name: str,
+        args: Optional[list] = None,
+        kwargs: Optional[dict] = None,
+    ):
+        if not isinstance(method_name, str) or not method_name:
+            raise ValueError("'method' must be a non-empty string")
+        if method_name.startswith("_"):
+            raise ValueError("Calling private methods is not allowed")
+
+        if args is None:
+            args = []
+        if kwargs is None:
+            kwargs = {}
+
+        if not isinstance(args, list):
+            raise ValueError("'args' must be a list when provided")
+        if not isinstance(kwargs, dict):
+            raise ValueError("'kwargs' must be a dictionary when provided")
+
+        method = getattr(self.interface, method_name, None)
+        if method is None or not callable(method):
+            raise ValueError(f"Interface method '{method_name}' not found")
+
+        return method(*args, **kwargs)
+
+    def _handle_request(
+        self, request: dict
+    ) -> Tuple[dict, Optional[Callable[[], None]]]:
+        command = request.get("command")
+
+        if command == "ping":
+            return {"ok": True, "command": command, "status": "alive"}, None
+
+        if command == "get_status":
+            return {
+                "ok": True,
+                "command": command,
+                "server_running": self._running,
+                "script": self.interface.script,
+            }, None
+
+        if command == "call_interface":
+            method_name = request.get("method")
+            args = request.get("args")
+            kwargs = request.get("kwargs")
+            wait_for_result = bool(request.get("wait_for_result", False))
+
+            if wait_for_result:
+                result = self._invoke_interface_method(
+                    method_name=method_name,
+                    args=args,
+                    kwargs=kwargs,
+                )
+                return {
+                    "ok": True,
+                    "command": command,
+                    "method": method_name,
+                    "result": result,
+                    "state": "completed",
+                }, None
+
+            response = {
+                "ok": True,
+                "command": command,
+                "method": method_name,
+                "state": "accepted",
+            }
+            deferred = lambda: self._invoke_interface_method(
+                method_name=method_name,
+                args=args,
+                kwargs=kwargs,
+            )
+            return response, deferred
+
+        if command == "shutdown":
+            self._running = False
+            return {"ok": True, "command": command}, None
+
+        if isinstance(command, str) and not command.startswith("_"):
+            payload = dict(request)
+            payload.pop("command", None)
+            args = payload.pop("args", [])
+            kwargs = payload.pop("kwargs", {})
+            wait_for_result = bool(payload.pop("wait_for_result", False))
+            if payload:
+                kwargs = {**payload, **kwargs}
+
+            if wait_for_result:
+                result = self._invoke_interface_method(
+                    method_name=command,
+                    args=args,
+                    kwargs=kwargs,
+                )
+                return {
+                    "ok": True,
+                    "command": "interface_method",
+                    "method": command,
+                    "result": result,
+                    "state": "completed",
+                }, None
+
+            response = {
+                "ok": True,
+                "command": "interface_method",
+                "method": command,
+                "state": "accepted",
+            }
+            deferred = lambda: self._invoke_interface_method(
+                method_name=command,
+                args=args,
+                kwargs=kwargs,
+            )
+            return response, deferred
+
+        raise ValueError(f"Unknown command '{command}'")
+
+    def serve_forever(self) -> None:
+        self.socket.bind(self.address)
+        self._running = True
+        print(f"MotMaster command server listening on {self.address}")
+        poller = zmq.Poller()
+        poller.register(self.socket, zmq.POLLIN)
+
+        try:
+            while self._running:
+                # Use a polling timeout so KeyboardInterrupt is handled promptly.
+                events = dict(poller.poll(timeout=2000))
+                if self.socket not in events:
+                    continue
+
+                request = self.socket.recv_json()
+                try:
+                    if not isinstance(request, dict):
+                        raise ValueError("Request must be a JSON object")
+                    response, deferred = self._handle_request(request)
+                except Exception as error:
+                    response = {"ok": False, "error": str(error)}
+                    deferred = None
+                self.socket.send_json(response)
+
+                # Execute deferred work only after replying so clients are non-blocking.
+                if deferred is not None:
+                    try:
+                        deferred()
+                    except Exception as error:
+                        print(f"Deferred interface call failed: {error}")
+        except KeyboardInterrupt:
+            print("Keyboard interrupt received. Stopping server.")
+            self._running = False
+        finally:
+            self.socket.close()
+            try:
+                self.interface.disconnect()
+            except Exception:
+                # Connection teardown should not mask shutdown.
+                pass
 
 
 def _is_process_running(process_name: str) -> bool:
@@ -158,39 +313,28 @@ def run_motmaster_command_server(
 ) -> None:
     _ensure_motmaster_running(config_file)
     if simulate:
-        interface = SimulatedMotMasterInterface(interval=interval)
+        interface = DummyMotMasterInterface(interval=interval)
     else:
         interface = MotMasterInterface(config_file, interval=interval)
     interface.connect()
     if (not simulate) and interface.motmaster is None:
         raise RuntimeError("Failed to connect to MotMaster.")
 
-    try:
-        simple_server_loop(
-            {"motmaster": interface},
-            host=host,
-            port=port,
-            description="MotMaster command server",
-        )
-    finally:
-        try:
-            interface.disconnect()
-        except Exception:
-            # Connection teardown should not mask shutdown.
-            pass
+    server = MotMasterCommandServer(interface=interface, host=host, port=port)
+    server.serve_forever()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run MotMaster sipyco RPC server")
+    parser = argparse.ArgumentParser(description="Run MotMaster ZeroMQ command server")
     parser.add_argument(
         "--name", nargs="?", default=None, help="name of this program instance"
     )
     parser.add_argument(
         "--host",
-        default="127.0.0.1",
+        default=None,
         help="Host interface to bind (use 0.0.0.0 for remote clients)",
     )
-    parser.add_argument("--port", type=int, default=8888, help="TCP port to bind")
+    parser.add_argument("--port", type=int, default=None, help="TCP port to bind")
     parser.add_argument(
         "--simulate",
         action="store_true",
@@ -207,18 +351,12 @@ def main() -> None:
 
     from pytweezer.configuration.config import CONFIG
     from pytweezer.servers import tweezerpath
-    
-    if args.name is not None:
-        config_dict = CONFIG["Devices"][args.name]
-        host = config_dict["host"]
-        port = config_dict["port"]
-        simulate = config_dict["simulate"]
-        interval = config_dict["interval"]
-    else:
-        host = args.host
-        port = args.port
-        simulate = args.simulate
-        interval = args.interval
+
+    config_dict = CONFIG["Devices"]["Rb MotMaster Server"]
+    host = args.host or config_dict.get("host")
+    port = args.port or config_dict.get("port")
+    simulate = args.simulate or config_dict.get("simulate", False)
+    interval = args.interval or config_dict.get("interval", 0.1)
     config_file = (
         tweezerpath + "/pytweezer/configuration/" + config_dict.get("config_file")
     )

@@ -4,6 +4,7 @@ from pytweezer.servers import Properties,tweezerpath,PropertyAttribute
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QKeyEvent
+from pytweezer.analysis.print_messages import print_error
 
 from pytweezer.logging_utils import get_logger
 logger = get_logger("pytweezer.GUI.pytweezerQt")

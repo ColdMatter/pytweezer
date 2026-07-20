@@ -12,11 +12,9 @@ from pytweezer import *
 import json
 import argparse
 from pytweezer.servers.configreader import ConfigReader
-from pytweezer.logging_utils import get_logger
 import threading
 from zmq.utils.monitor import recv_monitor_message
-
-logger = get_logger("pytweezer.servers.xsub_xpub")
+from pytweezer.analysis.print_messages import print_error
 
 EVENT_MAP = {}
 # print("Event names:")
@@ -53,16 +51,15 @@ def _terminate_stale_instances(instance_name: str, grace_s: float = 1.5) -> None
             if "xsub_xpub.py" in cmdline and instance_name in cmdline:
                 stale_pids.append(pid)
     except Exception as error:
-        logger.warning("Could not scan for stale instances: %s", error)
+        print_error(f"Could not scan for stale instances: {error}", "warning")
         return
 
     if not stale_pids:
         return
 
-    logger.warning(
-        "Found stale %s instance(s) %s; terminating before bind.",
-        instance_name,
-        stale_pids,
+    print_error(
+        f"Found stale {instance_name} instance(s) {stale_pids}; terminating before bind.",
+        "warning",
     )
 
     for pid in stale_pids:
@@ -71,7 +68,7 @@ def _terminate_stale_instances(instance_name: str, grace_s: float = 1.5) -> None
         except ProcessLookupError:
             pass
         except Exception as error:
-            logger.warning("Failed SIGTERM to pid %s: %s", pid, error)
+            print_error(f"Failed SIGTERM to pid {pid}: {error}", "warning")
 
     deadline = time.time() + grace_s
     while time.time() < deadline:
@@ -94,11 +91,12 @@ def _terminate_stale_instances(instance_name: str, grace_s: float = 1.5) -> None
         except ProcessLookupError:
             pass
         except Exception as error:
-            logger.warning("Failed SIGKILL to pid %s: %s", pid, error)
+            print_error(f"Failed SIGKILL to pid {pid}: {error}", "warning")
 
 
 def run_server(name, pubbinding_override=None, subbinding_override=None, kill_stale=True):
     conf = ConfigReader.getConfiguration()
+    name = name.split('/')[-1]
     c = conf['Servers'][name]
     host = c['host']
     pub_port = c['pub_port']
@@ -142,7 +140,7 @@ def event_monitor(monitor: zmq.Socket, name, pub_sub) -> None:
         evt.update(mon_evt)
         evt['description'] = EVENT_MAP[evt['event']]
         #if evt['event'] == zmq.EVENT_DISCONNECTED:
-        #    logger.warning('%s %s Event: %s', name, pub_sub, evt)
+        #    print_error(name + ' ' + pub_sub + ' ' + f"Event: {evt}")
         #else:
         #    print(name, pub_sub, f"Event: {evt}")
         if evt['event'] == zmq.EVENT_MONITOR_STOPPED:

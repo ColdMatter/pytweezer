@@ -1,15 +1,12 @@
 from pytweezer.servers.properties import Properties
 from pytweezer.servers import configreader  as cr
 from pytweezer.servers import zmqcontext
-from pytweezer.logging_utils import get_logger
 import time
 import argparse
 import json
 import zmq
 import os
 import signal
-
-logger = get_logger("Propertylogger")
 
 
 def _resolve_server_name(name: str, conf: dict) -> str:
@@ -104,50 +101,30 @@ def run_propertylogger(name='Servers/Propertylogger'):
     poller.register(rep_socket, zmq.POLLIN)
     lasttime=0
     poll_timeout_ms = int(p.get(f'/Servers/{server_name}/check_interval', 10) * 1000)
-    try:
-        while True:
-            #handle requests
-            events = dict(poller.poll(poll_timeout_ms))
-            if rep_socket in events and events[rep_socket] == zmq.POLLIN:
-                message=rep_socket.recv_string()
-                if message == 'INIT?':
-                    #print('propertylogger.py: someone wants data',message)
-                    rep_socket.send_string('INIT?',zmq.SNDMORE)
-                    rep_socket.send_json(p.get('/',{}))
-                elif message is not None:
-                    print('propertylogger.py unknown message: ',message)
+    while True:
+        #handle requests
+        events = dict(poller.poll(poll_timeout_ms))
+        if rep_socket in events and events[rep_socket] == zmq.POLLIN:
+            message=rep_socket.recv_string()
+            if message == 'INIT?':
+                #print('propertylogger.py: someone wants data',message)        
+                rep_socket.send_string('INIT?',zmq.SNDMORE)
+                rep_socket.send_json(p.get('/',{}))
+            elif message is not None:
+                print('propertylogger.py unknown message: ',message)
 
-            #do logging
-            t = time.time()
-            if t - lasttime > p.get('logginginterval[s]',1):
-                lasttime = t
-                #print(cr.propertyfilename)
-                with open(cr.propertyfilename, "w") as outfile:
-                    json.dump(p.get('/', {}), outfile, indent=4)
-    except KeyboardInterrupt:
-        logger.info("Propertylogger interrupted, shutting down.")
-    finally:
-        rep_socket.close(linger=0)
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('name', nargs='?', default='Servers/Propertylogger', help='name of this program instance')
-    args, _unknown = parser.parse_known_args()
-
-    def _stop(_signo, _frame):
-        # Let run_propertylogger's loop unwind so the property file gets a
-        # final flush and the socket closes cleanly.
-        raise KeyboardInterrupt
-
-    try:
-        signal.signal(signal.SIGTERM, _stop)
-    except (ValueError, OSError):
-        pass
-
-    run_propertylogger(args.name)
+        #do logging
+        t = time.time()
+        if t - lasttime > p.get('logginginterval[s]',1):
+            lasttime = t
+            #print(cr.propertyfilename)
+            with open(cr.propertyfilename, "w") as outfile:
+                json.dump(p.get('/', {}), outfile, indent=4)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('name', nargs='?', default='Servers/Propertylogger', help='name of this program instance')
+    args, _unknown = parser.parse_known_args()
+    run_propertylogger(args.name)
 

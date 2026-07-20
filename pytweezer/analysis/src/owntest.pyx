@@ -1,0 +1,2 @@
+cimport numpy
+print('ff')

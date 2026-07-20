@@ -1,19 +1,14 @@
 from PyQt5 import QtGui, QtCore
-from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton
+from PyQt5.QtWidgets import QFrame, QHBoxLayout, QPushButton
 import subprocess
 
+from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import icon_path
-from pytweezer.GUI.theme import apply_dot_style, apply_label_style
 from pytweezer.logging_utils import get_logger
-logger = get_logger("process_manager")
-
+logger = get_logger("pytweezer.GUI.process_tile_base")
 
 class ProcessTile(QFrame):
-    """Shared process tile with start/stop controls and status polling.
-
-    State is shown redundantly (colour dot + text label + a coloured left
-    border on the tile itself) so it never depends on colour perception alone.
-    """
+    """Shared process tile with start/stop controls and status polling."""
 
     def __init__(self, script='', name='', active=False, category='', parent=None, tooltip=None):
         self.process = None
@@ -22,42 +17,32 @@ class ProcessTile(QFrame):
         self.category = category
         super().__init__(parent)
 
-        self.setObjectName("ProcessTile")
-        self.setAttribute(QtCore.Qt.WA_StyledBackground)
+        self.setStyleSheet(
+            "QFrame {background-color: rgb(210,230,240); color: blue; margin: 1px; border: 2px solid rgb(220, 240, 255);}"
+        )
 
         layout = QHBoxLayout()
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(8)
-
-        self.dot = QLabel("●")
-        self.dot.setObjectName("StatusDot")
-        self.dot.setFixedWidth(14)
-        layout.addWidget(self.dot)
-
-        self.stateLabel = QLabel()
-        self.stateLabel.setObjectName("StatusLabel")
-        self.stateLabel.setMinimumWidth(64)
-        layout.addWidget(self.stateLabel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(1)
 
         start_button = QPushButton(name)
         if tooltip is not None:
             start_button.setToolTip(tooltip)
-        start_button.setObjectName("TileNameButton")
+        start_button.setStyleSheet(
+            "QPushButton {color: blue; background-color: rgb(0, 255, 127);}"
+        )
         self.startButton = start_button
         start_button.clicked.connect(self.startProcess)
-        layout.addWidget(start_button, 1)
+        layout.addWidget(start_button)
 
         kill_button = QPushButton('')
-        kill_button.setObjectName("KillButton")
-        kill_button.setFixedSize(24, 24)
+        kill_button.setMaximumWidth(20)
         kill_button.setIcon(QtGui.QIcon(icon_path + 'terminate.png'))
-        kill_button.setToolTip("Terminate")
         kill_button.clicked.connect(self.terminateProcess)
         layout.addWidget(kill_button)
 
         self.setLayout(layout)
-
-        self._set_state("stopped")
+        self.setAttribute(QtCore.Qt.WA_StyledBackground)
 
         if active:
             self.startProcess()
@@ -68,23 +53,34 @@ class ProcessTile(QFrame):
         self.timer.start()
 
     def __del__(self):
+        print('__del__', self.processname)
         self.killProcess()
+
 
     def startProcess(self):
         self.terminateProcess()
+        # print_error(
+        #     f"startProcess(): Starting {self.processname}.",
+        #     'bold',
+        # )
         logger.info(f"Starting process {self.processname} with script {self.script}")
-        self.process = subprocess.Popen(['python3', self.script, self.processname])
+        self.process = subprocess.Popen(['python3', self.script, self.category + self.processname])
 
     def terminateProcess(self):
         if self.process is not None:
             self.process.terminate()
             try:
                 self.process.wait(timeout=1)
-            except Exception:
+            except Exception as error:
+                # print_error(
+                #     f"process termination failed killing process {self.processname}",
+                #     'error',
+                # )
                 logger.error(f"process termination failed killing process {self.processname}")
+                # logger.error(error)
                 self.process.kill()
             if self.process.poll() is not None:
-                self._set_state("stopped")
+                self._set_start_button_style("color: gray")
                 self.process = None
 
     def killProcess(self):
@@ -92,25 +88,21 @@ class ProcessTile(QFrame):
             logger.info(f"Killing process {self.processname}")
             self.process.kill()
             if self.process.poll() is not None:
-                self._set_state("stopped")
+                self._set_start_button_style("color: gray")
                 self.process = None
 
     def updateStatus(self):
         if self.process is not None:
             if self.process.poll() is None:
-                self._set_state("running")
+                self._set_start_button_style("color: blue")
             else:
-                self._set_state("crashed")
+                self._set_start_button_style("color: red")
         else:
-            self._set_state("stopped")
+            self._set_start_button_style("color: gray")
 
-    def _set_state(self, state):
+    def _set_start_button_style(self, style):
         try:
-            apply_dot_style(self.dot, state)
-            apply_label_style(self.stateLabel, state)
-            self.setProperty("state", state)
-            self.style().unpolish(self)
-            self.style().polish(self)
+            self.startButton.setStyleSheet(style)
         except RuntimeError:
             # QWidget may already be deleted during teardown.
             pass

@@ -9,9 +9,7 @@ import logging, sys
 from zmq.utils import jsonapi
 
 # logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
-from pytweezer.logging_utils import get_logger
-
-_logger = get_logger("Properties")
+from pytweezer.analysis.print_messages import print_error
 
 """Configuration:  deep, fundamental property of the system.
                     (which hardware is running, drivers available)
@@ -178,11 +176,13 @@ class Properties(threading.Thread):
             try:
                 self.properties = self._fetch_initial_properties(logger_endpoint)
             except Exception as error:
-                _logger.warning(
-                    "properties.py init handshake failed (%s); "
+                print_error(
+                    "properties.py init handshake failed ({0}); "
                     "falling back to property file. "
-                    "Check Servers/Propertylogger/rep reachability for this client.",
-                    error,
+                    "Check Servers/Propertylogger/rep reachability for this client.".format(
+                        error
+                    ),
+                    "warning",
                 )
                 self.properties = cr.Properties()
         else:
@@ -328,7 +328,7 @@ class Properties(threading.Thread):
         try:
             md = jsonapi.loads(parts[1])
         except Exception as error:
-            _logger.warning("properties.py malformed property payload: %s", error)
+            print_error(f"properties.py malformed property payload: {error}", "warning")
             return
         logging.debug(self.name, " received: ", message, md)
         if "delete" in md:
@@ -415,7 +415,7 @@ class Properties(threading.Thread):
             try:
                 self._recv()
             except Exception as error:
-                _logger.warning("properties.py receive loop error: %s", error)
+                print_error(f"properties.py receive loop error: {error}", "warning")
                 time.sleep(0.05)
 
 

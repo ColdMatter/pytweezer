@@ -16,11 +16,9 @@ import zmq
 
 from pytweezer.GUI.property_editor import PropEdit
 from pytweezer.GUI.pytweezerQt import BWidget
+from pytweezer.analysis.print_messages import print_error
 from pytweezer.servers import Properties, tweezerpath, icon_path
 from pytweezer.servers.configreader import ConfigReader
-from pytweezer.logging_utils import get_logger
-
-logger = get_logger("Analysis Manager UI")
 
 
 class AnalysisManagerClient(QtCore.QObject):
@@ -184,7 +182,7 @@ class TreeViewWidget(QWidget):
             }
         )
         if not response.get("ok"):
-            logger.error(f"AnalysisManager RPC error: {response.get('error')}")
+            print_error(f"AnalysisManager RPC error: {response.get('error')}", "error")
             item.setCheckState(Qt.Unchecked if active else Qt.Checked)
             return
 
@@ -211,23 +209,16 @@ class TreeViewWidget(QWidget):
     def del_current(self):
         selmodel = self.dataView.selectionModel()
         indexlist = selmodel.selectedRows()
-        # Delete bottom-up so earlier removals don't shift the row numbers
-        # captured in the remaining indexes.
-        for index in sorted(indexlist, key=lambda idx: idx.row(), reverse=True):
+        for index in indexlist:
             name = self.model.data(index)
             category = self.model.data(self.model.index(index.row(), 2))
             response = self.rpc.request(
                 {"command": "delete_filter", "category": category, "name": name}
             )
             if not response.get("ok"):
-                logger.error(f"AnalysisManager delete error: {response.get('error')}")
+                print_error(f"AnalysisManager delete error: {response.get('error')}", "error")
                 continue
             self.model.removeRow(index.row())
-            # The row's QStandardItem is destroyed by removeRow; drop our
-            # references too, or refresh_status()'s next timer tick will call
-            # .index() on a deleted C++ object and raise a RuntimeError.
-            self.itemdict.pop(name, None)
-            self.filters.pop(name, None)
 
     def configure_current(self):
         selmodel = self.dataView.selectionModel()
@@ -263,65 +254,26 @@ class AddAnalysisWidget(QtWidgets.QWidget):
         self.analysistype.addItem('Image')
         self.analysistype.addItem('Data')
         self.analysistype.currentTextChanged.connect(self.update_streamlist)
-        self.analysistype.currentTextChanged.connect(self.update_scriptlist)
         layout.addWidget(self.analysistype)
 
-        self.scripts_by_category = self._scan_scripts(manager.analysisdir)
+        analysisdir = manager.analysisdir
+        files = [
+            f for f in os.listdir(analysisdir)
+            if os.path.isfile(analysisdir + f)
+            and f[0] != '.'
+            and (f.endswith('.py') or f.endswith('.pyx'))
+        ]
 
         self.analysisscript = QtWidgets.QComboBox()
+        for f in files:
+            self.analysisscript.addItem(f)
         layout.addWidget(self.analysisscript)
 
         self.streamlist = QComboBox()
         layout.addWidget(self.streamlist)
         self.setLayout(layout)
 
-        self.update_scriptlist('Image')
         self.update_streamlist('Image')
-
-    @staticmethod
-    def _classify_script(path):
-        """Guess a script's category from the streams PropertyAttribute it
-        declares (or inherits from analysis_base.py's ImageAnalysis/
-        DataAnalysis) -- the same 'imagestreams'/'datastreams' key the
-        manager stores the filter's input streams under. Scripts that
-        declare neither (or, ambiguously, both -- e.g. analysis_base.py
-        itself) are left uncategorized and don't appear in either list.
-        """
-        try:
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                text = f.read()
-        except OSError:
-            return None
-        has_image = "imagestreams" in text or "ImageAnalysis" in text
-        has_data = "datastreams" in text or "DataAnalysis" in text
-        if has_image and not has_data:
-            return 'Image'
-        if has_data and not has_image:
-            return 'Data'
-        return None
-
-    @classmethod
-    def _scan_scripts(cls, analysisdir):
-        by_category = {'Image': [], 'Data': []}
-        try:
-            filenames = sorted(os.listdir(analysisdir))
-        except OSError:
-            return by_category
-        for f in filenames:
-            path = analysisdir + f
-            if not os.path.isfile(path) or f[0] == '.':
-                continue
-            if not (f.endswith('.py') or f.endswith('.pyx')):
-                continue
-            category = cls._classify_script(path)
-            if category is not None:
-                by_category[category].append(f)
-        return by_category
-
-    def update_scriptlist(self, category):
-        self.analysisscript.clear()
-        for f in self.scripts_by_category.get(category, []):
-            self.analysisscript.addItem(f)
 
     def update_streamlist(self, category):
         self.streamlist.clear()
@@ -333,7 +285,7 @@ class AddAnalysisWidget(QtWidgets.QWidget):
     def add_filter(self):
         name = self.nametext.text().strip()
         if not name:
-            logger.warning('AnalysisManager: empty filter name')
+            print_error('AnalysisManager: empty filter name', 'warning')
             return
 
         category = self.analysistype.currentText()
@@ -351,7 +303,7 @@ class AddAnalysisWidget(QtWidgets.QWidget):
             }
         )
         if not response.get('ok'):
-            logger.error(f"AnalysisManager add_filter error: {response.get('error')}")
+            print_error(f"AnalysisManager add_filter error: {response.get('error')}", 'error')
             return
 
         self.manager.refresh_snapshot()
@@ -403,7 +355,7 @@ class AnalysisManager(BWidget):
             error_text = str(response.get('error', 'unknown error'))
             # Avoid flooding the console with the same timeout while service starts.
             if error_text != self._last_snapshot_error:
-                logger.warning(f"AnalysisManager snapshot error: {error_text}")
+                print_error(f"AnalysisManager snapshot error: {error_text}", 'warning')
                 self._last_snapshot_error = error_text
             return
 

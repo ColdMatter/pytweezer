@@ -15,21 +15,14 @@ from pytweezer.GUI.table_parameter import *
 from pytweezer.GUI.pytweezerQt import BMainWindow, BWidget
 from PyQt5 import QtWidgets
 
-import sys
 import traceback
 import json
 import shutil
 import signal
 from datetime import datetime
-from pytweezer.logging_utils import get_logger
+from pytweezer.analysis.print_messages import print_error
 
-logger = get_logger("Property Editor")
-
-# Reuse the running QApplication when embedded as a tab; only create one when
-# this module is the standalone entry point. A bare ``QApplication([])`` here
-# would fight the app created by ``bin/gui.py`` and raise "singleton already
-# exists".
-app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+app = QtWidgets.QApplication([])
 ## test subclassing parameters
 ## This parameter automatically generates two child parameters which are always reciprocals of each other
 ## test add/remove
@@ -130,7 +123,7 @@ class TreeEdit():
                             self.props.set(self.subtree+childName,edat)
                         except:
                             send_error('could not convert')
-                            logger.error('could not convert')
+                            print_error('could not convert', 'error')
                             param.opts['data']=param.opts['default']
                     elif param.type() in ['int','bool','float']:
                         self.props.set(self.subtree+childName,data)
@@ -157,7 +150,7 @@ class TreeEdit():
 
             except Exception as e:
                 send_error('change error')
-                logger.error('property_editor change error {0}'.format(str(e)))
+                print_error('property_editor change error {0}'.format(str(e)), 'error')
                 print('sysinfo:',sys.exc_info()[0],path)
                 print('sysinfo:',sys.exc_info()[1],path)
                 traceback.print_tb(sys.exc_info()[2])
@@ -276,10 +269,11 @@ class PropEdit(BWidget):
         #timer.start(1000)
         #self.timer=timer
 
-        # No self.show() here: when embedded as a tab the widget is reparented,
-        # and showing it first would briefly flash a stray top-level window.
-        # Standalone use goes through main(), which calls show() itself.
+        self.show()
         self.resize(800,800)
+        g = self.geometry()
+        geo = self.props.get('Geometry', g.getRect())
+        self.setGeometry(*geo)
 
     def update(self):
         self.tree.update()
@@ -298,7 +292,7 @@ class PropEdit(BWidget):
                 json.dump(self.props.get(self.subtree), outfile, indent=4)
         except:
             send_error('saving failed '+fname)
-            logger.error('property_editor.py: saving file failed')
+            print_error('property_editor.py: saving file failed', 'error')
 
     def load(self):
         fname = QFileDialog.getOpenFileName(self,'Load Properties',tweezerpath+'/configuration/user','json dictionaries, (*.json)')[0]
@@ -310,7 +304,7 @@ class PropEdit(BWidget):
                 prop=json.load(inputfile)
         except:
             send_error('error loading '+fname)
-            logger.error('error loading {0}'.format(fname))
+            print_error('error loading {0}'.format(fname), 'error')
             prop={}
         for k,v in prop.items():
             #print('setting: ',self.subtree+k)

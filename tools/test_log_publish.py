@@ -11,7 +11,7 @@ def main() -> None:
         1 / 0
     except ZeroDivisionError:
         logger.exception("Exception message from test publisher")
-    logger.info("A really long message from test publisher \n" * 20)
+    logger.info("A really long message from test publisher " * 100)
 
 
 if __name__ == "__main__":
