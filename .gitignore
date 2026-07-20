@@ -2,3 +2,12 @@ __pycache__/
 *.pyc
 configuration/configfile.py
 .vscode/
+
+# Compiled C++ extensions 
+
+# setuptools build_ext outputs
+build/
+dist/
+*.egg-info/
+
+/setup.py

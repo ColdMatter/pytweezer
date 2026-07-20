@@ -75,7 +75,12 @@ opencv-python = "^4.13.0.92"
 pytest = "^9.1.1"
 influxdb-client = "^1.50.0"
 nidaqmx = "^1.5.0"
+scikit-learn = "^1.9.0"
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core", "pybind11>=2.10.0", "setuptools", "numpy"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.build]
+script = "build_tools/build.py"
+generate-setup-file = true
