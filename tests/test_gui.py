@@ -1,41 +1,33 @@
 """Headless GUI tests. These construct real PyQt5 widgets under the offscreen
 platform (set in conftest.py). Pure-logic methods that don't need a live widget
 tree are exercised via ``__new__`` to avoid the panels' construction side
-effects (a real DeviceManager spawns device subprocesses for active devices).
+effects (a real DevicesPanel spawns device subprocesses for active devices).
 """
 
-import pytest
-
-from bin.process_manager import DeviceManager, ProcessManager
+from bin.managed_panel import DevicesPanel, ManagedRow
 
 
 # --------------------------------------------------------------------------- #
 # Host filtering (pure logic; no Qt construction)
 # --------------------------------------------------------------------------- #
 
-def test_base_process_manager_accepts_every_host():
-    pm = ProcessManager.__new__(ProcessManager)
-    assert pm.check_host("anything") is True
-    assert pm.check_host(None) is True
+def test_devices_panel_check_host_is_case_and_whitespace_insensitive():
+    panel = DevicesPanel.__new__(DevicesPanel)
+    panel.host_addr = "PH-BEAST"
+    assert panel.check_host("PH-BEAST") is True
+    assert panel.check_host("  ph-beast  ") is True
 
 
-def test_device_manager_check_host_is_case_and_whitespace_insensitive():
-    dm = DeviceManager.__new__(DeviceManager)
-    dm.host_addr = "PH-BEAST"
-    assert dm.check_host("PH-BEAST") is True
-    assert dm.check_host("  PH-BEAST  ") is True
+def test_devices_panel_check_host_rejects_other_hosts():
+    panel = DevicesPanel.__new__(DevicesPanel)
+    panel.host_addr = "192.168.0.10"
+    assert panel.check_host("192.168.0.11") is False
 
 
-def test_device_manager_check_host_rejects_other_hosts():
-    dm = DeviceManager.__new__(DeviceManager)
-    dm.host_addr = "192.168.0.10"
-    assert dm.check_host("192.168.0.11") is False
-
-
-def test_device_manager_check_host_none_is_false():
-    dm = DeviceManager.__new__(DeviceManager)
-    dm.host_addr = "192.168.0.10"
-    assert dm.check_host(None) is False
+def test_devices_panel_check_host_none_is_false():
+    panel = DevicesPanel.__new__(DevicesPanel)
+    panel.host_addr = "192.168.0.10"
+    assert panel.check_host(None) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -51,13 +43,22 @@ def test_bwidget_constructs_headless_without_property_hub(qapp):
     assert not hasattr(w, "_props")
 
 
-def test_process_tile_inactive_builds_and_does_not_spawn(qapp):
-    from bin.process_tile_base import ProcessTile
-
-    tile = ProcessTile(script="does_not_exist.py", name="TileLabel", active=False)
+def test_managed_row_inactive_builds_and_does_not_spawn(qapp):
+    row = ManagedRow("RowLabel", script="does_not_exist.py", active=False)
     try:
-        assert tile.startButton.text() == "TileLabel"
+        assert row.toggleButton.text() == "Start"
         # active=False -> no subprocess launched.
-        assert tile.process is None
+        assert row.process is None
     finally:
-        tile.timer.stop()
+        if row.timer is not None:
+            row.timer.stop()
+
+
+def test_managed_row_uncontrollable_has_no_toggle(qapp):
+    row = ManagedRow("RowLabel", script="does_not_exist.py", controllable=False)
+    try:
+        assert row.toggleButton is None
+        assert row.process is None
+    finally:
+        if row.timer is not None:
+            row.timer.stop()
