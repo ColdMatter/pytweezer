@@ -4,7 +4,7 @@ configuration/configfile.py
 .vscode/
 
 # Compiled C++ extensions 
-
+*.pyd
 # setuptools build_ext outputs
 build/
 dist/
