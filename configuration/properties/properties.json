@@ -27,7 +27,7 @@
                     "parts": 3
                 },
                 "rb_thorcam": {
-                    "timestamp": 1784564311.8386505,
+                    "timestamp": 1784636329.3955426,
                     "parts": 3
                 }
             }
@@ -40,12 +40,7 @@
         ],
         "DataStream": {
             "maxStreamInactive[s]": 1000,
-            "active": {
-                "rbstats": {
-                    "timestamp": 1784564311.8416429,
-                    "parts": 2
-                }
-            }
+            "active": {}
         }
     },
     "Analysis": {
