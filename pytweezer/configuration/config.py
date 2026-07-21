@@ -132,10 +132,10 @@ CONFIG = {
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
         },
-        "Rb ThorLabs Camera": {
+        "Rb ThorCam": {
             "active": True,
-            "class": "pytweezer.drivers.thorcam:ThorLabsCamera",
-            "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
+            "class": "pytweezer.drivers.thorcam:ThorCam",
+            "sim_class": "pytweezer.drivers.thorcam:SimulatedThorCam",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
