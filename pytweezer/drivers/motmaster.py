@@ -1,16 +1,26 @@
-import argparse
-import time
-from typing import Any, Optional, Union
+"""Driver for a MOTMaster experiment sequencer.
+
+MOTMaster is a .NET application reached over .NET remoting through pythonnet, so
+this module talks to it via `clr` rather than a Python instrument library. A
+`MotMasterInterface` is constructed with the name of a JSON config file in the
+package `configuration/` dir naming the MOTMaster executable, its remoting URL,
+the `.cs` script root, and the DLLs to load; constructing one starts
+`MOTMaster.exe` if it isn't already running and connects, so a constructed
+interface is a connected one.
+"""
+
 import json
+import numbers
 import pathlib
 import subprocess
 import sys
-from typing import Any, Callable, Dict, List, Tuple, Union
+import time
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-import pythonnet
-import numbers
-from sipyco.pc_rpc import simple_server_loop
-from pytweezer.servers.configreader import ConfigReader
+import numpy as np
+from rich.progress import track
+
+from pytweezer.servers.device_client import get_device
 
 # NOTE: these imports will only work with the pythonnet package
 try:
@@ -25,16 +35,78 @@ except Exception as e:
 # config directory local to the package.
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
 
+
+def _is_process_running(process_name: str) -> bool:
+    try:
+        if sys.platform.startswith("win"):
+            result = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            output = result.stdout.lower()
+            return (
+                result.returncode == 0
+                and process_name.lower() in output
+                and "no tasks are running" not in output
+            )
+
+        result = subprocess.run(
+            ["pgrep", "-f", process_name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _start_process(exe_path: str) -> None:
+    subprocess.Popen(
+        [exe_path],
+        cwd=str(pathlib.Path(exe_path).parent),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _ensure_motmaster_running(
+    config_file: str,
+    startup_timeout: float = 15.0,
+    poll_interval: float = 0.5,
+) -> None:
+    """Start the MOTMaster application named by ``config_file`` unless it is
+    already running, and block until it appears in the process table."""
+    with open(config_file, "r") as f:
+        config = json.load(f)
+    exe_path = config["motmaster"]["exe_path"]
+    process_name = pathlib.Path(exe_path).name
+    if _is_process_running(process_name):
+        return None
+
+    print(f"MOTMaster process '{process_name}' not found. Starting it now...")
+    _start_process(exe_path)
+
+    deadline = time.time() + startup_timeout
+    while time.time() < deadline:
+        if _is_process_running(process_name):
+            print(f"MOTMaster process '{process_name}' is running.")
+            return None
+        time.sleep(poll_interval)
+
+    raise RuntimeError(
+        f"Timed out waiting for process '{process_name}' to start from '{exe_path}'."
+    )
+
+
 class MotMasterInterface:
     def __init__(self, config_file: str, interval: Union[int, float] = 0.1) -> None:
         # ``config_file`` names a JSON file in the package ``configuration/`` dir; an
         # absolute path is taken as-is. Bringing the device up — making sure the
         # MOTMaster application is running, then connecting — happens here, so a
         # constructed interface is a connected one (as with the other drivers).
-        # ``_ensure_motmaster_running`` is imported lazily to avoid a circular import
-        # (the server module imports this class at module load).
-        from pytweezer.experiment.motmaster_server import _ensure_motmaster_running
-
         config_path = CONFIG_DIR / config_file
         _ensure_motmaster_running(str(config_path))
         with open(config_path, "r") as f:
@@ -303,6 +375,35 @@ class MotMasterInterface:
 
 
 
+    def scan_motmaster_parameter(
+        self,
+        script: str,
+        parameter: str,
+        values: List[Union[int, float]],
+        move_yag_spot: bool = False,
+        callback: Callable = None
+    ) -> List[Any]:
+        """Run ``script`` once per entry in ``values``, with the MOTMaster
+        parameter ``parameter`` set to that entry. ``callback`` is called with
+        the value after each shot and its return appended to the results."""
+        path = str(self.script_root.joinpath(f"{script}.cs"))
+        results = []
+        try:
+            self.motmaster.SetScriptPath(path)
+            for i in track(range(len(values))):
+                if move_yag_spot:
+                    self._move_picomotor_with_default_settings()
+                self.motmaster.Go(
+                    self.python_to_cs_dict({parameter: values[i]})
+                )
+                time.sleep(self.interval)
+                if callback is not None:
+                    result = callback(values[i])
+                    results.append(result)
+        except Exception as e:
+            print(f"Error: {e} encountered")
+        return results
+
     def scan_tcl_laser_set_points(
         self,
         script: str,
@@ -314,7 +415,7 @@ class MotMasterInterface:
         motmaster_value: Union[int, float] = None
     ) -> List[Any]:
         _dictionary = Dictionary[String, Object]()
-        path = str(self.root.joinpath(f"{script}.cs"))
+        path = str(self.script_root.joinpath(f"{script}.cs"))
         cavity = self.config["lasers"][laser]
         current_set_point = self.transfer_cavity_lock.GetLaserSetpoint(
             cavity, laser
@@ -362,7 +463,7 @@ class MotMasterInterface:
         motmaster_value: Union[int, float] = None
     ) -> List[Any]:
         _dictionary = Dictionary[String, Object]()
-        path = str(self.root.joinpath(f"{script}.cs"))
+        path = str(self.script_root.joinpath(f"{script}.cs"))
         current_set_point = float(self.wavemeter_lock.getSlaveFrequency(
             laser
         ))
@@ -409,7 +510,7 @@ class MotMasterInterface:
         motmaster_values: List[Union[int, float]] = None
     ) -> List[Any]:
         _dictionary = Dictionary[String, Object]()
-        path = str(self.root.joinpath(f"{script}.cs"))
+        path = str(self.script_root.joinpath(f"{script}.cs"))
         current_set_point = float(self.wavemeter_lock.getSlaveFrequency(
             laser
         ))
@@ -463,7 +564,7 @@ class MotMasterInterface:
         motmaster_values: List[Tuple[Union[int, float]]] = None
     ) -> List[Any]:
         _dictionary = Dictionary[String, Object]()
-        path = str(self.root.joinpath(f"{script}.cs"))
+        path = str(self.script_root.joinpath(f"{script}.cs"))
         current_set_point = float(self.wavemeter_lock.getSlaveFrequency(
             laser
         ))
@@ -517,7 +618,7 @@ class MotMasterInterface:
         values: List[float] = [],
         move_yag_spot: bool = False
     ) -> None:
-        path = str(self.root.joinpath(f"{script}.cs"))
+        path = str(self.script_root.joinpath(f"{script}.cs"))
         try:
             self.motmaster.SetScriptPath(path)
             for i in track(range(len(values))):
@@ -539,7 +640,7 @@ class MotMasterInterface:
         values: List[float] = [],
         move_yag_spot: bool = False
     ) -> None:
-        path = str(self.root.joinpath(f"{script}.cs"))
+        path = str(self.script_root.joinpath(f"{script}.cs"))
         try:
             self.motmaster.SetScriptPath(path)
             for i in track(range(len(values))):
@@ -566,7 +667,7 @@ class MotMasterInterface:
         motmaster_parameter: str = None,
         motmaster_values: List[Tuple[Union[int, float]]] = None
     ) -> List[Any]:
-        path = str(self.root.joinpath(f"{script}.cs"))
+        path = str(self.script_root.joinpath(f"{script}.cs"))
         _dictionary = Dictionary[String, Object]()
         try:
             self.motmaster.SetScriptPath(path)
@@ -595,3 +696,171 @@ class MotMasterInterface:
         except Exception as e:
             print(f"Error: {e} encountered")
         return results
+
+    def auto_mot(
+        self,
+        scan_ranges: Dict[str, Sequence[float]],
+        camera: Union[str, Any],
+        shots_per_point: int = 1,
+        script: str = "AMOTBasic",
+        field_parameter: str = "MOTCoilsCurrentValue",
+        bg_field_value: float = 0.0,
+        mot_field_value: float = 1.0,
+        display_results: bool = False
+    ) -> Dict[str, Dict[str, Any]]:
+        """Tune the MOT by scanning transfer-cavity-lock set points laser by laser.
+
+        A background is taken first with the MOT coils at ``bg_field_value``, then
+        each laser named in ``scan_ranges`` is stepped over its set points (coils at
+        ``mot_field_value``) while ``shots_per_point`` fluorescence frames are read
+        off ``camera``. Background-subtracted counts pick the set point with the most
+        atoms, and the laser is left parked there before moving on to the next one —
+        so lasers are optimised in the order ``scan_ranges`` gives.
+
+        ``scan_ranges`` maps laser name (a key of the config's ``lasers`` block) to
+        the TCL voltages to try. ``camera`` is a device name resolved with
+        :func:`~pytweezer.servers.device_client.get_device`, or an already-connected
+        camera (a client, or the object itself for a camera in this process); a
+        client opened here is closed again on the way out. **Configure the camera
+        before calling** — exposure, ROI, external trigger, and a
+        ``setup_acquisition`` buffer holding at least the whole scan. ``auto_mot``
+        arms it once and then reads consecutive frames, so the camera must capture
+        exactly ``shots_per_point`` frames per MOTMaster shot.
+
+        Returns, per laser, the scan range, mean and standard-error counts at each
+        point, and the chosen set point; pass that dict to
+        :func:`plot_auto_mot_results` to see the scans.
+        """
+        client = get_device(camera) if isinstance(camera, str) else camera
+        try:
+            results = self._auto_mot(
+                scan_ranges, client, int(shots_per_point), script,
+                field_parameter, bg_field_value, mot_field_value
+            )
+        finally:
+            try:
+                client.stop_acquisition()
+            finally:
+                if isinstance(camera, str):
+                    client.close_rpc()
+        if display_results:
+            plot_auto_mot_results(results)
+        return results
+
+    def _auto_mot(
+        self,
+        scan_ranges: Dict[str, Sequence[float]],
+        camera: Any,
+        shots_per_point: int,
+        script: str,
+        field_parameter: str,
+        bg_field_value: float,
+        mot_field_value: float
+    ) -> Dict[str, Dict[str, Any]]:
+        """The body of :meth:`auto_mot`, with the camera already connected."""
+        # Frames are numbered from the arming below and read in consecutive
+        # windows, so every shot's frames are the ones that shot produced.
+        frames_read = 0
+
+        def grab(value: float) -> Tuple[float, np.ndarray]:
+            nonlocal frames_read
+            images = camera.acquire_n_frames(shots_per_point, start_frame=frames_read)
+            frames_read += shots_per_point
+            return value, np.asarray(images, dtype=float)
+
+        camera.start_acquisition()
+        background = self.scan_motmaster_parameter(
+            script,
+            field_parameter,
+            [bg_field_value],
+            False,
+            grab
+        )
+        if not background or background[0][1].size == 0:
+            raise RuntimeError(
+                f"The camera returned no frames for the background shot — check "
+                f"that {script} triggers it {shots_per_point} time(s) per run."
+            )
+        images_bg = np.mean(background[0][1], axis=0)
+        time.sleep(1)
+
+        results: Dict[str, Dict[str, Any]] = {}
+        for laser, scan_range in scan_ranges.items():
+            if laser not in self.config["lasers"]:
+                raise KeyError(
+                    f"'{laser}' is not a laser in this MOTMaster config; known "
+                    f"lasers are {sorted(self.config['lasers'])}."
+                )
+            scan_range = [float(value) for value in scan_range]
+            shots = self.scan_tcl_laser_set_points(
+                script,
+                laser,
+                scan_range,
+                False,
+                grab,
+                field_parameter,
+                mot_field_value
+            )
+            if len(shots) != len(scan_range):
+                raise RuntimeError(
+                    f"Scan of {laser} returned {len(shots)} of "
+                    f"{len(scan_range)} points; the scan did not complete."
+                )
+            numbers, errors = [], []
+            for _, images in shots:
+                counts = np.sum(images - images_bg, axis=(1, 2))
+                numbers.append(float(np.mean(counts)))
+                errors.append(float(np.std(counts) / np.sqrt(len(counts))))
+            set_point = scan_range[int(np.argmax(numbers))]
+            # Leave the laser on its best set point before optimising the next.
+            self.scan_tcl_laser_set_points(
+                script,
+                laser,
+                [set_point],
+                False,
+                grab,
+                field_parameter,
+                mot_field_value
+            )
+            results[laser] = {
+                "scan_range": scan_range,
+                "numbers": numbers,
+                "errors": errors,
+                "set_point": set_point,
+            }
+        return results
+
+
+def plot_auto_mot_results(results: Dict[str, Dict[str, Any]]):
+    """Plot the scans returned by :meth:`MotMasterInterface.auto_mot`: one panel
+    per laser, normalised number against TCL voltage, with an arrow marking the
+    chosen set point. Returns the ``(figure, axes)`` pair."""
+    import matplotlib.pyplot as plt
+
+    n_cols = min(3, max(1, len(results)))
+    n_rows = max(1, -(-len(results) // n_cols))
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharey=True,
+        squeeze=False
+    )
+    flat_axes = axes.flatten()
+    for ax, (laser, scan) in zip(flat_axes, results.items()):
+        numbers = np.array(scan["numbers"])
+        errors = np.array(scan["errors"])
+        scale = np.max(numbers) if np.max(numbers) > 0 else 1.0
+        ax.errorbar(
+            scan["scan_range"], numbers / scale, yerr=errors / scale, fmt="ok"
+        )
+        ax.arrow(
+            scan["set_point"], 1.15, 0, -0.1,
+            head_width=0.002, head_length=0.03, width=0.0005, fc="r", ec="r"
+        )
+        ax.set_title(f"{laser} set @ {scan['set_point']} V")
+        ax.set_xlabel("TCL voltage [V]")
+        ax.set_ylim((0, 1.2))
+    for ax in flat_axes[len(results):]:
+        ax.set_visible(False)
+    for row in axes:
+        row[0].set_ylabel("Norm. number")
+    fig.tight_layout()
+    return fig, axes

@@ -24,10 +24,9 @@ whichever PC the hardware is attached to.
 | `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`, `requires_camera`. |
 | `pytweezer/drivers/imagemX2.py`, `bfly2.py` | Concrete camera backends on `Camera`, each with `Simulated* = simulated_camera_for(...)` and a legacy standalone `main()` (kept for ad hoc debugging, not on the launch path). |
 | `pytweezer/drivers/ni_dac.py`, `slm.py` | `NIDAC`/`SimulatedNIDAC`; `SLM` (Meadowlark Blink SDK)/`SimulatedSLM`. |
-| `pytweezer/experiment/motmaster_server.py` | `MotMasterInterface`/`SimulatedMotMasterInterface` + legacy standalone `main()`. |
-| `pytweezer/experiment/motmaster_client.py` | `MotMasterClient` — pre-framework client with back-compat aliases. |
-| `bin/process_manager.py`, `bin/managed_panel.py` | `DeviceManager`/`DevicesPanel` — host-filtered start/stop tiles, all via `DEVICE_SERVER_SCRIPT`. |
-| `pytweezer/servers/device_status.py` | `DeviceStatusServer`/`-Client` — cross-PC up/down feed (TCP probe, not RPC). |
+| `pytweezer/drivers/motmaster.py` | `MotMasterInterface` — MOTMaster sequencer over .NET remoting; no hand-written sim class, so simulation uses the auto-generated stand-in. |
+| `bin/managed_panel.py` | `DevicesPanel` — host-filtered start/stop rows, all via `DEVICE_SERVER_SCRIPT`, with a row per composite sub-device. |
+| `pytweezer/servers/device_status.py` | `DeviceStatusServer`/`-Client` — cross-PC up/down feed (TCP probe, plus a target-listing handshake for composites). |
 | `pyproject.toml` | `pytweezer-device = "pytweezer.servers.device_server:main"` console script. |
 
 ## Server side: one launcher for every device
@@ -65,9 +64,8 @@ The config keys `build_spec` reads:
 Every device is launched by the same file, `device_server.py`. Because device
 entries omit `"script"` while every other category names one, that path lives in
 exactly one place — the `DEVICE_SERVER_SCRIPT` constant in
-`pytweezer/servers/configreader.py` — and `DevicesPanel`, the legacy
-`DeviceManager`, and `process_cleanup` reference it directly rather than indexing
-`params["script"]`.
+`pytweezer/servers/configreader.py` — and `DevicesPanel` and `process_cleanup`
+reference it directly rather than indexing `params["script"]`.
 
 **Device names must be unique across the whole category**, composite sub-devices
 included, because `get_device` addresses every device by name (see below).
@@ -105,8 +103,8 @@ launch `MOTMaster.exe`, and the simulated camera synthesizes frames.
 ### `simulate()`: one mechanism for every driver's simulated backend
 
 `pytweezer/servers/simulated_device.py` provides a class decorator,
-`simulate(real_cls, *, exclude=(), defaults=None)`, used to build both
-`SimulatedMotMasterInterface` and `SimulatedImagEMX2Camera`. Rather than
+`simulate(real_cls, *, exclude=(), defaults=None)`, used to build the
+hand-written simulated backends such as `SimulatedImagEMX2Camera`. Rather than
 hand-copying every method of the real backend class into a parallel `Simulated*`
 class — which drifts out of sync silently as the real class changes —
 `simulate()` inspects `real_cls`'s public methods at class *definition* time
@@ -196,8 +194,8 @@ Two equivalent paths, both ending up at `run_device_server(name)`:
 - **CLI:** `pytweezer-device "Rb HamCam"` (console script in `pyproject.toml`, →
   `pytweezer.servers.device_server:main`). Also runnable as
   `python -m pytweezer.servers.device_server "Rb HamCam"` without `poetry install`.
-- **Device manager GUI:** `DeviceManager` (`bin/process_manager.py`) builds a
-  `ProcessTile` per host-matching, active device; the tile's start button runs
+- **Devices tab:** `DevicesPanel` (`bin/managed_panel.py`) builds a `ManagedRow`
+  per device, with a Start/Stop toggle on the host-matching ones; the toggle runs
   `python <script> <name>` — same module, same `main()`.
 
 `--host`/`--port` CLI flags override the config's values if given.
@@ -323,15 +321,6 @@ calling from GUI code would need a worker thread. See
 why `AsyncioClient` still awaits each reply — the win is running calls to
 *different* servers concurrently, not skipping replies).
 
-### Relationship to `MotMasterClient`
-
-`pytweezer/experiment/motmaster_client.py`'s `MotMasterClient` predates this
-framework and still exists for its back-compat method aliases
-(`set_script`/`start_experiment`/`shutdown_server` → the real
-`set_motmaster_experiment`/`start_motmaster_experiment`/`terminate`). New code
-should prefer `get_device(...)` directly; `MotMasterClient` has not been
-migrated onto it.
-
 ## Composite devices and coordinators
 
 Some experiments need two devices coupled tightly: grab a camera frame, reduce
@@ -384,8 +373,38 @@ the composite's `simulate` flag unless they set their own.
 RPC clients address it. Separating the two lets one coordinator class serve rigs
 whose devices are named differently. A role defaults to the device name.
 
-`DeviceManager`, `ProcessTile`, and `DeviceStatusServer` need no special
-handling: a composite is one config entry, one host:port, one launch command.
+`DevicesPanel` and `DeviceStatusServer` need no special handling to *launch* a
+composite: it is one config entry, one host:port, one launch command.
+
+### Partial rigs: a dead sub-device does not take the server down
+
+A sub-device that fails to build — hardware absent, driver library missing, SDK
+refusing to connect — is logged, recorded in `DeviceServerSpec.failed`, and
+skipped. The server comes up serving everything else, so an SLM that will not
+connect still leaves its camera usable through `get_device("Rb HamCam")`.
+
+The **coordinator is the exception**: it drives every backend in the rig, so it is
+constructed only when *all* sub-devices built. On a partial rig it stands down and
+the composite's own name is left unserved — `get_device("Rb Rearrangement Rig")`
+raises `IncompatibleServer` — rather than serving a coordinator that would fail on
+`require_role` partway through an experiment. A coordinator that raises while
+constructing is skipped the same way, leaving its sub-devices individually
+addressable.
+
+Config errors still fail loudly and up front: a nested composite, a sub-device
+name that folds to a duplicate RPC target, or a coordinator target name that
+collides with a sub-device all raise before any hardware is opened. Degradation
+covers devices that are *unavailable*, not configs that are *wrong*.
+
+If every sub-device fails the server still binds its port with no targets. That is
+deliberate: the rig then reads as "running, all parts failed" in the Devices tab,
+which is a diagnosable state, where a process that exited would be indistinguishable
+from one never started.
+
+Because sub-devices can be individually absent, status is reported per sub-device
+rather than per port — `DeviceStatusServer` asks each composite which RPC targets
+it is serving, and the **Devices** tab shows one indented row per sub-device under
+its rig. See `gui_architecture.md`.
 
 ### Addressing
 
@@ -461,17 +480,18 @@ exclusion for free.
 
 ## How this fits the rest of the system
 
-- **`DevicesPanel`** (`bin/managed_panel.py`, the live Devices tab; the legacy
-  `DeviceManager` in `bin/process_manager.py` is the earlier equivalent) does its
-  own host filtering (`check_host`) and start/stop tile management. Every
-  device's tile launches the same `device_server.py` via the
-  `DEVICE_SERVER_SCRIPT` constant, since device entries carry no `"script"`. A
-  composite is one tile; its sub-devices are not separately launchable.
+- **`DevicesPanel`** (`bin/managed_panel.py`, the Devices tab) does its own host
+  filtering (`check_host`) and start/stop row management. Every device's row
+  launches the same `device_server.py` via the `DEVICE_SERVER_SCRIPT` constant,
+  since device entries carry no `"script"`. A composite is one *controllable* row
+  — its sub-devices are not separately launchable — plus an indented, view-only
+  row per sub-device so each one's state is readable on its own.
 - **`DeviceStatusServer`** (`pytweezer/servers/device_status.py`) independently
-  TCP-probes `host:port` for every top-level `CONFIG["Devices"]` entry to
-  publish a cross-PC up/down feed — it does not use `get_device`/RPC calls, just
-  raw reachability (see `gui_architecture.md` for the full Device Status
-  writeup). A composite is probed once, since its sub-devices share its port.
+  TCP-probes `host:port` for every top-level `CONFIG["Devices"]` entry to publish
+  a cross-PC up/down feed (see `gui_architecture.md` for the full Device Status
+  writeup). A composite gets one extra probe: a sipyco handshake listing the
+  targets it serves, which is what distinguishes a sub-device that started from
+  one that did not. No RPC *method* is ever called.
 - **Both GUIs' Applets/experiment code** are the intended callers of
   `get_device` going forward, instead of hand-rolled `sipyco.pc_rpc.Client(...)`
   calls with hardcoded host/port.

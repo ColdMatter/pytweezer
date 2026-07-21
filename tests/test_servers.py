@@ -24,7 +24,7 @@ _FAKE_DEVICES = {
             "port": 5000,
         },
         "CaF MotMaster Server": {
-            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
+            "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "host": "1.2.3.5",
             "port": 6000,
         },
@@ -122,6 +122,90 @@ def test_build_spec_sim_class_used_when_simulating():
     from pytweezer.drivers.slm import SimulatedSLM
 
     assert isinstance(spec.target, SimulatedSLM)
+
+
+# --------------------------------------------------------------------------- #
+# device_server: a composite degrades around sub-devices that won't start
+# --------------------------------------------------------------------------- #
+
+#: A sub-device whose backend class cannot even be imported, standing in for any
+#: device that is absent at build time (no hardware, missing driver library, ...).
+_UNAVAILABLE = {"class": "no.such.module:Nope"}
+_WORKING_SLM = {"class": "pytweezer.drivers.slm:SimulatedSLM", "teardown": "close",
+                "role": "slm", "width": 8, "height": 8}
+
+
+def _rig(sub_confs, coordinator=None):
+    conf = {"host": "h", "port": 1, "devices": sub_confs}
+    if coordinator is not None:
+        conf["coordinator"] = coordinator
+    return conf
+
+
+def test_composite_serves_the_sub_devices_that_did_start():
+    spec = device_server.build_spec(
+        "Rig", conf=_rig({"Good SLM": _WORKING_SLM, "Dead Cam": _UNAVAILABLE})
+    )
+    assert set(spec.targets) == {"goodslm"}
+    assert spec.failed == ("Dead Cam",)
+
+
+def test_composite_skips_coordinator_when_a_sub_device_failed():
+    # The coordinator drives every backend, so a partial rig gets none: the
+    # composite's own name is unserved while its survivors stay addressable.
+    spec = device_server.build_spec(
+        "Rig",
+        conf=_rig(
+            {"Good SLM": _WORKING_SLM, "Dead Cam": _UNAVAILABLE},
+            coordinator="pytweezer.coordinators.base:Coordinator",
+        ),
+    )
+    assert set(spec.targets) == {"goodslm"}
+
+
+def test_composite_builds_coordinator_when_every_sub_device_started():
+    spec = device_server.build_spec(
+        "Rig",
+        conf=_rig(
+            {"Good SLM": _WORKING_SLM},
+            coordinator="pytweezer.coordinators.base:Coordinator",
+        ),
+    )
+    assert set(spec.targets) == {"goodslm", "coordinator"}
+
+
+def test_composite_coordinator_failure_leaves_sub_devices_served():
+    spec = device_server.build_spec(
+        "Rig", conf=_rig({"Good SLM": _WORKING_SLM}, coordinator="no.such.module:Nope")
+    )
+    assert set(spec.targets) == {"goodslm"}
+    assert spec.failed == ()  # the sub-device is fine; only the coordinator isn't
+
+
+def test_composite_with_nothing_available_still_builds_a_spec():
+    # The server binds anyway so the rig reads as "running, all parts failed"
+    # rather than silently vanishing from the status feed.
+    spec = device_server.build_spec("Rig", conf=_rig({"Dead Cam": _UNAVAILABLE}))
+    assert spec.targets == {}
+    assert spec.failed == ("Dead Cam",)
+
+
+def test_composite_tears_down_survivors_of_a_partial_start():
+    spec = device_server.build_spec(
+        "Rig", conf=_rig({"Good SLM": _WORKING_SLM, "Dead Cam": _UNAVAILABLE})
+    )
+    slm = spec.targets["goodslm"]
+    assert slm.is_connected()
+    spec.teardown()
+    assert not slm.is_connected()
+
+
+def test_composite_still_rejects_a_nested_composite():
+    # A structural config error is a typo, not a missing device: it fails loudly.
+    with pytest.raises(ValueError, match="may not"):
+        device_server.build_spec(
+            "Rig", conf=_rig({"Inner": {"devices": {"X": _WORKING_SLM}}})
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -331,14 +415,19 @@ def test_get_device_coordinatorless_composite_names_its_sub_devices(monkeypatch,
 # device_status.build_snapshot (state machine, is_reachable stubbed)
 # --------------------------------------------------------------------------- #
 
-def _status_server(devices, reachable, monkeypatch):
+def _status_server(devices, reachable, monkeypatch, targets=None):
     from pytweezer.servers import device_status
 
     monkeypatch.setattr(device_status, "is_reachable", lambda h, p, t: reachable)
+    # ``targets`` stands in for the sipyco handshake that lists what a composite
+    # serves; None means the handshake did not complete.
+    monkeypatch.setattr(device_status, "server_targets", lambda h, p, t: targets)
     # Build via __new__ to skip config reads and ZMQ socket creation.
     server = device_status.DeviceStatusServer.__new__(device_status.DeviceStatusServer)
     server.devices = devices
     server.probe_timeout = 0.1
+    server.target_timeout = 0.1
+    server._last_targets = {}
     return server
 
 
@@ -373,6 +462,85 @@ def test_build_snapshot_down_when_unreachable(monkeypatch):
         {"Cam": {"active": True, "host": "h", "port": 1}}, reachable=False, monkeypatch=monkeypatch
     )
     assert server.build_snapshot()["devices"]["Cam"]["state"] == "down"
+
+
+# --------------------------------------------------------------------------- #
+# device_status: composites report each sub-device separately
+# --------------------------------------------------------------------------- #
+
+_STATUS_RIG = {
+    "Rig": {
+        "active": True,
+        "host": "h",
+        "port": 1,
+        "devices": {"Rig Cam": {"class": "pkg:Cam"}, "Rig SLM": {"class": "pkg:Slm"}},
+        "coordinator": "pkg:Coord",
+    }
+}
+
+
+def test_build_snapshot_composite_reports_each_sub_device(monkeypatch):
+    server = _status_server(
+        _STATUS_RIG, reachable=True, monkeypatch=monkeypatch,
+        targets={"rigcam", "rigslm", "coordinator"},
+    )
+    devices = server.build_snapshot()["devices"]
+    assert devices["Rig"]["state"] == "up"
+    assert devices["Rig"]["children"] == ["Rig Cam", "Rig SLM"]
+    assert devices["Rig Cam"]["state"] == "up"
+    assert devices["Rig SLM"] == {
+        "state": "up", "host": "h", "port": 1,
+        "last_seen": devices["Rig SLM"]["last_seen"], "parent": "Rig",
+    }
+
+
+def test_build_snapshot_composite_marks_the_missing_sub_device_failed(monkeypatch):
+    # The rig is serving, but the SLM never opened: it is failed, not stopped, and
+    # the coordinator stood down so the rig itself is only degraded.
+    server = _status_server(
+        _STATUS_RIG, reachable=True, monkeypatch=monkeypatch, targets={"rigcam"}
+    )
+    devices = server.build_snapshot()["devices"]
+    assert devices["Rig"]["state"] == "degraded"
+    assert devices["Rig Cam"]["state"] == "up"
+    assert devices["Rig SLM"]["state"] == "failed"
+    assert devices["Rig SLM"]["last_seen"] is None
+
+
+def test_build_snapshot_composite_unknown_when_handshake_never_answered(monkeypatch):
+    server = _status_server(
+        _STATUS_RIG, reachable=True, monkeypatch=monkeypatch, targets=None
+    )
+    devices = server.build_snapshot()["devices"]
+    assert devices["Rig"]["state"] == "unknown"
+    assert devices["Rig Cam"]["state"] == "unknown"
+
+
+def test_build_snapshot_composite_reuses_targets_while_the_server_is_busy(monkeypatch):
+    # A long synchronous RPC leaves the handshake unanswered though the port still
+    # accepts connections; the last known answer stands in rather than flapping
+    # every sub-device to "failed".
+    from pytweezer.servers import device_status
+
+    server = _status_server(
+        _STATUS_RIG, reachable=True, monkeypatch=monkeypatch,
+        targets={"rigcam", "rigslm", "coordinator"},
+    )
+    server.build_snapshot()
+    monkeypatch.setattr(device_status, "server_targets", lambda h, p, t: None)
+    devices = server.build_snapshot()["devices"]
+    assert devices["Rig"]["state"] == "up"
+    assert devices["Rig Cam"]["state"] == "up"
+
+
+def test_build_snapshot_composite_sub_devices_follow_a_down_rig(monkeypatch):
+    server = _status_server(
+        _STATUS_RIG, reachable=False, monkeypatch=monkeypatch, targets={"rigcam"}
+    )
+    devices = server.build_snapshot()["devices"]
+    assert devices["Rig"]["state"] == "down"
+    assert devices["Rig Cam"]["state"] == "down"
+    assert devices["Rig SLM"]["state"] == "down"
 
 
 # --------------------------------------------------------------------------- #

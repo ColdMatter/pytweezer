@@ -105,8 +105,7 @@ CONFIG = {
     "Devices": {
          "Rb MotMaster": {
             "active": True,
-            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
-            "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+            "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "teardown": "disconnect",
             "config_file": "rb_mm_config.json",
             "host": HOSTS["IC-CZC4287H3W"],
@@ -115,8 +114,7 @@ CONFIG = {
         },
         "CaF MotMaster": {
             "active": True,
-            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
-            "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+            "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "teardown": "disconnect",
             "config_file": "caf_mm_config.json",
             "host": HOSTS["ph-bonesaw"],

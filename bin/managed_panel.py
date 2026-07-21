@@ -45,8 +45,9 @@ from pytweezer.logging_utils import get_logger
 
 logger = get_logger("managed_panel")
 
-# States that mean "the process is fully up".
-RUNNING_STATES = ("running", "up")
+# States that mean "the process is fully up". ``degraded`` counts: a composite
+# rig whose coordinator stood down is still a running process to start/stop.
+RUNNING_STATES = ("running", "up", "degraded")
 
 # States where the toggle should offer "Stop" (i.e. clicking it terminates):
 # a running process, or one still coming up.
@@ -60,6 +61,9 @@ _STARTING_GRACE_S = 30.0
 
 # Column heading for the name column, per config category.
 _ITEM_LABEL = {"Servers": "Server", "Loggers": "Logger", "Devices": "Device"}
+
+# Width of the Start/Stop toggle and of the Control column heading above it.
+_CONTROL_WIDTH = 72
 
 
 def _status_port(params):
@@ -108,7 +112,8 @@ class ManagedRow(QFrame):
     """One config entry: status indicator + optional Start/Stop toggle."""
 
     def __init__(self, name, script=None, active=False, tooltip=None,
-                 controllable=True, show_last_seen=False, parent=None):
+                 controllable=True, show_last_seen=False, indent=0,
+                 reserve_control=False, parent=None):
         super().__init__(parent)
         self.process = None
         self.script = script
@@ -120,15 +125,19 @@ class ManagedRow(QFrame):
 
         self.setObjectName("ProcessTile")
         self.setAttribute(QtCore.Qt.WA_StyledBackground)
+        if indent:
+            self.setProperty("tier", "child")
 
         layout = QHBoxLayout()
-        layout.setContentsMargins(10, 6, 10, 6)
+        # Indenting eats into the name column rather than shifting the row, so the
+        # Address/Status columns stay aligned with the un-indented rows above.
+        layout.setContentsMargins(10 + indent, 6, 10, 6)
         layout.setSpacing(10)
 
         name_label = QLabel(name)
         if tooltip:
             name_label.setToolTip(tooltip)
-        name_label.setMinimumWidth(150)
+        name_label.setMinimumWidth(max(150 - indent, 60))
         layout.addWidget(name_label)
 
         self.addressLabel = QLabel("—")
@@ -159,10 +168,19 @@ class ManagedRow(QFrame):
         if controllable:
             toggle = QPushButton("Start")
             toggle.setObjectName("ToggleButton")
-            toggle.setFixedWidth(72)
+            toggle.setFixedWidth(_CONTROL_WIDTH)
             toggle.clicked.connect(self._toggle)
             layout.addWidget(toggle)
             self.toggleButton = toggle
+        elif reserve_control:
+            # In a panel whose rows are only *sometimes* controllable, a row with
+            # no toggle still occupies the Control column so its status readout
+            # stays in line with the rows that do have one. An empty QLabel rather
+            # than addSpacing(): QBoxLayout suppresses its inter-item spacing next
+            # to a spacer item, which would leave the column 10px narrow.
+            placeholder = QLabel()
+            placeholder.setFixedWidth(_CONTROL_WIDTH)
+            layout.addWidget(placeholder)
 
         self.setLayout(layout)
         self._set_state("stopped" if controllable else "unknown")
@@ -302,7 +320,7 @@ def _header_row(left_columns, controllable):
     if controllable:
         control = QLabel("Control")
         control.setProperty("role", "heading")
-        control.setFixedWidth(72)
+        control.setFixedWidth(_CONTROL_WIDTH)
         row.addWidget(control)
     return row
 
@@ -380,6 +398,10 @@ class ControlPanel(BWidget):
         super().closeEvent(event)
 
 
+#: Left inset of a composite sub-device row, in pixels.
+_SUB_DEVICE_INDENT = 18
+
+
 class DevicesPanel(BWidget):
     """Devices tab: Start/Stop toggle (for local devices) + cross-PC status.
 
@@ -388,6 +410,12 @@ class DevicesPanel(BWidget):
     every device is listed, but the toggle only appears for devices whose
     config ``host`` matches this machine — status still updates for every row
     via the server-published :class:`DeviceStatusClient` feed.
+
+    A composite device gets a row for the rig itself plus an indented, view-only
+    row per sub-device, because a rig comes up serving only the devices that
+    opened successfully and each one's state has to be readable on its own. Only
+    the rig row is controllable: sub-devices share its process and start and stop
+    with it.
     """
 
     def __init__(self, name, parent=None):
@@ -425,9 +453,21 @@ class DevicesPanel(BWidget):
                 tooltip=params.get("tooltip"),
                 controllable=local,
                 show_last_seen=True,
+                reserve_control=True,
             )
             self._rows[pname] = row
             outer.addWidget(row)
+            for sub_name in sorted(params.get("devices") or {}):
+                sub_row = ManagedRow(
+                    sub_name,
+                    tooltip=f"Served by {pname}; starts and stops with it",
+                    controllable=False,
+                    show_last_seen=True,
+                    indent=_SUB_DEVICE_INDENT,
+                    reserve_control=True,
+                )
+                self._rows[sub_name] = sub_row
+                outer.addWidget(sub_row)
         outer.addStretch(1)
 
         self._client = None

@@ -28,7 +28,7 @@ without blocking in sequence.
      ```
 
 4. **Resolved: `Go()` blocks for the full sequence.** `MotMasterInterface.start_motmaster_experiment()`
-   → `self.motmaster.Go()` (`pytweezer/experiment/motmaster_interface.py:190`) is a
+   → `self.motmaster.Go()` (`pytweezer/drivers/motmaster.py`) is a
    .NET remoting call (`Activator.GetObject`) — it's a synchronous proxy call that
    returns only once the remote `Go()` returns, and every scan helper in that file
    calls it in a loop with `time.sleep(self.interval)` right after, which only makes

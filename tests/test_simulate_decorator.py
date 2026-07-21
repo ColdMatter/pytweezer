@@ -182,13 +182,3 @@ def test_simulated_imagemx2_covers_real_interface():
 
     missing = set(public_methods(ImagEMX2Camera)) - set(dir(SimulatedImagEMX2Camera))
     assert not missing, f"SimulatedImagEMX2Camera missing methods: {missing}"
-
-
-def test_simulated_motmaster_covers_real_interface():
-    from pytweezer.experiment.motmaster_server import SimulatedMotMasterInterface
-    from pytweezer.experiment.motmaster_interface import MotMasterInterface
-
-    missing = set(public_methods(MotMasterInterface)) - set(
-        dir(SimulatedMotMasterInterface)
-    )
-    assert not missing, f"SimulatedMotMasterInterface missing methods: {missing}"
