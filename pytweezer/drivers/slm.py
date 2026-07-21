@@ -173,11 +173,40 @@ class SLM:
             "Preloaded %d frames in %.3f ms.", list_length, (time.perf_counter() - t0) * 1000
         )
 
+    def start_auto_increment(self, list_length: int) -> None:
+        """Arm hardware auto-increment over a preloaded sequence.
+
+        After :meth:`preload_sequence`, this makes the SLM listen for external
+        triggers: frame 0 is live once armed, then each trigger advances to the
+        next preloaded frame, looping back to frame 0 after the last one, until
+        :meth:`stop_auto_increment`. So an ``n``-frame sequence needs ``n-1``
+        triggers to end on the final frame; an ``n``-th trigger wraps to frame 0.
+
+        1024x1024 board with firmware rev >= 2.4 only. Raises on failure.
+        """
+        self._require_slm()
+        ret = self._lib.StartAutoIncrement(self.board_number, int(list_length))
+        if ret != 1:
+            raise RuntimeError("SLM StartAutoIncrement failed")
+        LOGGER.info("Auto-increment armed over %d frames.", int(list_length))
+
+    def stop_auto_increment(self) -> None:
+        """Stop hardware auto-increment (see :meth:`start_auto_increment`).
+
+        Leaves whichever frame was last triggered live on the SLM. Raises on failure.
+        """
+        self._require_slm()
+        ret = self._lib.StopAutoIncrement(self.board_number)
+        if ret != 1:
+            raise RuntimeError("SLM StopAutoIncrement failed")
+        LOGGER.info("Auto-increment stopped.")
+
     def run_sequence(self, mask_sequence: np.ndarray, fps: float = 1.0) -> None:
         """Display each frame of a ``(n, H, W)`` sequence at ``fps`` (software timed).
 
         Software-timed writes; for hardware-triggered playback use
-        :meth:`preload_sequence` and drive the SLM's external trigger.
+        :meth:`preload_sequence`, :meth:`start_auto_increment`, and drive the
+        SLM's external trigger.
         """
         self._require_slm()
         seq = self._as_c_uint8(mask_sequence)
@@ -212,6 +241,7 @@ class SimulatedSLM:
         self.last_mask = None
         self.frames_written = 0
         self.preloaded_frames = 0
+        self.auto_increment_length = 0
         self._temp = 35.0
         self._closed = False
 
@@ -224,6 +254,12 @@ class SimulatedSLM:
 
     def preload_sequence(self, mask_sequence: np.ndarray) -> None:
         self.preloaded_frames = int(np.asarray(mask_sequence).shape[0])
+
+    def start_auto_increment(self, list_length: int) -> None:
+        self.auto_increment_length = int(list_length)
+
+    def stop_auto_increment(self) -> None:
+        self.auto_increment_length = 0
 
     def run_sequence(self, mask_sequence: np.ndarray, fps: float = 1.0) -> None:
         for frame in np.asarray(mask_sequence, dtype=np.uint8):
