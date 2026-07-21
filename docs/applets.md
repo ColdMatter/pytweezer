@@ -24,19 +24,23 @@ are deliberately local and per-operator.
 
 ```
 pytweezer/GUI/applet.py                 (base class + entry-point helper)
-├── Applet(QWidget)      props + title + geometry + poll timer + menu dialogs
+├── Applet(QWidget)      props + title + icon + geometry + poll timer + dialogs
 │   ├── stream_category  "Image" | "Data"  (which stream catalog to browse)
 │   ├── poll_interval    ms between poll() calls (0 = no timer)
+│   ├── default_size     (w, h) fallback window size before geometry is saved
 │   ├── init_gui()             hook: build widgets
 │   ├── poll()                 hook: pull new stream data, refresh display
 │   ├── update_subscriptions() hook: (re)apply stream subscriptions
+│   ├── stream_color(stream, index)   palette colour, per-stream overridable
 │   ├── open_subscription_editor(streamkey=None)  shared "subscriptions" dialog
 │   └── open_config_editor()                      shared "configure" dialog
-└── run_applet(applet_cls, default_name)   parse <name> argv, run Qt loop
+└── run_applet(applet_cls, default_name)   theme + parse <name> argv + Qt loop
 
 pytweezer/GUI/viewers/                   (the applet scripts themselves)
-├── image_monitor.py   ImageDisplay(Applet)   image streams  (stream_category="Image")
-└── live_plot.py       LivePlot(Applet)        data streams   (stream_category="Data")
+├── image_monitor.py       ImageDisplay(Applet)      image  (stream_category="Image")
+├── image_plot_monitor.py  ImagePlotDisplay(Applet)  image + linked projections
+├── live_plot.py           LivePlot(Applet)          data   (stream_category="Data")
+└── scalar_history.py      ScalarHistory(Applet)     data, one header field vs shot
       (viewers/archive/ holds retired/experimental viewers — ignore them)
 
 pytweezer/GUI/applet_launcher.py         (the manager panel)
@@ -52,11 +56,18 @@ machinery that used to be copy-pasted into each viewer:
 - a `Properties(name)` connection, exposed as **both** `self.props` and
   `self._props` (the latter is what `PropertyAttribute` descriptors read);
 - the **window title**, set to `name` — so the title always matches the label
-  in the Applet Launcher;
+  in the Applet Launcher — and the shared viewer window icon;
 - **geometry persistence** via `QSettings("pytweezer", name)` (restored in
-  `__init__`, saved in `closeEvent`);
+  `__init__`, saved in `closeEvent`), falling back to `default_size`;
 - a repeating **poll timer** that calls `self.poll()` every `poll_interval` ms;
-- the shared **"subscriptions"** and **"configure"** context-menu dialogs.
+- the shared **"subscriptions"** and **"configure"** context-menu dialogs;
+- the **theme**: `run_applet` calls `theme.apply_theme`, which sets the dark
+  stylesheet *and* pyqtgraph's background/foreground. An applet is its own
+  process with its own `QApplication`, so it inherits nothing from the main GUI
+  — without this it would open in the platform's default light style. Applets
+  should therefore never set a stylesheet or a literal colour of their own;
+  `stream_color(stream, index)` hands out the shared curve palette, honouring a
+  per-stream `<stream>/color` property when the user has set one.
 
 A subclass describes only *what* it shows, by overriding a few hooks:
 
@@ -146,6 +157,12 @@ manager, closely analogous to `ProcessTile`/`DeviceManager` on the device side:
   subclasses `Applet`, implement `init_gui`/`poll`/`update_subscriptions`, end
   with `run_applet(...)`, then point a launcher entry at it. Optionally add it to
   `DEFAULT_APPLETS` as a template.
+
+The `add-applet` skill (`.claude/skills/add-applet/`) walks through the second
+case, including the transport gotchas that decide whether an applet survives a
+real stream. Its `scripts/preview_applet.py` builds any applet against fake
+Properties and fake streams and saves a screenshot, so a viewer can be developed
+and looked at without hubs, hardware, or a window appearing on screen.
 
 ## Not to be confused with…
 

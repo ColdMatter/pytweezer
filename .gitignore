@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 configuration/configfile.py
 .vscode/
+
+# Screenshots written by the GUI/applet preview drivers under .claude/skills/
+.claude/skills/*/shots/

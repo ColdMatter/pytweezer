@@ -6,8 +6,6 @@ Built on :class:`pytweezer.GUI.applet.Applet` — see ``docs/applets.md``.
 import numpy as np
 import pyqtgraph as pg
 from PyQt5 import QtWidgets
-from PyQt5.QtGui import QColor
-from pyqtgraph.Qt import QtCore
 
 from pytweezer.servers import DataClient
 from pytweezer.GUI.applet import Applet, run_applet
@@ -24,13 +22,17 @@ class LivePlot(Applet):
         self.curvedict = {}
 
         layout = QtWidgets.QVBoxLayout()
+        # The plot is the whole window; margins here would just frame it in
+        # background colour.
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
-        pg.setConfigOptions(antialias=True)
         win = pg.GraphicsLayoutWidget()
         layout.addWidget(win)
 
         self.plot = pg.PlotItem()
+        self.plot.showGrid(x=True, y=True, alpha=0.15)
+        self.plot.addLegend(offset=(-10, 10))
         win.addItem(self.plot)
 
         vb = self.plot.getViewBox()
@@ -47,17 +49,25 @@ class LivePlot(Applet):
         self.curvedict = {}
         datastreams = self.props.get("datastreams", ["Axial_slice"])
         self.datastream.subscribe(datastreams)
-        print("live_plot.py subscribed to:  ", datastreams)
 
         self.plot.clear()
-        for stream in datastreams:
-            col = QColor(self.props.get(stream + "/color", int(255 * 256**3 + 255)))
-            pen = pg.mkPen(col, width=1)
-            self.curvedict[stream] = self.plot.plot(pen=pen)
+        for index, stream in enumerate(datastreams):
+            if stream == "--None--":
+                continue
+            pen = pg.mkPen(self.stream_color(stream, index), width=1.5)
+            self.curvedict[stream] = self.plot.plot(pen=pen, name=stream)
 
     def poll(self):
-        if self.datastream.has_new_data():
-            msg, di, A = self.datastream.recv()
+        # Drain the queue: at 100 Hz a busy stream delivers several messages per
+        # poll, and reading one per tick falls further behind the longer it runs.
+        while self.datastream.has_new_data():
+            message = self.datastream.recv()
+            # recv() gives (channel, header) for a header-only message and
+            # (channel, header, array) when an array follows, so a stream
+            # carrying only scalars must not be unpacked as three.
+            if message is None or len(message) < 3:
+                continue
+            msg, di, A = message
             # generate x axis in case array is one-dimensional
             if A.ndim == 1:
                 x = range(len(A))
@@ -68,9 +78,6 @@ class LivePlot(Applet):
                     self.curvedict[msg].setData(A[1], A[0])
                 else:
                     self.curvedict[msg].setData(A[0], A[1])
-
-    def sizeHint(self):
-        return QtCore.QSize(200, 200)
 
 
 def main(name):
