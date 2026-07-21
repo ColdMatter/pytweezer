@@ -140,7 +140,7 @@ class MotMasterInterface:
             elif key == "motmaster":
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import MOTMaster
+                    import MOTMaster # type: ignore
                     self.motmaster = Activator.GetObject(
                         MOTMaster.Controller,
                         path_info["remote_path"]
@@ -150,7 +150,7 @@ class MotMasterInterface:
             elif key == "cafbec_hardware_controller":
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import CaFBECHadwareController
+                    import CaFBECHadwareController  # type: ignore
                     self.hardware_controller = Activator.GetObject(
                         CaFBECHadwareController.Controller,
                         path_info["remote_path"]
@@ -160,7 +160,7 @@ class MotMasterInterface:
             elif key == "caf_hardware_controller":
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import MoleculeMOTHardwareControl
+                    import MoleculeMOTHardwareControl  # type: ignore
                     self.hardware_controller = Activator.GetObject(
                         MoleculeMOTHardwareControl.Controller,
                         path_info["remote_path"]
@@ -170,7 +170,7 @@ class MotMasterInterface:
             elif key == "transfer_cavity_lock":
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import TransferCavityLock2012
+                    import TransferCavityLock2012  # type: ignore
                     self.transfer_cavity_lock = Activator.GetObject(
                         TransferCavityLock2012.Controller,
                         path_info["remote_path"]
@@ -180,7 +180,7 @@ class MotMasterInterface:
             elif key == "wavemeter_lock":
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import WavemeterLock
+                    import WavemeterLock  # type: ignore
                     self.wavemeter_lock = Activator.GetObject(
                         WavemeterLock.Controller,
                         path_info["remote_path"]
@@ -708,7 +708,7 @@ class MotMasterInterface:
         mot_field_value: float = 1.0,
         display_results: bool = False
     ) -> Dict[str, Dict[str, Any]]:
-        """Tune the MOT by scanning transfer-cavity-lock set points laser by laser.
+        """Tune the MOT by scanning wavemeter-lock set points laser by laser.
 
         A background is taken first with the MOT coils at ``bg_field_value``, then
         each laser named in ``scan_ranges`` is stepped over its set points (coils at
@@ -718,7 +718,7 @@ class MotMasterInterface:
         so lasers are optimised in the order ``scan_ranges`` gives.
 
         ``scan_ranges`` maps laser name (a key of the config's ``lasers`` block) to
-        the TCL voltages to try. ``camera`` is a device name resolved with
+        the slave frequencies to try, in THz. ``camera`` is a device name resolved with
         :func:`~pytweezer.servers.device_client.get_device`, or an already-connected
         camera (a client, or the object itself for a camera in this process); a
         client opened here is closed again on the way out. **Configure the camera
@@ -728,8 +728,8 @@ class MotMasterInterface:
         exactly ``shots_per_point`` frames per MOTMaster shot.
 
         Returns, per laser, the scan range, mean and standard-error counts at each
-        point, and the chosen set point; pass that dict to
-        :func:`plot_auto_mot_results` to see the scans.
+        point, the chosen set point and the set point the laser started from; pass
+        that dict to :func:`plot_auto_mot_results` to see the scans.
         """
         client = get_device(camera) if isinstance(camera, str) else camera
         try:
@@ -792,7 +792,10 @@ class MotMasterInterface:
                     f"lasers are {sorted(self.config['lasers'])}."
                 )
             scan_range = [float(value) for value in scan_range]
-            shots = self.scan_tcl_laser_set_points(
+            # Where the laser sat before this scan: the reference the results are
+            # plotted as a detuning from.
+            start_set_point = float(self.wavemeter_lock.getSlaveFrequency(laser))
+            shots = self.scan_wm_laser_set_points(
                 script,
                 laser,
                 scan_range,
@@ -813,7 +816,7 @@ class MotMasterInterface:
                 errors.append(float(np.std(counts) / np.sqrt(len(counts))))
             set_point = scan_range[int(np.argmax(numbers))]
             # Leave the laser on its best set point before optimising the next.
-            self.scan_tcl_laser_set_points(
+            self.scan_wm_laser_set_points(
                 script,
                 laser,
                 [set_point],
@@ -827,14 +830,16 @@ class MotMasterInterface:
                 "numbers": numbers,
                 "errors": errors,
                 "set_point": set_point,
+                "start_set_point": start_set_point,
             }
         return results
 
 
 def plot_auto_mot_results(results: Dict[str, Dict[str, Any]]):
-    """Plot the scans returned by :meth:`MotMasterInterface.auto_mot`: one panel
-    per laser, normalised number against TCL voltage, with an arrow marking the
-    chosen set point. Returns the ``(figure, axes)`` pair."""
+    """Plot the scans returned by :meth:`MotMasterInterface.auto_mot`: one panel per
+    laser, normalised number against detuning from the set point the laser started
+    on, with an arrow marking the set point chosen. Returns the ``(figure, axes)``
+    pair."""
     import matplotlib.pyplot as plt
 
     n_cols = min(3, max(1, len(results)))
@@ -848,15 +853,16 @@ def plot_auto_mot_results(results: Dict[str, Dict[str, Any]]):
         numbers = np.array(scan["numbers"])
         errors = np.array(scan["errors"])
         scale = np.max(numbers) if np.max(numbers) > 0 else 1.0
-        ax.errorbar(
-            scan["scan_range"], numbers / scale, yerr=errors / scale, fmt="ok"
-        )
+        # THz set points shown as MHz detunings from where the laser started.
+        start = scan["start_set_point"]
+        detunings = (np.array(scan["scan_range"]) - start) * 1e6
+        ax.errorbar(detunings, numbers / scale, yerr=errors / scale, fmt="ok")
         ax.arrow(
-            scan["set_point"], 1.15, 0, -0.1,
-            head_width=0.002, head_length=0.03, width=0.0005, fc="r", ec="r"
+            (scan["set_point"] - start) * 1e6, 1.15, 0, -0.1,
+            head_width=2.0, head_length=0.03, width=1.0, fc="r", ec="r"
         )
-        ax.set_title(f"{laser} set @ {scan['set_point']} V")
-        ax.set_xlabel("TCL voltage [V]")
+        ax.set_title(f"{laser} set @ {scan['set_point']} THz")
+        ax.set_xlabel("Detuning to previous set point [MHz]")
         ax.set_ylim((0, 1.2))
     for ax in flat_axes[len(results):]:
         ax.set_visible(False)

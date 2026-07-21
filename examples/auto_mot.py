@@ -22,7 +22,7 @@ def _get_image_from_file(
     return image
 
 
-class MOTAutoTuner():
+class MOTAutoTunerWML():
     def __init__(
         self,
         experiment: Experiment,
@@ -71,7 +71,7 @@ class MOTAutoTuner():
         for laser in self.expt.config["lasers"]:
             if hasattr(self, f"{laser}_isscan"):
                 if getattr(self, f"{laser}_isscan"):
-                    results = self.expt.scan_tcl_laser_set_points(
+                    results = self.expt.scan_wm_laser_set_points(
                         self.script,
                         laser,
                         getattr(self, f"{laser}_scan_range"),
@@ -91,7 +91,7 @@ class MOTAutoTuner():
                     setattr(self, f"{laser}_setpoint", set_point)
                     setattr(self, f"{laser}_numbers_mean", n)
                     setattr(self, f"{laser}_numbers_error", ne)
-                    results = self.expt.scan_tcl_laser_set_points(
+                    results = self.expt.scan_wm_laser_set_points(
                         self.script,
                         laser,
                         [set_point],
@@ -140,39 +140,40 @@ class MOTAutoTuner():
         )
         named_ax = \
             {
-                "v00Lock": ax[0, 0],
-                "bXLock": ax[0, 1],
-                "v10Lock": ax[0, 2],
-                "v21Lock": ax[1, 0],
-                "v32Lock": ax[1, 1],
-                "bXBeastLock": ax[1, 2]
+                "v0": ax[0, 0],
+                "BX": ax[0, 1],
+                "v1": ax[0, 2],
+                "v2": ax[1, 0],
+                "v3": ax[1, 1],
+                "TCool": ax[1, 2]
             }
-        named_ax["v00Lock"].set_ylabel("Norm. Number")
-        named_ax["v21Lock"].set_ylabel("Norm. Number")
+        named_ax["v0"].set_ylabel("Norm. Number")
+        named_ax["v2"].set_ylabel("Norm. Number")
         for laser in self.expt.config["lasers"]:
             if hasattr(self, f"{laser}_isscan"):
                 if getattr(self, f"{laser}_isscan"):
                     f = getattr(self, f"{laser}_scan_range")
+                    f0 = getattr(self, f"{laser}_curr_setpoint")
                     n = getattr(self, f"{laser}_numbers_mean")
                     ne = getattr(self, f"{laser}_numbers_error")
                     named_ax[laser].errorbar(
-                        f,
+                        (f - f0) * 1e6,
                         n/np.max(n),
                         yerr=ne/np.max(n),
                         fmt='ok'
                     )
                     named_ax[laser].arrow(
-                        getattr(self, f"{laser}_setpoint"),
+                        1.0e6 * (getattr(self, f"{laser}_setpoint") - f0),
                         1.15, 0, -0.1,
-                        head_width=0.002,
+                        head_width=2.0,
                         head_length=0.03,
-                        width=0.0005,
+                        width=1.0,
                         fc='r', ec='r')
-                    named_ax[laser].set_title(
-                        f"{laser} set @ {getattr(self, f'{laser}_setpoint')} V"
-                    )
+                    text = f"{laser} set " + \
+                        f"@ {getattr(self, f'{laser}_setpoint')} THz"
+                    named_ax[laser].set_title(text)
             else:
                 named_ax[laser].set_title(f"{laser} not scanned")
-            named_ax[laser].set_xlabel("TCL Volatge [V]")
+            named_ax[laser].set_xlabel("Detuning to previous setpoint (MHz)")
             named_ax[laser].set_ylim((0, 1.2))
         return None
