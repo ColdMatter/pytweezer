@@ -24,19 +24,23 @@ are deliberately local and per-operator.
 
 ```
 pytweezer/GUI/applet.py                 (base class + entry-point helper)
-├── Applet(QWidget)      props + title + geometry + poll timer + menu dialogs
+├── Applet(QWidget)      props + title + icon + geometry + poll timer + dialogs
 │   ├── stream_category  "Image" | "Data"  (which stream catalog to browse)
 │   ├── poll_interval    ms between poll() calls (0 = no timer)
+│   ├── default_size     (w, h) fallback window size before geometry is saved
 │   ├── init_gui()             hook: build widgets
 │   ├── poll()                 hook: pull new stream data, refresh display
 │   ├── update_subscriptions() hook: (re)apply stream subscriptions
+│   ├── stream_color(stream, index)   palette colour, per-stream overridable
 │   ├── open_subscription_editor(streamkey=None)  shared "subscriptions" dialog
 │   └── open_config_editor()                      shared "configure" dialog
-└── run_applet(applet_cls, default_name)   parse <name> argv, run Qt loop
+└── run_applet(applet_cls, default_name)   theme + parse <name> argv + Qt loop
 
 pytweezer/GUI/viewers/                   (the applet scripts themselves)
-├── image_monitor.py   ImageDisplay(Applet)   image streams  (stream_category="Image")
-└── live_plot.py       LivePlot(Applet)        data streams   (stream_category="Data")
+├── image_monitor.py       ImageDisplay(Applet)      image  (stream_category="Image")
+├── image_plot_monitor.py  ImagePlotDisplay(Applet)  image + linked projections
+├── live_plot.py           LivePlot(Applet)          data   (stream_category="Data")
+└── scalar_history.py      ScalarHistory(Applet)     data, one header field vs shot
       (viewers/archive/ holds retired/experimental viewers — ignore them)
 
 pytweezer/GUI/applet_launcher.py         (the manager panel)
@@ -52,11 +56,18 @@ machinery that used to be copy-pasted into each viewer:
 - a `Properties(name)` connection, exposed as **both** `self.props` and
   `self._props` (the latter is what `PropertyAttribute` descriptors read);
 - the **window title**, set to `name` — so the title always matches the label
-  in the Applet Launcher;
+  in the Applet Launcher — and the shared viewer window icon;
 - **geometry persistence** via `QSettings("pytweezer", name)` (restored in
-  `__init__`, saved in `closeEvent`);
+  `__init__`, saved in `closeEvent`), falling back to `default_size`;
 - a repeating **poll timer** that calls `self.poll()` every `poll_interval` ms;
-- the shared **"subscriptions"** and **"configure"** context-menu dialogs.
+- the shared **"subscriptions"** and **"configure"** context-menu dialogs;
+- the **theme**: `run_applet` calls `theme.apply_theme`, which sets the dark
+  stylesheet *and* pyqtgraph's background/foreground. An applet is its own
+  process with its own `QApplication`, so it inherits nothing from the main GUI
+  — without this it would open in the platform's default light style. Applets
+  should therefore never set a stylesheet or a literal colour of their own;
+  `stream_color(stream, index)` hands out the shared curve palette, honouring a
+  per-stream `<stream>/color` property when the user has set one.
 
 A subclass describes only *what* it shows, by overriding a few hooks:
 
@@ -118,9 +129,17 @@ and the `__main__` guard.
 the **Applets** tab in both the server and client GUIs. It is a subprocess
 manager, closely analogous to `ProcessTile`/`DeviceManager` on the device side:
 
-- **Storage.** The list of applets lives in **Properties** under the `"Applets"`
-  key: `{ name: {"script": ..., "active": bool, "description": ...}, ... }`.
-  `_ensure_defaults()` seeds it from `DEFAULT_APPLETS` the first time.
+- **Storage — shared list, local running-state.** The list of applets lives in
+  **Properties** under the `"Applets"` key:
+  `{ name: {"script": ..., "description": ...}, ... }`, so every client sees the
+  same catalogue. `_ensure_defaults()` seeds it from `DEFAULT_APPLETS` the first
+  time. Which applets are *running* is **per-machine** and deliberately kept out
+  of Properties: it lives in local `QSettings("pytweezer", <launcher name>)`
+  under `"active_applets"` (a list of names), the same local store used for
+  window geometry. Properties has no local-only write — every `set()` is
+  broadcast to all clients and persisted centrally by the propertylogger — so
+  storing running-state there would make one PC's applets start on every other
+  PC. A legacy `"active"` key in the shared entry is ignored and stripped.
 - **Launch model.** Starting an applet runs
   `subprocess.Popen([sys.executable, script_path, name], cwd=tweezerpath)` —
   i.e. `python <script> <name>`. **`name` is the applet's label, its Properties
@@ -132,10 +151,15 @@ manager, closely analogous to `ProcessTile`/`DeviceManager` on the device side:
 - **Controls.** The name column's checkbox = active/start-stop; `add` (with an
   optional template from `DEFAULT_APPLETS`), `del`, and `restart` buttons; a
   1 s timer reconciles each row's status against `process.poll()`.
-- **Auto-start & teardown.** On open, every applet marked `"active": True` is
-  started (`_start_active_applets`); on close, all child processes are
-  terminated (`closeEvent`). This is why the GUI shell's teardown must call the
-  panel's `close()` — see `gui_architecture.md`.
+- **Auto-start & teardown.** On open, `_start_active_applets()` starts exactly
+  the applets this machine had running last session (names still present in the
+  shared list; stale ones are pruned). On close, `closeEvent` terminates the
+  child processes via `_terminate_process`, which **leaves the recorded set
+  intact** — the distinction matters: stopping an applet from its Stop button
+  (`_stop_applet`) or closing its own window means "don't start it next time",
+  whereas quitting the GUI must preserve what was running so it comes back.
+  This is why the GUI shell's teardown must call the panel's `close()` — see
+  `gui_architecture.md`.
 
 ### Adding an applet
 
@@ -146,6 +170,12 @@ manager, closely analogous to `ProcessTile`/`DeviceManager` on the device side:
   subclasses `Applet`, implement `init_gui`/`poll`/`update_subscriptions`, end
   with `run_applet(...)`, then point a launcher entry at it. Optionally add it to
   `DEFAULT_APPLETS` as a template.
+
+The `add-applet` skill (`.claude/skills/add-applet/`) walks through the second
+case, including the transport gotchas that decide whether an applet survives a
+real stream. Its `scripts/preview_applet.py` builds any applet against fake
+Properties and fake streams and saves a screenshot, so a viewer can be developed
+and looked at without hubs, hardware, or a window appearing on screen.
 
 ## Not to be confused with…
 

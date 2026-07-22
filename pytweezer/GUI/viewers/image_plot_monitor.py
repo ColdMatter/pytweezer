@@ -17,10 +17,9 @@ the shared x-axis, and the left plot draws ``coords`` up the shared y-axis with
 """
 
 import numpy as np
-from PyQt5 import QtCore
-from PyQt5.QtWidgets import QVBoxLayout
-from PyQt5.QtGui import QColor
-import PyQt5
+from PyQt6 import QtCore
+from PyQt6.QtWidgets import QVBoxLayout
+import PyQt6
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
 
@@ -66,9 +65,12 @@ class ImagePlotDisplay(Applet):
 
         imgdata = np.ones((100, 100))
         self.image_item = pg.ImageItem(imgdata)
-        self.image_item.setLookupTable(cmap.getLookupTable())
-        self.image_item.setRect(PyQt5.QtCore.QRect(0, 0, 100, 100))
+        self.image_item.setRect(PyQt6.QtCore.QRect(0, 0, 100, 100))
         lut.setImageItem(self.image_item)
+        # The colormap goes on the histogram's gradient, not on the image: a
+        # HistogramLUTItem drives its image's lookup table, so a setLookupTable
+        # here would be overwritten and the image would come out greyscale.
+        lut.gradient.setColorMap(cmap)
         self.plot.addItem(self.image_item)
         self.plot.setLabel("left", text="y", units="m")
         self.plot.setLabel("bottom", text="x", units="m")
@@ -124,11 +126,11 @@ class ImagePlotDisplay(Applet):
             plot.removeItem(curve)
         curvedict.clear()
         client.subscribe(streams)
-        for stream in streams:
+        for index, stream in enumerate(streams):
             if stream == "--None--":
                 continue
-            col = QColor(self.props.get(stream + "/color", int(255 * 256**3 + 255)))
-            curvedict[stream] = plot.plot(pen=pg.mkPen(col, width=1))
+            pen = pg.mkPen(self.stream_color(stream, index), width=1.5)
+            curvedict[stream] = plot.plot(pen=pen)
 
     def poll(self):
         self._update_image()

@@ -3,8 +3,8 @@ import os
 import subprocess
 import sys
 
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtCore import Qt
+from PyQt6 import QtCore, QtWidgets
+from PyQt6.QtCore import Qt
 
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
@@ -32,6 +32,11 @@ DEFAULT_APPLETS = [
         "name": "Image Plot Monitor",
         "script": "pytweezer/GUI/viewers/image_plot_monitor.py",
         "description": "Image with x/y projection plots linked to the image axes",
+    },
+    {
+        "name": "Scalar History",
+        "script": "pytweezer/GUI/viewers/scalar_history.py",
+        "description": "Rolling history of a scalar from a data stream header",
     },
 ]
 
@@ -102,7 +107,7 @@ class AppletRow(QtWidgets.QFrame):
         self.name = name
         self.launcher = launcher
         self.setObjectName("ProcessTile")
-        self.setAttribute(Qt.WA_StyledBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
 
         layout = QtWidgets.QHBoxLayout()
         layout.setContentsMargins(10, 6, 10, 6)
@@ -197,7 +202,13 @@ class AppletLauncher(BWidget):
         self._rows = {}
 
         self._ensure_defaults()
+        # The applet *list* (name -> script/description) is shared across clients
+        # via Properties. Which applets are *running* is deliberately per-machine
+        # and lives in local QSettings, so starting an applet on one lab PC does
+        # not launch it on every other client, and each client restores only the
+        # applets it had running last session.
         self._applets = self._load_applets()
+        self._active = self._load_active()
 
         self.init_gui()
         self.populate()
@@ -216,10 +227,37 @@ class AppletLauncher(BWidget):
         data = self._props.get("Applets", {})
         if not isinstance(data, dict):
             return {}
-        return data
+        # Drop any legacy shared "active" flag: running state is now local
+        # (see _load_active). Keeping it out of the in-memory model stops it
+        # from being re-published to other clients on the next save.
+        applets = {}
+        for name, entry in data.items():
+            if not isinstance(entry, dict):
+                continue
+            applets[name] = {k: v for k, v in entry.items() if k != "active"}
+        return applets
 
     def _save_applets(self, applets):
         self._props.set("Applets", applets)
+
+    def _local_settings(self):
+        return QtCore.QSettings("pytweezer", self._name)
+
+    def _load_active(self):
+        """Names of applets this machine had running last session (local)."""
+        value = self._local_settings().value("active_applets", [])
+        if isinstance(value, str):  # QSettings collapses a 1-element list to a str
+            value = [value]
+        if not value:  # empty list round-trips back as None
+            return set()
+        return set(value)
+
+    def _save_active(self):
+        settings = self._local_settings()
+        settings.setValue("active_applets", sorted(self._active))
+        # The GUI shell hard-exits (os._exit) after the Qt loop, which skips
+        # QSettings' deferred write, so force it to disk now.
+        settings.sync()
 
     def _ensure_defaults(self):
         data = self._props.get("Applets", {})
@@ -229,7 +267,6 @@ class AppletLauncher(BWidget):
         for entry in DEFAULT_APPLETS:
             applets[entry["name"]] = {
                 "script": entry["script"],
-                "active": False,
                 "description": entry.get("description", ""),
             }
         self._save_applets(applets)
@@ -285,7 +322,7 @@ class AppletLauncher(BWidget):
         if name in self._applets:
             logger.warning("Applet Launcher: applet '%s' already exists", name)
             return
-        self._applets[name] = {"script": script, "active": False}
+        self._applets[name] = {"script": script}
         self._save_applets(self._applets)
         self._add_row(name, script)
 
@@ -305,9 +342,11 @@ class AppletLauncher(BWidget):
         return os.path.normpath(os.path.join(tweezerpath, script))
 
     def _set_active(self, name, active):
-        if name in self._applets:
-            self._applets[name]["active"] = bool(active)
-            self._save_applets(self._applets)
+        if active:
+            self._active.add(name)
+        else:
+            self._active.discard(name)
+        self._save_active()
 
     def _set_status(self, name, status, label=None):
         row = self._rows.get(name)
@@ -333,22 +372,32 @@ class AppletLauncher(BWidget):
         self._set_active(name, True)
         self._set_status(name, "running")
 
+    def _terminate_process(self, name):
+        """Kill the child process, leaving the local active set untouched."""
+        process = self._processes.pop(name, None)
+        if process is None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=1.0)
+        except Exception:
+            process.kill()
+
     def _stop_applet(self, name):
-        process = self._processes.get(name)
-        if process is not None:
-            process.terminate()
-            try:
-                process.wait(timeout=1.0)
-            except Exception:
-                process.kill()
-            self._processes.pop(name, None)
+        """User-initiated stop: kill it and remember it should stay stopped."""
+        self._terminate_process(name)
         self._set_active(name, False)
         self._set_status(name, "stopped")
 
     def _start_active_applets(self):
-        for name, entry in self._applets.items():
-            if entry.get("active"):
+        for name in sorted(self._active):
+            if name in self._applets:
                 self._start_applet(name)
+        # Applets deleted on another client linger in the local set; drop them.
+        stale = self._active - set(self._applets)
+        if stale:
+            self._active -= stale
+            self._save_active()
 
     def refresh_status(self):
         for name, process in list(self._processes.items()):
@@ -363,8 +412,10 @@ class AppletLauncher(BWidget):
                 self._set_status(name, "running")
 
     def closeEvent(self, event):
+        # Keep the active set intact so the next session restores exactly what
+        # was running when the GUI closed.
         for name in list(self._processes.keys()):
-            self._stop_applet(name)
+            self._terminate_process(name)
         super().closeEvent(event)
 
 
@@ -372,7 +423,7 @@ def main(name):
     app = QtWidgets.QApplication(sys.argv)
     window = AppletLauncher(name)
     window.show()
-    app.exec_()
+    app.exec()
 
 
 if __name__ == "__main__":

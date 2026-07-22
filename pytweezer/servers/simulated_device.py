@@ -12,9 +12,6 @@ doesn't already define itself gets a safe, logging, no-op stub. Only methods
 with genuinely interesting fake behavior (e.g. synthesizing camera frames)
 need to be hand-written; everything else stays in sync automatically as the
 real class changes.
-
-Stubs return plain ``None``/dict/list values (never a ``unittest.mock.Mock``)
-so they remain serializable by ``sipyco.pyon`` when served over RPC.
 """
 
 from __future__ import annotations

@@ -4,8 +4,8 @@ import threading
 from typing import Any, Optional
 
 import zmq
-from PyQt5 import QtCore
-from PyQt5.QtCore import QDateTime, Qt
+from PyQt6 import QtCore
+from PyQt6.QtCore import QDateTime, Qt
 
 from pytweezer.GUI.models import PrepModel, ScheduleModel
 
@@ -260,10 +260,10 @@ class SyncedScheduleModel(ScheduleModel):
         )
         self.endResetModel()
 
-    def setData(self, index, value, role=Qt.DisplayRole):
+    def setData(self, index, value, role=Qt.ItemDataRole.DisplayRole):
         if value == "":
             return False
-        if role == Qt.EditRole:
+        if role == Qt.ItemDataRole.EditRole:
             k = self.row_to_key[index.row()]
             col = index.column()
             if col == 7:
@@ -325,10 +325,10 @@ class SyncedPrepModel(PrepModel):
         self.backing_store = data
         self.endResetModel()
 
-    def setData(self, index, value, role=Qt.DisplayRole):
+    def setData(self, index, value, role=Qt.ItemDataRole.DisplayRole):
         if value == "":
             return False
-        if role == Qt.EditRole:
+        if role == Qt.ItemDataRole.EditRole:
             k = index.row()
             col = index.column()
             if col == 7:

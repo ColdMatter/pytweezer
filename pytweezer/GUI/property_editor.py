@@ -1,8 +1,8 @@
 from os.path import isfile
 
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import QApplication, QFileDialog, QListWidget, QListWidgetItem
+from PyQt6 import QtCore, QtGui
+from PyQt6.QtGui import *
+from PyQt6.QtWidgets import QApplication, QFileDialog, QListWidget, QListWidgetItem
 import pyqtgraph as pg
 import pyqtgraph.parametertree.parameterTypes as pTypes
 from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
@@ -13,7 +13,7 @@ import numpy as np
 from pytweezer.servers import Properties,tweezerpath,send_error,send_info
 from pytweezer.GUI.table_parameter import *
 from pytweezer.GUI.pytweezerQt import BMainWindow, BWidget
-from PyQt5 import QtWidgets
+from PyQt6 import QtWidgets
 
 import sys
 import traceback
@@ -244,7 +244,7 @@ class PropEdit(BWidget):
         # and sorting it in ascending order
         paramTree.expandToDepth(0)
         paramTree.setSortingEnabled(True)
-        paramTree.sortItems(0, QtCore.Qt.AscendingOrder)
+        paramTree.sortItems(0, QtCore.Qt.SortOrder.AscendingOrder)
         self.pTree=paramTree
         layout.addWidget(paramTree, 1, 0, 1, 1)
 
@@ -375,7 +375,7 @@ class PropSelector(BWidget):
         # and sorting it in ascending order
         paramTree.expandToDepth(0)
         paramTree.setSortingEnabled(True)
-        paramTree.sortItems(0, QtCore.Qt.AscendingOrder)
+        paramTree.sortItems(0, QtCore.Qt.SortOrder.AscendingOrder)
         self.pTree=paramTree
         layout.addWidget(paramTree, 1, 0, 1, 1)
 
@@ -439,7 +439,7 @@ def main():
     app = QApplication(sys.argv)
     Win = PropEdit()
     Win.show()
-    app.exec_()
+    app.exec()
 
 
 # Start Qt event loop unless running in interactive mode or using pyside.
