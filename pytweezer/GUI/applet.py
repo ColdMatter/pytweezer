@@ -19,15 +19,20 @@ import logging
 import os
 import sys
 
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QDialog, QVBoxLayout
 
 from pytweezer.servers import Properties
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
 from pytweezer.GUI.property_editor import PropEdit
+from pytweezer.GUI.theme import apply_theme, curve_color
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.GUI.applet")
+
+#: Window/taskbar icon for every applet, so a screenful of applets is
+#: distinguishable from the main GUI at a glance.
+ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "pytweezers_viewer_icon.svg")
 
 
 class Applet(QtWidgets.QWidget):
@@ -58,12 +63,17 @@ class Applet(QtWidgets.QWidget):
     #: timer (e.g. an applet driven purely by Qt signals).
     poll_interval = 10
 
+    #: Fallback window size, used the first time an applet runs (before any
+    #: geometry has been saved). Override :meth:`sizeHint` for a different one.
+    default_size = (760, 560)
+
     def __init__(self, name, parent=None):
         super().__init__(parent)
         self.name = name
         self._props = Properties(name)
         self.props = self._props
         self.setWindowTitle(name)
+        self.setWindowIcon(QtGui.QIcon(ICON_PATH))
         self._restore_geometry()
 
         self.init_gui()
@@ -89,6 +99,23 @@ class Applet(QtWidgets.QWidget):
         Called automatically after the subscription or configure dialog closes
         (property edits may have changed the stream list). Override to
         unsubscribe/re-subscribe the applet's stream clients."""
+
+    def sizeHint(self):
+        return QtCore.QSize(*self.default_size)
+
+    # -- display helpers ---------------------------------------------------
+
+    def stream_color(self, stream, index=0):
+        """Colour to draw ``stream`` in, as a :class:`QColor`.
+
+        Reads the per-stream ``<stream>/color`` property, defaulting to the
+        ``index``-th colour of the shared palette — so several streams on one
+        plot are told apart without any configuration, while a user who wants a
+        specific colour can still set it. Because ``props.get`` writes its
+        default back, the colour appears in the configure dialog ready to edit
+        after the first draw.
+        """
+        return QtGui.QColor(self.props.get(f"{stream}/color", curve_color(index)))
 
     # -- shared context-menu dialogs --------------------------------------
 
@@ -160,6 +187,10 @@ def run_applet(applet_cls, default_name=None):
     args = parser.parse_args()
 
     app = QtWidgets.QApplication(sys.argv)
+    # An applet is its own process, so it inherits nothing from the main GUI's
+    # QApplication — without this it would open in the platform's default light
+    # style next to a dark control window.
+    apply_theme(app)
     applet = applet_cls(args.name)
     applet.show()
     app.exec_()

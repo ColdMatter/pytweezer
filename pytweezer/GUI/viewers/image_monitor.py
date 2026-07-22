@@ -8,7 +8,6 @@ from PyQt5 import QtCore
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
-    QPushButton,
     QDialog,
     QSpinBox,
 )
@@ -47,10 +46,8 @@ class ImageDisplay(Applet):
         self.imgresolution = [1, 1]
         self.image_index = -1
 
-        btn = QPushButton("SaveImage")
         layout = QVBoxLayout()
-        layout.addWidget(btn)
-        # btn.clicked.connect(self.saveCurrentImage)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         # Image and its data sidebar sit side by side; the sidebar is hidden by
         # default and toggled from the view-box context menu.
@@ -84,7 +81,10 @@ class ImageDisplay(Applet):
         lut.setImageItem(image_item)
         graphics_layout_widget.addItem(lut)
         image_item.setRect(PyQt5.QtCore.QRect(0, 0, imgdata.shape[1], imgdata.shape[0]))
-        image_item.setLookupTable(cmap.getLookupTable())
+        # The colormap goes on the histogram's gradient, not on the image: a
+        # HistogramLUTItem drives its image's lookup table, so a setLookupTable
+        # here would be overwritten and the image would come out greyscale.
+        lut.gradient.setColorMap(cmap)
         plot.addItem(image_item)
         self.plot = plot
 
@@ -180,10 +180,6 @@ class ImageDisplay(Applet):
                     )
                 )
                 self.mask.setImage(imgdata, autoLevels=False, levels=(0, 1))
-
-    def saveCurrentImage(self):
-        """Save the current image as png using current time as filename"""
-        pass
 
     def index_selector(self):
         d = QDialog()

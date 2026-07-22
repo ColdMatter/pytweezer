@@ -34,9 +34,13 @@ Entry points (`[tool.poetry.scripts]` in `pyproject.toml`):
 poetry run pytweezer-server         # full-control GUI, run on the server PC
 poetry run pytweezer-client         # view-only GUI, run on client PCs
 poetry run pytweezer-device <name>  # start one device's RPC server standalone
+poetry run pytweezer-logger <name>  # start one InfluxDB logger standalone
+poetry run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
 ```
 
-`start_servers.bat` / `start_client.bat` just wrap the first two.
+`start_servers.bat` / `start_client.bat` / `kill_stale.bat` wrap the above.
+Run kill-stale after an unclean shutdown, when launch fails with "Address
+already in use".
 
 **Headless/offscreen testing:** PyQt5 windows can't construct without a display.
 Set `QT_QPA_PLATFORM=offscreen` before running any script that imports Qt widgets
@@ -83,17 +87,19 @@ processes) and one or more **client PCs** (launch applets + local device
 drivers). `pytweezer/configuration/config.py` is the single source of truth:
 
 - `HOSTS`: hostname → IP map. `SERVER_HOST` resolves based on `SIMULATING`/`LOCAL`
-  flags at the top of the file (both `True` today → everything binds to
-  localhost for dev/sim work).
+  flags at the top of the file (both `False` today → `SERVER_HOST` is the real
+  `PH-BEAST`; set either to `True` to bind everything to localhost for dev/sim).
 - `CONFIG["Servers"]`: hubs (`Imagehub`/`Commandhub`/`Datahub`/`Propertyhub`/
   `Messagehub`), loggers, `Analysis Manager`, `Device Status`.
 - `CONFIG["Devices"]`: one entry per physical device (MotMaster sequencers,
   cameras), each with its own `host` — **this is what determines which PC a
   device's server actually runs on**, independent of where the GUI is launched.
   Device entries carry **no `"script"`** (every device runs `device_server.py`;
-  `"driver"` selects the behavior), so anything spawning a process must call
-  `ConfigReader.script_for(category, params)` rather than indexing
-  `params["script"]` — see `DEFAULT_SCRIPTS` in `config.py`.
+  its `"class"` selects the behavior). Every other category names its `"script"`
+  explicitly, so the only place that supplies the device launcher is the
+  `DEVICE_SERVER_SCRIPT` constant in `pytweezer/servers/configreader.py` — device
+  spawn sites (`DevicesPanel`, `process_cleanup`) reference it
+  directly rather than indexing `params["script"]`.
 - `CONFIG["GUI"]`: standalone GUI tool entries (StreamMonitor, Applet Launcher, etc).
 
 Don't confuse this with the **root** `configuration/` directory — that holds
@@ -102,9 +108,9 @@ Python `CONFIG` dict. `ConfigReader.getConfiguration()` (in
 `pytweezer/servers/configreader.py`) always returns the dict from
 `pytweezer/configuration/config.py`.
 
-### Process launching: ProcessTile → `python <script> <name>`
+### Process launching: ManagedRow → `python <script> <name>`
 
-`bin/process_tile_base.py`'s `ProcessTile` is the base unit for starting/stopping
+`bin/managed_panel.py`'s `ManagedRow` is the base unit for starting/stopping
 a process from the GUI: it runs `subprocess.Popen(['python3', script, name])`,
 where `name` is the CONFIG key. Every server/device script's `main()` accepts
 that `name` as a positional/optional CLI arg and, if given, looks up its own
@@ -113,9 +119,12 @@ flags directly. When adding or modifying a server script's `main()`, preserve
 this dual mode (config-driven when launched by a tile, flag-driven for manual
 CLI use).
 
-`bin/process_manager.py` builds two flavors of this: `ServerManager` (no host
-filtering — server PC controls everything) and `DeviceManager` (filters devices
-to `host == this machine`, case-insensitively, via `check_host`).
+`bin/managed_panel.py` builds two panels from it: `ControlPanel(name, category,
+controllable=)` (serves both the Servers and Loggers tabs; `controllable=False`
+is the client's view-only "Server Status" tab, statused by TCP probe) and
+`DevicesPanel` (one row per device; the Start/Stop toggle appears only where
+config `host` matches this machine, via `check_host`, but status arrives for
+every row from the server-published `DeviceStatusClient` feed).
 
 ### Device control framework (server + client)
 
@@ -123,13 +132,14 @@ Rather than each driver module hand-rolling its own RPC server/client
 boilerplate, there's a generic pair:
 
 - `pytweezer/servers/device_server.py` — `run_device_server(name)` reads
-  `CONFIG["Devices"][name]["driver"]`, looks it up in `DRIVER_REGISTRY` (maps a
-  driver key like `"motmaster"`/`"imagemx2"`/`"blackfly"` to a factory that lazily
-  imports the real backend and builds a `DeviceServerSpec`), then runs
-  `sipyco.pc_rpc.simple_server_loop`. Every device runs this same file — `"driver"`
-  is what differentiates behavior. Backend imports are lazy per-factory so an
-  unavailable hardware lib (e.g. `rotpy` for the Blackfly) never breaks importing
-  the launcher itself. `resolve_device(name)` does whitespace-/case-insensitive
+  `CONFIG["Devices"][name]["class"]` (a `"module.path:ClassName"` string), imports
+  it lazily, and builds it into a `DeviceServerSpec` by matching config keys against
+  its `__init__` signature, then runs `sipyco.pc_rpc.simple_server_loop`. Every
+  device runs this same file — `"class"` is what differentiates behavior. Imports
+  happen only when that specific device is built, so an unavailable hardware lib
+  (e.g. `pylablib` for the ImagEM) never breaks importing the launcher itself. When
+  `"simulate": True`, `"sim_class"` is used instead (or, if absent, a no-op stand-in
+  auto-generated from `"class"`). `resolve_device(name)` does whitespace-/case-insensitive
   matching so CLI callers don't need to quote/space-match names exactly, and
   accepts only *launchable* (top-level) devices.
 - `pytweezer/servers/device_client.py` — `get_device(name)` returns a transparent
@@ -137,7 +147,7 @@ boilerplate, there's a generic pair:
   `device_server.resolve_address`. Prefer this over hand-built `Client(...)` calls
   in new experiment code.
 
-**Composite devices.** A `"driver": "composite"` entry runs several devices in one
+**Composite devices.** A `"devices"` sub-dict entry runs several devices in one
 process (one sipyco target each) plus an optional *coordinator* holding direct
 references to them, so a camera→DAC feedback step never serializes a frame. Its
 sub-devices live under `"devices"` but are named and addressed exactly like
@@ -169,8 +179,8 @@ switching to a normal return. Geometry persistence (`QSettings`) needs an
 explicit `.sync()` before that hard exit, or the write never reaches disk.
 
 Full writeup, including the panel teardown chain and the two status-panel
-mechanisms (`ServerStatusPanel` client-probe vs `DeviceStatusPanel` server-published
-feed): `docs/gui_architecture.md`.
+mechanisms (`ControlPanel(controllable=False)` client-probe vs `DevicesPanel`
+server-published feed): `docs/gui_architecture.md`.
 
 ### Applet framework (viewers/plots)
 

@@ -33,6 +33,11 @@ DEFAULT_APPLETS = [
         "script": "pytweezer/GUI/viewers/image_plot_monitor.py",
         "description": "Image with x/y projection plots linked to the image axes",
     },
+    {
+        "name": "Scalar History",
+        "script": "pytweezer/GUI/viewers/scalar_history.py",
+        "description": "Rolling history of a scalar from a data stream header",
+    },
 ]
 
 

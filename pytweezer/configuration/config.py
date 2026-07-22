@@ -5,7 +5,6 @@ HOSTS = {
     "IC-CZC4287H3W": "10.59.3.2", # rb pc
     "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
-
 }
 
 port_iterator = iter(range(7278, 99999))
@@ -106,8 +105,7 @@ CONFIG = {
     "Devices": {
          "Rb MotMaster": {
             "active": True,
-            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
-            "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+            "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "teardown": "disconnect",
             "config_file": "rb_mm_config.json",
             "host": HOSTS["IC-CZC4287H3W"],
@@ -116,8 +114,7 @@ CONFIG = {
         },
         "CaF MotMaster": {
             "active": True,
-            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
-            "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+            "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "teardown": "disconnect",
             "config_file": "caf_mm_config.json",
             "host": HOSTS["ph-bonesaw"],
@@ -135,6 +132,17 @@ CONFIG = {
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
         },
+        "Rb ThorCam": {
+            "active": True,
+            "class": "pytweezer.drivers.thorcam:ThorCam",
+            "sim_class": "pytweezer.drivers.thorcam:SimulatedThorCam",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "stream_name": "rb_thorcam",
+            "timeout": 5.0,
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
+        },
         # Atom-rearrangement rig: a rearrangement camera and the Blink SLM in one
         # process, with the rearrangement coordinator streaming GPU-computed phase
         # frames straight to slm.update_mask() (no socket). Needs cupy/lap + a CUDA
@@ -142,7 +150,7 @@ CONFIG = {
         # addressable on its own as get_device("Rb SLM"). See
         # docs/rearrangement_coordinator.md.
         "Rb Rearrangement Rig": {
-            "active": False,
+            "active": True,
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,

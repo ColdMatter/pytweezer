@@ -2,3 +2,14 @@ __pycache__/
 *.pyc
 configuration/configfile.py
 .vscode/
+
+# Screenshots written by the GUI/applet preview drivers under .claude/skills/
+.claude/skills/*/shots/
+# Compiled C++ extensions 
+*.pyd
+# setuptools build_ext outputs
+build/
+dist/
+*.egg-info/
+
+/setup.py

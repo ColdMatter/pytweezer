@@ -9,6 +9,12 @@ Readin configuration file and startup values for Properties
 import os
 import json
 
+# Device config entries omit "script": they all run device_server.py,
+# differentiated by their "driver" key. This is the one launcher that isn't named
+# per-entry in CONFIG. Path is relative to bin/ (callers prefix
+# tweezerpath + "/bin/"), matching how ManagedRow/ProcessTile spawn it.
+DEVICE_SERVER_SCRIPT = "../pytweezer/servers/device_server.py"
+
 tweezerpath = os.path.realpath(os.path.dirname(os.path.abspath(__file__)) + "/../..")
 configpath = os.path.realpath(
     os.path.dirname(os.path.abspath(__file__)) + "/../../configuration/"
@@ -40,19 +46,6 @@ class ConfigReader:
         """
 
         return Config()
-
-    @staticmethod
-    def script_for(category, params):
-        """Return the launcher script for one config entry, relative to ``bin/``.
-
-        Entries may omit ``"script"`` when every entry in their category runs the
-        same launcher (``CONFIG["Devices"]`` all run ``device_server.py``, selected
-        by their ``"driver"`` key). Returns ``None`` if the entry has no script and
-        its category has no default, meaning it is not a launchable process.
-        """
-        from pytweezer.configuration.config import DEFAULT_SCRIPTS
-
-        return params.get("script") or DEFAULT_SCRIPTS.get(category)
 
 def Properties():
     """return dictionary of startup properties"""

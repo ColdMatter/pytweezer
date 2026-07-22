@@ -1,9 +1,14 @@
 """Shared dark theme for the pytweezer GUIs.
 
 Applied once, app-wide, via ``QApplication.setStyleSheet`` (see ``bin/gui.py``'s
-``_run()``). Individual widgets opt into specific rules with ``setObjectName``
-or the ``role``/``state`` dynamic properties referenced below, rather than each
-carrying its own inline ``setStyleSheet`` call.
+``_run()``) or via :func:`apply_theme`, which additionally sets the pyqtgraph
+defaults that plotting windows need. Individual widgets opt into specific rules
+with ``setObjectName`` or the ``role``/``state`` dynamic properties referenced
+below, rather than each carrying its own inline ``setStyleSheet`` call.
+
+Applets run as their own processes with their own ``QApplication``, so they do
+not inherit the main window's stylesheet — :func:`pytweezer.GUI.applet.run_applet`
+calls :func:`apply_theme` to give every applet the same appearance.
 
 Status indicators (:data:`STATE_STYLE`) are deliberately colour *and* text: a
 dot for an at-a-glance read plus an always-visible label, so state is never
@@ -18,13 +23,20 @@ conveyed by colour alone.
 # ``running`` both display "Running", and ``down`` and ``stopped`` both display
 # "Stopped". ``crashed`` (a subprocess that died unexpectedly, which only
 # self-polling can distinguish) stays red as a genuine alert.
+#
+# Two states are specific to composite devices, whose sub-devices are served
+# individually from one process: ``failed`` is a sub-device its running rig could
+# not open, and ``degraded`` is a rig that is running but whose coordinator stood
+# down because of one — so both mean "the process is alive, this part of it is not".
 STATE_STYLE = {
     "running": ("#2ecc71", "Running"),
     "up": ("#2ecc71", "Running"),
     "starting": ("#f5a623", "Starting"),
+    "degraded": ("#f5a623", "Degraded"),
     "stopped": ("#6b6c76", "Stopped"),
     "down": ("#6b6c76", "Stopped"),
     "crashed": ("#e74c3c", "Crashed"),
+    "failed": ("#e74c3c", "Failed"),
     "disabled": ("#6b6c76", "Disabled"),
     "unknown": ("#6b6c76", "Unknown"),
 }
@@ -52,6 +64,63 @@ def state_style(status):
 # a widget's QFontMetrics.
 UI_FONT_FAMILY = "Segoe UI"
 UI_FONT_POINT_SIZE = 10
+
+
+# pyqtgraph draws through QGraphicsView, so QSS does not reach its canvas or
+# axes — these are handed to pg.setConfigOptions instead. The background matches
+# the QWidget rule above so a plot sits flush in its window; the foreground is
+# the muted grey used for axes, ticks and labels, which keeps chrome behind the
+# data without dropping below readable contrast.
+PLOT_BACKGROUND = "#1b1c22"
+PLOT_FOREGROUND = "#9a9aa5"
+
+# Default curve colours, cycled by index so a plot with several streams gives
+# each one a distinguishable colour without the user configuring anything.
+# Deliberately distinct from the STATE_STYLE traffic lights: a red trace should
+# not read as "crashed". Ordered so the first few stay separable for viewers
+# with red-green colour blindness, and all are light enough to carry a 1px line
+# against PLOT_BACKGROUND.
+CURVE_COLORS = (
+    "#5b8def",  # accent blue
+    "#f0a35e",  # amber
+    "#4fd1a5",  # teal
+    "#d98ae0",  # orchid
+    "#e8dc6d",  # sand
+    "#6fd3ef",  # sky
+    "#ef7a85",  # salmon
+    "#a8b0c0",  # slate
+)
+
+
+def curve_color(index):
+    """Return the ``index``-th default curve colour as a ``QRgb`` int.
+
+    An int rather than a string because per-stream colour overrides are stored
+    in Properties as ints (JSON has no colour type) and ``QColor`` accepts
+    either. Cycles, so any number of streams is safe to index.
+    """
+    hexcode = CURVE_COLORS[index % len(CURVE_COLORS)]
+    return 0xFF000000 | int(hexcode.lstrip("#"), 16)
+
+
+def apply_theme(app):
+    """Apply the dark stylesheet and pyqtgraph defaults to a ``QApplication``.
+
+    Use this rather than a bare ``setStyleSheet`` in any process that plots:
+    pyqtgraph keeps its own global background/foreground config, and left at its
+    defaults a plot renders black-on-white inside an otherwise dark window.
+    """
+    app.setStyleSheet(DARK_STYLESHEET)
+    try:
+        import pyqtgraph as pg
+    except ImportError:
+        # Not every themed process plots; a missing pyqtgraph is not an error.
+        return
+    pg.setConfigOptions(
+        background=PLOT_BACKGROUND,
+        foreground=PLOT_FOREGROUND,
+        antialias=True,
+    )
 
 
 DARK_STYLESHEET = """
@@ -163,12 +232,20 @@ QFrame#ProcessTile[state="up"] {
     border-left: 4px solid #2ecc71;
 }
 
-QFrame#ProcessTile[state="starting"] {
+QFrame#ProcessTile[state="starting"],
+QFrame#ProcessTile[state="degraded"] {
     border-left: 4px solid #f5a623;
 }
 
-QFrame#ProcessTile[state="crashed"] {
+QFrame#ProcessTile[state="crashed"],
+QFrame#ProcessTile[state="failed"] {
     border-left: 4px solid #e74c3c;
+}
+
+/* A composite's sub-device row, indented under the rig that serves it: recessed
+   so the rig reads as the thing you start and its parts as what it contains. */
+QFrame#ProcessTile[tier="child"] {
+    background-color: #1f2027;
 }
 
 QFrame#ProcessTile[state="stopped"],

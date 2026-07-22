@@ -156,9 +156,10 @@ no single machine otherwise has the global picture.
 Server PC:  DeviceStatusServer            pytweezer/servers/device_status.py
               every ~2 s: for each CONFIG["Devices"] entry,
                 is_reachable(host, port) -> "up" | "down"   (active=False -> "disabled")
+                composites also: server_targets(host, port) -> per-sub-device state
               PUB-bind tcp://SERVER_HOST:pub_port, send_json full snapshot
                         │
-Client/Server GUI:  DeviceStatusClient (SUB) --status_received--> DeviceStatusPanel
+Client/Server GUI:  DeviceStatusClient (SUB) --status_received--> DevicesPanel
 ```
 
 - **Pull model:** only the server PC probes; it can reach every device server
@@ -169,14 +170,35 @@ Client/Server GUI:  DeviceStatusClient (SUB) --status_received--> DeviceStatusPa
 - **Periodic full snapshot** every poll cycle → new subscribers sync within one
   interval (no REP/snapshot endpoint, no PUB slow-joiner problem).
 - **Snapshot shape:** `{"type":"device_status","timestamp":ts,
-  "devices":{name:{"state","host","port","last_seen"}}}` (JSON).
-- **Display:** `DeviceStatusPanel` rebuilds its rows from each snapshot, so it shows
-  **all** devices across all PCs (green up / red down / grey disabled), independent
-  of local host-filtering. Present on both GUIs (client = primary requirement,
-  server = operator convenience).
+  "devices":{name:{"state","host","port","last_seen"}}}` (JSON). A composite's
+  entry adds `"children"` (its sub-device names) and each sub-device gets its own
+  top-level entry carrying `"parent"` — the dict stays flat because device names
+  are unique across the whole category.
+- **Display:** `DevicesPanel` (`bin/managed_panel.py`) applies each snapshot to
+  its rows, so it shows **all** devices across all PCs, independent of local
+  host-filtering, with a Start/Stop toggle only on rows this machine owns.
+
+### Composites: a second, RPC-level probe
+
+A composite serves several sub-devices from one port and comes up with only the
+ones that opened successfully (see `device_framework.md`), so a TCP probe of that
+port cannot say whether a given sub-device is running. `server_targets(host,
+port)` therefore performs a sipyco handshake with `target_name=None` — no RPC
+method is ever invoked — and returns the target names the server is actually
+serving. Each sub-device is `up` when its target is present and `failed` when it
+is not; a composite whose coordinator target is missing reads `degraded`, since
+its process is running but `get_device(<composite>)` will not resolve.
+
+The handshake needs the server's event loop, which a synchronous RPC method
+occupies for its whole duration — during a long camera grab the OS still accepts
+the TCP connection but nothing answers. `DeviceStatusServer` therefore caches the
+last target list per composite and reuses it when a handshake times out, so a busy
+rig does not flap all of its sub-devices to `failed`. A server that has never
+completed a handshake reports `unknown`.
 
 The reachability probe itself lives in `pytweezer/servers/reachability.py`
-(`is_reachable`), shared by both this server and `ServerStatusPanel`.
+(`is_reachable`), shared by both this server and `ControlPanel`'s client-side
+probe.
 
 ## Stream monitor
 

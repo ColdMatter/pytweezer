@@ -17,8 +17,10 @@ from pytweezer.servers.simulated_device import public_methods
 #: driver key -> minimal simulate=True conf, built through the same
 #: device_server.build_spec path used in production.
 SIM_CONFS = {
+    # No hand-written sim class: exercises the auto-generated stand-in built
+    # from the real driver's method surface.
     "motmaster": {
-        "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+        "class": "pytweezer.drivers.motmaster:MotMasterInterface",
         "simulate": True,
     },
     "imagemx2": {
