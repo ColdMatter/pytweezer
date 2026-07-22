@@ -143,6 +143,17 @@ CONFIG = {
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
         },
+        "Tweezer Monitor": {
+            "active": True,
+            "class": "pytweezer.drivers.tweezermonitor:ThorCam",
+            "sim_class": "pytweezer.drivers.tweezermonitor:SimulatedThorCam",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "stream_name": "tweezermonitor",
+            "timeout": 5.0,
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
+        },
         # Atom-rearrangement rig: a rearrangement camera and the Blink SLM in one
         # process, with the rearrangement coordinator streaming GPU-computed phase
         # frames straight to slm.update_mask() (no socket). Needs cupy/lap + a CUDA
