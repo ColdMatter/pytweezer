@@ -17,10 +17,6 @@ _logger = get_logger("Properties")
                     (which hardware is running, drivers available)
 
    Properties:     usually refer to objects (position of ROI)
-
-   Settings/Options: (currently not used)
-
-   Preferences:    minor choices, no influence on data !! (shape of mouse pointer, positions of Windows,...)
 """
 
 
