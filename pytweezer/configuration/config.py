@@ -143,14 +143,14 @@ CONFIG = {
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
         },
-        "Tweezer Monitor": {
+        "Tweezer Monitor ThorCam": {
             "active": True,
-            "class": "pytweezer.drivers.tweezermonitor:ThorCam",
-            "sim_class": "pytweezer.drivers.tweezermonitor:SimulatedThorCam",
+            "class": "pytweezer.drivers.tweezermonitorcam:ThorCam",
+            "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorCam",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
-            "stream_name": "tweezermonitor",
+            "stream_name": "rb_thorcam2",
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
         },

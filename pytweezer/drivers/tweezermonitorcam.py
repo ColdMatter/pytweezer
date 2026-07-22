@@ -27,7 +27,7 @@ class ThorCam(Camera):
     """ThorLabs shim: translates the generic :class:`Camera` interface to the
     ThorLabs camera's pylablib driver, plus any camera-specific controls."""
     
-    image_prefix = "TweezerMonitor"
+    image_prefix = "ThorCam"
 
     def __init__(
         self,
@@ -64,6 +64,10 @@ class ThorCam(Camera):
         self._backend.set_roi(x0, x0 + width - 1, y0, y0 + height - 1)
 
     @requires_camera
+    def set_trigger_source(self, source: str):
+        self._backend.set_trigger_mode(source)
+
+    @requires_camera
     def set_exposure_time(self, exposure: float):
         self._backend.set_exposure(exposure)
 
@@ -98,7 +102,7 @@ class ThorCamClient(RPCClient):
 
     def __init__(
         self,
-        server_name: str = "Tweezer Monitor Camera",
+        server_name: str = "ThorLabs Camera",
         host: str | None = None,
         port: int | None = None,
         timeout: float | None = 5.0,
@@ -118,20 +122,20 @@ class ThorCamClient(RPCClient):
 def run_server(
     host: str,
     port: int,
-    stream_name: str = "tweezermonitor",
+    stream_name: str = "thorcam",
     image_dir: str | None = None,
     timeout: float = 5.0,
     simulate: bool = False,
 ):
     LOGGER.info(
-        "Starting Tweezer Monitor Camera RPC server host=%s port=%s stream=%s simulate=%s",
+        "Starting ThorLabs Camera RPC server host=%s port=%s stream=%s simulate=%s",
         host,
         port,
         stream_name,
         simulate,
     )
     if simulate:
-        LOGGER.warning("Running Tweezer Monitor Camera server in SIMULATION MODE")
+        LOGGER.warning("Running ThorLabs Camera server in SIMULATION MODE")
         camera = SimulatedThorLabsCamera(
             stream_name=stream_name, image_dir=image_dir, timeout=timeout
         )
@@ -146,7 +150,7 @@ def run_server(
         {"camera": camera},
         host=host,
         port=int(port),
-        description="Tweezer Monitor Camera RPC server",
+        description="ThorLabs Camera RPC server",
     )
 
 
