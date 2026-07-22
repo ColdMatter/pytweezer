@@ -129,9 +129,17 @@ and the `__main__` guard.
 the **Applets** tab in both the server and client GUIs. It is a subprocess
 manager, closely analogous to `ProcessTile`/`DeviceManager` on the device side:
 
-- **Storage.** The list of applets lives in **Properties** under the `"Applets"`
-  key: `{ name: {"script": ..., "active": bool, "description": ...}, ... }`.
-  `_ensure_defaults()` seeds it from `DEFAULT_APPLETS` the first time.
+- **Storage — shared list, local running-state.** The list of applets lives in
+  **Properties** under the `"Applets"` key:
+  `{ name: {"script": ..., "description": ...}, ... }`, so every client sees the
+  same catalogue. `_ensure_defaults()` seeds it from `DEFAULT_APPLETS` the first
+  time. Which applets are *running* is **per-machine** and deliberately kept out
+  of Properties: it lives in local `QSettings("pytweezer", <launcher name>)`
+  under `"active_applets"` (a list of names), the same local store used for
+  window geometry. Properties has no local-only write — every `set()` is
+  broadcast to all clients and persisted centrally by the propertylogger — so
+  storing running-state there would make one PC's applets start on every other
+  PC. A legacy `"active"` key in the shared entry is ignored and stripped.
 - **Launch model.** Starting an applet runs
   `subprocess.Popen([sys.executable, script_path, name], cwd=tweezerpath)` —
   i.e. `python <script> <name>`. **`name` is the applet's label, its Properties
@@ -143,10 +151,15 @@ manager, closely analogous to `ProcessTile`/`DeviceManager` on the device side:
 - **Controls.** The name column's checkbox = active/start-stop; `add` (with an
   optional template from `DEFAULT_APPLETS`), `del`, and `restart` buttons; a
   1 s timer reconciles each row's status against `process.poll()`.
-- **Auto-start & teardown.** On open, every applet marked `"active": True` is
-  started (`_start_active_applets`); on close, all child processes are
-  terminated (`closeEvent`). This is why the GUI shell's teardown must call the
-  panel's `close()` — see `gui_architecture.md`.
+- **Auto-start & teardown.** On open, `_start_active_applets()` starts exactly
+  the applets this machine had running last session (names still present in the
+  shared list; stale ones are pruned). On close, `closeEvent` terminates the
+  child processes via `_terminate_process`, which **leaves the recorded set
+  intact** — the distinction matters: stopping an applet from its Stop button
+  (`_stop_applet`) or closing its own window means "don't start it next time",
+  whereas quitting the GUI must preserve what was running so it comes back.
+  This is why the GUI shell's teardown must call the panel's `close()` — see
+  `gui_architecture.md`.
 
 ### Adding an applet
 
