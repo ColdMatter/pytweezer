@@ -19,7 +19,7 @@
                     "parts": 3
                 },
                 "rb_hamcam": {
-                    "timestamp": 1783523978.2946951,
+                    "timestamp": 1784650001.3318417,
                     "parts": 3
                 },
                 "caf_hamcam": {
@@ -27,7 +27,7 @@
                     "parts": 3
                 },
                 "rb_thorcam": {
-                    "timestamp": 1784636329.3955426,
+                    "timestamp": 1784652067.4159832,
                     "parts": 3
                 }
             }
@@ -40,7 +40,12 @@
         ],
         "DataStream": {
             "maxStreamInactive[s]": 1000,
-            "active": {}
+            "active": {
+                "rbstats": {
+                    "timestamp": 1784652067.4169862,
+                    "parts": 2
+                }
+            }
         }
     },
     "Analysis": {
@@ -214,8 +219,8 @@
             "Geometry": [
                 0,
                 0,
-                828,
-                552
+                90,
+                218
             ]
         },
         "Applet Launcher": {
@@ -309,7 +314,13 @@
             },
             "Live Plot": {
                 "script": "pytweezer/GUI/viewers/live_plot.py",
-                "active": false
+                "active": false,
+                "description": "Live plot of data streams"
+            },
+            "Image Plot Monitor": {
+                "script": "pytweezer/GUI/viewers/image_plot_monitor.py",
+                "active": false,
+                "description": "Image with x/y projection plots linked to the image axes"
             }
         }
     },

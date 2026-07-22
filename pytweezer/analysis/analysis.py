@@ -4,7 +4,7 @@ from PIL import Image
 import re
 from typing import Any, Dict
 from scipy.optimize import curve_fit
-from scipy.ndimage import center_of_mass, label, white_tophat
+from scipy.ndimage import center_of_mass, label
 import matplotlib.pyplot as plt
 import scipy.constants as cn
 import os
@@ -14,6 +14,9 @@ import matplotlib.patches as patches
 from rich.progress import track
 from scipy.special import erf
 import datetime
+from sklearn.mixture import GaussianMixture
+from scipy.stats import norm
+from scipy.ndimage import gaussian_filter, white_tophat
 
 cloudpath = "C:\\Users\\tweez\\OneDrive - Imperial College London\\"
 tweezer_img_source_dir = "C:\\Users\\tweez\\OneDrive - Imperial College London\\caftweezers\\HamCamImages\\"
@@ -63,22 +66,14 @@ def detect_bright_points(image_array, threshold=200):
     # Step 2: Label connected components (each bright spot gets a unique label)
     labeled_array, num_features = label(binary_image)
 
-    # Step 3: Find the brightest pixel in each region (brightest pixel corresponds to the highest intensity)
+    # Step 3: Find the centre of mass in each region
     centers = []
     for region_id in range(1, num_features + 1):
-        # Get the coordinates of the pixels in the current region (bright spot)
-        coordinates = np.argwhere(labeled_array == region_id)
-
-        # Find the coordinates of the brightest pixel in this region
-        brightest_pixel = None
-        max_intensity = -1
-        for y, x in coordinates:
-            if image_array[y, x] > max_intensity:
-                max_intensity = image_array[y, x]
-                brightest_pixel = (y, x)
-
-        # Append the brightest pixel's coordinates (y, x) as a tuple
-        centers.append(brightest_pixel)
+        # Calculate the centre of mass for this region
+        com = center_of_mass(image_array, labeled_array, region_id)
+        
+        # Append the centre of mass coordinates (y, x) as a tuple
+        centers.append(com)
     
     centers = np.array(centers)
     
@@ -117,17 +112,6 @@ def detect_trap_sites(img_array, grid_shape, detection_step = 100):
             return grid_positions, detection_threshold
 
 # Sum pixel values in a 5x5 region around each detected center
-def morphological_tophat_high_pass(image_array, feature_size=10):
-    """White top-hat high-pass: keep bright features up to ``feature_size`` pixels,
-    subtract the slowly-varying background larger than that.
-
-    Used before occupancy thresholding so a spatially uneven background doesn't bias
-    per-trap pixel sums. ``feature_size`` is the structuring-element size in pixels
-    (roughly the diameter of a single trap spot).
-    """
-    return white_tophat(image_array, size=int(feature_size))
-
-
 def sum_pixel_values(image_array, grid_positions, grid_shape, window_size=10):
     half_size = window_size // 2
     pixel_sums = np.zeros(grid_shape, dtype=int)  # Create empty 2D array
@@ -141,7 +125,7 @@ def sum_pixel_values(image_array, grid_positions, grid_shape, window_size=10):
     return pixel_sums
 
 # Function to visualize results with cropping and zooming
-def visualize_results(image_array, grid_positions, margin=50, window_size=5, threshold=150, vmaxfactor = 0.8):
+def visualize_results(image_array, grid_positions, margin=50, window_size=5, threshold=150, vmaxfactor=0.8, index_labels=False, bin_sharpness=20, bin_thresh_factor=0.8):
     # Get bounding box around detected points
     y_vals, x_vals = zip(*grid_positions.values())  # Extract y and x coordinates
     min_y, max_y = min(y_vals), max(y_vals)
@@ -155,20 +139,29 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
 
     # Crop the image
     cropped_image = image_array[y1:y2, x1:x2]
-    cropped_bin_image = (cropped_image > threshold)
+    cropped_bin_image = (cropped_image - image_array.min()) / (image_array.max() - image_array.min())  
+    threshold_bin = (threshold - image_array.min()) / (image_array.max() - image_array.min())
+
+    # Apply a sigmoid function to binarize the image, change parameters to adjust the threshold and sharpness of the sigmoid
+    sigmoid = lambda x, a, b: 1 / (1 + np.exp(-a * (x - b)))
+    img_bin_sigmoid = sigmoid(cropped_bin_image, bin_sharpness, bin_thresh_factor*threshold_bin)
 
     # Adjust positions of grid labels for cropped view
     fig, ax = plt.subplots(1, 3, figsize=(18, 6))
     ax[0].imshow(cropped_image, cmap="gray", extent=[x1, x2, y2, y1], vmax=vmaxfactor*cropped_image.max())
     ax[0].grid(False)
+    ax[0].set_title("Raw Image")
     ax[1].imshow(cropped_image, cmap="gray", extent=[x1, x2, y2, y1], vmax=vmaxfactor*cropped_image.max())  # Use extent to maintain coordinates
-    ax[2].imshow(cropped_bin_image, cmap='viridis', extent=[x1, x2, y2, y1])
+    ax[1].set_title("Trap Site Detection")
+    ax[2].imshow(img_bin_sigmoid, cmap='hot', extent=[x1, x2, y2, y1])
+    ax[2].set_title("Binarized Image (Sigmoid)")
 
     # Draw 5x5 squares and labels
     half_size = window_size // 2
     for (i, j), (y, x) in grid_positions.items():
         # Draw grid label
-        ax[1].text(x+5, y, f"({i},{j})", color='white', fontsize=12, weight='bold')
+        if index_labels:
+            ax[1].text(x+5, y, f"({i},{j})", color='white', fontsize=6, weight='bold')
 
         # Draw a 5x5 square centered on (x, y)
         rect0 = patches.Rectangle((x - half_size, y - half_size), window_size, window_size,
@@ -176,25 +169,37 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
         rect1 = patches.Rectangle((x - half_size, y - half_size), window_size, window_size,
                                  linewidth=1, edgecolor='red', facecolor='none')
         ax[1].add_patch(rect0)
-        ax[2].add_patch(rect1)
     plt.show()
 
-def detect_loading_threshold(photon_rates):
-    photon_rates = np.array(photon_rates)
-    entries, bin_edges = np.histogram(photon_rates.ravel(), bins=30, range=(photon_rates.min(),photon_rates.max()))
-    entries = entries/sum(entries)
-    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
-    
-    bg_gauss_fit = lambda x, a, b, c: a*np.exp(-(x-b)**2 / (2*c**2))
-    params, _ = curve_fit(bg_gauss_fit, bin_centers, entries, p0=[0.2, bin_centers[0]*1.05, bin_centers[0]*0.1])
+def detect_loading_threshold(counts):
+    counts_2d = counts.reshape(-1, 1)
+    # Initialize and fit the GMM for 2 components
+    gmm = GaussianMixture(n_components=2, covariance_type='spherical')
+    gmm.fit(counts_2d)
 
-    xx = np.linspace(bin_centers[0], bin_centers[-1], 1000)
-    yy = bg_gauss_fit(xx, *params)
+    # Extract the fitted parameters
+    means = gmm.means_.flatten()
+    variances = gmm.covariances_.flatten()
+    weights = gmm.weights_.flatten() # We need these for accurate plotting!
 
-    A, mu, sigma = params
-    loading_threshold = mu + 4*sigma
+    # Identify which mean is the background and which is the signal
+    bg_idx = np.argmin(means)
+    sig_idx = np.argmax(means)
+
+    mu_bg, var_bg = means[bg_idx], variances[bg_idx]
+    mu_sig, var_sig = means[sig_idx], variances[sig_idx]
+    weight_bg, weight_sig = weights[bg_idx], weights[sig_idx]
+
+    # Calculate the intersection point of the two Gaussians (the threshold)
+    a = 1/(2*var_bg) - 1/(2*var_sig)
+    b = mu_sig/var_sig - mu_bg/var_bg
+    c = mu_bg**2 / (2*var_bg) - mu_sig**2 / (2*var_sig) - np.log(np.sqrt(var_sig/var_bg))
+
+    # The quadratic formula yields two roots; we want the one between the means
+    roots = np.roots([a, b, c])
+    threshold = [r for r in roots if mu_bg < r < mu_sig][0]
     
-    return loading_threshold
+    return threshold, [mu_bg, var_bg, weight_bg], [mu_sig, var_sig, weight_sig]
 
 def detect_trap_sites_general(img_array, atom_number, detection_step=100):
     print('Looking for trap sites...')
@@ -284,6 +289,27 @@ def maxwell_boltzmann_cdf(P, Amp, Pc, P_offset):
     term2 = (2.0 / np.sqrt(np.pi)) * sqrt_ratio * np.exp(-ratio)
     
     return Amp * (term1 - term2)
+
+def gaussian_high_pass(image, sigma_blur):
+    """
+    Standard linear high-pass filter.
+    Subtracts a Gaussian-blurred version of the image from itself.
+    """
+    # Create the low-pass background
+    low_pass = gaussian_filter(image, sigma=sigma_blur)
+    
+    # Subtract to get the high-pass, clipping at 0 to prevent negative counts
+    high_pass = image - low_pass
+    return np.clip(high_pass, 0, None)
+
+def morphological_tophat_high_pass(image, feature_size):
+    """
+    Non-linear high-pass filter (Recommended for Tweezer Arrays).
+    Extracts bright features smaller than the feature_size.
+    """
+    # white_tophat requires a footprint (kernel size). 
+    # This should be larger than your atom spot, but smaller than the background glow.
+    return white_tophat(image, size=feature_size)
 
 
 ########################################################################################################################################################################################
@@ -781,44 +807,87 @@ class TweezerExperimentAnalysis:
                 ax[1].grid()
         return img_average
     
-    def get_array_loading_probability(self, images, grid_positions, grid_shape, threshold=6.85, window_size=5, binning=20, show_histogram=True):
+    def get_array_loading_statistics(self, images, grid_positions, grid_shape, threshold=6.85, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True):
         n_row, n_col = grid_shape
         a500 = 0.00483372
         b500 = 1828.38
         c500 = 13
-        photon_rates, count_rates, atom_counter = [], [], np.zeros(grid_shape)
+
+        photon_rates, count_rates = [], []
         for image in images:
-            counts = sum_pixel_values(image, grid_positions, [n_row, n_col], window_size=window_size)
+            counts = sum_pixel_values(image, grid_positions, grid_shape, window_size=window_size)
             electrons = (counts - b500) * a500
             photons = electrons/0.7
             photon_rate = (photons/80e-3)/1000
             photon_rates.append(photon_rate)
             count_rates.append(photon_rate*0.7)
 
-        if threshold == 0:
-            threshold = detect_loading_threshold(photon_rates)
+        photon_rates = np.array(photon_rates)
+        tot_photon_rates = photon_rates.flatten()
 
-        for photon_rate in photon_rates:
-            atoms = np.zeros_like(photon_rate)
-            atoms[photon_rate > threshold] = 1
-            atom_counter += atoms
+        if threshold_detection:
+            try:
+                threshold, bg_params, sig_params = detect_loading_threshold(tot_photon_rates)
+                mu_bg, var_bg, weight_bg  = bg_params
+                mu_sig, var_sig, weight_sig = sig_params
+                prob_false_negative = norm.cdf(threshold, loc=mu_sig, scale=np.sqrt(var_sig))
+                prob_false_positive = 1.0 - norm.cdf(threshold, loc=mu_bg, scale=np.sqrt(var_bg))
+                total_error = (weight_bg * prob_false_positive) + (weight_sig * prob_false_negative)
+                fidelity = 1.0 - total_error
+            except Exception as e:
+                mu_bg = tot_photon_rates[tot_photon_rates < threshold].mean()
+                mu_sig = tot_photon_rates[tot_photon_rates >= threshold].mean()
+                var_bg = tot_photon_rates[tot_photon_rates < threshold].var()
+                var_sig = tot_photon_rates[tot_photon_rates >= threshold].var()
+                fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg)))
+                
+        else:
+            mu_bg = tot_photon_rates[tot_photon_rates < threshold].mean()
+            mu_sig = tot_photon_rates[tot_photon_rates >= threshold].mean()
+            var_bg = tot_photon_rates[tot_photon_rates < threshold].var()
+            var_sig = tot_photon_rates[tot_photon_rates >= threshold].var()
+            fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg)))
             
+        atom_counter = (photon_rates > threshold).astype(int).sum(axis=0)
         loading_probabilities = atom_counter / len(images)
+        
         if show_histogram:
-            fig, ax = plt.subplots(1, 3, figsize = (21,5))
+            fig, ax = plt.subplots(1, 3, figsize = (16,5), constrained_layout=True)
+
             for n in range(n_row):
                 for m in range(n_col):
-                    ax[0].hist(np.array(photon_rates)[:, n, m], bins=binning, alpha=0.6)
+                    ax[0].hist(photon_rates[:, n, m], bins=40, density=True, alpha=0.6, range=(min(tot_photon_rates), max(tot_photon_rates)))
                     ax[0].set_xlabel('Photon Rate / kHz')
-                    ax[0].set_ylabel('Measurements')
-                    print(f'Trap ({n}, {m}) Loading Probability : {loading_probabilities[n, m]*100} %')
-            ax[1].hist(np.array(photon_rates).ravel(), bins=binning, alpha=0.8)
-            ax[1].axvline(x=threshold, color='red', linestyle='--')
+                    ax[0].set_ylabel('Probability Density')
+                    if verbose:
+                        print(f'Trap ({n}, {m}) Loading Probability : {loading_probabilities[n, m]*100:.2f} %')
+
+            if threshold_detection:
+                x_fit = np.linspace(min(tot_photon_rates), max(tot_photon_rates), 1000)
+                pdf_bg = weight_bg * norm.pdf(x_fit, mu_bg, np.sqrt(var_bg))
+                pdf_sig = weight_sig * norm.pdf(x_fit, mu_sig, np.sqrt(var_sig))
+                ax[1].plot(x_fit, pdf_bg + pdf_sig, 'k-', lw=2,)
+                ax[1].plot(x_fit, pdf_bg, 'b--', lw=2, label=f'Background Fit ($\mu$={mu_bg:.1f})')
+                ax[1].plot(x_fit, pdf_sig, 'r--', lw=2, label=f'Signal Fit ($\mu$={mu_sig:.1f})')
+
+            ax[1].hist(tot_photon_rates, bins=binning, density=True, alpha=0.5, color='gray', edgecolor='black', label='Raw Data')
+            ax[1].axvline(x=threshold, color='green', linestyle='--', lw=2, label=f'Threshold ({threshold:.1f} kHz)')
             ax[1].set_xlabel('Photon Rate / kHz')
-            ax[1].set_ylabel('Measurements')
+            ax[1].set_ylabel('Probability Density')
+            ax[1].legend()
+            
             cax = ax[2].matshow(loading_probabilities, cmap='viridis', vmin=0.3)
             fig.colorbar(cax, ax=ax[2])
-        return photon_rates, loading_probabilities, threshold
+
+        if verbose:
+            print(f"\Detected Loading Threshold: {threshold:.2f} kHz")
+            print(f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean()*100:.2f} %")
+            print(f"Mean Loading Probability: {loading_probabilities.mean()*100:.2f} %")
+            print(f"Detection Fidelity: {fidelity*100:.2f} %")
+            print(f"Mean Background Photon Rate: {mu_bg:.2f} kHz, Variance: {var_bg:.2f} (kHz)^2")
+            print(f"Mean Signal Photon Rate: {mu_sig:.2f} kHz, Variance: {var_sig:.2f} (kHz)^2")
+
+        return photon_rates, loading_probabilities, threshold, fidelity
     
     def get_array_loading_probability_general(self, images, grid_positions, threshold=6.85, window_size=5, binning=20):
         a500 = 0.00483372
