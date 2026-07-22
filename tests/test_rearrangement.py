@@ -119,34 +119,44 @@ def test_arm_before_initialise_raises(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Simplified ARM pipeline: generate_rearrangement_sequence + slm.run_sequence
+# ARM pipeline: iter_rearrangement_sequence streamed to the SLM
 # --------------------------------------------------------------------------- #
 
 class FakePM:
-    """Stands in for the GPU phasemask generator's rearrangement entry point."""
+    """Stands in for the GPU phasemask generator's rearrangement entry point.
+
+    Mirrors the real streaming signature: a generator yielding one frame at a time.
+    """
 
     def __init__(self, n_frames=5):
         self.n_frames = n_frames
         self.called_with = None
 
-    def generate_rearrangement_sequence(self, terms1, terms2, occ_mask, d0):
-        self.called_with = dict(terms1=terms1, terms2=terms2, occ_mask=occ_mask, d0=d0)
-        seq = np.zeros((self.n_frames, 8, 8), dtype=np.uint8)
-        return seq, "debug"
+    def iter_rearrangement_sequence(self, terms1, terms2, occ_mask, d0,
+                                    profile="minimum_jerk", to_host=True):
+        self.called_with = dict(
+            terms1=terms1, terms2=terms2, occ_mask=occ_mask, d0=d0,
+            profile=profile, to_host=to_host,
+        )
+        for _ in range(self.n_frames):
+            yield np.zeros((8, 8), dtype=np.uint8)
 
 
-def test_arm_generates_sequence_and_plays_it(monkeypatch):
-    monkeypatch.setattr(rearr, "_HAS_CUPY", True)
-    # Occupancy extraction is faked so no real analysis/GPU is needed.
+def _patch_occupancy(monkeypatch):
+    """Fake occupancy extraction so no real analysis/GPU/C++ is needed."""
     from pytweezer.analysis import analysis as an
+    # Force the numpy branch so the patched sum_pixel_values is the one used.
+    monkeypatch.setattr(rearr, "USE_SUM_CPP", False)
     monkeypatch.setattr(an, "morphological_tophat_high_pass", lambda img, feature_size: img)
     # np.fliplr is applied to this before thresholding, so [[5, 0]] -> [0, 5].
     monkeypatch.setattr(an, "sum_pixel_values",
                         lambda img, grid, shape, window_size: np.array([[5.0, 0.0]]))
 
-    camera, slm = FakeCamera(), SimulatedSLM()
+
+def _armed_coord(pm, slm=None, camera=None):
+    camera = camera or FakeCamera()
+    slm = slm or SimulatedSLM()
     coord = Rearrangement({"camera": camera, "slm": slm}, {})
-    pm = FakePM(n_frames=5)
     coord._initialised = True
     coord._state = dict(
         PM=pm,
@@ -154,7 +164,18 @@ def test_arm_generates_sequence_and_plays_it(monkeypatch):
         terms2=("w2", "phi2", "x2", "y2", (1, 2)),
         pm_init_uint8=np.zeros((1024, 1024), dtype=np.uint8),
         d0=0.5, fps=1000.0, threshold=1.0, grid_positions=None, roi=None,
+        profile="minimum_jerk",
     )
+    return coord
+
+
+def test_arm_streams_sequence_to_slm(monkeypatch):
+    monkeypatch.setattr(rearr, "_HAS_CUPY", True)
+    _patch_occupancy(monkeypatch)
+
+    slm = SimulatedSLM()
+    pm = FakePM(n_frames=5)
+    coord = _armed_coord(pm, slm=slm)
 
     img0, img1 = coord.arm_rearrangement()
 
@@ -162,9 +183,40 @@ def test_arm_generates_sequence_and_plays_it(monkeypatch):
     assert pm.called_with["terms1"] == coord._state["terms1"]
     assert pm.called_with["d0"] == 0.5
     np.testing.assert_array_equal(pm.called_with["occ_mask"], np.array([False, True]))
-    # SLM saw the initial mask (1) plus every sequence frame (5) played in-process.
+    # Frames are consumed on the writer thread, so the copy is left to it.
+    assert pm.called_with["to_host"] is False
+    # SLM saw the initial mask (1) plus every streamed frame (5), in-process.
     assert slm.frames_written == 1 + 5
     assert img0.shape == (8, 8) and img1.shape == (8, 8)
+
+
+def test_arm_passes_configured_profile(monkeypatch):
+    monkeypatch.setattr(rearr, "_HAS_CUPY", True)
+    _patch_occupancy(monkeypatch)
+
+    pm = FakePM(n_frames=2)
+    coord = _armed_coord(pm)
+    coord._state["profile"] = "linear"
+    coord.arm_rearrangement()
+
+    assert pm.called_with["profile"] == "linear"
+
+
+def test_arm_reraises_slm_upload_error(monkeypatch):
+    """An upload failure must surface, not be swallowed by the writer thread."""
+    monkeypatch.setattr(rearr, "_HAS_CUPY", True)
+    _patch_occupancy(monkeypatch)
+
+    class ExplodingSLM(SimulatedSLM):
+        def update_mask(self, mask_array):
+            if getattr(self, "_armed", False):
+                raise RuntimeError("DMA failed")
+            self._armed = True
+            super().update_mask(mask_array)
+
+    coord = _armed_coord(FakePM(n_frames=4), slm=ExplodingSLM())
+    with pytest.raises(RuntimeError, match="DMA failed"):
+        coord.arm_rearrangement()
 
 
 # --------------------------------------------------------------------------- #
