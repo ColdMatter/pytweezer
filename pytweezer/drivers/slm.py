@@ -152,7 +152,10 @@ class SLM:
         ret1 = self._lib.ImageWriteComplete(self.board_number, self.timeout_ms)
         if ret1 != 1:
             raise RuntimeError("SLM ImageWriteComplete failed")
-        LOGGER.info("Updated mask to SLM board %d", mask.shape[1], mask.shape[0], self.board_number)
+        # debug, not info: this runs once per frame on the rearrangement hot path.
+        LOGGER.debug(
+            "Wrote %dx%d mask to SLM board %d", mask.shape[1], mask.shape[0], self.board_number
+        )
 
     def preload_sequence(self, mask_sequence: np.ndarray) -> None:
         """Upload a whole ``(n, H, W)`` sequence into the SLM's on-board memory.
@@ -174,7 +177,8 @@ class SLM:
         )
 
     def start_auto_increment(self, list_length: int) -> None:
-        """Arm hardware auto-increment over a preloaded sequence.
+        """Arm hardware auto-increment over a p
+        reloaded sequence.
 
         After :meth:`preload_sequence`, this makes the SLM listen for external
         triggers: frame 0 is live once armed, then each trigger advances to the
@@ -216,7 +220,8 @@ class SLM:
             self.update_mask(seq[i])
             if period:
                 time.sleep(period)
-            LOGGER.info("Updated sequence frame %d/%d", i + 1, n)
+            LOGGER.debug("Displayed sequence frame %d/%d", i + 1, n)
+        LOGGER.info("Displayed %d-frame sequence at %s fps.", n, fps)
 
     def get_temperature(self) -> float:
         self._require_slm()

@@ -19,22 +19,30 @@ the coordinator contract):
 * :meth:`initialise` — build the GPU phasemask generator, configure the camera,
   precompute the initial array. Takes the two trap parameter sets (``data1``/
   ``data2``, shape ``(4, N)``: w, phi, x, y).
-* :meth:`arm_rearrangement` — grab an image, extract the occupancy mask, generate
-  the interpolated phase sequence
-  (``OptimisationBasedPhasemaskGeneratorGPU.generate_rearrangement_sequence``), play
-  it to the SLM, then grab a reset image. Returns the before/after images.
+* :meth:`arm_rearrangement` — grab an image, extract the occupancy mask, then
+  generate the interpolated phase sequence
+  (``OptimisationBasedPhasemaskGeneratorGPU.iter_rearrangement_sequence``) and
+  upload it to the SLM concurrently, then grab a reset image. Returns the
+  before/after images.
 * :meth:`test` / :meth:`status` / :meth:`shutdown`.
+
+Generation and upload are pipelined: the GPU loop pushes each finished frame onto a
+bounded queue and a writer thread copies it to the host and DMAs it to the board, so
+synthesis of frame *n+1* overlaps the upload of frame *n*. The queue depth
+(:data:`UPLOAD_QUEUE_DEPTH`) bounds how far the GPU may run ahead.
 
 ``cupy``/``lap`` and the heavy GPU math are imported lazily, so this module imports
 and :meth:`status` works on any machine; :meth:`initialise`/:meth:`arm_rearrangement`
 raise a clear error where the GPU stack is absent.
 
-The remaining timing optimisation — preloading the whole sequence into the SLM's
-on-board memory and clocking it out with a hardware trigger instead of the
-software-timed :meth:`SLM.run_sequence` — is described in
+The remaining timing optimisation — preloading frames into the SLM's on-board memory
+and clocking them out with a hardware trigger (``preload_sequence`` /
+``start_auto_increment``) instead of per-frame software writes — is described in
 ``docs/rearrangement_coordinator.md``.
 """
 
+import queue
+import threading
 import time
 
 import numpy as np
@@ -54,6 +62,42 @@ try:
 except Exception:  # pragma: no cover - depends on the machine's GPU stack
     cp = None
     _HAS_CUPY = False
+
+#: Set ``False`` to force the numpy occupancy path instead of the C++ extension.
+USE_SUM_CPP = True
+
+_sum_cpp_module = None
+_sum_cpp_loaded = False
+
+#: How many generated frames may queue ahead of the SLM before the GPU loop blocks.
+UPLOAD_QUEUE_DEPTH = 5
+
+
+def _sum_cpp():
+    """Return the compiled pixel-summing extension, or ``None`` to use numpy.
+
+    Imported on first use rather than at module scope: loading this native extension
+    into a process that has already loaded other native libraries (PyQt5, notably)
+    can abort the interpreter outright, which no ``try``/``except`` can catch.
+    Importing this module must stay safe everywhere, so the risk is deferred to the
+    hot path that actually wants the speedup.
+    """
+    global _sum_cpp_module, _sum_cpp_loaded
+    if not USE_SUM_CPP:
+        return None
+    if not _sum_cpp_loaded:
+        _sum_cpp_loaded = True
+        try:
+            from pytweezer.cpp import sum_pixel_values_cpp
+
+            _sum_cpp_module = sum_pixel_values_cpp
+        except Exception:  # pragma: no cover - depends on whether it was built
+            LOGGER.debug(
+                "sum_pixel_values_cpp unavailable; using the numpy fallback.",
+                exc_info=True,
+            )
+            _sum_cpp_module = None
+    return _sum_cpp_module
 
 
 #: Default phasemask-generator geometry (the lab's Rb SLM); overridable via config.
@@ -135,12 +179,18 @@ class Rearrangement(Coordinator):
         threshold: float,
         grid_positions,
         roi=None,
+        profile: str = "minimum_jerk",
     ) -> None:
         """Build the phasemask generator, configure the camera, precompute masks.
 
         ``data1``/``data2`` are ``(4, N)`` arrays of trap parameters (w, phi, x, y)
         for the initial and target arrays. Everything GPU-side is kept on the device
         between here and :meth:`arm_rearrangement`.
+
+        ``profile`` picks the transport trajectory used by every subsequent
+        :meth:`arm_rearrangement`: ``"minimum_jerk"`` (smoother on the atoms) or
+        ``"linear"``, which needs 1.875x fewer frames for the same ``d0`` and so
+        completes the move in proportionally less time.
         """
         self._require_gpu()
         from pytweezer import phasemask as pm
@@ -176,6 +226,7 @@ class Rearrangement(Coordinator):
             terms1=terms1, terms2=terms2,
             pm_init_uint8=pm_init_uint8,
             d0=d0, fps=fps, threshold=threshold, grid_positions=grid_positions, roi=roi,
+            profile=profile,
         )
         self._initialised = True
         LOGGER.info("Rearrangement node initialised.")
@@ -184,16 +235,86 @@ class Rearrangement(Coordinator):
     # Arm / run one rearrangement
     # ------------------------------------------------------------------ #
 
+    def _extract_occupancy(self, image, array_shape, threshold):
+        """Threshold per-site pixel sums into a flat boolean occupancy mask.
+
+        Uses the compiled ``sum_pixel_values`` when it is available and the image is
+        ``uint16`` (the dtype the extension is built for), else the numpy version.
+        """
+        from pytweezer.analysis import analysis as an
+
+        img = an.morphological_tophat_high_pass(image, feature_size=10)
+        grid_positions = self._state["grid_positions"]
+
+        cpp = _sum_cpp()
+        if cpp is not None and getattr(img, "dtype", None) == np.uint16:
+            pixel_sums = cpp.sum_pixel_values(
+                img, grid_positions, array_shape, window_size=3
+            )
+        else:
+            pixel_sums = an.sum_pixel_values(
+                img, grid_positions, array_shape, window_size=3
+            )
+        return np.fliplr(pixel_sums).flatten() > threshold
+
+    def _play_sequence_pipelined(self, frames):
+        """Upload each frame to the SLM as it is produced; return the frame count.
+
+        ``frames`` is an iterator of ``cupy`` (or numpy) uint8 masks. A writer thread
+        drains a bounded queue, so the GPU keeps synthesising while the previous frame
+        is copied to the host and DMA'd to the board. The GPU->host ``.get()`` runs on
+        the writer thread to keep the PCIe transfer off the generation loop.
+
+        The queue depth bounds how far generation may run ahead. On an upload error
+        the writer keeps draining (without touching hardware) so the producer cannot
+        deadlock on a full queue; the first error is re-raised here.
+        """
+        upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
+        errors = []
+
+        def writer():
+            while True:
+                frame = upload_queue.get()
+                if frame is None:
+                    return
+                if errors:
+                    continue  # drain the rest so the producer never blocks
+                try:
+                    # cupy arrays expose .get(); numpy frames pass straight through.
+                    host_frame = frame.get() if hasattr(frame, "get") else frame
+                    self.slm.update_mask(host_frame)
+                except Exception as exc:
+                    errors.append(exc)
+
+        thread = threading.Thread(target=writer, name="slm-upload", daemon=True)
+        thread.start()
+
+        n_frames = 0
+        try:
+            for frame in frames:
+                upload_queue.put(frame)
+                n_frames += 1
+        finally:
+            upload_queue.put(None)
+            thread.join()
+
+        if errors:
+            raise errors[0]
+        return n_frames
+
     def arm_rearrangement(self):
         """Run one rearrangement and return the ``(before, after)`` camera images.
 
-        Loads the initial array, grabs an occupancy image, generates the full
-        interpolated phase sequence on the GPU, plays it to the SLM, and grabs a
+        Loads the initial array, grabs an occupancy image, then generates the
+        interpolated phase sequence and uploads it to the SLM *concurrently* - each
+        frame goes to the board as soon as the GPU produces it - and finally grabs a
         reset image. Timing breakdown is logged.
+
+        Generation and upload overlap, so they are timed together; splitting them
+        would only measure where the pipeline happened to stall.
         """
         self._require_gpu()
         self._require_initialised()
-        from pytweezer.analysis import analysis as an
 
         s = self._state
         PM = s["PM"]
@@ -208,36 +329,32 @@ class Rearrangement(Coordinator):
         t1 = time.time()
 
         # 2. Occupancy mask.
-        img = an.morphological_tophat_high_pass(img_array0, feature_size=10)
-        pixel_sums = np.fliplr(
-            an.sum_pixel_values(img, s["grid_positions"], arr_shape1, window_size=3)
-        )
-        occ_mask = pixel_sums.flatten() > s["threshold"]
+        occ_mask = self._extract_occupancy(img_array0, arr_shape1, s["threshold"])
         t2 = time.time()
 
-        # 3. Optimal pairing + full interpolated sequence (host-side uint8 frames).
-        sequence, _debug = PM.generate_rearrangement_sequence(
-            s["terms1"], s["terms2"], occ_mask, d0=s["d0"]
+        # 3. Pairing, interpolation and SLM upload, pipelined.
+        frames = PM.iter_rearrangement_sequence(
+            s["terms1"], s["terms2"], occ_mask,
+            d0=s["d0"],
+            profile=s.get("profile", "minimum_jerk"),
+            to_host=False,
         )
+        n_frames = self._play_sequence_pipelined(frames)
         t3 = time.time()
 
-        # 4. Play the sequence to the SLM.
-        self.slm.run_sequence(sequence, fps=s["fps"])
-        t4 = time.time()
-
-        # 5. Reset image.
+        # 4. Reset image.
         try:
             self.camera.start_acquisition()
             img_array1 = self.camera.acquire_n_frames(1)[0]
         except Exception:
             LOGGER.exception("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)
-        t5 = time.time()
+        t4 = time.time()
 
         LOGGER.info(
             "Rearrangement complete: %d frames, %.4fs total "
-            "(occupancy %.4fs, sequence %.4fs, slm %.4fs, reset %.4fs).",
-            len(sequence), t5 - t1, t2 - t1, t3 - t2, t4 - t3, t5 - t4,
+            "(occupancy %.4fs, sequence+upload %.4fs, reset %.4fs).",
+            n_frames, t4 - t1, t2 - t1, t3 - t2, t4 - t3,
         )
         return np.asarray(img_array0), np.asarray(img_array1)
 
