@@ -1,6 +1,6 @@
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QGridLayout,
@@ -124,10 +124,10 @@ class TreeViewWidget(QWidget):
 
     def create_model(self, parent):
         model = CheckableModel(0, 4, parent)
-        model.setHeaderData(self.FROM, Qt.Horizontal, "Name")
-        model.setHeaderData(self.SUBJECT, Qt.Horizontal, "Script")
-        model.setHeaderData(self.DATE, Qt.Horizontal, "Category")
-        model.setHeaderData(self.STREAM, Qt.Horizontal, "Inputstream")
+        model.setHeaderData(self.FROM, Qt.Orientation.Horizontal, "Name")
+        model.setHeaderData(self.SUBJECT, Qt.Orientation.Horizontal, "Script")
+        model.setHeaderData(self.DATE, Qt.Orientation.Horizontal, "Category")
+        model.setHeaderData(self.STREAM, Qt.Orientation.Horizontal, "Inputstream")
         model.itemChanged.connect(self.on_item_changed)
         return model
 
@@ -157,7 +157,7 @@ class TreeViewWidget(QWidget):
         parent_item = self.model.invisibleRootItem()
         check_item = QtGui.QStandardItem(name)
         check_item.setCheckable(True)
-        check_item.setCheckState(Qt.Checked if active else Qt.Unchecked)
+        check_item.setCheckState(Qt.CheckState.Checked if active else Qt.CheckState.Unchecked)
 
         parent_item.appendRow(
             [
@@ -173,7 +173,7 @@ class TreeViewWidget(QWidget):
         name = item.text()
         index = item.index()
         category = self.model.data(self.model.index(index.row(), 2))
-        active = item.checkState() == Qt.Checked
+        active = item.checkState() == Qt.CheckState.Checked
 
         response = self.rpc.request(
             {
@@ -185,7 +185,7 @@ class TreeViewWidget(QWidget):
         )
         if not response.get("ok"):
             logger.error(f"AnalysisManager RPC error: {response.get('error')}")
-            item.setCheckState(Qt.Unchecked if active else Qt.Checked)
+            item.setCheckState(Qt.CheckState.Unchecked if active else Qt.CheckState.Checked)
             return
 
         self._props.set(f"{category}/{name}/active", active)
@@ -201,7 +201,7 @@ class TreeViewWidget(QWidget):
             row = item.index().row()
             category = self.model.data(self.model.index(row, 2))
             key = f"{category}/{name}"
-            should_be_checked = Qt.Checked if running.get(key, False) else Qt.Unchecked
+            should_be_checked = Qt.CheckState.Checked if running.get(key, False) else Qt.CheckState.Unchecked
             if item.checkState() != should_be_checked:
                 # Block signals to avoid sending RPC while reflecting status.
                 self.model.blockSignals(True)
@@ -242,7 +242,7 @@ class TreeViewWidget(QWidget):
             editor = PropEdit('/Analysis/' + category + '/' + name + '/')
             layout.addWidget(editor)
             dialog.setLayout(layout)
-            dialog.exec_()
+            dialog.exec()
 
 
 class AddAnalysisWidget(QtWidgets.QWidget):
@@ -429,7 +429,7 @@ def main():
 
     window = AnalysisManager()
     window.show()
-    app.exec_()
+    app.exec()
 
 
 if __name__ == '__main__':

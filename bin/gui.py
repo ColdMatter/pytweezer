@@ -29,8 +29,8 @@ import os
 import signal
 import sys
 
-from PyQt5.QtCore import QSettings, Qt
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtWidgets import (
     QApplication,
     QDockWidget,
     QLabel,
@@ -62,7 +62,7 @@ def _safe_panel(label, factory):
     except Exception:
         logger.exception("Failed to build %r panel", label)
         placeholder = QLabel(f"{label} unavailable — see logs.")
-        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         placeholder.setWordWrap(True)
         return placeholder
 
@@ -80,12 +80,6 @@ class TabbedGUI(QMainWindow):
     system provides that for free. Grid/tree panels are wrapped in a scroll area
     so they stay usable when embedded; an already-tabbed panel (the stream
     monitor) is added as-is.
-
-    Deliberately a plain ``QMainWindow`` (not ``BMainWindow``): the shell has no
-    need for a ``Properties`` connection, and avoiding it keeps startup fast and
-    independent of the Propertyhub/Propertylogger being reachable. Window
-    geometry and the dock layout are persisted with ``QSettings``, mirroring the
-    ``BWidget`` convention.
     """
 
     def __init__(self, name, tabs, parent=None):
@@ -95,7 +89,7 @@ class TabbedGUI(QMainWindow):
         self.setDockNestingEnabled(True)
         # Tabbed docks default to a bottom tab bar; put it on top to match the
         # conventional tab-widget look.
-        self.setTabPosition(Qt.AllDockWidgetAreas, QTabWidget.North)
+        self.setTabPosition(Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
         # QMainWindow always reserves a central area; a zero-size placeholder
         # lets the tabified docks fill the window like a plain tab widget.
         central = QWidget()
@@ -110,14 +104,15 @@ class TabbedGUI(QMainWindow):
             dock = QDockWidget(label, self)
             # Stable objectName is required for saveState()/restoreState().
             dock.setObjectName(f"dock:{label}")
-            dock.setAllowedAreas(Qt.AllDockWidgetAreas)
+            dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
             # Movable + floatable, but not closable: hiding a panel with no easy
             # way back would just be a footgun.
             dock.setFeatures(
-                QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
+                QDockWidget.DockWidgetFeature.DockWidgetMovable
+                | QDockWidget.DockWidgetFeature.DockWidgetFloatable
             )
             dock.setWidget(self._wrap(widget))
-            self.addDockWidget(Qt.TopDockWidgetArea, dock)
+            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, dock)
             if previous is not None:
                 self.tabifyDockWidget(previous, dock)
             previous = dock
@@ -165,41 +160,31 @@ class TabbedGUI(QMainWindow):
 # GUI builders and entry points
 # --------------------------------------------------------------------------- #
 
-def build_server_gui():
-    # Imported lazily (inside the builder, after the QApplication exists) so
-    # property_editor's module-level QApplication reuse doesn't fight _run().
+def build_gui(server: bool) -> TabbedGUI:
     from pytweezer.GUI.property_editor import PropEdit
     from pytweezer.GUI.analysismanager import AnalysisManager
 
+    name = "Server" if server else "Client"
+    
     return TabbedGUI(
-        "Server GUI",
+        f"PyTweezer {name}",
         [
-            ("Servers", _safe_panel("Servers", lambda: ControlPanel("server", "Servers", controllable=True))),
+            ("Servers", _safe_panel("Servers", lambda: ControlPanel("server", "Servers", controllable=server))),
             ("Devices", _safe_panel("Devices", lambda: DevicesPanel("device"))),
-            ("Loggers", _safe_panel("Loggers", lambda: ControlPanel("logger", "Loggers", controllable=True))),
-            ("Streams", _safe_panel("Streams", lambda: make_stream_monitor("StreamMonitor"))),
+            ("Loggers", _safe_panel("Loggers", lambda: ControlPanel("logger", "Loggers", controllable=server))),
+            ("Streams", _safe_panel("Streams", lambda: make_stream_monitor("Stream Monitor"))),
             ("Applets", _safe_panel("Applets", lambda: AppletLauncher("Applet Launcher"))),
-            ("Analysis", _safe_panel("Analysis", lambda: AnalysisManager("Analysis Manager UI"))),
+            ("Analysis", _safe_panel("Analysis", lambda: AnalysisManager("Analysis"))),
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],
     )
+
+def build_server_gui():
+    return build_gui(True)
 
 
 def build_client_gui():
-    from pytweezer.GUI.property_editor import PropEdit
-    from pytweezer.GUI.analysismanager import AnalysisManager
-
-    return TabbedGUI(
-        "Client GUI",
-        [
-            ("Server Status", _safe_panel("Server Status", lambda: ControlPanel("server status", "Servers", controllable=False))),
-            ("Devices", _safe_panel("Devices", lambda: DevicesPanel("device"))),
-            ("Applets", _safe_panel("Applets", lambda: AppletLauncher("Applet Launcher"))),
-            ("Analysis", _safe_panel("Analysis", lambda: AnalysisManager("Analysis Manager UI"))),
-            ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
-            ("Streams", _safe_panel("Streams", lambda: make_stream_monitor("StreamMonitor"))),
-        ],
-    )
+    return build_gui(False)
 
 
 def _run(build):
@@ -220,7 +205,7 @@ def _run(build):
 
     signal.signal(signal.SIGTERM, on_exit)
     signal.signal(signal.SIGINT, on_exit)
-    app.exec_()
+    app.exec()
 
     # The Qt event loop has ended: the window closed and every panel's closeEvent
     # ran, terminating the child subprocesses they manage. Some embedded panels

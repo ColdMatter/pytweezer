@@ -5,15 +5,7 @@ HOSTS = {
     "IC-CZC4287H3W": "10.59.3.2", # rb pc
     "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
-
 }
-
-# Categories whose entries all run the same launcher script, so their config entries
-# omit "script" entirely. For Devices the "class" key names the backend to serve.
-# Use ConfigReader.script_for(category, params) rather than params["script"].
-DEFAULT_SCRIPTS = {
-    "Devices": "../pytweezer/servers/device_server.py",
-} # TODO: this isn't actually needed but breaks the servers if removed
 
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
@@ -113,8 +105,7 @@ CONFIG = {
     "Devices": {
          "Rb MotMaster": {
             "active": True,
-            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
-            "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+            "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "teardown": "disconnect",
             "config_file": "rb_mm_config.json",
             "host": HOSTS["IC-CZC4287H3W"],
@@ -123,8 +114,7 @@ CONFIG = {
         },
         "CaF MotMaster": {
             "active": True,
-            "class": "pytweezer.experiment.motmaster_server:MotMasterInterface",
-            "sim_class": "pytweezer.experiment.motmaster_server:SimulatedMotMasterInterface",
+            "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "teardown": "disconnect",
             "config_file": "caf_mm_config.json",
             "host": HOSTS["ph-bonesaw"],

@@ -38,8 +38,8 @@ pillow = "^12.1.0"
 pyzmq = "^27.1.0"
 
 # --- Qt Stuff ---
-PyQt5 = "=5.15.10"
-PyQt5-qt5 = "=5.15.2"
+PyQt6 = "^6.9"
+PyQt6-Qt6 = "^6.9"
 
 
 # --- Jupyter Support ---

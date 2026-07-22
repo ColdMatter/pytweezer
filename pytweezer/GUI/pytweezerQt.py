@@ -1,9 +1,9 @@
 
-from PyQt5.QtWidgets import *
+from PyQt6.QtWidgets import *
 from pytweezer.servers import Properties,tweezerpath,PropertyAttribute
-from PyQt5 import QtCore
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QKeyEvent
+from PyQt6 import QtCore
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QKeyEvent
 
 from pytweezer.logging_utils import get_logger
 logger = get_logger("pytweezer.GUI.pytweezerQt")
@@ -82,16 +82,16 @@ class SearchComboBox(QComboBox):
         super().__init__(parent)
         self.setLineEdit(SearchLineEdit(self))
         self.setEditable(True)
-        self.setInsertPolicy(QComboBox.NoInsert)
-        self.completer().setCompletionMode(QCompleter.PopupCompletion)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.completer().setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         if match_flag == 'contains':
-            self.matchFlag = Qt.MatchContains
+            self.matchFlag = Qt.MatchFlag.MatchContains
         elif match_flag == 'begins':
-            self.matchFlag = Qt.MatchStartsWith
+            self.matchFlag = Qt.MatchFlag.MatchStartsWith
         else:
             print('SearchComboBox: invalid matchflag set. Must be either contains or begins')
             print('Setting to default: contains')
-            self.matchFlag = Qt.MatchContains
+            self.matchFlag = Qt.MatchFlag.MatchContains
         self.completer().setFilterMode(self.matchFlag)
         self.setDuplicatesEnabled(False)
 
@@ -120,9 +120,9 @@ class SearchLineEdit(QLineEdit):
         super().__init__(parent)
 
     def keyPressEvent(self, event: QKeyEvent):
-        if event.key() == Qt.Key_Escape:
+        if event.key() == Qt.Key.Key_Escape:
             self.setText(self.lastText)
-        elif event.key() == Qt.Key_Enter:
+        elif event.key() == Qt.Key.Key_Enter:
             self.lastText = self.text()
         else:
             super().keyPressEvent(event)

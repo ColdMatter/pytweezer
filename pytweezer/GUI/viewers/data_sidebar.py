@@ -8,8 +8,8 @@ edited through the standard :class:`SubscriptionEditor`.
 Call :meth:`update` from the host applet's poll loop to drain new data.
 """
 
-from PyQt5 import QtWidgets
-from PyQt5.QtWidgets import QDialog, QVBoxLayout
+from PyQt6 import QtWidgets
+from PyQt6.QtWidgets import QDialog, QVBoxLayout
 
 from pytweezer.servers import DataClient
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
@@ -45,7 +45,7 @@ class DataSidebar(QtWidgets.QWidget):
         self.table.setHorizontalHeaderLabels(["field", "value"])
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.table)
 
         self.setMinimumWidth(180)
@@ -65,7 +65,7 @@ class DataSidebar(QtWidgets.QWidget):
         editor = SubscriptionEditor(self._props, "Data", streamkey=self.streamkey)
         layout.addWidget(editor)
         dialog.setLayout(layout)
-        dialog.exec_()
+        dialog.exec()
         self.update_subscriptions()
 
     def update(self):

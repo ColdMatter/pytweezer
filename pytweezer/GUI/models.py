@@ -1,6 +1,6 @@
-from PyQt5 import QtCore
-from PyQt5.QtCore import Qt
-from PyQt5.QtCore import QDateTime
+from PyQt6 import QtCore
+from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QDateTime
 
 """
 Here we define the models Queue and PrepStation tables.
@@ -67,17 +67,17 @@ class DictSyncModel(QtCore.QAbstractTableModel):
     def columnCount(self, parent=None):
         return len(self.headers)
 
-    def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid() or role not in (Qt.DisplayRole, Qt.EditRole):
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             return None
         else:
             k = self.row_to_key[index.row()]
             return self.convert(k, self.backing_store[k], index.column())
 
-    def setData(self, index, value, role=Qt.DisplayRole):
+    def setData(self, index, value, role=Qt.ItemDataRole.DisplayRole):
         if value == '':
             return False
-        if role == Qt.EditRole:
+        if role == Qt.ItemDataRole.EditRole:
             k = self.row_to_key[index.row()]
             col = index.column()
             if col == 7:
@@ -87,9 +87,9 @@ class DictSyncModel(QtCore.QAbstractTableModel):
             self.backing_store[k][self.dataNames[col]] = value
             return True
 
-    def headerData(self, col, orientation, role=Qt.DisplayRole):
-        if (orientation == Qt.Horizontal and
-                role == Qt.DisplayRole):
+    def headerData(self, col, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if (orientation == Qt.Orientation.Horizontal and
+                role == Qt.ItemDataRole.DisplayRole):
             return self.headers[col]
         return None
 
@@ -180,9 +180,9 @@ class ScheduleModel(DictSyncModel):
 
     def flags(self, index):
         if index.column() in (4, 5, 6, 7):
-            return Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable
+            return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable
         else:
-            return Qt.ItemIsEnabled | Qt.ItemIsSelectable
+            return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
 
 class ListSyncModel(QtCore.QAbstractTableModel):
@@ -201,19 +201,19 @@ class ListSyncModel(QtCore.QAbstractTableModel):
     def columnCount(self, parent=None):
         return len(self.headers)
 
-    def data(self, index, role=Qt.DisplayRole):
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
-        elif role == Qt.DisplayRole or role == Qt.EditRole:
+        elif role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             row = index.row()
             return self.convert(row, self.backing_store[row], index.column())
         else:
             return None
 
-    def setData(self, index, value, role=Qt.DisplayRole):
+    def setData(self, index, value, role=Qt.ItemDataRole.DisplayRole):
         if value == '':
             return False
-        if role == Qt.EditRole:
+        if role == Qt.ItemDataRole.EditRole:
             k = index.row()
             col = index.column()
             if col == 7:
@@ -226,9 +226,9 @@ class ListSyncModel(QtCore.QAbstractTableModel):
             self.backing_store[k][self.dataNames[col]] = value
             return True
 
-    def headerData(self, col, orientation, role=Qt.DisplayRole):
-        if (orientation == Qt.Horizontal and
-                role == Qt.DisplayRole):
+    def headerData(self, col, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if (orientation == Qt.Orientation.Horizontal and
+                role == Qt.ItemDataRole.DisplayRole):
             return self.headers[col]
         return None
 
@@ -272,6 +272,6 @@ class PrepModel(ListSyncModel):
 
     def flags(self, index):
         if index.column() in (2, 4, 6, 7):
-            return Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable
+            return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable
         else:
-            return Qt.ItemIsEnabled | Qt.ItemIsSelectable
+            return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable

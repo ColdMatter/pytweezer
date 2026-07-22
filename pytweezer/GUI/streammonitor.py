@@ -3,9 +3,9 @@ import sys
 import json
 import datetime
 from collections import deque
-from PyQt5 import QtCore
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
+from PyQt6 import QtCore
+from PyQt6.QtGui import *
+from PyQt6.QtWidgets import *
 from pytweezer.servers import DataClient,ImageClient,CommandClient
 from pytweezer.servers.messageclient import MessageClient
 from pytweezer.GUI.pytweezerQt import BWidget
@@ -82,11 +82,11 @@ class LogMonitor(QWidget):
         self.table.setHorizontalHeaderLabels(
             ["Timestamp", "Level", "Host", "Process", "Message"]
         )
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setAlternatingRowColors(True)
-        self.table.setContextMenuPolicy(QtCore.Qt.ActionsContextMenu)
+        self.table.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
         # Give each row room for two lines so longer messages wrap rather than
         # being clipped to one; hover/double-click still reveal the full text.
         # Measure with a QFont matching the app stylesheet (QSS font settings
@@ -100,17 +100,17 @@ class LogMonitor(QWidget):
         self.table.verticalHeader().setDefaultSectionSize(self._row_height)
 
         copy_action = QAction("Copy", self.table)
-        copy_action.setShortcut(QKeySequence.Copy)
-        copy_action.setShortcutContext(QtCore.Qt.WidgetWithChildrenShortcut)
+        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        copy_action.setShortcutContext(QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut)
         copy_action.triggered.connect(self._copy_selection)
         self.table.addAction(copy_action)
 
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(self.MESSAGE_COL, QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self.MESSAGE_COL, QHeaderView.ResizeMode.Stretch)
 
         layout.addWidget(self.table)
         self.setLayout(layout)
@@ -153,7 +153,7 @@ class LogMonitor(QWidget):
             # Hover any cell in the row to read the full (untruncated) message.
             item.setToolTip(message)
             if col == self.MESSAGE_COL:
-                item.setTextAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop)
             self.table.setItem(row, col, item)
 
         if self.table.rowCount() > self.max_rows:
@@ -206,11 +206,11 @@ class LogMonitor(QWidget):
         text.setPlainText(message)
         layout.addWidget(text)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok, parent=dialog)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok, parent=dialog)
         buttons.accepted.connect(dialog.accept)
         layout.addWidget(buttons)
 
-        dialog.exec_()
+        dialog.exec()
 
 
 
@@ -234,7 +234,7 @@ def main(name):
     qApp = QApplication(sys.argv)
     Win = make_stream_monitor(name)
     Win.show()
-    qApp.exec_()
+    qApp.exec()
 
 
 

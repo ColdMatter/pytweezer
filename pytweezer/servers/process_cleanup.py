@@ -24,7 +24,7 @@ import signal
 import subprocess
 import time
 
-from pytweezer.servers.configreader import ConfigReader, tweezerpath
+from pytweezer.servers.configreader import ConfigReader, DEVICE_SERVER_SCRIPT, tweezerpath
 
 MANAGED_CATEGORIES = ("Servers", "Devices", "Loggers")
 
@@ -41,7 +41,9 @@ def _managed_scripts():
     scripts = {}
     for category in MANAGED_CATEGORIES:
         for name, params in conf.get(category, {}).items():
-            script = ConfigReader.script_for(category, params)
+            script = params.get("script") or (
+                DEVICE_SERVER_SCRIPT if category == "Devices" else None
+            )
             if not script:
                 continue
             raw_path = tweezerpath + "/bin/" + script

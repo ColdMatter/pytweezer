@@ -5,67 +5,36 @@ Complements [`gui_architecture.md`](gui_architecture.md), which covers the GUIs
 that embed the **Devices** tab and the cross-PC **Device Status** feed described
 here only in passing.
 
-## The problem this solves
 
 Every physical device (a MotMaster experiment sequencer, a camera) is driven by
 a small [sipyco](https://github.com/m-labs/sipyco) RPC server process running on
-whichever PC the hardware is attached to. Before this framework, each driver
-module (`motmaster_server.py`, `imagemX2.py`, `bfly2.py`) duplicated its own
-`argparse` parser, config-reading, backend construction, and
-`simple_server_loop(...)` call. Adding a device meant copy-pasting that
-boilerplate; the client side had the same duplication (`MotMasterClient`, one
-per device type).
+whichever PC the hardware is attached to.
 
-Now there is **one generic server launcher** and **one generic client factory**.
-A device's config entry points directly at its backend class, so both adding a new
-*instance* and adding a new *driver type* are config-only changes.
+## File map
 
-## Component map
-
-```
-pytweezer/configuration/config.py
-  CONFIG["Devices"] = { name: {"class": "module:Class", "host":..., "port":..., ...}, ... }
-
-pytweezer/servers/device_server.py      (generic server launcher)
-├── build_spec(name)       config -> DeviceServerSpec (imports "class"/"sim_class", constructs it)
-├── _make_composite   several devices in one process, one target each
-├── device_index()         flat {name -> DeviceAddress} incl. composite sub-devices
-├── resolve_address(name)  any addressable device -> DeviceAddress
-├── resolve_device(name)   launchable (top-level) device only
-├── run_device_server(name, host=None, port=None, allow_parallel=None)  blocks
-└── main()                 CLI entry: pytweezer-device <name>
-
-pytweezer/coordinators/                  (in-process device coordination)
-├── base.py           Coordinator: holds direct refs to a composite's backends
-├── camera_dac_feedback.py   CameraDACFeedback: worked example (image -> DAC)
-└── rearrangement.py         Rearrangement: camera + SLM atom-rearrangement loop
-
-pytweezer/servers/device_client.py       (generic client factory)
-├── get_device_config(name)   lenient config-key lookup (via resolve_device)
-├── get_device(name, host=None, port=None, target_name=AutoTarget, timeout=None)
-│     -> sipyco.pc_rpc.Client (transparent RPC proxy)
-└── get_device_async(name, host=None, port=None, target_name=AutoTarget)
-      -> sipyco.pc_rpc.AsyncioClient (coroutine methods; concurrent servers)
-
-pytweezer/servers/simulated_device.py    (generic simulated-backend mechanism)
-├── public_methods(real_cls, exclude=())   introspects real_cls's public methods
-├── simulate(real_cls, exclude=(), defaults=None)   class decorator: auto-stub
-│     any public method of real_cls a decorated class doesn't already define
-└── default_simulated(real_cls)   generate a full no-op stand-in from real_cls
-      (used when a device config has no "sim_class")
-
-bin/process_manager.py            DeviceManager (host-filtered start/stop tiles)
-bin/process_tile_base.py          ProcessTile (subprocess: python <script> <name>)
-pytweezer/servers/device_status.py DeviceStatusServer/-Client (cross-PC up/down feed)
-```
+| File | Role |
+|------|------|
+| `pytweezer/configuration/config.py` | `CONFIG["Devices"]` — one entry per device: `"class"`/`"sim_class"`/`host`/`port`/`active`/... |
+| `pytweezer/servers/device_server.py` | Generic server launcher: `build_spec` (imports the config's `"class"`/`"sim_class"` and constructs it), `_make_composite`, `device_index`, `resolve_address`, `resolve_device`, `run_device_server`, `main`. |
+| `pytweezer/servers/device_client.py` | Generic client factory: `get_device`, `get_device_async`, `get_device_config`. |
+| `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`, `default_simulated` (auto-generated stand-in when a device has no `sim_class`). |
+| `pytweezer/coordinators/base.py` | `Coordinator` — base for in-process coordination of a composite's backends. |
+| `pytweezer/coordinators/camera_dac_feedback.py` | `CameraDACFeedback` — worked example: frame mean → proportional DAC correction. |
+| `pytweezer/coordinators/rearrangement.py` | `Rearrangement` — camera + SLM atom-rearrangement loop (lazy GPU stack). See `docs/rearrangement_coordinator.md`. |
+| `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`, `requires_camera`. |
+| `pytweezer/drivers/imagemX2.py`, `bfly2.py` | Concrete camera backends on `Camera`, each with `Simulated* = simulated_camera_for(...)` and a legacy standalone `main()` (kept for ad hoc debugging, not on the launch path). |
+| `pytweezer/drivers/ni_dac.py`, `slm.py` | `NIDAC`/`SimulatedNIDAC`; `SLM` (Meadowlark Blink SDK)/`SimulatedSLM`. |
+| `pytweezer/drivers/motmaster.py` | `MotMasterInterface` — MOTMaster sequencer over .NET remoting; no hand-written sim class, so simulation uses the auto-generated stand-in. |
+| `bin/managed_panel.py` | `DevicesPanel` — host-filtered start/stop rows, all via `DEVICE_SERVER_SCRIPT`, with a row per composite sub-device. |
+| `pytweezer/servers/device_status.py` | `DeviceStatusServer`/`-Client` — cross-PC up/down feed (TCP probe, plus a target-listing handshake for composites). |
+| `pyproject.toml` | `pytweezer-device = "pytweezer.servers.device_server:main"` console script. |
 
 ## Server side: one launcher for every device
 
 ### Config shape
 
-Each entry in `CONFIG["Devices"]` (`pytweezer/configuration/config.py`) names its
-backend class with `"class"` (a `"module.path:ClassName"` string), alongside the
-usual `host`/`port`/`active`:
+Each entry in `CONFIG["Devices"]` names its backend class with `"class"` (a
+`"module.path:ClassName"` string), alongside the usual `host`/`port`/`active`:
 
 ```python
 "Rb HamCam": {
@@ -92,13 +61,11 @@ The config keys `build_spec` reads:
 | `"description"` | sipyco server description. Defaults to `"<name> RPC server"`. |
 | anything else | Passed to the backend constructor if its name matches an `__init__` parameter (e.g. `stream_name`, `sdk_dll`). |
 
-Every device is launched by the same file,
-`pytweezer/servers/device_server.py`, so that path is the `"Devices"` entry in
-`DEFAULT_SCRIPTS` (`config.py`). Anything that needs to spawn a process —
-`ProcessTile`, `ManagedRow`, `process_cleanup` — asks
-`ConfigReader.script_for(category, params)` rather than indexing
-`params["script"]`, so it works for categories that still name a script per entry
-(`Servers`, `GUI`) and for those that don't.
+Every device is launched by the same file, `device_server.py`. Because device
+entries omit `"script"` while every other category names one, that path lives in
+exactly one place — the `DEVICE_SERVER_SCRIPT` constant in
+`pytweezer/servers/configreader.py` — and `DevicesPanel` and `process_cleanup`
+reference it directly rather than indexing `params["script"]`.
 
 **Device names must be unique across the whole category**, composite sub-devices
 included, because `get_device` addresses every device by name (see below).
@@ -108,32 +75,25 @@ included, because `get_device` addresses every device by name (see below).
 `build_spec(name)` imports the class named by `"class"` (or `"sim_class"` when
 simulating) and constructs it **automatically**: it reads the constructor's
 signature and passes the config entries whose keys match parameter names. No
-per-driver glue function is involved. Anything a backend needs beyond receiving
-those values — resolving a path, starting a helper process, connecting to
-hardware — it does in its own `__init__` from the arguments it is given. For
-example `MotMasterInterface(config_file, interval)` resolves `config_file` against
-the package `configuration/` dir, ensures `MOTMaster.exe` is running, and connects,
+per-driver glue function is involved — a backend does whatever else it needs
+(resolving a path, starting a helper process, connecting to hardware) inside its
+own `__init__` from the arguments it's given. For example
+`MotMasterInterface(config_file, interval)` resolves `config_file` against the
+package `configuration/` dir, ensures `MOTMaster.exe` is running, and connects,
 all in `__init__`; the config just passes `"config_file": "rb_mm_config.json"`.
 
 The result is a `DeviceServerSpec(target_name, target, description,
 teardown=None)`, or `DeviceServerSpec(targets={...}, ...)` for the composite
 multi-target form. Either way `spec.targets` is the normalized
 `{target_name: target}` dict that gets served, and `run_device_server` does the
-generic part:
+generic part: build the spec, hand `spec.targets` to `simple_server_loop`, then run
+`spec.teardown()` (if given) in a `finally`.
 
-```python
-spec = build_spec(name)                  # config -> DeviceServerSpec
-simple_server_loop(spec.targets, host=host, port=port,
-                    description=spec.description, allow_parallel=allow_parallel)
-# ... then, in finally: spec.teardown() if provided (e.g. MotMaster disconnect)
-```
-
-**Backends are imported lazily** — the class string is resolved only when that
-device is actually built. This matters because a driver like the ImagEM pulls in
-`pylablib`, a hardware library that may not be installed on every machine —
-importing `device_server.py` itself must never fail just because one driver's
-hardware library is absent. Only launching *that specific* device pulls in its
-library.
+**Backends are imported lazily**, only when that specific device is actually
+built — this matters because a driver like the ImagEM pulls in `pylablib`, a
+hardware library that may not be installed on every machine, and importing
+`device_server.py` itself must never fail just because one driver's hardware
+library is absent.
 
 **Simulate-mode is a config choice, not launcher logic.** `"simulate": True`
 selects `"sim_class"` (or an auto-generated stand-in if there is none), so a
@@ -143,15 +103,13 @@ launch `MOTMaster.exe`, and the simulated camera synthesizes frames.
 ### `simulate()`: one mechanism for every driver's simulated backend
 
 `pytweezer/servers/simulated_device.py` provides a class decorator,
-`simulate(real_cls, *, exclude=(), defaults=None)`, used to build both
-`SimulatedMotMasterInterface` (`pytweezer/experiment/motmaster_server.py`) and
-`SimulatedImagEMX2Camera` (`pytweezer/drivers/imagemX2.py`). Rather than
-hand-copying every method of the real backend class into a parallel
-`Simulated*` class — which drifts out of sync silently as the real class
-changes — `simulate()` inspects `real_cls`'s public methods at class
-*definition* time (never an instance, so it never touches hardware) and
-injects a safe, logging, no-op stub for every one the decorated class doesn't
-already define itself:
+`simulate(real_cls, *, exclude=(), defaults=None)`, used to build the
+hand-written simulated backends such as `SimulatedImagEMX2Camera`. Rather than
+hand-copying every method of the real backend class into a parallel `Simulated*`
+class — which drifts out of sync silently as the real class changes —
+`simulate()` inspects `real_cls`'s public methods at class *definition* time
+(never an instance, so it never touches hardware) and injects a safe, logging,
+no-op stub for every one the decorated class doesn't already define itself:
 
 ```python
 @simulate(ImagEMX2Camera)
@@ -165,49 +123,48 @@ class SimulatedImagEMX2Camera:
     # set_ccd_mode, enable_em_gain, set_sensitivity, ... are all auto-stubbed
 ```
 
-Only methods with genuinely interesting fake behavior need a hand-written
-body; everything else stays interface-complete automatically, and stubs
-return plain `None`/`dict`/`list` values (never a `unittest.mock.Mock`) so
-they remain serializable by `sipyco.pyon` when a client calls them over RPC —
-a bare `MagicMock`/`create_autospec` object is **not** PYON-encodable and
-breaks every unconfigured RPC call, which is why this repo doesn't use one as
-the literal RPC target. `defaults={method_name: value_or_zero_arg_callable}`
-overrides the stub's return value for methods where `None` would be a poor
-fake (e.g. `dict`/`list` for methods real callers expect to iterate over).
+Only methods with genuinely interesting fake behavior need a hand-written body;
+everything else stays interface-complete automatically, and stubs return plain
+`None`/`dict`/`list` values so they remain
+serializable by `sipyco.pyon` when a client calls them over RPC — a bare
+`MagicMock`/`create_autospec` object is **not** PYON-encodable and breaks every
+unconfigured RPC call, which is why this repo doesn't use one as the literal RPC
+target. `defaults={method_name: value_or_zero_arg_callable}` overrides the stub's
+return value for methods where `None` would be a poor fake (e.g. `dict`/`list` for
+methods real callers expect to iterate over).
 
-`simulate()` is MRO-aware: it only stubs a method the decorated class does not
+`simulate()` is MRO-aware: it only stubs a method the decorated class doesn't
 already provide *itself or via a base class*. That's what lets a per-driver
 simulated class inherit real fake behaviour from a shared base (e.g.
 `SimulatedCamera`) and get only the driver's *extra* methods stubbed — see the
-`Camera` abstraction above.
+`Camera` abstraction below.
 
 ### Cameras: the shared `Camera` abstraction
 
 Camera drivers don't each reimplement ROI/trigger/acquisition/broadcast logic.
 `pytweezer/drivers/camera_base.py` defines:
 
-- `Camera(ABC)` — owns everything generic to a camera server: image
-  broadcasting onto the ZMQ stream, TIFF autosave, the autosave/broadcast
-  acquisition loop (`acquire_n_frames`/`acquire_single_frame`), and the
-  connect/relinquish/reacquire lifecycle. It declares the small set of
-  hardware-specific hooks a concrete driver must implement: `_connect`/
-  `_disconnect`, `set_roi`, `set_trigger_source`, `set_exposure_time`,
-  `setup_acquisition`, `start_acquisition`/`stop_acquisition`, and
-  `_read_frames` (the raw grab). The live hardware handle lives on
-  `self._backend` (`None` == relinquished).
-- `SimulatedCamera(Camera)` — a single, one-size-fits-all synthetic backend
-  that implements those hooks with generated frames, usable for **any** camera
-  in simulation mode.
+- `Camera(ABC)` — owns everything generic to a camera server: image broadcasting
+  onto the ZMQ stream, TIFF autosave, the autosave/broadcast acquisition loop
+  (`acquire_n_frames`/`acquire_single_frame`), and the connect/relinquish/reacquire
+  lifecycle. It declares the small set of hardware-specific hooks a concrete
+  driver must implement: `_connect`/`_disconnect`, `set_roi`,
+  `set_trigger_source`, `set_exposure_time`, `setup_acquisition`,
+  `start_acquisition`/`stop_acquisition`, and `_read_frames` (the raw grab). The
+  live hardware handle lives on `self._backend` (`None` == relinquished).
+- `SimulatedCamera(Camera)` — a single, one-size-fits-all synthetic backend that
+  implements those hooks with generated frames, usable for **any** camera in
+  simulation mode.
 - `simulated_camera_for(real_cls)` — returns a `SimulatedCamera` subclass with
-  `real_cls`'s *extra* methods (beyond the `Camera` interface, e.g. the
-  ImagEM's EM-gain setters) auto-stubbed via `@simulate`. This is how
+  `real_cls`'s *extra* methods (beyond the `Camera` interface, e.g. the ImagEM's
+  EM-gain setters) auto-stubbed via `@simulate`. This is how
   `SimulatedImagEMX2Camera` is defined — one line, no hand-written per-driver
   simulated class.
 
 A concrete camera driver (e.g. `ImagEMX2Camera` in `imagemX2.py`) is therefore
-just the thin dcam→hooks translation shim plus its camera-specific extras.
-**A new camera type** is: subclass `Camera`, implement the hooks over its SDK,
-and set `SimulatedX = simulated_camera_for(X)` — no bespoke simulated class.
+just the thin dcam→hooks translation shim plus its camera-specific extras. **A
+new camera type** is: subclass `Camera`, implement the hooks over its SDK, and set
+`SimulatedX = simulated_camera_for(X)` — no bespoke simulated class.
 
 ### Adding a new driver type
 
@@ -227,20 +184,18 @@ No factory, no new console script, no new argparse, no `simple_server_loop` call
 
 Config-only: add an entry to `CONFIG["Devices"]` reusing the same `"class"` (and
 `"sim_class"`) and that backend's expected constructor keys (see its `__init__`).
-**Append it**, don't insert: ports come
-from `get_next_port()` in declaration order, so inserting renumbers every device
-below.
+**Append it**, don't insert: ports come from `get_next_port()` in declaration
+order, so inserting renumbers every device below.
 
 ### Launching a device server
 
 Two equivalent paths, both ending up at `run_device_server(name)`:
 
-- **CLI:** `pytweezer-device "Rb HamCam"` (console script in `pyproject.toml`,
-  → `pytweezer.servers.device_server:main`). Also runnable as
-  `python -m pytweezer.servers.device_server "Rb HamCam"` without `poetry
-  install`.
-- **Device manager GUI:** `DeviceManager` (`bin/process_manager.py`) builds a
-  `ProcessTile` per host-matching, active device; the tile's start button runs
+- **CLI:** `pytweezer-device "Rb HamCam"` (console script in `pyproject.toml`, →
+  `pytweezer.servers.device_server:main`). Also runnable as
+  `python -m pytweezer.servers.device_server "Rb HamCam"` without `poetry install`.
+- **Devices tab:** `DevicesPanel` (`bin/managed_panel.py`) builds a `ManagedRow`
+  per device, with a Start/Stop toggle on the host-matching ones; the toggle runs
   `python <script> <name>` — same module, same `main()`.
 
 `--host`/`--port` CLI flags override the config's values if given.
@@ -251,9 +206,9 @@ Every device — top-level or a composite's sub-device — lives in one flat nam
 keyed by its config name. `device_index()` builds that map, returning a
 `DeviceAddress(name, conf, owner_name, owner_conf, target_name)` per device:
 `owner_conf` is the entry of the process that *serves* it (itself, for a plain
-device; the composite, for a sub-device) and is therefore where `host`/`port` live.
-It raises `KeyError` if two devices share a name, since such a name could not be
-resolved unambiguously.
+device; the composite, for a sub-device) and is therefore where `host`/`port`
+live. It raises `KeyError` if two devices share a name, since such a name could
+not be resolved unambiguously.
 
 Names match leniently: whitespace-stripped and lowercased, so `RbHamCam`,
 `rb hamcam`, and `RB HAMCAM` all resolve to `"Rb HamCam"`. This matters because
@@ -269,8 +224,8 @@ Two entry points, with different jobs:
 
 Both raise `KeyError` listing the valid names on a typo, so a mistake fails fast
 instead of surfacing as a confusing downstream error ("no port configured").
-`run_device_server` also calls `device_index()` at startup purely to fail fast on a
-duplicate name anywhere in the config.
+`run_device_server` also calls `device_index()` at startup purely to fail fast on
+a duplicate name anywhere in the config.
 
 ## Client side: one factory for every device
 
@@ -287,12 +242,12 @@ cam.close_rpc()
 ```
 
 `get_device(name, host=None, port=None, target_name=AutoTarget, timeout=None)`
-resolves `name` through `resolve_address`, connects to whichever process serves it,
-and returns a `sipyco.pc_rpc.Client`.
+resolves `name` through `resolve_address`, connects to whichever process serves
+it, and returns a `sipyco.pc_rpc.Client`.
 
-**Every device is addressed by its own name**, whether it has a server to itself or
-shares one with other devices. The caller never needs to know which process a device
-lives in, nor that sipyco targets exist:
+**Every device is addressed by its own name**, whether it has a server to itself
+or shares one with other devices — the caller never needs to know which process a
+device lives in, nor that sipyco targets exist:
 
 ```python
 cam = get_device("Rb HamCam")          # a server of its own
@@ -300,14 +255,14 @@ cam = get_device("Rb Feedback Cam")    # shares a process with a DAC; same call 
 ```
 
 `target_name` therefore rarely needs passing. Its `AutoTarget` default now means
-"whatever target the config says serves this device": the server's sole target for a
-plain device, or the sub-device's target on a composite. Pass it explicitly only to
-reach a target the config doesn't name.
+"whatever target the config says serves this device": the server's sole target
+for a plain device, or the sub-device's target on a composite. Pass it explicitly
+only to reach a target the config doesn't name.
 
-`get_device_config(name)` returns the device's own config entry without connecting.
-For a sub-device that entry holds only its driver settings — `host`/`port` belong to
-the composite serving it, so use `get_device` or `resolve_address` rather than
-reading them off the dict.
+`get_device_config(name)` returns the device's own config entry without
+connecting. For a sub-device that entry holds only its driver settings —
+`host`/`port` belong to the composite serving it, so use `get_device` or
+`resolve_address` rather than reading them off the dict.
 
 ### Concurrent devices: `run_parallel`
 
@@ -325,8 +280,8 @@ zero-argument callables in one thread each and returns their results in order.
 Because every device is its own server process, a `get_device` call is just a
 blocking socket round-trip whose `recv` releases the GIL, so the threads overlap
 for real — no `async`/`await`, and it works from the PyQt5 GUI (which has no
-`qasync`). `after(delay, call)` staggers one call's start to win the arm-before-
-trigger race:
+`qasync`). `after(delay, call)` staggers one call's start to win the
+arm-before-trigger race:
 
 ```python
 from pytweezer.parallel import run_parallel, after
@@ -357,63 +312,33 @@ If you'd rather drive the servers with `asyncio` directly,
 `get_device_async(name, host=None, port=None, target_name=AutoTarget)` is the
 same lookup and config resolution, but returns a `sipyco.pc_rpc.AsyncioClient`
 whose RPC methods are coroutines. Connect several and drive them with
-`asyncio.gather` so the calls are issued together instead of one waiting on
-the other's reply:
-
-```python
-import asyncio
-from pytweezer.servers.device_client import get_device_async
-
-async def main():
-    mm1 = await get_device_async("Rb MotMaster Server")
-    mm2 = await get_device_async("CaF MotMaster Server")
-    try:
-        await asyncio.gather(
-            mm1.start_motmaster_experiment(),
-            mm2.start_motmaster_experiment(),
-        )
-    finally:
-        await mm1.close_rpc()
-        await mm2.close_rpc()
-
-asyncio.run(main())
-```
-
-No server-side change is needed for this — each device already runs its own
-`simple_server_loop`, so the concurrency only needed solving on the client.
-Fine to call from scripts/notebooks; the GUI is PyQt5 with no `qasync`
-integration, so calling from GUI code would need a worker thread. See
-`async_device_comms_notes.md` (repo root) for the fuller investigation
-(including why `AsyncioClient` still awaits each reply — the win is running
-calls to *different* servers concurrently, not skipping replies).
-
-### Relationship to `MotMasterClient`
-
-`pytweezer/experiment/motmaster_client.py`'s `MotMasterClient` predates this
-framework and still exists for its back-compat method aliases
-(`set_script`/`start_experiment`/`shutdown_server` → the real
-`set_motmaster_experiment`/`start_motmaster_experiment`/`terminate`). New code
-should prefer `get_device(...)` directly; `MotMasterClient` has not been
-migrated onto it.
+`asyncio.gather` so the calls are issued together instead of one waiting on the
+other's reply. No server-side change is needed — each device already runs its own
+`simple_server_loop`, so the concurrency only needed solving on the client. Fine
+to call from scripts/notebooks; the GUI is PyQt5 with no `qasync` integration, so
+calling from GUI code would need a worker thread. See
+`async_device_comms_notes.md` (repo root) for the fuller investigation (including
+why `AsyncioClient` still awaits each reply — the win is running calls to
+*different* servers concurrently, not skipping replies).
 
 ## Composite devices and coordinators
 
-Some experiments need two devices coupled tightly: grab a camera frame, reduce it,
-and set a DAC voltage from the result. Doing that with two `get_device` clients
-costs an RPC round trip per device per step, and the frame gets pyon-encoded onto a
-socket and decoded again — far too slow for a control loop.
+Some experiments need two devices coupled tightly: grab a camera frame, reduce
+it, and set a DAC voltage from the result. Doing that with two `get_device`
+clients costs an RPC round trip per device per step, and the frame gets
+pyon-encoded onto a socket and decoded again — far too slow for a control loop.
 
 A **composite device** solves this. One `CONFIG["Devices"]` entry produces one
 `device_server.py` process serving several RPC targets on one port: one per
 sub-device, plus an optional **coordinator**. The sub-devices are ordinary Python
-objects in that one process, so the coordinator holds direct references to them and
-drives them with plain method calls. There is no transport between targets to
-configure, because there is no transport — a frame handed from camera to coordinator
-is an attribute lookup. Only the scalar summary crosses RPC.
+objects in that one process, so the coordinator holds direct references to them
+and drives them with plain method calls — there is no transport between targets
+to configure, because there is no transport; a frame handed from camera to
+coordinator is an attribute lookup. Only the scalar summary crosses RPC.
 
 Crucially, the camera stays a first-class device. A composite is not a merged
-camera+DAC blob, and it is not a namespace you address *through* — sub-devices are
-named and reached exactly like any other device.
+camera+DAC blob, and it is not a namespace you address *through* — sub-devices
+are named and reached exactly like any other device.
 
 ### Config shape
 
@@ -436,25 +361,55 @@ named and reached exactly like any other device.
 },
 ```
 
-An entry is a composite exactly when it has a `"devices"` sub-dict. Each sub-entry
-is an ordinary device config (its own `"class"`/`"sim_class"`), built through
-`build_spec` like any other, and is **named like a top-level device**. Its RPC target
-name is that name folded to be wire-safe (`composite_target_name`: whitespace
-stripped, lowercased — sipyco rejects target names containing spaces), but nothing
-outside this module needs to know that. Sub-configs inherit the composite's
-`simulate` flag unless they set their own.
+An entry is a composite exactly when it has a `"devices"` sub-dict. Each
+sub-entry is an ordinary device config (its own `"class"`/`"sim_class"`), built
+through `build_spec` like any other, and is **named like a top-level device**.
+Its RPC target name is that name folded to be wire-safe (`composite_target_name`:
+whitespace stripped, lowercased — sipyco rejects target names containing
+spaces), but nothing outside this module needs to know that. Sub-configs inherit
+the composite's `simulate` flag unless they set their own.
 
-`"role"` is how the *coordinator* looks a backend up; the device *name* is how RPC
-clients address it. Separating the two lets one coordinator class serve rigs whose
-devices are named differently. A role defaults to the device name.
+`"role"` is how the *coordinator* looks a backend up; the device *name* is how
+RPC clients address it. Separating the two lets one coordinator class serve rigs
+whose devices are named differently. A role defaults to the device name.
 
-`DeviceManager`, `ProcessTile`, and `DeviceStatusServer` need no special handling:
-a composite is one config entry, one host:port, one launch command.
+`DevicesPanel` and `DeviceStatusServer` need no special handling to *launch* a
+composite: it is one config entry, one host:port, one launch command.
+
+### Partial rigs: a dead sub-device does not take the server down
+
+A sub-device that fails to build — hardware absent, driver library missing, SDK
+refusing to connect — is logged, recorded in `DeviceServerSpec.failed`, and
+skipped. The server comes up serving everything else, so an SLM that will not
+connect still leaves its camera usable through `get_device("Rb HamCam")`.
+
+The **coordinator is the exception**: it drives every backend in the rig, so it is
+constructed only when *all* sub-devices built. On a partial rig it stands down and
+the composite's own name is left unserved — `get_device("Rb Rearrangement Rig")`
+raises `IncompatibleServer` — rather than serving a coordinator that would fail on
+`require_role` partway through an experiment. A coordinator that raises while
+constructing is skipped the same way, leaving its sub-devices individually
+addressable.
+
+Config errors still fail loudly and up front: a nested composite, a sub-device
+name that folds to a duplicate RPC target, or a coordinator target name that
+collides with a sub-device all raise before any hardware is opened. Degradation
+covers devices that are *unavailable*, not configs that are *wrong*.
+
+If every sub-device fails the server still binds its port with no targets. That is
+deliberate: the rig then reads as "running, all parts failed" in the Devices tab,
+which is a diagnosable state, where a process that exited would be indistinguishable
+from one never started.
+
+Because sub-devices can be individually absent, status is reported per sub-device
+rather than per port — `DeviceStatusServer` asks each composite which RPC targets
+it is serving, and the **Devices** tab shows one indented row per sub-device under
+its rig. See `gui_architecture.md`.
 
 ### Addressing
 
-Sub-devices are addressed by name, like everything else. The composite's own name
-resolves to its coordinator:
+Sub-devices are addressed by name, like everything else. The composite's own
+name resolves to its coordinator:
 
 ```python
 cam   = get_device("Rb Feedback Cam")    # camera target on the rig's server
@@ -477,8 +432,8 @@ imports it and constructs it as `cls(roles, conf)`.
 `pytweezer/coordinators/camera_dac_feedback.py` is the worked example: `arm()`,
 `measure()`, `control()`, `image_to_dac()`, and `run_n()`.
 `pytweezer/coordinators/rearrangement.py` (`Rearrangement`) is a real one — a
-camera + Blink SLM atom-rearrangement loop, with the GPU stack imported lazily so
-it degrades gracefully off the GPU host; see `docs/rearrangement_coordinator.md`.
+camera + Blink SLM atom-rearrangement loop, with the GPU stack imported lazily
+so it degrades gracefully off the GPU host; see `docs/rearrangement_coordinator.md`.
 
 Three constraints, all consequences of how sipyco serves targets:
 
@@ -486,81 +441,57 @@ Three constraints, all consequences of how sipyco serves targets:
   while it runs.** The sipyco server is single-threaded asyncio and calls a plain
   `def` target method inline on the event loop, so no target on that server —
   camera, DAC, or coordinator — answers anything until it returns. This is not new
-  (a plain `camera.acquire_n_frames(100)` RPC already does it), but it means a batch
-  method must take a bounded iteration count rather than free-run. `run_n(n)` is the
-  fast-loop answer: one RPC issues the whole batch, and each iteration is direct
-  Python calls with no serialization. It cannot be aborted mid-batch.
+  (a plain `camera.acquire_n_frames(100)` RPC already does it), but it means a
+  batch method must take a bounded iteration count rather than free-run. `run_n(n)`
+  is the fast-loop answer: one RPC issues the whole batch, and each iteration is
+  direct Python calls with no serialization. It cannot be aborted mid-batch.
 - **Return values cross a PYON boundary.** Return plain types, dicts, lists, numpy
   arrays; never exception objects or backend handles. `image_to_dac` deliberately
-  returns `{"mean", "voltage", "t"}` and *not* the frame — returning the frame would
-  reintroduce exactly the serialization cost the coordinator exists to avoid.
+  returns `{"mean", "voltage", "t"}` and *not* the frame — returning the frame
+  would reintroduce exactly the serialization cost the coordinator exists to avoid.
 - **Never define `__call__`** on a target. `Server._handle_connection_cr` does
   `if callable(target): target = target()`, treating a callable target as a
-  per-connection factory. `_make_composite` rejects callable targets up front, along
-  with nameless sub-devices and two sub-devices whose names fold to the same target.
+  per-connection factory. `_make_composite` rejects callable targets up front,
+  along with nameless sub-devices and two sub-devices whose names fold to the
+  same target.
 
-If a loop ever needs to free-run while the server stays answerable, the coordinator
-grows `start`/`stop`/`status` backed by a `threading.Thread`; nothing else in this
-design moves. A thread — not an asyncio task — because the drivers are synchronous
-and an asyncio task's cadence is hostage to any other client's blocking RPC.
+If a loop ever needs to free-run while the server stays answerable, the
+coordinator grows `start`/`stop`/`status` backed by a `threading.Thread`; nothing
+else in this design moves. A thread — not an asyncio task — because the drivers
+are synchronous and an asyncio task's cadence is hostage to any other client's
+blocking RPC.
 
 ### `allow_parallel`
 
 `run_device_server` accepts `allow_parallel` (config key of the same name, or
 `--allow-parallel`), which drops the lock sipyco holds across each RPC call.
 
-**It has no effect while every target method is a plain `def`.**
-`Server._process_action` awaits a method's result only when that result is a
-coroutine, and an uncontended `asyncio.Lock.acquire()` returns without suspending.
-With synchronous methods there is therefore no suspension point between acquiring
-and releasing that lock, so nothing can ever contend for it. What serializes calls
-is the single-threaded event loop, not the lock. Do not reach for this flag as a
-speed knob.
+**It has no effect while every target method is a plain `def`.** With
+synchronous methods there is no suspension point between acquiring and releasing
+that lock — `Server._process_action` only awaits a coroutine result, and an
+uncontended `asyncio.Lock.acquire()` doesn't suspend — so nothing can ever
+contend for it. What serializes calls is the single-threaded event loop, not the
+lock. Do not reach for this flag as a speed knob.
 
-It becomes meaningful only once some target method is `async def` — which then also
-wants `await asyncio.to_thread(...)` around its blocking work, and its own
-per-backend lock, because the sipyco lock is currently supplying mutual exclusion
-for free.
+It becomes meaningful only once some target method is `async def` — which then
+also wants `await asyncio.to_thread(...)` around its blocking work, and its own
+per-backend lock, because the sipyco lock is currently supplying mutual
+exclusion for free.
 
 ## How this fits the rest of the system
 
-- **`DeviceManager`** (`bin/process_manager.py`) still does its own host
-  filtering (`check_host`) and start/stop tile management. Every device's tile
-  launches the same `device_server.py`, supplied by
-  `ConfigReader.script_for("Devices", params)` since device entries carry no
-  `"script"`. A composite is one tile; its sub-devices are not separately
-  launchable.
+- **`DevicesPanel`** (`bin/managed_panel.py`, the Devices tab) does its own host
+  filtering (`check_host`) and start/stop row management. Every device's row
+  launches the same `device_server.py` via the `DEVICE_SERVER_SCRIPT` constant,
+  since device entries carry no `"script"`. A composite is one *controllable* row
+  — its sub-devices are not separately launchable — plus an indented, view-only
+  row per sub-device so each one's state is readable on its own.
 - **`DeviceStatusServer`** (`pytweezer/servers/device_status.py`) independently
-  TCP-probes `host:port` for every top-level `CONFIG["Devices"]` entry to publish a
-  cross-PC up/down feed — it does not use `get_device`/RPC calls, just raw
-  reachability (see `gui_architecture.md` for the full Device Status writeup). A
-  composite is probed once, since its sub-devices share its port.
+  TCP-probes `host:port` for every top-level `CONFIG["Devices"]` entry to publish
+  a cross-PC up/down feed (see `gui_architecture.md` for the full Device Status
+  writeup). A composite gets one extra probe: a sipyco handshake listing the
+  targets it serves, which is what distinguishes a sub-device that started from
+  one that did not. No RPC *method* is ever called.
 - **Both GUIs' Applets/experiment code** are the intended callers of
   `get_device` going forward, instead of hand-rolled `sipyco.pc_rpc.Client(...)`
   calls with hardcoded host/port.
-
-## File index
-
-| File | Role |
-|------|------|
-| `pytweezer/servers/device_server.py` | Generic server launcher: `build_spec` (imports the config's `"class"`/`"sim_class"` and constructs it), `resolve_device`, `run_device_server`, `main`. |
-| `pytweezer/servers/device_client.py` | Generic client factory: `get_device`, `get_device_async`, `get_device_config`. |
-| `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`, `default_simulated` (auto-generated stand-in when a device has no `sim_class`). |
-| `pytweezer/coordinators/base.py` | `Coordinator` — base for in-process coordination of a composite's backends. |
-| `pytweezer/coordinators/camera_dac_feedback.py` | `CameraDACFeedback` — worked example: frame mean → proportional DAC correction. |
-| `pytweezer/coordinators/rearrangement.py` | `Rearrangement` — camera + SLM atom-rearrangement loop (lazy GPU stack). See `docs/rearrangement_coordinator.md`. |
-| `pytweezer/drivers/ni_dac.py` | `SimulatedNIDAC`; the real NI analog-output driver belongs here. |
-| `pytweezer/drivers/slm.py` | `SLM` (Meadowlark Blink SDK) + `SimulatedSLM`. |
-| `pytweezer/experiment/motmaster_server.py` | MotMaster backend classes (`MotMasterInterface`, `SimulatedMotMasterInterface`) + legacy standalone `main()`. |
-| `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`, `requires_camera`. |
-| `pytweezer/drivers/imagemX2.py` | ImagEM X2 dcam shim (`ImagEMX2Camera` on `Camera`) + `SimulatedImagEMX2Camera = simulated_camera_for(...)` + legacy standalone `main()`. |
-| `pytweezer/drivers/bfly2.py` | Blackfly backend class + legacy standalone `main()`. |
-| `pytweezer/experiment/motmaster_client.py` | `MotMasterClient` — pre-framework client with back-compat aliases. |
-| `pytweezer/configuration/config.py` | `CONFIG["Devices"]` — `class`/`sim_class`/`host`/`port`/`active`/... per device. |
-| `bin/process_manager.py` | `DeviceManager` — host-filtered start/stop tiles (unchanged besides the shared script path). |
-| `pyproject.toml` | `pytweezer-device = "pytweezer.servers.device_server:main"` console script. |
-
-**Note:** each driver module's original standalone `main()`/`run_server()` is
-still present (useful for ad hoc debugging directly against that module) but is
-no longer on the launch path — both the CLI and the device manager go through
-`device_server.py`.

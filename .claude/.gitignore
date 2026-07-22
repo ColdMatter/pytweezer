@@ -1,0 +1,18 @@
+# Track skill sources (SKILL.md, scripts/, assets/) but not the byproducts of
+# developing and evaluating them.
+
+# Personal/machine-local Claude settings
+settings.local.json
+
+# Temporary agent worktrees
+worktrees/
+
+# Skill-creator eval workspaces: benchmark/grading/timing/feedback JSON,
+# generated review HTML, and copied run outputs all live here.
+skills/*-workspace/
+
+# Eval definitions and results that skill-creator drops next to a skill
+skills/**/evals/
+
+# Screenshots and other run artifacts a skill generates into its own dir
+skills/**/shots/
