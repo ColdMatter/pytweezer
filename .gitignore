@@ -11,3 +11,5 @@ dist/
 *.egg-info/
 
 /setup.py
+**/Local_Files/**
+**/logs/**
