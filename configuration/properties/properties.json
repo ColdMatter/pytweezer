@@ -27,7 +27,7 @@
                     "parts": 3
                 },
                 "rb_thorcam": {
-                    "timestamp": 1784652067.4159832,
+                    "timestamp": 1784652681.7993684,
                     "parts": 3
                 }
             }
@@ -40,12 +40,7 @@
         ],
         "DataStream": {
             "maxStreamInactive[s]": 1000,
-            "active": {
-                "rbstats": {
-                    "timestamp": 1784652067.4169862,
-                    "parts": 2
-                }
-            }
+            "active": {}
         }
     },
     "Analysis": {
@@ -220,7 +215,7 @@
                 0,
                 0,
                 90,
-                218
+                214
             ]
         },
         "Applet Launcher": {
@@ -303,7 +298,11 @@
                 ],
                 "color": 4278190335
             }
-        }
+        },
+        "sidebarstreams": [
+            "--None--"
+        ],
+        "show_sidebar": false
     },
     "Applet Launcher": {
         "Applets": {
@@ -321,6 +320,10 @@
                 "script": "pytweezer/GUI/viewers/image_plot_monitor.py",
                 "active": false,
                 "description": "Image with x/y projection plots linked to the image axes"
+            },
+            "Image Monitor 2": {
+                "script": "pytweezer/GUI/viewers/image_monitor.py",
+                "active": true
             }
         }
     },
