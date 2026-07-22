@@ -1,6 +1,6 @@
-from PyQt5 import QtGui, QtCore
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
+from PyQt6 import QtGui, QtCore
+from PyQt6.QtGui import *
+from PyQt6.QtWidgets import *
 from pyqtgraph.Qt import QtCore, QtGui
 from pytweezer.servers import Properties
 import time
@@ -100,4 +100,4 @@ if __name__ == '__main__':
     props=Properties('Tests/SubscriptionEditor')
     pp=SubscriptionEditor(props,'Data')
     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
-        QtGui.QApplication.instance().exec_()
+        QtGui.QApplication.instance().exec()

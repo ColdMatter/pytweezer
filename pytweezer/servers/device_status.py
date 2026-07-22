@@ -24,7 +24,7 @@ import signal
 import time
 
 import zmq
-from PyQt5 import QtCore
+from PyQt6 import QtCore
 from sipyco.pc_rpc import Client as RPCClient
 
 from pytweezer.servers.configreader import ConfigReader

@@ -4,14 +4,14 @@ Built on :class:`pytweezer.GUI.applet.Applet` — see ``docs/applets.md``.
 """
 
 import numpy as np
-from PyQt5 import QtCore
-from PyQt5.QtWidgets import (
+from PyQt6 import QtCore
+from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QDialog,
     QSpinBox,
 )
-import PyQt5
+import PyQt6
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
 
@@ -80,7 +80,7 @@ class ImageDisplay(Applet):
         lut = pg.HistogramLUTItem()
         lut.setImageItem(image_item)
         graphics_layout_widget.addItem(lut)
-        image_item.setRect(PyQt5.QtCore.QRect(0, 0, imgdata.shape[1], imgdata.shape[0]))
+        image_item.setRect(PyQt6.QtCore.QRect(0, 0, imgdata.shape[1], imgdata.shape[0]))
         # The colormap goes on the histogram's gradient, not on the image: a
         # HistogramLUTItem drives its image's lookup table, so a setLookupTable
         # here would be overwritten and the image would come out greyscale.
@@ -191,7 +191,7 @@ class ImageDisplay(Applet):
         layout.addWidget(index_selector)
         d.setLayout(layout)
         index_selector.valueChanged.connect(self.update_image_index)
-        d.exec_()
+        d.exec()
 
     def update_image_index(self, value):
         self.image_index = value

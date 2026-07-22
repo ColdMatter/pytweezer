@@ -3,8 +3,8 @@ import os
 import subprocess
 import sys
 
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtCore import Qt
+from PyQt6 import QtCore, QtWidgets
+from PyQt6.QtCore import Qt
 
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
@@ -107,7 +107,7 @@ class AppletRow(QtWidgets.QFrame):
         self.name = name
         self.launcher = launcher
         self.setObjectName("ProcessTile")
-        self.setAttribute(Qt.WA_StyledBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
 
         layout = QtWidgets.QHBoxLayout()
         layout.setContentsMargins(10, 6, 10, 6)
@@ -377,7 +377,7 @@ def main(name):
     app = QtWidgets.QApplication(sys.argv)
     window = AppletLauncher(name)
     window.show()
-    app.exec_()
+    app.exec()
 
 
 if __name__ == "__main__":

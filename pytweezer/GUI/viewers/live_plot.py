@@ -5,7 +5,7 @@ Built on :class:`pytweezer.GUI.applet.Applet` — see ``docs/applets.md``.
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt5 import QtWidgets
+from PyQt6 import QtWidgets
 
 from pytweezer.servers import DataClient
 from pytweezer.GUI.applet import Applet, run_applet

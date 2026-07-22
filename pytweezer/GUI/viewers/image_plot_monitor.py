@@ -17,9 +17,9 @@ the shared x-axis, and the left plot draws ``coords`` up the shared y-axis with
 """
 
 import numpy as np
-from PyQt5 import QtCore
-from PyQt5.QtWidgets import QVBoxLayout
-import PyQt5
+from PyQt6 import QtCore
+from PyQt6.QtWidgets import QVBoxLayout
+import PyQt6
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
 
@@ -65,7 +65,7 @@ class ImagePlotDisplay(Applet):
 
         imgdata = np.ones((100, 100))
         self.image_item = pg.ImageItem(imgdata)
-        self.image_item.setRect(PyQt5.QtCore.QRect(0, 0, 100, 100))
+        self.image_item.setRect(PyQt6.QtCore.QRect(0, 0, 100, 100))
         lut.setImageItem(self.image_item)
         # The colormap goes on the histogram's gradient, not on the image: a
         # HistogramLUTItem drives its image's lookup table, so a setLookupTable

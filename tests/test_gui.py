@@ -1,4 +1,4 @@
-"""Headless GUI tests. These construct real PyQt5 widgets under the offscreen
+"""Headless GUI tests. These construct real PyQt6 widgets under the offscreen
 platform (set in conftest.py). Pure-logic methods that don't need a live widget
 tree are exercised via ``__new__`` to avoid the panels' construction side
 effects (a real DevicesPanel spawns device subprocesses for active devices).

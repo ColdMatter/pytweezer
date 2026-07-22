@@ -1,6 +1,6 @@
 import pytweezer as bc
-from PyQt5 import QtGui, QtCore
-from PyQt5.QtGui import *
+from PyQt6 import QtGui, QtCore
+from PyQt6.QtGui import *
 
 import pyqtgraph as pg
 from pytweezer.servers import Properties,PropertyAttribute

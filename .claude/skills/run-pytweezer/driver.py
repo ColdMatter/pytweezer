@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Headless launch + screenshot driver for the pytweezer PyQt5 GUIs.
+"""Headless launch + screenshot driver for the pytweezer PyQt6 GUIs.
 
-The GUIs (``pytweezer-server`` / ``pytweezer-client``) are PyQt5 QMainWindows.
+The GUIs (``pytweezer-server`` / ``pytweezer-client``) are PyQt6 QMainWindows.
 This driver builds one of them under the *offscreen* Qt platform, spins the
 real event loop briefly so text/layout actually paints, then grabs a PNG of the
 whole window and of each tab.
@@ -30,7 +30,7 @@ Default outdir is ``.claude/skills/run-pytweezer/shots``. Writes:
 import os
 import sys
 
-# Platform choice (must be decided before any PyQt5 import):
+# Platform choice (must be decided before any PyQt6 import):
 #   * default (unset) -> native "windows" backend. On a machine with an active
 #     desktop session (the usual lab PC) this renders text/fonts correctly AND
 #     the panels reach the live hubs, so the screenshot shows real device state.
@@ -41,8 +41,8 @@ import sys
 #     there is no display; prefer the default when a session exists.
 # Respect an explicit override; otherwise leave Qt's default (native).
 
-from PyQt5.QtCore import QTimer
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
 
 from bin.gui import build_client_gui, build_server_gui
 from pytweezer.GUI.theme import DARK_STYLESHEET
@@ -55,7 +55,7 @@ def _paint(app, ms):
     until the loop has actually run. A single-shot quit gives a bounded spin.
     """
     QTimer.singleShot(ms, app.quit)
-    app.exec_()
+    app.exec()
 
 
 def main():

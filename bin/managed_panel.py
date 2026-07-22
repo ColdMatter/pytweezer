@@ -29,9 +29,9 @@ import subprocess
 import time
 from socket import gethostname
 
-from PyQt5 import QtCore
-from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PyQt6 import QtCore
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
@@ -124,7 +124,7 @@ class ManagedRow(QFrame):
         self.timer = None
 
         self.setObjectName("ProcessTile")
-        self.setAttribute(QtCore.Qt.WA_StyledBackground)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground)
         if indent:
             self.setProperty("tier", "child")
 

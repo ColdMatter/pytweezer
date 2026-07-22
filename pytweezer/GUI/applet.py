@@ -19,8 +19,8 @@ import logging
 import os
 import sys
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtWidgets import QDialog, QVBoxLayout
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtWidgets import QDialog, QVBoxLayout
 
 from pytweezer.servers import Properties
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
@@ -134,7 +134,7 @@ class Applet(QtWidgets.QWidget):
         )
         layout.addWidget(editor)
         dialog.setLayout(layout)
-        dialog.exec_()
+        dialog.exec()
         self.update_subscriptions()
 
     def open_config_editor(self):
@@ -146,7 +146,7 @@ class Applet(QtWidgets.QWidget):
         editor = PropEdit("/" + self.name + "/")
         layout.addWidget(editor)
         dialog.setLayout(layout)
-        dialog.exec_()
+        dialog.exec()
         self.update_subscriptions()
 
     # -- geometry persistence ---------------------------------------------
@@ -193,7 +193,7 @@ def run_applet(applet_cls, default_name=None):
     apply_theme(app)
     applet = applet_cls(args.name)
     applet.show()
-    app.exec_()
+    app.exec()
 
     # The window has closed. The applet's Properties connection starts
     # *non-daemon* ZMQ threads that loop forever and would hang interpreter

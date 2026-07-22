@@ -21,8 +21,8 @@ Properties:
 from collections import deque
 
 import pyqtgraph as pg
-from PyQt5 import QtWidgets
-from PyQt5.QtGui import QFont
+from PyQt6 import QtWidgets
+from PyQt6.QtGui import QFont
 
 from pytweezer.servers import DataClient, PropertyAttribute
 from pytweezer.GUI.applet import Applet, run_applet
@@ -60,7 +60,7 @@ class ScalarHistory(Applet):
         # jittering as the numbers change.
         self.readout = QtWidgets.QLabel()
         font = QFont("Consolas")
-        font.setStyleHint(QFont.Monospace)
+        font.setStyleHint(QFont.StyleHint.Monospace)
         self.readout.setFont(font)
         self.readout.setContentsMargins(10, 6, 10, 8)
         layout.addWidget(self.readout)

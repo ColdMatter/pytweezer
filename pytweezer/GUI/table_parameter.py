@@ -1,4 +1,4 @@
-import PyQt5
+import PyQt6
 
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui
