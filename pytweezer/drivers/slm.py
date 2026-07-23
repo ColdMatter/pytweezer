@@ -32,6 +32,9 @@ LOGGER = get_logger("slm")
 DEFAULT_SDK_DLL = "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\SDK\\Blink_C_wrapper"
 DEFAULT_LUT_FILE = "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\LUT Files\\slm40_at852.LUT"
 
+#: Frames the 1024x1024 board's on-board memory holds (manual S4.3.9).
+MAX_PRELOAD_FRAMES = 752
+
 
 class SLM:
     """Blink Plus SLM over its ctypes C-wrapper SDK.
@@ -176,9 +179,41 @@ class SLM:
             "Preloaded %d frames in %.3f ms.", list_length, (time.perf_counter() - t0) * 1000
         )
 
+    def preload_image(self, mask_array: np.ndarray, frame: int) -> None:
+        """Upload one mask into on-board frame slot ``frame``.
+
+        Same destination as :meth:`preload_sequence`, one frame at a time, so
+        frames can be uploaded as they are generated instead of after the whole
+        sequence exists. Does not display anything. Raises on failure.
+        """
+        self._require_slm()
+        if not 0 <= frame < MAX_PRELOAD_FRAMES:
+            raise ValueError(f"frame {frame} outside 0-{MAX_PRELOAD_FRAMES - 1}")
+        mask = self._as_c_uint8(mask_array)
+        ret = self._lib.PreLoad_Image(
+            self.board_number, mask.ctypes.data_as(self._poi), int(frame), self.timeout_ms
+        )
+        if ret != 1:
+            raise RuntimeError(f"SLM PreLoad_Image failed for frame {frame}")
+
+    def set_wait_for_trigger(self, enabled: bool) -> None:
+        """Turn external-trigger gating on or off at runtime.
+
+        With it on, an image is not displayed until a trigger falling edge arrives,
+        and calls that load images (``update_mask``, ``preload_sequence``) block
+        until one does or ``timeout_ms`` expires. Preloading therefore has to happen
+        with it **off**; turn it on only to clock a preloaded sequence out with
+        :meth:`start_auto_increment`.
+        """
+        self._require_slm()
+        ret = self._lib.SetWaitForTrigger(self.board_number, int(bool(enabled)))
+        if ret != 1:
+            raise RuntimeError("SLM SetWaitForTrigger failed")
+        self.wait_for_trigger = bool(enabled)
+        LOGGER.info("Wait-for-trigger %s.", "enabled" if enabled else "disabled")
+
     def start_auto_increment(self, list_length: int) -> None:
-        """Arm hardware auto-increment over a p
-        reloaded sequence.
+        """Arm hardware auto-increment over a preloaded sequence.
 
         After :meth:`preload_sequence`, this makes the SLM listen for external
         triggers: frame 0 is live once armed, then each trigger advances to the
@@ -247,6 +282,7 @@ class SimulatedSLM:
         self.frames_written = 0
         self.preloaded_frames = 0
         self.auto_increment_length = 0
+        self.wait_for_trigger = False
         self._temp = 35.0
         self._closed = False
 
@@ -259,6 +295,14 @@ class SimulatedSLM:
 
     def preload_sequence(self, mask_sequence: np.ndarray) -> None:
         self.preloaded_frames = int(np.asarray(mask_sequence).shape[0])
+
+    def preload_image(self, mask_array: np.ndarray, frame: int) -> None:
+        if not 0 <= frame < MAX_PRELOAD_FRAMES:
+            raise ValueError(f"frame {frame} outside 0-{MAX_PRELOAD_FRAMES - 1}")
+        self.preloaded_frames = max(self.preloaded_frames, int(frame) + 1)
+
+    def set_wait_for_trigger(self, enabled: bool) -> None:
+        self.wait_for_trigger = bool(enabled)
 
     def start_auto_increment(self, list_length: int) -> None:
         self.auto_increment_length = int(list_length)

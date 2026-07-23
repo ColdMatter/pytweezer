@@ -76,6 +76,23 @@ _sum_cpp_loaded = False
 UPLOAD_QUEUE_DEPTH = 5
 
 
+def _pinned_like(frame):
+    """Page-locked host array matching for a frame to be copied from the GPU.
+
+    Falls back to ordinary memory if the pinned allocation fails, since pinning is
+    a throughput optimisation and not for correctness.
+    """
+    shape = tuple(frame.shape)
+    dtype = np.dtype(frame.dtype)
+    count = int(np.prod(shape))
+    try:
+        mem = cp.cuda.alloc_pinned_memory(count * dtype.itemsize)
+        return np.frombuffer(mem, dtype, count).reshape(shape)
+    except Exception:
+        LOGGER.debug("Pinned allocation failed; using pageable memory.", exc_info=True)
+        return np.empty(shape, dtype)
+
+
 def _sum_cpp():
     global _sum_cpp_module, _sum_cpp_loaded
     if not USE_SUM_CPP:
@@ -286,12 +303,67 @@ class Rearrangement(Coordinator):
         panel, so a caller can separate the latency before the move starts from the
         move itself.
         """
-        upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
-        errors = []
         first_frame_at = []
         self.last_first_frame_at = None
 
+        def display(index, host_frame):
+            self.slm.update_mask(host_frame)
+            if not first_frame_at:
+                first_frame_at.append(time.perf_counter())
+
+        n_frames = self._drain_pipelined(frames, display, "slm-upload")
+        if first_frame_at:
+            self.last_first_frame_at = first_frame_at[0]
+        return n_frames
+
+    def _preload_sequence_pipelined(self, frames):
+        """Preload each frame into its on-board slot as it is produced.
+
+        Same overlap as :meth:`_play_sequence_pipelined`, but the frames go into
+        the board's frame memory rather than onto the panel, so the sequence is
+        ready for :meth:`~pytweezer.drivers.slm.SLM.start_auto_increment` to clock
+        out on external triggers. Nothing is displayed here.
+
+        Trigger gating must be **off** while this runs, or each upload blocks
+        waiting for a trigger.
+
+        :attr:`last_first_frame_at` is set as in :meth:`_play_sequence_pipelined`,
+        which separates the once-per-shot setup (pairing, static background, array
+        prep) from the steady-state per-frame upload rate.
+        """
+        first_frame_at = []
+        self.last_first_frame_at = None
+
+        def store(index, host_frame):
+            self.slm.preload_image(host_frame, index)
+            if not first_frame_at:
+                first_frame_at.append(time.perf_counter())
+
+        n_frames = self._drain_pipelined(frames, store, "slm-preload")
+        if first_frame_at:
+            self.last_first_frame_at = first_frame_at[0]
+        return n_frames
+
+    def _drain_pipelined(self, frames, sink, thread_name):
+        """Feed ``frames`` to ``sink(index, host_frame)`` on a writer thread.
+
+        The producer (GPU generation) and the writer (host copy + PCIe transfer)
+        run concurrently, bounded by :data:`UPLOAD_QUEUE_DEPTH`. On error the
+        writer keeps draining without touching hardware so the producer cannot
+        deadlock on a full queue; the first error is re-raised here.
+
+        cupy frames land in a page-locked staging buffer, which the GPU can DMA
+        into roughly twice as fast as pageable memory and which the SLM driver
+        passes to the board without a further copy. One buffer is reused for every
+        frame: ``sink`` must finish with it before returning, which both
+        ``update_mask`` and ``preload_image`` do (each blocks on its own DMA).
+        """
+        upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
+        errors = []
+
         def writer():
+            index = 0
+            staging = None
             while True:
                 frame = upload_queue.get()
                 if frame is None:
@@ -299,15 +371,19 @@ class Rearrangement(Coordinator):
                 if errors:
                     continue  # drain the rest so the producer never blocks
                 try:
-                    # cupy arrays expose .get(); numpy frames pass straight through.
-                    host_frame = frame.get() if hasattr(frame, "get") else frame
-                    self.slm.update_mask(host_frame)
-                    if not first_frame_at:
-                        first_frame_at.append(time.perf_counter())
+                    if hasattr(frame, "get"):  # cupy: copy into pinned host memory
+                        if staging is None:
+                            staging = _pinned_like(frame)
+                        frame.get(out=staging)
+                        host_frame = staging
+                    else:  # already numpy, nothing to copy
+                        host_frame = frame
+                    sink(index, host_frame)
+                    index += 1
                 except Exception as exc:
                     errors.append(exc)
 
-        thread = threading.Thread(target=writer, name="slm-upload", daemon=True)
+        thread = threading.Thread(target=writer, name=thread_name, daemon=True)
         thread.start()
 
         n_frames = 0
@@ -319,8 +395,6 @@ class Rearrangement(Coordinator):
             upload_queue.put(None)
             thread.join()
 
-        if first_frame_at:
-            self.last_first_frame_at = first_frame_at[0]
         if errors:
             raise errors[0]
         return n_frames
