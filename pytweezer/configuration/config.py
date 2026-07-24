@@ -171,7 +171,7 @@ CONFIG = {
                     "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
                     "role": "camera",
                     "stream_name": "rb_hamcam",
-                    "timeout": 5.0,
+                    "timeout": 20.0,
                     "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
                 },
                 "Rb SLM": {
