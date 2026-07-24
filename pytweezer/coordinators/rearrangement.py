@@ -7,11 +7,14 @@ sub-devices of the same process, so this coordinator drives them with direct
 in-process calls: the GPU-computed phase sequence goes straight to
 ``slm.update_mask`` with no frame ever serialized onto a socket.
 
-Two roles are required in the composite's ``"devices"`` block:
+Roles in the composite's ``"devices"`` block:
 
+* ``slm``    — a :class:`pytweezer.drivers.slm.SLM` (`update_mask`). Required.
 * ``camera`` — an ImagEM-X2-style camera (`setup_acquisition`, `set_roi`,
-  `enable_em_gain`, `acquire_n_frames`, ...).
-* ``slm``    — a :class:`pytweezer.drivers.slm.SLM` (`update_mask`).
+  `enable_em_gain`, `acquire_n_frames`, ...). Optional: without it the
+  coordinator constructs SLM-only and :meth:`initialise` raises, but the phase
+  sequence generation and upload path is fully usable. Benchmarks that only
+  time frame delivery run this way.
 
 Lifecycle over RPC (all synchronous; each stalls the server for its duration, per
 the coordinator contract):
@@ -73,15 +76,24 @@ _sum_cpp_loaded = False
 UPLOAD_QUEUE_DEPTH = 5
 
 
-def _sum_cpp():
-    """Return the compiled pixel-summing extension, or ``None`` to use numpy.
+def _pinned_like(frame):
+    """Page-locked host array matching for a frame to be copied from the GPU.
 
-    Imported on first use rather than at module scope: loading this native extension
-    into a process that has already loaded other native libraries (PyQt5, notably)
-    can abort the interpreter outright, which no ``try``/``except`` can catch.
-    Importing this module must stay safe everywhere, so the risk is deferred to the
-    hot path that actually wants the speedup.
+    Falls back to ordinary memory if the pinned allocation fails, since pinning is
+    a throughput optimisation and not for correctness.
     """
+    shape = tuple(frame.shape)
+    dtype = np.dtype(frame.dtype)
+    count = int(np.prod(shape))
+    try:
+        mem = cp.cuda.alloc_pinned_memory(count * dtype.itemsize)
+        return np.frombuffer(mem, dtype, count).reshape(shape)
+    except Exception:
+        LOGGER.debug("Pinned allocation failed; using pageable memory.", exc_info=True)
+        return np.empty(shape, dtype)
+
+
+def _sum_cpp():
     global _sum_cpp_module, _sum_cpp_loaded
     if not USE_SUM_CPP:
         return None
@@ -91,9 +103,9 @@ def _sum_cpp():
             from pytweezer.cpp import sum_pixel_values_cpp
 
             _sum_cpp_module = sum_pixel_values_cpp
-        except Exception:  # pragma: no cover - depends on whether it was built
+        except Exception:  # pragma: no cover 
             LOGGER.debug(
-                "sum_pixel_values_cpp unavailable; using the numpy fallback.",
+                "sum_pixel_values_cpp unavailable; using numpy.",
                 exc_info=True,
             )
             _sum_cpp_module = None
@@ -127,7 +139,7 @@ class Rearrangement(Coordinator):
 
     def __init__(self, targets, conf):
         super().__init__(targets, conf)
-        self.camera: ImagEMX2Camera = self.require_role(self.camera_role)
+        self.camera: ImagEMX2Camera | None = self.targets.get(self.camera_role)
         self.slm: SLM = self.require_role(self.slm_role)
 
         self.phasemask_kwargs = {**DEFAULT_PHASEMASK, **(conf.get("phasemask") or {})}
@@ -135,12 +147,29 @@ class Rearrangement(Coordinator):
         self._initialised = False
         self._state = None  # populated by initialise()
 
+        #: ``time.perf_counter()`` at which the most recent
+        #: :meth:`_play_sequence_pipelined` finished displaying its *first* frame,
+        #: or ``None`` if it never did. Frame 0 must be synthesised, copied to the
+        #: host and DMA'd before anything reaches the panel, so this splits a
+        #: pipelined run into time-to-first-frame and the move proper.
+        self.last_first_frame_at = None
+
     def _require_gpu(self):
         if not _HAS_CUPY:
             raise RuntimeError(
                 "Rearrangement needs cupy/lap and a CUDA GPU, which are not available "
                 "on this machine. Run the rig on the GPU host, or use status()/test() "
                 "only here."
+            )
+
+    def _require_camera(self):
+        if self.camera is None:
+            raise RuntimeError(
+                f"{type(self).__name__} needs a sub-device with role "
+                f"{self.camera_role!r} for this call; this composite provides roles: "
+                f"{sorted(self.targets) or '(none)'}. Set \"role\": "
+                f"{self.camera_role!r} on the relevant entry in the composite's "
+                '"devices" block.'
             )
 
     def _require_initialised(self):
@@ -193,6 +222,7 @@ class Rearrangement(Coordinator):
         completes the move in proportionally less time.
         """
         self._require_gpu()
+        self._require_camera()
         from pytweezer import phasemask as pm
 
         roi = list(roi) if roi is not None else list(DEFAULT_ROI)
@@ -268,11 +298,72 @@ class Rearrangement(Coordinator):
         The queue depth bounds how far generation may run ahead. On an upload error
         the writer keeps draining (without touching hardware) so the producer cannot
         deadlock on a full queue; the first error is re-raised here.
+
+        :attr:`last_first_frame_at` is set to the moment the first frame reached the
+        panel, so a caller can separate the latency before the move starts from the
+        move itself.
+        """
+        first_frame_at = []
+        self.last_first_frame_at = None
+
+        def display(index, host_frame):
+            self.slm.update_mask(host_frame)
+            if not first_frame_at:
+                first_frame_at.append(time.perf_counter())
+
+        n_frames = self._drain_pipelined(frames, display, "slm-upload")
+        if first_frame_at:
+            self.last_first_frame_at = first_frame_at[0]
+        return n_frames
+
+    def _preload_sequence_pipelined(self, frames):
+        """Preload each frame into its on-board slot as it is produced.
+
+        Same overlap as :meth:`_play_sequence_pipelined`, but the frames go into
+        the board's frame memory rather than onto the panel, so the sequence is
+        ready for :meth:`~pytweezer.drivers.slm.SLM.start_auto_increment` to clock
+        out on external triggers. Nothing is displayed here.
+
+        Trigger gating must be **off** while this runs, or each upload blocks
+        waiting for a trigger.
+
+        :attr:`last_first_frame_at` is set as in :meth:`_play_sequence_pipelined`,
+        which separates the once-per-shot setup (pairing, static background, array
+        prep) from the steady-state per-frame upload rate.
+        """
+        first_frame_at = []
+        self.last_first_frame_at = None
+
+        def store(index, host_frame):
+            self.slm.preload_image(host_frame, index)
+            if not first_frame_at:
+                first_frame_at.append(time.perf_counter())
+
+        n_frames = self._drain_pipelined(frames, store, "slm-preload")
+        if first_frame_at:
+            self.last_first_frame_at = first_frame_at[0]
+        return n_frames
+
+    def _drain_pipelined(self, frames, sink, thread_name):
+        """Feed ``frames`` to ``sink(index, host_frame)`` on a writer thread.
+
+        The producer (GPU generation) and the writer (host copy + PCIe transfer)
+        run concurrently, bounded by :data:`UPLOAD_QUEUE_DEPTH`. On error the
+        writer keeps draining without touching hardware so the producer cannot
+        deadlock on a full queue; the first error is re-raised here.
+
+        cupy frames land in a page-locked staging buffer, which the GPU can DMA
+        into roughly twice as fast as pageable memory and which the SLM driver
+        passes to the board without a further copy. One buffer is reused for every
+        frame: ``sink`` must finish with it before returning, which both
+        ``update_mask`` and ``preload_image`` do (each blocks on its own DMA).
         """
         upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
         errors = []
 
         def writer():
+            index = 0
+            staging = None
             while True:
                 frame = upload_queue.get()
                 if frame is None:
@@ -280,13 +371,19 @@ class Rearrangement(Coordinator):
                 if errors:
                     continue  # drain the rest so the producer never blocks
                 try:
-                    # cupy arrays expose .get(); numpy frames pass straight through.
-                    host_frame = frame.get() if hasattr(frame, "get") else frame
-                    self.slm.update_mask(host_frame)
+                    if hasattr(frame, "get"):  # cupy: copy into pinned host memory
+                        if staging is None:
+                            staging = _pinned_like(frame)
+                        frame.get(out=staging)
+                        host_frame = staging
+                    else:  # already numpy, nothing to copy
+                        host_frame = frame
+                    sink(index, host_frame)
+                    index += 1
                 except Exception as exc:
                     errors.append(exc)
 
-        thread = threading.Thread(target=writer, name="slm-upload", daemon=True)
+        thread = threading.Thread(target=writer, name=thread_name, daemon=True)
         thread.start()
 
         n_frames = 0
@@ -377,7 +474,7 @@ class Rearrangement(Coordinator):
 
     def shutdown(self) -> None:
         """Release rearrangement state. The camera/SLM backends close themselves."""
-        if self._initialised:
+        if self._initialised and self.camera is not None:
             try:
                 self.camera.stop_acquisition()
             except Exception:
