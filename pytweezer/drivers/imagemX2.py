@@ -29,7 +29,7 @@ class ImagEMX2Camera(Camera):
     def __init__(
         self,
         image_dir: str | None = None,
-        timeout: float = 5.0,
+        timeout: float = 20.0,
         stream_name: str | None = None,
     ):
         super().__init__(
