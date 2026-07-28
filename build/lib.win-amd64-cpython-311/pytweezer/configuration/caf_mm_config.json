@@ -1,0 +1,50 @@
+{
+  "motmaster": {
+    "exe_path": "C:\\ControlPrograms\\EDMSuite\\MOTMaster\\bin\\CaF\\MOTMaster.exe",
+    "remote_path": "tcp://localhost:1187/controller.rem"
+  },
+  "transfer_cavity_lock": {
+    "exe_path": "C:\\ControlPrograms\\EDMSuite\\TransferCavityLock2012\\bin\\CaF\\TransferCavityLock.exe",
+    "remote_path": "tcp://localhost:1190/controller.rem"
+  },
+  "wavemeter_lock": {
+    "exe_path": "C:\\ControlPrograms\\EDMSuite\\WavemeterLock\\bin\\Debug\\WavemeterLock.exe",
+    "remote_path": "tcp://localhost:5555/controller.rem"
+  },
+  "caf_hardware_controller": {
+    "exe_path": "C:\\ControlPrograms\\EDMSuite\\MoleculeMOTHardwareControl\\bin\\CaF\\MoleculeMOTHardwareControl.exe",
+    "remote_path": "tcp://localhost:1172/controller.rem"
+  },
+  "dll_paths": {
+    "daq": "C:\\ControlPrograms\\EDMSuite\\MoleculeMOTHardwareControl\\bin\\CaF\\DAQ.dll",
+    "shared_code": "C:\\ControlPrograms\\EDMSuite\\MoleculeMOTHardwareControl\\bin\\CaF\\SharedCode.dll"
+  },
+  "lasers": {
+    "v0": 1,
+    "BX": 5,
+    "v1": 2,
+    "v2": 3,
+    "v3": 4,
+    "TCool": 6
+  },
+  "picomotor":
+        {
+            "connect": false,
+            "motor_to_axis":
+                {
+                    "FMH": 1,
+                    "FMV": 2,
+                    "CMH": 3,
+                    "CMV": 4,
+                    "Further Mirror Horizontal": 1,
+                    "Further Mirror Vertical": 2,
+                    "Closer Mirror Horizontal": 3,
+                    "Closer Mirror Vertical": 4
+                }
+        },
+  "script_root_path": "C:\\ControlPrograms\\EDMSuite\\MoleculeMOTMasterScripts",
+  "data_root_path": "C:\\Users\\cafmot\\OneDrive - Imperial College London\\cafmot\\datasync\\mot_master_data",
+  "temp_image_path": "C:\\Users\\cafmot\\Documents\\TempCameraImages",
+  "temp_tof_path": "C:\\Users\\cafmot\\Documents\\ToF_Data",
+  "data_prefix": "CaF"
+}
