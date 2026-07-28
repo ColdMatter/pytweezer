@@ -72,6 +72,9 @@ USE_SUM_CPP = True
 _sum_cpp_module = None
 _sum_cpp_loaded = False
 
+_morph_cpp_module = None
+_morph_cpp_loaded = False
+
 #: How many generated frames may queue ahead of the SLM before the GPU loop blocks.
 UPLOAD_QUEUE_DEPTH = 5
 
@@ -80,7 +83,7 @@ def _pinned_like(frame):
     """Page-locked host array matching for a frame to be copied from the GPU.
 
     Falls back to ordinary memory if the pinned allocation fails, since pinning is
-    a throughput optimisation and not for correctness.
+    a throughput optimisation and not for correctness - should be faster than pageable.
     """
     shape = tuple(frame.shape)
     dtype = np.dtype(frame.dtype)
@@ -92,6 +95,26 @@ def _pinned_like(frame):
         LOGGER.debug("Pinned allocation failed; using pageable memory.", exc_info=True)
         return np.empty(shape, dtype)
 
+
+def _morph_cpp():
+    global _morph_cpp_module, _morph_cpp_loaded
+    if not USE_SUM_CPP:
+        return None
+    if not _morph_cpp_loaded:
+        _morph_cpp_loaded = True
+        try:
+            from pytweezer.cpp import morph_tophat_cpp
+
+            _morph_cpp_module = morph_tophat_cpp
+        except Exception:  # pragma: no cover
+            # pragme no cover stops coverage.py complaining about failing imports here on machine 
+            # without the C++ extension built. The extension is optional, so this is not a test failure.
+            LOGGER.debug(
+                "morph_tophat_cpp unavailable; using numpy.",
+                exc_info=True,
+            )
+            _morph_cpp_module = None
+    return _morph_cpp_module
 
 def _sum_cpp():
     global _sum_cpp_module, _sum_cpp_loaded
@@ -273,14 +296,21 @@ class Rearrangement(Coordinator):
         """
         from pytweezer.analysis import analysis as an
 
-        img = an.morphological_tophat_high_pass(image, feature_size=10)
-        grid_positions = self._state["grid_positions"]
+        cpp_morph = _morph_cpp()
+        if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
+            img = cpp_morph.Morphological_top_hat_cpp(image, feature_size=10)
+            LOGGER.debug("Using C++ morphological top-hat for occupancy extraction.")
+        else:
+            img = an.morphological_tophat_high_pass(image, feature_size=10)
+            grid_positions = self._state["grid_positions"]
 
-        cpp = _sum_cpp()
-        if cpp is not None and getattr(img, "dtype", None) == np.uint16:
-            pixel_sums = cpp.sum_pixel_values(
+
+        cpp_sum = _sum_cpp()
+        if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
+            pixel_sums = cpp_sum.sum_pixel_values(
                 img, grid_positions, array_shape, window_size=3
             )
+            LOGGER.debug("Using C++ pixel-sum for occupancy extraction.")
         else:
             pixel_sums = an.sum_pixel_values(
                 img, grid_positions, array_shape, window_size=3
@@ -294,14 +324,6 @@ class Rearrangement(Coordinator):
         drains a bounded queue, so the GPU keeps synthesising while the previous frame
         is copied to the host and DMA'd to the board. The GPU->host ``.get()`` runs on
         the writer thread to keep the PCIe transfer off the generation loop.
-
-        The queue depth bounds how far generation may run ahead. On an upload error
-        the writer keeps draining (without touching hardware) so the producer cannot
-        deadlock on a full queue; the first error is re-raised here.
-
-        :attr:`last_first_frame_at` is set to the moment the first frame reached the
-        panel, so a caller can separate the latency before the move starts from the
-        move itself.
         """
         first_frame_at = []
         self.last_first_frame_at = None
@@ -326,10 +348,6 @@ class Rearrangement(Coordinator):
 
         Trigger gating must be **off** while this runs, or each upload blocks
         waiting for a trigger.
-
-        :attr:`last_first_frame_at` is set as in :meth:`_play_sequence_pipelined`,
-        which separates the once-per-shot setup (pairing, static background, array
-        prep) from the steady-state per-frame upload rate.
         """
         first_frame_at = []
         self.last_first_frame_at = None
@@ -348,15 +366,11 @@ class Rearrangement(Coordinator):
         """Feed ``frames`` to ``sink(index, host_frame)`` on a writer thread.
 
         The producer (GPU generation) and the writer (host copy + PCIe transfer)
-        run concurrently, bounded by :data:`UPLOAD_QUEUE_DEPTH`. On error the
-        writer keeps draining without touching hardware so the producer cannot
-        deadlock on a full queue; the first error is re-raised here.
+        run concurrently, bounded by :data:`UPLOAD_QUEUE_DEPTH`.
 
         cupy frames land in a page-locked staging buffer, which the GPU can DMA
         into roughly twice as fast as pageable memory and which the SLM driver
-        passes to the board without a further copy. One buffer is reused for every
-        frame: ``sink`` must finish with it before returning, which both
-        ``update_mask`` and ``preload_image`` do (each blocks on its own DMA).
+        passes to the board without a further copy.
         """
         upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
         errors = []

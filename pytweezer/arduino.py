@@ -11,7 +11,7 @@ class ArduinoPulser:
     board.
     """
 
-    def __init__(self, port='COM4', baudrate=250000, timeout=5):
+    def __init__(self, port='COM5', baudrate=250000, timeout=5):
 
         self.port = port
         self.baudrate = baudrate
@@ -70,7 +70,7 @@ class ArduinoPulser:
 
 
 if __name__ == "__main__":
-    arduino = ArduinoPulser('COM4')
+    arduino = ArduinoPulser('COM5')
 
     startup_message = arduino.connect()
     print(f"Connection Confirmed - Arduino: '{startup_message}'")
