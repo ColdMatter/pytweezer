@@ -3,9 +3,11 @@
 Status: a real O(n^2) bug in sipyco was found and fixed on branch `sipyco-fix`
 (commit `5aef1f6`), **not merged, not pushed**.
 
-**Whether it fixes the reported symptom is still unmeasured.** The one attempt
-to test against real hardware was run over a Tailscale DERP relay and is
-invalid — see "Hardware results" below. A valid test has to run on the lab LAN.
+**The fix is confirmed on real hardware** (2026-07-29, on PH-BEAST itself — see
+"Hardware results" below). It is real but *not* the dominant cost: the HamCam
+delivers frames at a measured **425.9 ms/frame**, which swamps everything else
+at the frame counts in use. If the complaint is "HamCam grabs are slow", the
+frame rate is now the thing to chase, not the RPC layer.
 
 ## Symptom
 
@@ -107,7 +109,68 @@ This matches the real `hybrid_exp_test.ipynb` / `28Jul26Exp.ipynb` /
 `local_cam.acquire_n_frames(n_iterations * 2)` — any loop that grabs more
 than a handful of frames per RPC call pays this.
 
-## Hardware results (2026-07-28, `Rb HamCam` on PH-BEAST) — INVALID, do not use
+## Hardware results (2026-07-29, `Rb HamCam`, run on PH-BEAST) — VALID
+
+Run on PH-BEAST itself: `Ethernet 2` (Intel X710-TL) up at 1 Gbps holding
+10.59.3.1, WiFi down, and the rig server bound to that same address, so the RPC
+never enters the Tailscale tunnel. Measured RTT on a tiny reply was 0.1-0.3 ms
+(against 33-134 ms for the relayed run below). `tools/bench_hamcam_rpc.py`,
+512x512, 1 ms exposure, EM gain off, 3 repeats:
+
+| frames | MB | stock med | patched med | ratio |
+|---|---|---|---|---|
+| 1 | 0.5 | 853.9 ms | 853.9 ms | 1.0x |
+| 5 | 2.6 | 2728.0 ms | 2557.3 ms | 1.1x |
+| 10 | 5.2 | 5384.4 ms | 4687.1 ms | 1.1x |
+| 25 | 13.1 | 15150.2 ms | 11075.7 ms | 1.4x |
+| 50 | 26.2 | — | `DCAMTimeoutError` | — |
+
+The synthetic loopback benchmark on the same machine, for comparison: 2.4x at
+1 frame, 19.9x at 10, 96.4x at 50, 184.7x at 100.
+
+**The modest ratios are not the fix underperforming.** Subtract the arms and the
+readline cost falls out on its own, and it is cleanly quadratic in reply size —
+exactly the predicted shape:
+
+| reply | stock − patched | vs. previous row |
+|---|---|---|
+| 2.6 MB | 171 ms | — |
+| 5.2 MB | 697 ms | 2.0x size → 4.1x time |
+| 13.1 MB | 4075 ms | 2.5x size → 5.8x time (quadratic predicts 6.3x) |
+
+So the defect and its removal behave on the real link precisely as on loopback.
+It is simply that at 25 frames the fix saves 4 s out of 15 s, and the other 11 s
+is the camera.
+
+### The camera, not the RPC, sets the pace
+
+Per-frame cost is dead constant across every frame count measured:
+
+| frames | total (patched) | Δ per extra frame |
+|---|---|---|
+| 1 | 853.9 ms | — |
+| 5 | 2557.3 ms | 425.9 ms |
+| 10 | 4687.1 ms | 426.0 ms |
+| 25 | 11075.7 ms | 425.9 ms |
+
+**425.9 ms/frame — 2.35 fps at 512x512** — with the fixed intercept (428 ms)
+equal to exactly one more frame period. Exposure was 1 ms, so essentially none
+of this is integration time, and `autosave`/`broadcast` both default to `False`,
+so no TIFF write or ZMQ publish is in this path either. The whole of it is
+inside `_read_frames` (`wait_for_frame` + `read_multiple_images`). That is far
+below what this sensor should manage and is unexplained — whether it is a slow
+readout/scan-mode attribute, a pylablib polling granularity, or genuine sensor
+readout is **not yet determined**. Splitting `wait_for_frame` from
+`read_multiple_images` needs server-side timing; a client-side ROI sweep would
+discriminate a pixel-rate limit from a fixed per-frame overhead.
+
+This also fully explains the 50-frame failure above: 50 x 426 ms = 21.3 s
+against the 20 s `timeout` in the `Rb HamCam` config entry. It supersedes the
+guess recorded below that the ~330 ms/frame seen over the relay was a network
+artefact — the same per-frame floor is present on a 1 Gbps local link, so most
+of that figure was the camera all along, not the DERP relay.
+
+## Hardware results (2026-07-28, over Tailscale) — INVALID, do not use
 
 An attempt to measure this against the real camera from a laptop produced these
 numbers, which are **an artefact of the network path and say nothing about the
@@ -145,9 +208,8 @@ The same ceiling explains why the fix looked useless here: the defect costs
 On a fast link the copying dominates instead, which is what the loopback
 benchmark shows.
 
-**To get a valid answer**, run `tools/bench_hamcam_rpc.py` *on PH-BEAST itself*
-(loopback to its own device server) or from a machine wired to the lab LAN
-(10.59.3.0/24). Do not run it across Tailscale.
+This has since been done — see the valid run above. Do not re-run the benchmark
+across Tailscale.
 
 ### Two things this turned up that are NOT network artefacts
 
@@ -158,8 +220,10 @@ benchmark shows.
   returns **496**. Not fixed here — analysis code may already be compensating.
 * **`"sequence"` mode returns empty arrays.** The buffer window advances past
   absolute frame 0, so `read_multiple_images((0, n))` finds nothing. Use
-  `"snap"`. Also, >~25 frames per call exceeds the server-side 20 s
-  `wait_for_frame` timeout at 330 ms/frame.
+  `"snap"`. Also, >~46 frames per call exceeds the server-side 20 s
+  `wait_for_frame` timeout at the measured 426 ms/frame — 50 frames raises
+  `DCAMTimeoutError`, and raising the config `timeout` is the workaround until
+  the frame rate itself is understood.
 
 ## Fix applied
 
