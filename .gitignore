@@ -13,9 +13,26 @@ poetry/
 scripts/
 tests/
 # compiled extensions / build artifacts (rebuilt per-platform with `make`)
+# .obj/.lib/.exp are the MSVC counterparts of .o — the *.o rule misses them on Windows.
 *.so
 *.o
+*.obj
+*.lib
+*.exp
+
+# setup.py staging tree: a stale copy of the whole package plus ~19 MB of object
+# files. Nothing imports from it; it only ever goes stale against the source.
+build/
+
+# runtime logs
+logs/
 
 cpp_implementations/Pixel_Summing/build/
+cpp_implementations/*/build/
+cpp_implementations/*/*.egg-info/
 cpp_implementations/Pixel_Summing/*.egg-info/
 SDK/
+
+# The compiled extensions themselves stay tracked so lab machines without MSVC
+# still get the fast path (rearrangement.py falls back to numpy without them).
+!pytweezer/cpp/*.pyd
