@@ -6,7 +6,7 @@ authors = [
     {name = "Peter",email = "PDunniece@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "annotated-types (==0.7.0)",
     "asttokens (==3.0.1)",
@@ -81,7 +81,7 @@ dependencies = [
     "pynacl (==1.6.2)",
     "pyparsing (==3.3.2)",
     "pyperclip (==1.11.0)",
-    "pyqt5 (==5.15.10)",
+    "pyqt5 (==5.15.11)",
     "pyqt5-qt5 (==5.15.2)",
     "pyqt5-sip (==12.18.0)",
     "pyqtgraph (==0.14.0)",
