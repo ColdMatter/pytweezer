@@ -103,7 +103,7 @@ def _morph_cpp():
     if not _morph_cpp_loaded:
         _morph_cpp_loaded = True
         try:
-            import morph_tophat_cpp
+            from pytweezer.cpp import morph_tophat_cpp
 
             _morph_cpp_module = morph_tophat_cpp
         except Exception:  # pragma: no cover
@@ -123,7 +123,7 @@ def _sum_cpp():
     if not _sum_cpp_loaded:
         _sum_cpp_loaded = True
         try:
-            import sum_pixel_values_cpp
+            from pytweezer.cpp import sum_pixel_values_cpp
 
             _sum_cpp_module = sum_pixel_values_cpp
         except Exception:  # pragma: no cover 
