@@ -13,7 +13,6 @@ tweezerpath = os.path.realpath(os.path.dirname(os.path.abspath(__file__)) + "/..
 configpath = os.path.realpath(
     os.path.dirname(os.path.abspath(__file__)) + "/../../configuration/"
 )
-icon_path = tweezerpath + "/pytweezer/GUI/icons/"
 configfilename = configpath + "/config.py"
 propertyfilename = configpath + "/properties/properties.json"
 

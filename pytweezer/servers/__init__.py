@@ -12,6 +12,6 @@ from .properties import PropertyAttribute
 from .clients import DataClient
 from .clients import ImageClient
 from .clients import CommandClient
-from .configreader import tweezerpath, icon_path
+from .configreader import tweezerpath
 from .messageclient import send_error,send_warning,send_info,send_debug
 
