@@ -24,7 +24,6 @@ IMAGE_DIRECTORY = (
 
 LOGGER = logging.getLogger(__name__)
 
-
 def requires_camera(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):

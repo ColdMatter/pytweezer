@@ -19,7 +19,7 @@
                     "parts": 3
                 },
                 "rb_hamcam": {
-                    "timestamp": 1785248421.0875604,
+                    "timestamp": 1784650001.3318417,
                     "parts": 3
                 },
                 "caf_hamcam": {
@@ -27,7 +27,7 @@
                     "parts": 3
                 },
                 "rb_thorcam": {
-                    "timestamp": 1785248419.563327,
+                    "timestamp": 1784893051.639819,
                     "parts": 3
                 }
             }
@@ -214,7 +214,7 @@
             "Geometry": [
                 0,
                 0,
-                1052,
+                612,
                 408
             ]
         },
@@ -251,12 +251,12 @@
         "ROI": {
             "slice": {
                 "pos": [
-                    28.344530609223852,
-                    21.613346615292585
+                    11.362338639954956,
+                    60.1063150789687
                 ],
                 "size": [
-                    39.057169050276656,
-                    42.453607444130625
+                    30,
+                    30
                 ],
                 "color": 4278190335
             }
@@ -289,12 +289,12 @@
         "ROI": {
             "slice": {
                 "pos": [
-                    6.510699605322827,
-                    -1.435971984571779
+                    0,
+                    0
                 ],
                 "size": [
-                    9.549350430766829,
-                    13.663219315957065
+                    30,
+                    30
                 ],
                 "color": 4278190335
             }
@@ -308,7 +308,7 @@
         "Applets": {
             "Image Monitor": {
                 "script": "pytweezer/GUI/viewers/image_monitor.py",
-                "active": false,
+                "active": true,
                 "description": "Display image streams"
             },
             "Live Plot": {
@@ -323,7 +323,7 @@
             },
             "Image Monitor 2": {
                 "script": "pytweezer/GUI/viewers/image_monitor.py",
-                "active": false
+                "active": true
             }
         }
     },
