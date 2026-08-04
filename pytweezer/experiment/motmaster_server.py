@@ -5,15 +5,11 @@ import json
 import pathlib
 import subprocess
 import sys
-
 import zmq
-from pytweezer.servers.configreader import ConfigReader
 from pytweezer.experiment.motmaster_interface import MotMasterInterface
-# from pycaf.experiment import Experiment
 
 # config directory local to the package.
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
-
 
 class DummyMotMasterInterface(MotMasterInterface):
 

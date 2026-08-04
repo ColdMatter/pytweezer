@@ -17,16 +17,12 @@ hardware applies its own voltage LUT on top.
 """
 
 from __future__ import annotations
-
 import time
 from typing import Optional
-
 import numpy as np
+import logging
 
-from pytweezer.servers.simulated_device import simulate
-from pytweezer.logging_utils import get_logger
-
-LOGGER = get_logger("slm")
+LOGGER = logging.getLogger(__name__)
 
 #: Defaults matching the lab's Blink Plus install; overridable via config.
 DEFAULT_SDK_DLL = "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\SDK\\Blink_C_wrapper"
@@ -85,7 +81,7 @@ class SLM:
         constructed_okay = c_uint(-1)
         lib.Create_SDK(byref(num_boards_found), byref(constructed_okay))
         if constructed_okay.value == 0:
-            raise RuntimeError("Blink SDK did not construct successfully")
+            raise RuntimeError("SLM connection failed. Blink SDK did not construct successfully")
         if num_boards_found.value != 1:
             raise RuntimeError(
                 f"Expected exactly one SLM board, found {num_boards_found.value}"
@@ -95,11 +91,7 @@ class SLM:
         self.height = lib.Get_image_height(self.board_number)
         self.depth = lib.Get_image_depth(self.board_number)  # bits per pixel
         serial = lib.Read_Serial_Number(self.board_number)
-        LOGGER.info(
-            "SLM board %d: %dx%d @ %d-bit, serial %s, %.3f degC",
-            self.board_number, self.width, self.height, self.depth, serial,
-            lib.Read_SLM_temperature(self.board_number),
-        )
+        print(f"SLM {self.board_number} initialised: {self.width}x{self.height} @ {self.depth}-bit, serial {serial}, {lib.Read_SLM_temperature(self.board_number):.3f} degC")
 
         lib.SetWaitForTrigger(self.board_number, int(self.wait_for_trigger))
         lib.SetFlipImmediate(self.board_number, int(self.flip_immediate))
@@ -109,7 +101,7 @@ class SLM:
             status = lib.Load_LUT_file(self.board_number, self.lut_file.encode())
             if status != 1:
                 raise RuntimeError(f"Failed to load LUT file {self.lut_file!r}")
-            LOGGER.info("Loaded LUT %s", self.lut_file)
+            print(f"SLM {self.board_number} loaded LUT \"{self.lut_file}\"")
 
         self._lib = lib
         self._poi = POINTER(c_ubyte)  # cached for hot-path mask writes
@@ -127,8 +119,9 @@ class SLM:
         if self._lib is not None:
             try:
                 self._lib.Delete_SDK()
+                print(f"SLM {self.board_number} closed.")
             except Exception:
-                LOGGER.exception("Failed to close Blink SDK cleanly")
+                print(f"Failed to close SLM {self.board_number} cleanly")
         self._lib = None
 
     # ------------------------------------------------------------------ #
@@ -264,64 +257,3 @@ class SLM:
 
     def get_dimensions(self) -> dict:
         return {"width": self.width, "height": self.height, "depth": self.depth}
-
-
-class SimulatedSLM:
-    """Synthetic SLM: remembers the last mask written and counts frames.
-
-    Interface-complete with :class:`SLM` via :func:`simulate`, so anything the
-    real driver adds is auto-stubbed. Fixed 1024x1024 8-bit geometry, matching the
-    lab's board.
-    """
-
-    def __init__(self, width: int = 1024, height: int = 1024, depth: int = 8, **_ignored):
-        self.width = int(width)
-        self.height = int(height)
-        self.depth = int(depth)
-        self.last_mask = None
-        self.frames_written = 0
-        self.preloaded_frames = 0
-        self.auto_increment_length = 0
-        self.wait_for_trigger = False
-        self._temp = 35.0
-        self._closed = False
-
-    def is_connected(self) -> bool:
-        return not self._closed
-
-    def update_mask(self, mask_array: np.ndarray) -> None:
-        self.last_mask = np.ascontiguousarray(mask_array, dtype=np.uint8)
-        self.frames_written += 1
-
-    def preload_sequence(self, mask_sequence: np.ndarray) -> None:
-        self.preloaded_frames = int(np.asarray(mask_sequence).shape[0])
-
-    def preload_image(self, mask_array: np.ndarray, frame: int) -> None:
-        if not 0 <= frame < MAX_PRELOAD_FRAMES:
-            raise ValueError(f"frame {frame} outside 0-{MAX_PRELOAD_FRAMES - 1}")
-        self.preloaded_frames = max(self.preloaded_frames, int(frame) + 1)
-
-    def set_wait_for_trigger(self, enabled: bool) -> None:
-        self.wait_for_trigger = bool(enabled)
-
-    def start_auto_increment(self, list_length: int) -> None:
-        self.auto_increment_length = int(list_length)
-
-    def stop_auto_increment(self) -> None:
-        self.auto_increment_length = 0
-
-    def run_sequence(self, mask_sequence: np.ndarray, fps: float = 1.0) -> None:
-        for frame in np.asarray(mask_sequence, dtype=np.uint8):
-            self.update_mask(frame)
-
-    def get_temperature(self) -> float:
-        return float(self._temp)
-
-    def get_dimensions(self) -> dict:
-        return {"width": self.width, "height": self.height, "depth": self.depth}
-
-    def close(self) -> None:
-        self._closed = True
-
-
-SimulatedSLM = simulate(SLM)(SimulatedSLM)

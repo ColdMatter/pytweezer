@@ -4,7 +4,6 @@ from typing import Any, Optional
 from pytweezer.servers.configreader import ConfigReader
 import zmq
 
-
 class MotMasterClient:
 	def __init__(
 		self,
@@ -23,6 +22,7 @@ class MotMasterClient:
 		self.address = f"tcp://{self.host}:{self.port}"
 		self.timeout_ms = timeout_ms
 		self.context = context or zmq.Context.instance()
+		print(f"{system} MotMasterClient initialised.")
 
 	def _create_socket(self, timeout_ms: int) -> zmq.Socket:
 		socket = self.context.socket(zmq.REQ)
@@ -33,6 +33,7 @@ class MotMasterClient:
 		return socket
 
 	def close(self) -> None:
+		print(f"MotMasterClient closed.")
 		return None
 
 	def __enter__(self) -> "MotMasterClient":
