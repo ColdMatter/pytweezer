@@ -19,7 +19,7 @@
                     "parts": 3
                 },
                 "rb_hamcam": {
-                    "timestamp": 1785321553.4476902,
+                    "timestamp": 1785501796.1260877,
                     "parts": 3
                 },
                 "caf_hamcam": {
@@ -27,7 +27,7 @@
                     "parts": 3
                 },
                 "rb_thorcam": {
-                    "timestamp": 1784893051.639819,
+                    "timestamp": 1785501794.345277,
                     "parts": 3
                 }
             }
@@ -239,7 +239,7 @@
     },
     "Image Monitor": {
         "imagestreams": [
-            "rb_hamcam"
+            "rb_thorcam"
         ],
         "maskstreams": [
             "--None--"
