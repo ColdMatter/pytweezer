@@ -117,6 +117,10 @@ class ImagEMX2Camera(Camera):
         self._backend.set_attribute_value("trigger_active", 2)
         self._backend.setup_ext_trigger(invert=True)
 
+    def trigger(self):
+        """Send a software trigger to the camera."""
+        self._backend.send_software_trigger()
+
 
 #: One-size-fits-all simulated camera, with the ImagEM's EM-gain/sensitivity
 #: setters auto-stubbed so the simulated surface matches the real driver.

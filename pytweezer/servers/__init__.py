@@ -1,4 +1,9 @@
 import zmq
+
+from .sipyco_patches import apply_patches as _apply_sipyco_patches
+
+_apply_sipyco_patches()
+
 zmqcontext = zmq.Context()
 EVENT_MAP = {}
 # print("Event names:")
