@@ -18,6 +18,7 @@ scripts/
 *.obj
 *.lib
 *.exp
+*.pyd
 
 # setup.py staging tree: a stale copy of the whole package plus ~19 MB of object
 # files. Nothing imports from it; it only ever goes stale against the source.

@@ -76,6 +76,7 @@ pytest = "^9.1.1"
 influxdb-client = "^1.50.0"
 nidaqmx = "^1.5.0"
 scikit-learn = "^1.9.0"
+pybase64 = "^1.4.3"
 
 [build-system]
 requires = ["poetry-core", "pybind11>=2.10.0", "setuptools", "numpy"]
