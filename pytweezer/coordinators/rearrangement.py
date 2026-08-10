@@ -157,6 +157,8 @@ def _sum_cpp():
     return _sum_cpp_module
 
 
+dx, dy = 8.0, 12.0
+
 #: Default phasemask-generator geometry (the lab's Rb SLM); overridable via config.
 DEFAULT_PHASEMASK = dict(
     wavelength_um=0.852,
@@ -286,8 +288,12 @@ class Rearrangement(Coordinator):
         self.camera.set_roi(x0, width, y0, height)
         print("Camera configured for rearrangement (roi=%s).", roi)
 
-        w1, phi1, x1, y1 = cp.asarray(np.asarray(data1))
-        w2, phi2, x2, y2 = cp.asarray(np.asarray(data2))
+        # cp.asarray takes host or device arrays: a no-op for the cupy terms that
+        # come straight out of superposition_optimization, a host->device copy for
+        # numpy ones. np.asarray cannot sit in front of it - it is not dispatchable
+        # under NEP-18, so a cupy input falls through to __array__ and raises.
+        w1, phi1, x1, y1 = cp.asarray(data1)
+        w2, phi2, x2, y2 = cp.asarray(data2)
         terms1 = (w1, phi1, x1, y1, array_shape1)
         terms2 = (w2, phi2, x2, y2, array_shape2)
 
@@ -316,13 +322,13 @@ class Rearrangement(Coordinator):
         Uses the compiled ``sum_pixel_values`` when it is available and the image is
         ``uint16`` (the dtype the extension is built for), else the numpy version.
         """
-        from pytweezer.analysis import analysis as an
+        from pytweezer import analysis as an
 
         grid_positions = self._state["grid_positions"]
 
         cpp_morph = _morph_cpp()
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
-            img = cpp_morph.Morphological_top_hat_cpp(image, feature_size=10)
+            img = cpp_morph.tophat(image, feature_size=10)
             print("Using C++ morphological top-hat for occupancy extraction.")
         else:
             img = an.morphological_tophat_high_pass(image, feature_size=10)
