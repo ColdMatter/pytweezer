@@ -286,6 +286,7 @@ class Rearrangement(Coordinator):
         self.camera.enable_direct_em_gain(True)
         self.camera.set_sensitivity(1200)
         self.camera.set_roi(x0, width, y0, height)
+        self.camera.timeout = 5
         print("Camera configured for rearrangement (roi=%s).", roi)
 
         # cp.asarray takes host or device arrays: a no-op for the cupy terms that
@@ -327,6 +328,7 @@ class Rearrangement(Coordinator):
         grid_positions = self._state["grid_positions"]
 
         cpp_morph = _morph_cpp()
+        cpp_morph = None
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
             img = cpp_morph.tophat(image, feature_size=10)
             print("Using C++ morphological top-hat for occupancy extraction.")
@@ -334,6 +336,7 @@ class Rearrangement(Coordinator):
             img = an.morphological_tophat_high_pass(image, feature_size=10)
 
         cpp_sum = _sum_cpp()
+        cpp_sum = None
         if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
             pixel_sums = cpp_sum.sum_pixel_values(
                 img, grid_positions, array_shape, window_size=3
@@ -511,9 +514,8 @@ class Rearrangement(Coordinator):
         t4 = time.time()
 
         print(
-            "Rearrangement complete: %d frames, %.4fs total "
-            "(occupancy %.4fs, sequence+upload %.4fs, reset %.4fs).",
-            n_frames, t4 - t1, t2 - t1, t3 - t2, t4 - t3,
+            f"Rearrangement complete: {n_frames} frames, {t4 - t1:.4f}s total "
+            f"(occupancy {t2 - t1:.4f}s, sequence+upload {t3 - t2:.4f}s, reset {t4 - t3:.4f}s)."
         )
         # Generation and upload are pipelined (see docstring), so they share one
         # measured span; both keys report it rather than a fabricated split.
