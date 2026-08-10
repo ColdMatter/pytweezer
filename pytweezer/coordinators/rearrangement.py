@@ -78,6 +78,37 @@ _morph_cpp_loaded = False
 #: How many generated frames may queue ahead of the SLM before the GPU loop blocks.
 UPLOAD_QUEUE_DEPTH = 5
 
+#: Minimum interval between successive ``update_mask`` calls on the display path,
+#: in seconds. ``Write_image``/``ImageWriteComplete`` acknowledge the transfer into
+#: the board's memory, NOT a panel flip, so without this the pipeline happily
+#: writes faster than the liquid crystal can refresh and each frame overwrites the
+#: one still being displayed — the atoms then see fewer, larger jumps than ``d0``
+#: asks for. Override per instance with ``conf["panel_period_s"]``; set to 0.0 to
+#: disable pacing entirely. Only the display path needs this: preload+trigger
+#: writes to frame memory and is clocked by the Arduino.
+PANEL_PERIOD_S = 0.70e-3
+
+#: Slack left for the spin tail in :func:`_wait_until`. Must exceed the Windows
+#: timer quantum (~0.5 ms), or ``time.sleep`` rounds straight past the deadline,
+#: but stay below :data:`PANEL_PERIOD_S`, or nothing ever sleeps. At a 0.70 ms
+#: period a 0.10 ms margin overshoots to 1.00 ms; 0.60 ms lands on 0.7006 ms.
+SLEEP_MARGIN_S = 0.60e-3
+
+
+def _wait_until(deadline):
+    """Block until ``deadline`` (a ``time.perf_counter()`` value).
+
+    Sleeps the bulk and spins only the last :data:`SLEEP_MARGIN_S`. ``time.sleep``
+    releases the GIL, so the generation thread keeps running for most of the wait,
+    while the spin covers the tail where the OS timer is too coarse to land on.
+    Measured at a 0.70 ms period: mean 0.7006 ms, 3.4 us sd, asleep ~74% of the wait.
+    """
+    remaining = deadline - time.perf_counter()
+    if remaining > SLEEP_MARGIN_S:
+        time.sleep(remaining - SLEEP_MARGIN_S)
+    while time.perf_counter() < deadline:
+        pass
+
 
 def _pinned_like(frame):
     """Page-locked host array matching for a frame to be copied from the GPU.
@@ -166,6 +197,9 @@ class Rearrangement(Coordinator):
         self.slm: SLM = self.require_role(self.slm_role)
 
         self.phasemask_kwargs = {**DEFAULT_PHASEMASK, **(conf.get("phasemask") or {})}
+
+        #: Enforced minimum interval between panel writes; see :data:`PANEL_PERIOD_S`.
+        self.panel_period_s = float(conf.get("panel_period_s", PANEL_PERIOD_S))
 
         self._initialised = False
         self._state = None  # populated by initialise()
@@ -324,14 +358,29 @@ class Rearrangement(Coordinator):
         drains a bounded queue, so the GPU keeps synthesising while the previous frame
         is copied to the host and DMA'd to the board. The GPU->host ``.get()`` runs on
         the writer thread to keep the PCIe transfer off the generation loop.
+
+        Writes are held to :attr:`panel_period_s` apart. This is a floor, not an
+        added delay: if generation is already slower than the panel nothing is
+        added and the GPU stays the bottleneck. Without it the board acknowledges
+        each transfer in ~0.4 ms and the next frame overwrites the one still being
+        displayed, so the atoms step further per *displayed* frame than ``d0`` sets
+        — the moves get faster on paper and worse in the trap.
         """
         first_frame_at = []
         self.last_first_frame_at = None
+        next_slot = None
 
         def display(index, host_frame):
+            nonlocal next_slot
             self.slm.update_mask(host_frame)
             if not first_frame_at:
                 first_frame_at.append(time.perf_counter())
+            if self.panel_period_s:
+                now = time.perf_counter()
+                if next_slot is not None and now < next_slot:
+                    _wait_until(next_slot)
+                    now = next_slot
+                next_slot = now + self.panel_period_s
 
         n_frames = self._drain_pipelined(frames, display, "slm-upload")
         if first_frame_at:
