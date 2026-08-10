@@ -80,11 +80,22 @@ class SLM:
         num_boards_found = c_uint(0)
         constructed_okay = c_uint(-1)
         lib.Create_SDK(byref(num_boards_found), byref(constructed_okay))
+        # `constructed_okay` is advisory only: the Blink Plus build on the lab PC
+        # reports 0 here while still enumerating the board correctly (the same SDK
+        # also returns temperature 0.0 and serial -1). The old SLMServer.py printed
+        # this and carried on, which is why it connects where a hard check does not.
+        # Board count is the signal that actually tracks the hardware.
         if constructed_okay.value == 0:
-            raise RuntimeError("SLM connection failed. Blink SDK did not construct successfully")
+            LOGGER.warning(
+                "Blink SDK reported constructed_okay=0; continuing on board count "
+                "(%d found), matching the legacy SLMServer.py behaviour.",
+                num_boards_found.value,
+            )
         if num_boards_found.value != 1:
             raise RuntimeError(
-                f"Expected exactly one SLM board, found {num_boards_found.value}"
+                "SLM connection failed. Expected exactly one SLM board, found "
+                f"{num_boards_found.value} (Blink SDK constructed_okay="
+                f"{constructed_okay.value})"
             )
 
         self.width = lib.Get_image_width(self.board_number)
@@ -257,3 +268,62 @@ class SLM:
 
     def get_dimensions(self) -> dict:
         return {"width": self.width, "height": self.height, "depth": self.depth}
+
+
+class SimulatedSLM:
+    """Synthetic SLM: remembers the last mask written and counts frames.
+
+    Implements the same public surface as :class:`SLM` by hand — the old
+    ``servers.simulated_device.simulate`` decorator that auto-stubbed the rest
+    was removed in the repo clean-up. Fixed 1024x1024 8-bit geometry, matching
+    the lab's board.
+    """
+
+    def __init__(self, width: int = 1024, height: int = 1024, depth: int = 8, **_ignored):
+        self.width = int(width)
+        self.height = int(height)
+        self.depth = int(depth)
+        self.last_mask = None
+        self.frames_written = 0
+        self.preloaded_frames = 0
+        self.auto_increment_length = 0
+        self.wait_for_trigger = False
+        self._temp = 35.0
+        self._closed = False
+
+    def is_connected(self) -> bool:
+        return not self._closed
+
+    def update_mask(self, mask_array: np.ndarray) -> None:
+        self.last_mask = np.ascontiguousarray(mask_array, dtype=np.uint8)
+        self.frames_written += 1
+
+    def preload_sequence(self, mask_sequence: np.ndarray) -> None:
+        self.preloaded_frames = int(np.asarray(mask_sequence).shape[0])
+
+    def preload_image(self, mask_array: np.ndarray, frame: int) -> None:
+        if not 0 <= frame < MAX_PRELOAD_FRAMES:
+            raise ValueError(f"frame {frame} outside 0-{MAX_PRELOAD_FRAMES - 1}")
+        self.preloaded_frames = max(self.preloaded_frames, int(frame) + 1)
+
+    def set_wait_for_trigger(self, enabled: bool) -> None:
+        self.wait_for_trigger = bool(enabled)
+
+    def start_auto_increment(self, list_length: int) -> None:
+        self.auto_increment_length = int(list_length)
+
+    def stop_auto_increment(self) -> None:
+        self.auto_increment_length = 0
+
+    def run_sequence(self, mask_sequence: np.ndarray, fps: float = 1.0) -> None:
+        for frame in np.asarray(mask_sequence, dtype=np.uint8):
+            self.update_mask(frame)
+
+    def get_temperature(self) -> float:
+        return float(self._temp)
+
+    def get_dimensions(self) -> dict:
+        return {"width": self.width, "height": self.height, "depth": self.depth}
+
+    def close(self) -> None:
+        self._closed = True
