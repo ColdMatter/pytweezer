@@ -131,14 +131,11 @@ DEFAULT_PHASEMASK = dict(
     wavelength_um=0.852,
     focal_length_mm=17.3,
     slm_pitch_um=17,
-    slm_res=(1024, 1024),
+    slm_res=(1024,1024),
     input_beam_waist_mm=16,
     fresnel_f_mm=1072,
-    blaze_dx_dy_um=(48, -4),
-    zernike_coeff_dict={
-        5: 1.195, 6: 0.725, 7: 0.970, 8: 0.478, 9: -1.091,
-        10: 0.303, 11: 0.021, 12: 0.072, 13: 0.049,
-    },
+    blaze_dx_dy_um=(40+dx, -8+dy),
+    zernike_coeff_dict={5:1.195, 6:0.725, 7:0.970, 8:0.478, 9:-1.091, 10:0.303, 11:0.021, 12:0.072, 13:0.049}
 )
 
 #: Default camera ROI (x0, y0, width, height) if ``initialise`` isn't given one.
