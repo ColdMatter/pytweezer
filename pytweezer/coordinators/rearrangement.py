@@ -63,8 +63,8 @@ except Exception:  # pragma: no cover - depends on the machine's GPU stack
     cp = None
     _HAS_CUPY = False
 
-#: Set ``False`` to force the numpy occupancy path instead of the C++ extension.
-USE_SUM_CPP = True
+
+USE_SUM_CPP = False
 
 _sum_cpp_module = None
 _sum_cpp_loaded = False
@@ -257,17 +257,7 @@ class Rearrangement(Coordinator):
         roi=None,
         profile: str = "minimum_jerk",
     ) -> None:
-        """Build the phasemask generator, configure the camera, precompute masks.
-
-        ``data1``/``data2`` are ``(4, N)`` arrays of trap parameters (w, phi, x, y)
-        for the initial and target arrays. Everything GPU-side is kept on the device
-        between here and :meth:`arm_rearrangement`.
-
-        ``profile`` picks the transport trajectory used by every subsequent
-        :meth:`arm_rearrangement`: ``"minimum_jerk"`` (smoother on the atoms) or
-        ``"linear"``, which needs 1.875x fewer frames for the same ``d0`` and so
-        completes the move in proportionally less time.
-        """
+        
         self._require_gpu()
         self._require_camera()
         from pytweezer import phasemask as pm
@@ -349,20 +339,7 @@ class Rearrangement(Coordinator):
         return np.fliplr(pixel_sums).flatten() > threshold
 
     def _play_sequence_pipelined(self, frames):
-        """Upload each frame to the SLM as it is produced; return the frame count.
-
-        ``frames`` is an iterator of ``cupy`` (or numpy) uint8 masks. A writer thread
-        drains a bounded queue, so the GPU keeps synthesising while the previous frame
-        is copied to the host and DMA'd to the board. The GPU->host ``.get()`` runs on
-        the writer thread to keep the PCIe transfer off the generation loop.
-
-        Writes are held to :attr:`panel_period_s` apart. This is a floor, not an
-        added delay: if generation is already slower than the panel nothing is
-        added and the GPU stays the bottleneck. Without it the board acknowledges
-        each transfer in ~0.4 ms and the next frame overwrites the one still being
-        displayed, so the atoms step further per *displayed* frame than ``d0`` sets
-        — the moves get faster on paper and worse in the trap.
-        """
+        """Display each frame on the SLM as it is produced."""
         first_frame_at = []
         self.last_first_frame_at = None
         next_slot = None
@@ -385,16 +362,7 @@ class Rearrangement(Coordinator):
         return n_frames
 
     def _preload_sequence_pipelined(self, frames):
-        """Preload each frame into its on-board slot as it is produced.
-
-        Same overlap as :meth:`_play_sequence_pipelined`, but the frames go into
-        the board's frame memory rather than onto the panel, so the sequence is
-        ready for :meth:`~pytweezer.drivers.slm.SLM.start_auto_increment` to clock
-        out on external triggers. Nothing is displayed here.
-
-        Trigger gating must be **off** while this runs, or each upload blocks
-        waiting for a trigger.
-        """
+        """Preload each frame into the SLM's on-board memory as it is produced."""
         first_frame_at = []
         self.last_first_frame_at = None
 
@@ -409,15 +377,7 @@ class Rearrangement(Coordinator):
         return n_frames
 
     def _drain_pipelined(self, frames, sink, thread_name):
-        """Feed ``frames`` to ``sink(index, host_frame)`` on a writer thread.
-
-        The producer (GPU generation) and the writer (host copy + PCIe transfer)
-        run concurrently, bounded by :data:`UPLOAD_QUEUE_DEPTH`.
-
-        cupy frames land in a page-locked staging buffer, which the GPU can DMA
-        into roughly twice as fast as pageable memory and which the SLM driver
-        passes to the board without a further copy.
-        """
+        """Drain a generator of GPU frames into a sink function on a writer thread."""
         upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
         errors = []
 
@@ -460,21 +420,7 @@ class Rearrangement(Coordinator):
         return n_frames
 
     def arm_rearrangement(self):
-        """Run one rearrangement; return ``(before, after, timings)``.
-
-        ``timings`` is a dict of ``occupancy_extraction_s``,
-        ``rearrangement_sequence_generation_s``, ``slm_upload_s`` and
-        ``total_rearrangement_s`` (seconds), kept for parity with callers that
-        collect per-shot timing stats across many iterations.
-
-        Loads the initial array, grabs an occupancy image, then generates the
-        interpolated phase sequence and uploads it to the SLM *concurrently* - each
-        frame goes to the board as soon as the GPU produces it - and finally grabs a
-        reset image. Timing breakdown is logged.
-
-        Generation and upload overlap, so they are timed together; splitting them
-        would only measure where the pipeline happened to stall.
-        """
+        """Run one rearrangement via software upload."""
         self._require_gpu()
         self._require_initialised()
 
@@ -528,25 +474,6 @@ class Rearrangement(Coordinator):
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
     def arm_rearrangement_preload_trigger(self, pulser, period_us: float = 700, profile: str = None):
-        """Run one rearrangement via on-board preload + hardware trigger.
-
-        Same shot as :meth:`arm_rearrangement`, but delivers the sequence by
-        preloading it into the SLM's on-board frame memory
-        (:meth:`~pytweezer.drivers.slm.SLM.preload_image`, via
-        :meth:`_preload_sequence_pipelined`) and clocking it out with an external
-        trigger instead of writing each frame from software. ``pulser`` is
-        anything exposing ``send_pulses(n, period_us=...)``, e.g.
-        :class:`pytweezer.arduino.ArduinoPulser`. Needs a 1024x1024 board on
-        firmware >= 2.4 (see :meth:`~pytweezer.drivers.slm.SLM.start_auto_increment`)
-        and the trigger source wired to the SLM's external trigger input.
-
-        ``profile`` overrides the sequence's stored delivery profile for this
-        call only (e.g. ``"linear"``, which needs ~1.875x fewer frames than
-        ``"minimum_jerk"`` for the same ``d0``); default reuses what
-        :meth:`initialise` was given.
-
-        Returns ``(before, after, timings)``, same shape as :meth:`arm_rearrangement`.
-        """
         self._require_gpu()
         self._require_initialised()
 
