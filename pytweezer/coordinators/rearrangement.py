@@ -506,11 +506,14 @@ class Rearrangement(Coordinator):
 
         # 4. Clock the preloaded sequence out on hardware triggers.
         self.slm.set_wait_for_trigger(True)
-        self.slm.start_auto_increment(n_frames)
         try:
-            pulser.send_pulses(n_frames - 1, period_us=period_us)
+            self.slm.start_auto_increment(n_frames)
+            try:
+                pulser.send_pulses(n_frames - 1, period_us=period_us)
+            finally:
+                self.slm.stop_auto_increment()
         finally:
-            self.slm.stop_auto_increment()
+            self.slm.set_wait_for_trigger(False)
         t4 = time.time()
 
         # 5. Reset image.
