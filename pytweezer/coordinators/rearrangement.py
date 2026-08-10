@@ -51,12 +51,9 @@ import time
 import numpy as np
 
 from pytweezer.coordinators.base import Coordinator
-from pytweezer.logging_utils import get_logger
 
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.slm import SLM
-
-LOGGER = get_logger("rearrangement")
 
 try:
     import cupy as cp
@@ -92,7 +89,7 @@ def _pinned_like(frame):
         mem = cp.cuda.alloc_pinned_memory(count * dtype.itemsize)
         return np.frombuffer(mem, dtype, count).reshape(shape)
     except Exception:
-        LOGGER.debug("Pinned allocation failed; using pageable memory.", exc_info=True)
+        print("Pinned allocation failed; using pageable memory.")
         return np.empty(shape, dtype)
 
 
@@ -109,10 +106,7 @@ def _morph_cpp():
         except Exception:  # pragma: no cover
             # pragme no cover stops coverage.py complaining about failing imports here on machine 
             # without the C++ extension built. The extension is optional, so this is not a test failure.
-            LOGGER.debug(
-                "morph_tophat_cpp unavailable; using numpy.",
-                exc_info=True,
-            )
+            print("morph_tophat_cpp unavailable; using numpy.")
             _morph_cpp_module = None
     return _morph_cpp_module
 
@@ -127,10 +121,7 @@ def _sum_cpp():
 
             _sum_cpp_module = sum_pixel_values_cpp
         except Exception:  # pragma: no cover 
-            LOGGER.debug(
-                "sum_pixel_values_cpp unavailable; using numpy.",
-                exc_info=True,
-            )
+            print("sum_pixel_values_cpp unavailable; using numpy.")
             _sum_cpp_module = None
     return _sum_cpp_module
 
@@ -251,7 +242,7 @@ class Rearrangement(Coordinator):
         roi = list(roi) if roi is not None else list(DEFAULT_ROI)
 
         PM = pm.OptimisationBasedPhasemaskGeneratorGPU(**self.phasemask_kwargs)
-        LOGGER.info("Phasemask generator initialised.")
+        print("Phasemask generator initialised.")
 
         # Camera setup (ImagEM-X2 specific; simulated backend stubs these).
         x0, y0, width, height = roi
@@ -262,7 +253,7 @@ class Rearrangement(Coordinator):
         self.camera.enable_direct_em_gain(True)
         self.camera.set_sensitivity(1200)
         self.camera.set_roi(x0, width, y0, height)
-        LOGGER.info("Camera configured for rearrangement (roi=%s).", roi)
+        print("Camera configured for rearrangement (roi=%s).", roi)
 
         w1, phi1, x1, y1 = cp.asarray(np.asarray(data1))
         w2, phi2, x2, y2 = cp.asarray(np.asarray(data2))
@@ -282,7 +273,7 @@ class Rearrangement(Coordinator):
             profile=profile,
         )
         self._initialised = True
-        LOGGER.info("Rearrangement node initialised.")
+        print("Rearrangement node initialised.")
 
     # ------------------------------------------------------------------ #
     # Arm / run one rearrangement
@@ -301,7 +292,7 @@ class Rearrangement(Coordinator):
         cpp_morph = _morph_cpp()
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
             img = cpp_morph.Morphological_top_hat_cpp(image, feature_size=10)
-            LOGGER.debug("Using C++ morphological top-hat for occupancy extraction.")
+            print("Using C++ morphological top-hat for occupancy extraction.")
         else:
             img = an.morphological_tophat_high_pass(image, feature_size=10)
 
@@ -310,7 +301,7 @@ class Rearrangement(Coordinator):
             pixel_sums = cpp_sum.sum_pixel_values(
                 img, grid_positions, array_shape, window_size=3
             )
-            LOGGER.debug("Using C++ pixel-sum for occupancy extraction.")
+            print("Using C++ pixel-sum for occupancy extraction.")
         else:
             pixel_sums = an.sum_pixel_values(
                 img, grid_positions, array_shape, window_size=3
@@ -463,11 +454,11 @@ class Rearrangement(Coordinator):
             self.camera.start_acquisition()
             img_array1 = self.camera.acquire_n_frames(1)[0]
         except Exception:
-            LOGGER.exception("Reset-image acquisition failed; returning zeros.")
+            print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)
         t4 = time.time()
 
-        LOGGER.info(
+        print(
             "Rearrangement complete: %d frames, %.4fs total "
             "(occupancy %.4fs, sequence+upload %.4fs, reset %.4fs).",
             n_frames, t4 - t1, t2 - t1, t3 - t2, t4 - t3,
@@ -546,11 +537,11 @@ class Rearrangement(Coordinator):
             self.camera.start_acquisition()
             img_array1 = self.camera.acquire_n_frames(1)[0]
         except Exception:
-            LOGGER.exception("Reset-image acquisition failed; returning zeros.")
+            print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)
         t5 = time.time()
 
-        LOGGER.info(
+        print(
             "Rearrangement (preload+trigger) complete: %d frames, %.4fs total "
             "(occupancy %.4fs, preload %.4fs, trigger playback %.4fs, reset %.4fs).",
             n_frames, t5 - t1, t2 - t1, t3 - t2, t4 - t3, t5 - t4,
@@ -586,6 +577,6 @@ class Rearrangement(Coordinator):
             try:
                 self.camera.stop_acquisition()
             except Exception:
-                LOGGER.debug("camera.stop_acquisition() during shutdown failed", exc_info=True)
+                print("camera.stop_acquisition() during shutdown failed", exc_info=True)
         self._state = None
         self._initialised = False
