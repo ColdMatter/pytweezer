@@ -113,6 +113,160 @@ def sum_pixel_values(image_array, grid_positions, grid_shape, window_size=10):
 
     return pixel_sums
 
+def extract_crops(images, grid_positions, window_size=9):
+    """Window around every site in every frame: (n_frames, n_sites, w, w), keys."""
+    images = np.asarray(images, dtype=np.float32)
+    if images.ndim == 2:
+        images = images[None]
+    keys = sorted(grid_positions)
+    half = window_size // 2
+    rows = np.array([grid_positions[k][0] for k in keys])
+    cols = np.array([grid_positions[k][1] for k in keys])
+    offsets = np.arange(-half, half + 1)
+    row_index = rows[:, None, None] + offsets[None, :, None]
+    col_index = cols[:, None, None] + offsets[None, None, :]
+
+    height, width = images.shape[1:]
+    if row_index.min() < 0 or col_index.min() < 0 or \
+            row_index.max() >= height or col_index.max() >= width:
+        raise ValueError(f"window_size={window_size} runs off the {height}x{width} frame.")
+    return images[:, row_index, col_index], keys
+
+
+def split_threshold(values, max_iter=50):
+    """Two-means split of a bimodal distribution."""
+    cut = np.median(values)
+    for _ in range(max_iter):
+        low, high = values[values <= cut], values[values > cut]
+        if low.size == 0 or high.size == 0:
+            break
+        new_cut = 0.5 * (low.mean() + high.mean())
+        if np.isclose(new_cut, cut):
+            break
+        cut = new_cut
+    return float(cut)
+
+
+def build_psf_templates(images, grid_positions, window_size=9, min_samples=10):
+    """Per-site PSF template: mean occupied crop minus mean empty crop, sum-normalised.
+
+    Occupancy is called per site, so a dim site is not dragged below an array-wide
+    cut. Sites with too few frames either way fall back to the mean template.
+    """
+    crops, keys = extract_crops(images, grid_positions, window_size)
+    box_scores = crops.sum(axis=(2, 3))
+
+    templates, counts = {}, {}
+    for index, site in enumerate(keys):
+        scores = box_scores[:, index]
+        occupied = scores > split_threshold(scores)
+        counts[site] = (int(occupied.sum()), int((~occupied).sum()))
+        if min(counts[site]) < min_samples:
+            templates[site] = None
+            continue
+        psf = np.clip(crops[occupied, index].mean(axis=0)
+                      - crops[~occupied, index].mean(axis=0), 0, None)
+        templates[site] = (psf / psf.sum()).astype(np.float32) if psf.sum() > 0 else None
+
+    usable = [t for t in templates.values() if t is not None]
+    if not usable:
+        raise ValueError(f"No site had {min_samples} clear frames out of {len(crops)}.")
+    fallback = np.mean(usable, axis=0)
+    fallback = (fallback / fallback.sum()).astype(np.float32)
+    missing = [s for s, t in templates.items() if t is None]
+    if missing:
+        print(f"{len(missing)} site(s) used the mean template: {missing}")
+    return {s: (fallback if t is None else t) for s, t in templates.items()}
+
+
+class SiteScorer:
+    """Per-site photon rates on a fixed grid.
+
+    ``method="box"``  top-hat, then sum each site's window - the original.
+    ``method="psf"``  weight each window by that site's template. Weights are
+    mean-subtracted, so flat background scores zero and no top-hat is needed.
+    """
+
+    def __init__(self, grid_positions, grid_shape, method="box", window_size=None,
+                 templates=None, feature_size=10, threshold=None):
+        if method not in ("box", "psf"):
+            raise ValueError(f"method must be 'box' or 'psf', got {method!r}")
+        if method == "psf" and not templates:
+            raise ValueError("method='psf' needs templates; see build_psf_templates.")
+
+        self.method = method
+        self.grid_positions = dict(grid_positions)
+        self.grid_shape = tuple(grid_shape)
+        self.templates = templates
+        self.feature_size = feature_size
+        self.threshold = threshold
+        self.keys = sorted(self.grid_positions)
+
+        if window_size is None:
+            window_size = next(iter(templates.values())).shape[0] if method == "psf" else 5
+        self.window_size = int(window_size)
+
+        half = self.window_size // 2
+        offsets = np.arange(-half, half + 1)
+        rows = np.array([self.grid_positions[k][0] for k in self.keys])
+        cols = np.array([self.grid_positions[k][1] for k in self.keys])
+        self._rows = rows[:, None, None] + offsets[None, :, None]
+        self._cols = cols[:, None, None] + offsets[None, None, :]
+        self._flat = np.array([r * self.grid_shape[1] + c for r, c in self.keys])
+
+        # Cached: the hot path should not re-read these per frame.
+        self._offset = exp_params.get_parameter("conversion_offset")
+        self._factor = exp_params.get_parameter("conversion_factor")
+
+        if method == "psf":
+            stack = np.stack([templates[k] for k in self.keys]).astype(np.float32)
+            weights = stack - stack.mean(axis=(1, 2), keepdims=True)
+            self._weights = weights / np.einsum("swh,swh->s", weights, stack)[:, None, None]
+
+    @property
+    def name(self):
+        return "PSF" if self.method == "psf" else "box sum"
+
+    @classmethod
+    def from_images(cls, images, grid_positions, grid_shape, window_size=9,
+                    min_samples=10, **kwargs):
+        """Build PSF templates from a stack, then a scorer that uses them."""
+        templates = build_psf_templates(images, grid_positions, window_size, min_samples)
+        return cls(grid_positions, grid_shape, method="psf", window_size=window_size,
+                   templates=templates, **kwargs)
+
+    def site_scores(self, image):
+        """One photon rate per site, in ``self.keys`` order."""
+        if self.method == "box":
+            if self.feature_size:
+                image = white_tophat(image, size=self.feature_size)
+            counts = np.asarray(image, dtype=np.float32)[self._rows, self._cols].sum(axis=(1, 2))
+        else:
+            crops = np.asarray(image, dtype=np.float32)[self._rows, self._cols]
+            counts = np.einsum("swh,swh->s", crops, self._weights)
+        return (counts - self._offset) * self._factor / 0.7
+
+    def score_grid(self, image):
+        """Photon rates laid out on the array grid."""
+        grid = np.empty(self.grid_shape, dtype=np.float32)
+        grid.flat[self._flat] = self.site_scores(image)
+        return grid
+
+    def score_stack(self, images):
+        return np.stack([self.score_grid(image) for image in images])
+
+    def occupancy(self, image, threshold=None):
+        """Flat boolean mask in trap order, for the rearrangement coordinator.
+
+        ``threshold`` is in photons - takes ``threshold_1`` from
+        :func:`get_array_loading_statistics` directly.
+        """
+        cut = self.threshold if threshold is None else threshold
+        if cut is None:
+            raise ValueError(f"{self.name} scorer has no threshold; calibrate it first.")
+        return np.fliplr(self.score_grid(image)).flatten() > cut
+
+
 # Function to visualize results with cropping and zooming
 def visualize_results(image_array, grid_positions, margin=50, window_size=5, threshold=150, vmaxfactor=0.8, index_labels=False, bin_sharpness=20, bin_thresh_factor=0.8):
     # Get bounding box around detected points
@@ -333,13 +487,27 @@ def convert_counts_to_photons(counts):
     photons_array = (counts - conversion_offset) * conversion_factor / 0.7
     return photons_array
 
-def get_array_loading_statistics(images, grid_positions, grid_shape, threshold=1.0, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True):
+def get_array_loading_statistics(images, grid_positions, grid_shape, threshold=1.0, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True, method="box", scorer=None, psf_window=9):
+    """Loading statistics per site, scored by box sum or PSF matched filter.
+
+    ``method="box"`` expects top-hat filtered ``images``; ``method="psf"`` builds a
+    template per site and takes the raw frames. Pass ``scorer`` to reuse templates
+    built elsewhere.
+    """
     n_row, n_col = grid_shape
     conversion_factor = exp_params.get_parameter("conversion_factor")
     conversion_offset = exp_params.get_parameter("conversion_offset")
 
+    if scorer is None and method == "psf":
+        scorer = SiteScorer.from_images(images, grid_positions, grid_shape,
+                                        window_size=psf_window)
+
     # Extract photon counts for each image and each trap site
-    photon_array = np.array([(sum_pixel_values(image, grid_positions, grid_shape, window_size=window_size) - conversion_offset) * conversion_factor /0.7 for image in images])
+    if scorer is not None:
+        photon_array = scorer.score_stack(images)   # SiteScorer already returns photons
+    else:
+        raw_counts = np.array([sum_pixel_values(image, grid_positions, grid_shape, window_size=window_size) for image in images])
+        photon_array = (raw_counts - conversion_offset) * conversion_factor / 0.7
     tot_photon_array = photon_array.flatten()
 
     # Threshold detection and fidelity calculation

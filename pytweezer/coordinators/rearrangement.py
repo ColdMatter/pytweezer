@@ -239,8 +239,9 @@ class Rearrangement(Coordinator):
         window_size: int = 5,
         feature_size: int = 10,
         profile: str = "linear",
+        detector=None,
     ) -> None:
-        
+
         self._require_gpu()
         self._require_camera()
         self.camera.timeout = 2
@@ -264,9 +265,12 @@ class Rearrangement(Coordinator):
             terms1=terms1, terms2=terms2,
             pm_init_uint8=pm_init_uint8,
             d0=d0, fps=fps, threshold=threshold, grid_positions=grid_positions, window_size=window_size, feature_size=feature_size,
-            profile=profile,
+            profile=profile, detector=detector,
         )
         self._initialised = True
+        if detector is not None:
+            print(f"Occupancy via {detector.name} detector "
+                  f"(window {detector.window_size}, threshold {detector.threshold:.1f}).")
         print("Rearrangement node initialised.")
 
     # ------------------------------------------------------------------ #
@@ -274,11 +278,12 @@ class Rearrangement(Coordinator):
     # ------------------------------------------------------------------ #
 
     def _extract_occupancy(self, image, array_shape, threshold):
-        """Threshold per-site pixel sums into a flat boolean occupancy mask.
+        
+        detector = self._state.get("detector")
+        if detector is not None:
+            return detector.occupancy(image)
 
-        Uses the compiled ``sum_pixel_values`` when it is available and the image is
-        ``uint16`` (the dtype the extension is built for), else the numpy version.
-        """
+        from pytweezer import analysis_old as an
 
         grid_positions = self._state["grid_positions"]
         window_size = self._state["window_size"]
@@ -400,11 +405,13 @@ class Rearrangement(Coordinator):
         # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
         img_array0 = self.camera.acquire_n_frames(1)[0]
-        t1 = time.time()
+        # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
+        # the same order as the spans measured here.
+        t1 = time.perf_counter()
 
         # 2. Occupancy mask.
         occ_mask = self._extract_occupancy(img_array0, arr_shape1, s["threshold"])
-        t2 = time.time()
+        t2 = time.perf_counter()
 
         # 3. Pairing, interpolation and SLM upload, pipelined.
         frames = PM.iter_rearrangement_sequence(
@@ -414,7 +421,7 @@ class Rearrangement(Coordinator):
             to_host=False,
         )
         n_frames = self._play_sequence_pipelined(frames)
-        t3 = time.time()
+        t3 = time.perf_counter()
 
         # 4. Reset image.
         try:
@@ -452,11 +459,13 @@ class Rearrangement(Coordinator):
         # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
         img_array0 = self.camera.acquire_n_frames(1)[0]
-        t1 = time.time()
+        # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
+        # the same order as the spans measured here.
+        t1 = time.perf_counter()
 
         # 2. Occupancy mask.
         occ_mask = self._extract_occupancy(img_array0, arr_shape1, s["threshold"])
-        t2 = time.time()
+        t2 = time.perf_counter()
 
         # 3. Pairing, interpolation and on-board preload, pipelined.
         frames = PM.iter_rearrangement_sequence(
@@ -467,7 +476,7 @@ class Rearrangement(Coordinator):
         )
         self.slm.set_wait_for_trigger(False)  # must be off while preloading
         n_frames = self._preload_sequence_pipelined(frames)
-        t3 = time.time()
+        t3 = time.perf_counter()
 
         # 4. Clock the preloaded sequence out on hardware triggers.
         trigger_span_s = float("nan")
@@ -480,7 +489,7 @@ class Rearrangement(Coordinator):
                 self.slm.stop_auto_increment()
         finally:
             self.slm.set_wait_for_trigger(False)
-        t4 = time.time()
+        t4 = time.perf_counter()
 
         # 5. Reset image.
         try:
