@@ -473,7 +473,7 @@ class Rearrangement(Coordinator):
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
-    def arm_rearrangement_preload_trigger(self, pulser, period_us: float = 700, profile: str = None):
+    def arm_rearrangement_preload_trigger(self, pulser, period_us: float = 700, profile: str = None, restore_initial_array: bool = True):
         self._require_gpu()
         self._require_initialised()
 
@@ -525,16 +525,23 @@ class Rearrangement(Coordinator):
             img_array1 = np.zeros_like(img_array0)
         t5 = time.time()
 
+        if restore_initial_array:
+            self.slm.update_mask(s["pm_init_uint8"])  # restore the initial array for the next run
+
         print(
-            "Rearrangement (preload+trigger) complete: %d frames, %.4fs total "
-            "(occupancy %.4fs, preload %.4fs, trigger playback %.4fs, reset %.4fs).",
-            n_frames, t5 - t1, t2 - t1, t3 - t2, t4 - t3, t5 - t4,
+            f"Rearrangement (preload+trigger) complete: {n_frames} frames, "
+            f"{t4 - t2:.4f}s rearrangement "
+            f"(preload {t3 - t2:.4f}s, trigger playback {t4 - t3:.4f}s) | "
+            f"occupancy {t2 - t1:.4f}s, reset {t5 - t4:.4f}s, full cycle {t5 - t1:.4f}s."
         )
         timings = {
             "occupancy_extraction_s": t2 - t1,
             "rearrangement_sequence_generation_s": t3 - t2,
             "slm_upload_s": t4 - t3,
-            "total_rearrangement_s": t5 - t1,
+            
+            "total_rearrangement_s": t4 - t2,
+            
+            "full_cycle_s": t5 - t1,
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
