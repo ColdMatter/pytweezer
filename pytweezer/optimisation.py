@@ -4,7 +4,7 @@ from pytweezer.drivers.slm import SLM
 from pytweezer.drivers.thorcam import ThorCamera
 from pytweezer.experiment.experiment_parameter_manager import ExpParameterManager
 import pytweezer.phasemask as pm
-import pytweezer.analysis_lean as an
+import pytweezer.analysis as an
 import numpy as np
 import matplotlib.pyplot as plt
 from skopt.space import Real, Integer
@@ -269,8 +269,6 @@ def OptimiseMOTNumber(motcam, exp, img_it=10, bg_it=2):
     ExpParams.save_parameters()
 
 
-
-
 def OptimiseMOTShimParameters(hamcam, exp, n_calls=50, init_calls=10, xlim=(0.0, 10.0), ylim=(-5.0, 5.0), zlim=(-1.0, 1.0)):
     dimensions = [  
         Real(name='tMOTShimXccValue', low=xlim[0], high=xlim[1]),
@@ -345,7 +343,6 @@ def OptimiseMOTShimParameters(hamcam, exp, n_calls=50, init_calls=10, xlim=(0.0,
     ExpParams.set_parameter("tMOTShimXccValue", best_params[0])
     ExpParams.set_parameter("tMOTShimYccValue", best_params[1])
     ExpParams.set_parameter("tMOTShimZccValue", best_params[2])
-
     ExpParams.save_parameters()
     
 

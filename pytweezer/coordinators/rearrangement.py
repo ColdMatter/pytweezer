@@ -274,7 +274,7 @@ class Rearrangement(Coordinator):
         self.camera.set_external_exposure_mode()
         self.camera.enable_em_gain(True)
         self.camera.enable_direct_em_gain(True)
-        self.camera.set_sensitivity(1200)
+        self.camera.set_sensitivity(600)
         self.camera.set_roi(x0, width, y0, height)
         self.camera.timeout = 5
         print("Camera configured for rearrangement (roi=%s).", roi)
@@ -313,7 +313,7 @@ class Rearrangement(Coordinator):
         Uses the compiled ``sum_pixel_values`` when it is available and the image is
         ``uint16`` (the dtype the extension is built for), else the numpy version.
         """
-        from pytweezer import analysis as an
+        from pytweezer import analysis_old as an
 
         grid_positions = self._state["grid_positions"]
 
@@ -457,19 +457,18 @@ class Rearrangement(Coordinator):
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)
-        t4 = time.time()
 
         print(
-            f"Rearrangement complete: {n_frames} frames, {t4 - t1:.4f}s total "
-            f"(occupancy {t2 - t1:.4f}s, sequence+upload {t3 - t2:.4f}s, reset {t4 - t3:.4f}s)."
+            f"Rearrangement complete: {n_frames} frames, {(t3 - t1)*1000:.4f}ms total "
+            f"(occupancy {(t2 - t1)*1000:.4f}ms, calculation+upload {(t3 - t2)*1000:.4f}ms)."
         )
         # Generation and upload are pipelined (see docstring), so they share one
         # measured span; both keys report it rather than a fabricated split.
         timings = {
-            "occupancy_extraction_s": t2 - t1,
-            "rearrangement_sequence_generation_s": t3 - t2,
-            "slm_upload_s": t3 - t2,
-            "total_rearrangement_s": t4 - t1,
+            "n_frames": n_frames,
+            "occupancy_extraction_ms": (t2 - t1)*1000,
+            "calculation_and_upload_ms": (t3 - t2)*1000,
+            "total_rearrangement_ms": (t3 - t1)*1000
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
@@ -523,18 +522,17 @@ class Rearrangement(Coordinator):
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)
-        t5 = time.time()
 
         print(
-            "Rearrangement (preload+trigger) complete: %d frames, %.4fs total "
-            "(occupancy %.4fs, preload %.4fs, trigger playback %.4fs, reset %.4fs).",
-            n_frames, t5 - t1, t2 - t1, t3 - t2, t4 - t3, t5 - t4,
+            f"Rearrangement complete (preload+trigger): {n_frames} frames, {(t4 - t1)*1000:.4f}ms total "
+            f"(occupancy {(t2 - t1)*1000:.4f}ms, calculation and preload {(t3 - t2)*1000:.4f}ms, hardware trigger upload {(t4 - t3)*1000:.4f}ms)."
         )
         timings = {
-            "occupancy_extraction_s": t2 - t1,
-            "rearrangement_sequence_generation_s": t3 - t2,
-            "slm_upload_s": t4 - t3,
-            "total_rearrangement_s": t5 - t1,
+            "n_frames": n_frames,
+            "occupancy_extraction_ms": (t2 - t1)*1000,
+            "calculation_and_preload_ms": (t3 - t2)*1000,
+            "hardware_trigger_upload_ms": (t4 - t3)*1000,
+            "total_rearrangement_ms": (t4 - t1)*1000
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings
 

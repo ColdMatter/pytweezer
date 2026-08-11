@@ -10,9 +10,9 @@
         "tMolRepVCO2": 3.259016009127741,
         "tMolCoolVVA2": 0.9895836703797966,
         "tMolRepVVA2": 0.7590677019962364,
-        "tMOTShimXccValue": 0.017274499890946874,
-        "tMOTShimYccValue": 1.38581476439688,
-        "tMOTShimZccValue": -0.4844836103904361,
+        "tMOTShimXccValue": 0.0,
+        "tMOTShimYccValue": -2.026359047273954,
+        "tMOTShimZccValue": -0.5386689646897473,
         "tMOTLoadRepVVA": 0.6526315789473685,
         "tMOTLoadCoolVVA": 0.9210526315789475,
         "tImgCoolVCO": 2.948,
@@ -21,5 +21,10 @@
     "misc_parameters": {
         "rep_vco_resonance": 4.473684210526316,
         "cool_vco_resonance": 4.789473684210526
+    },
+    "emccd_parameters": {
+        "em_gain": 600,
+        "conversion_factor": 0.00950896,
+        "conversion_offset": 1979.52
     }
 }
