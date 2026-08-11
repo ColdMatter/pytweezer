@@ -318,15 +318,16 @@ class Rearrangement(Coordinator):
         grid_positions = self._state["grid_positions"]
 
         cpp_morph = _morph_cpp()
-        cpp_morph = None
+
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
-            img = cpp_morph.tophat(image, feature_size=10)
+            img = cpp_morph.tophat(np.ascontiguousarray(image, dtype=np.uint16),
+                                   feature_size=10)
             print("Using C++ morphological top-hat for occupancy extraction.")
         else:
             img = an.morphological_tophat_high_pass(image, feature_size=10)
 
         cpp_sum = _sum_cpp()
-        cpp_sum = None
+        
         if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
             pixel_sums = cpp_sum.sum_pixel_values(
                 img, grid_positions, array_shape, window_size=3
