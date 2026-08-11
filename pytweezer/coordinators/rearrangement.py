@@ -472,7 +472,7 @@ class Rearrangement(Coordinator):
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
-    def arm_rearrangement_preload_trigger(self, pulser, period_us: float = 700, profile: str = None):
+    def arm_rearrangement_preload_trigger(self, pulser, period_us: float = 700, profile: str = None, restore_initial_array: bool = True):
         self._require_gpu()
         self._require_initialised()
 
@@ -522,6 +522,10 @@ class Rearrangement(Coordinator):
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)
+        t5 = time.time()
+
+        if restore_initial_array:
+            self.slm.update_mask(s["pm_init_uint8"])  # restore the initial array for the next run
 
         print(
             f"Rearrangement complete (preload+trigger): {n_frames} frames, {(t4 - t1)*1000:.4f}ms total "
