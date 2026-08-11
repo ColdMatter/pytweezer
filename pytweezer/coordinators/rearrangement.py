@@ -51,7 +51,7 @@ import time
 import numpy as np
 
 from pytweezer.coordinators.base import Coordinator
-
+from pytweezer import analysis as an
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.slm import SLM
 
@@ -157,36 +157,18 @@ def _sum_cpp():
     return _sum_cpp_module
 
 
-dx, dy = 8.0, 12.0
-
-#: Default phasemask-generator geometry (the lab's Rb SLM); overridable via config.
-DEFAULT_PHASEMASK = dict(
-    wavelength_um=0.852,
-    focal_length_mm=17.3,
-    slm_pitch_um=17,
-    slm_res=(1024,1024),
-    input_beam_waist_mm=16,
-    fresnel_f_mm=1072,
-    blaze_dx_dy_um=(40+dx, -8+dy),
-    zernike_coeff_dict={5:1.195, 6:0.725, 7:0.970, 8:0.478, 9:-1.091, 10:0.303, 11:0.021, 12:0.072, 13:0.049}
-)
-
-#: Default camera ROI (x0, y0, width, height) if ``initialise`` isn't given one.
-DEFAULT_ROI = [50, 70, 384, 384]
-
-
 class Rearrangement(Coordinator):
     """Camera + SLM rearrangement loop, run entirely in one process."""
 
     camera_role = "camera"
     slm_role = "slm"
+    pm_gen_role = "phasemask_generator"
 
     def __init__(self, targets, conf):
         super().__init__(targets, conf)
         self.camera: ImagEMX2Camera | None = self.targets.get(self.camera_role)
         self.slm: SLM = self.require_role(self.slm_role)
-
-        self.phasemask_kwargs = {**DEFAULT_PHASEMASK, **(conf.get("phasemask") or {})}
+        self.pm_gen = self.targets.get(self.pm_gen_role)
 
         #: Enforced minimum interval between panel writes; see :data:`PANEL_PERIOD_S`.
         self.panel_period_s = float(conf.get("panel_period_s", PANEL_PERIOD_S))
@@ -254,30 +236,14 @@ class Rearrangement(Coordinator):
         fps: float,
         threshold: float,
         grid_positions,
-        roi=None,
-        profile: str = "minimum_jerk",
+        window_size: int = 5,
+        feature_size: int = 10,
+        profile: str = "linear",
     ) -> None:
         
         self._require_gpu()
         self._require_camera()
-        from pytweezer import phasemask as pm
-
-        roi = list(roi) if roi is not None else list(DEFAULT_ROI)
-
-        PM = pm.OptimisationBasedPhasemaskGeneratorGPU(**self.phasemask_kwargs)
-        print("Phasemask generator initialised.")
-
-        # Camera setup (ImagEM-X2 specific; simulated backend stubs these).
-        x0, y0, width, height = roi
-        self.camera.setup_acquisition("snap", 1)
-        self.camera.set_trigger_source("ext")
-        self.camera.set_external_exposure_mode()
-        self.camera.enable_em_gain(True)
-        self.camera.enable_direct_em_gain(True)
-        self.camera.set_sensitivity(600)
-        self.camera.set_roi(x0, width, y0, height)
-        self.camera.timeout = 5
-        print("Camera configured for rearrangement (roi=%s).", roi)
+        self.camera.timeout = 2
 
         # cp.asarray takes host or device arrays: a no-op for the cupy terms that
         # come straight out of superposition_optimization, a host->device copy for
@@ -289,15 +255,15 @@ class Rearrangement(Coordinator):
         terms2 = (w2, phi2, x2, y2, array_shape2)
 
         # The initial array to load onto the SLM before each rearrangement.
-        pm_array_init = PM.generate_phasemask(list(terms1))
-        pm_init = PM.superimpose([pm_array_init, PM.fresnel, PM.blaze, PM.zernike])
-        pm_init_uint8 = PM.transform_phase_8bit(pm_init).get()
+        pm_array_init = self.pm_gen.generate_phasemask(list(terms1))
+        pm_init = self.pm_gen.superimpose([pm_array_init, self.pm_gen.fresnel, self.pm_gen.blaze, self.pm_gen.zernike])
+        pm_init_uint8 = self.pm_gen.transform_phase_8bit(pm_init).get()
 
         self._state = dict(
-            PM=PM,
+            PM=self.pm_gen,
             terms1=terms1, terms2=terms2,
             pm_init_uint8=pm_init_uint8,
-            d0=d0, fps=fps, threshold=threshold, grid_positions=grid_positions, roi=roi,
+            d0=d0, fps=fps, threshold=threshold, grid_positions=grid_positions, window_size=window_size, feature_size=feature_size,
             profile=profile,
         )
         self._initialised = True
@@ -313,29 +279,28 @@ class Rearrangement(Coordinator):
         Uses the compiled ``sum_pixel_values`` when it is available and the image is
         ``uint16`` (the dtype the extension is built for), else the numpy version.
         """
-        from pytweezer import analysis_old as an
 
         grid_positions = self._state["grid_positions"]
+        window_size = self._state["window_size"]
+        feature_size = self._state["feature_size"]
 
         cpp_morph = _morph_cpp()
-
+        cpp_morph = None
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
             img = cpp_morph.tophat(np.ascontiguousarray(image, dtype=np.uint16),
-                                   feature_size=10)
-            print("Using C++ morphological top-hat for occupancy extraction.")
+                                   feature_size=feature_size)
         else:
-            img = an.morphological_tophat_high_pass(image, feature_size=10)
+            img = an.morphological_tophat_high_pass(image, feature_size=feature_size)
 
         cpp_sum = _sum_cpp()
-        
+        cpp_sum = None
         if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
             pixel_sums = cpp_sum.sum_pixel_values(
-                img, grid_positions, array_shape, window_size=3
+                img, grid_positions, array_shape, window_size=window_size
             )
-            print("Using C++ pixel-sum for occupancy extraction.")
         else:
             pixel_sums = an.sum_pixel_values(
-                img, grid_positions, array_shape, window_size=3
+                img, grid_positions, array_shape, window_size=window_size
             )
         return np.fliplr(pixel_sums).flatten() > threshold
 
