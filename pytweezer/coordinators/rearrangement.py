@@ -318,14 +318,16 @@ class Rearrangement(Coordinator):
         grid_positions = self._state["grid_positions"]
 
         cpp_morph = _morph_cpp()
+
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
-            print(image.dtype)
-            img = cpp_morph.tophat(image, feature_size=10)
+            img = cpp_morph.tophat(np.ascontiguousarray(image, dtype=np.uint16),
+                                   feature_size=10)
             print("Using C++ morphological top-hat for occupancy extraction.")
         else:
             img = an.morphological_tophat_high_pass(image, feature_size=10)
 
         cpp_sum = _sum_cpp()
+        
         if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
             pixel_sums = cpp_sum.sum_pixel_values(
                 img, grid_positions, array_shape, window_size=3
@@ -503,17 +505,17 @@ class Rearrangement(Coordinator):
         t3 = time.time()
 
         # 4. Clock the preloaded sequence out on hardware triggers.
+        trigger_span_s = float("nan")
         self.slm.set_wait_for_trigger(True)
         try:
             self.slm.start_auto_increment(n_frames)
             try:
-                pulser.send_pulses(n_frames - 1, period_us=period_us)
-                t4 = time.time()
+                trigger_span_s = pulser.send_pulses(n_frames - 1, period_us=period_us)
             finally:
                 self.slm.stop_auto_increment()
         finally:
             self.slm.set_wait_for_trigger(False)
-        
+        t4 = time.time()
 
         # 5. Reset image.
         try:
@@ -535,7 +537,8 @@ class Rearrangement(Coordinator):
             "occupancy_extraction_ms": (t2 - t1)*1000,
             "calculation_and_preload_ms": (t3 - t2)*1000,
             "hardware_trigger_upload_ms": (t4 - t3)*1000,
-            "total_rearrangement_ms": (t4 - t1)*1000
+            "total_rearrangement_ms": (t4 - t1)*1000, 
+            "trigger_span_s": trigger_span_s,
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
