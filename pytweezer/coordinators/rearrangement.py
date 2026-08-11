@@ -318,15 +318,14 @@ class Rearrangement(Coordinator):
         grid_positions = self._state["grid_positions"]
 
         cpp_morph = _morph_cpp()
-        cpp_morph = None
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
+            print(image.dtype)
             img = cpp_morph.tophat(image, feature_size=10)
             print("Using C++ morphological top-hat for occupancy extraction.")
         else:
             img = an.morphological_tophat_high_pass(image, feature_size=10)
 
         cpp_sum = _sum_cpp()
-        cpp_sum = None
         if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
             pixel_sums = cpp_sum.sum_pixel_values(
                 img, grid_positions, array_shape, window_size=3
@@ -509,11 +508,12 @@ class Rearrangement(Coordinator):
             self.slm.start_auto_increment(n_frames)
             try:
                 pulser.send_pulses(n_frames - 1, period_us=period_us)
+                t4 = time.time()
             finally:
                 self.slm.stop_auto_increment()
         finally:
             self.slm.set_wait_for_trigger(False)
-        t4 = time.time()
+        
 
         # 5. Reset image.
         try:
@@ -522,7 +522,6 @@ class Rearrangement(Coordinator):
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)
-        t5 = time.time()
 
         if restore_initial_array:
             self.slm.update_mask(s["pm_init_uint8"])  # restore the initial array for the next run
