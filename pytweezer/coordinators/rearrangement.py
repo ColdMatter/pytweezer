@@ -47,8 +47,9 @@ and clocking them out with a hardware trigger (``preload_sequence`` /
 import queue
 import threading
 import time
-
+import asyncio
 import numpy as np
+from torchgen import gen
 
 from pytweezer.coordinators.base import Coordinator
 
@@ -471,6 +472,82 @@ class Rearrangement(Coordinator):
         )
         # Generation and upload are pipelined (see docstring), so they share one
         # measured span; both keys report it rather than a fabricated split.
+        timings = {
+            "n_frames": n_frames,
+            "occupancy_extraction_ms": (t2 - t1)*1000,
+            "calculation_and_upload_ms": (t3 - t2)*1000,
+            "total_rearrangement_ms": (t3 - t1)*1000
+        }
+        return np.asarray(img_array0), np.asarray(img_array1), timings
+
+    async def arm_rearrangement_async(self):
+        """Run one rearrangement via software upload."""
+
+        # usage - rearrangement_task = asyncio.create_task(coordinator.arm_rearrangement_async()) - compared to arm_rearrangement() which is synchronous
+        self._require_gpu()
+        self._require_initialised()
+
+        s = self._state
+        PM = s["PM"]
+        arr_shape1 = s["terms1"][4]
+
+        self.slm.update_mask(s["pm_init_uint8"])
+
+        warm_up_mask = np.zeros(arr_shape1, dtype=bool) # use bool to avoid unnecessary memory usage
+
+
+        # create a small helper function to consume first frame from the generator and discard it
+        def warm_up_generator():
+            try:
+                generator = PM.iter_rearrangement_sequence(
+                    s["terms1"], s["terms2"], warm_up_mask,
+                    d0=s["d0"],
+                    profile=s.get("profile", "linear"),
+                    to_host=False,
+                )
+                next(iter(generator), None)  # consume first frame to warm up the generator
+            except Exception:
+                pass  
+
+        warmup_task = asyncio.create_task(asyncio.to_thread(warm_up_generator))
+
+    
+        self.camera.start_acquisition()
+        img_array0 = self.camera.acquire_n_frames(1)[0]
+
+
+        # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
+        # the same order as the spans measured here.
+        t1 = time.perf_counter()
+
+        occ_mask = self._extract_occupancy(img_array0, arr_shape1, s["threshold"])
+        t2 = time.perf_counter()
+
+
+        await warmup_task  # ensure the generator is warmed up before proceeding should be well done by here 
+
+        frames = PM.iter_rearrangement_sequence(
+            s["terms1"], s["terms2"], occ_mask,
+            d0=s["d0"],
+            profile=s.get("profile", "minimum_jerk"),
+            to_host=False,
+        )
+        n_frames = self._play_sequence_pipelined(frames)
+        t3 = time.perf_counter()
+
+        #  Reset image.
+        try:
+            self.camera.start_acquisition()
+            img_array1 = self.camera.acquire_n_frames(1)[0]
+        except Exception:
+            print("Reset-image acquisition failed; returning zeros.")
+            img_array1 = np.zeros_like(img_array0)
+
+        print(
+            f"Rearrangement complete: {n_frames} frames, {(t3 - t1)*1000:.4f}ms total "
+            f"(occupancy {(t2 - t1)*1000:.4f}ms, calculation+upload {(t3 - t2)*1000:.4f}ms)."
+        )
+        
         timings = {
             "n_frames": n_frames,
             "occupancy_extraction_ms": (t2 - t1)*1000,
