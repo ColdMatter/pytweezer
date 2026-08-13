@@ -49,7 +49,7 @@ import threading
 import time
 import asyncio
 import numpy as np
-from torchgen import gen
+
 
 from pytweezer.coordinators.base import Coordinator
 from pytweezer import analysis as an
@@ -123,6 +123,12 @@ def _pinned_like(frame):
     except Exception:
         print("Pinned allocation failed; using pageable memory.")
         return np.empty(shape, dtype)
+
+
+def _steady_median(values):
+    
+    tail = values[1:] if len(values) > 1 else values
+    return float(np.median(tail)) if tail else float("nan")
 
 
 def _morph_cpp():
@@ -443,10 +449,135 @@ class Rearrangement(Coordinator):
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
-    async def arm_rearrangement_async(self):
-        """Run one rearrangement via software upload."""
 
-        # usage - rearrangement_task = asyncio.create_task(coordinator.arm_rearrangement_async()) - compared to arm_rearrangement() which is synchronous
+    def _play_sequence_pipelined_timings(self, frames):
+        
+        upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
+        errors = []
+        first_frame_at = []
+        events = []
+        gpu_wait_ms, transfer_ms, display_ms, pacing_ms = [], [], [], []
+        pinned_alloc_ms = [float("nan")]
+        self.last_first_frame_at = None
+
+        def writer():
+            staging = None
+            next_slot = None
+            while True:
+                item = upload_queue.get()
+                if item is None:
+                    return
+                if errors:
+                    continue  # drain the rest so the producer never blocks
+                frame, start_ev, end_ev = item
+                try:
+                    # First frame only: page-locked staging buffer. Timed on its
+                    # own because it is a per-run cost that lands entirely on
+                    # frame 0 and would otherwise inflate that frame's transfer.
+                    if staging is None:
+                        a0 = time.perf_counter()
+                        staging = _pinned_like(frame)
+                        pinned_alloc_ms[0] = (time.perf_counter() - a0) * 1000
+
+                    w0 = time.perf_counter()
+                    end_ev.synchronize()
+                    w1 = time.perf_counter()
+                    frame.get(out=staging)
+                    w2 = time.perf_counter()
+                    self.slm.update_mask(staging)
+                    w3 = time.perf_counter()
+
+                    if not first_frame_at:
+                        first_frame_at.append(w3)
+
+                    if self.panel_period_s:
+                        now = w3
+                        if next_slot is not None and now < next_slot:
+                            _wait_until(next_slot)
+                            now = next_slot
+                        next_slot = now + self.panel_period_s
+                    w4 = time.perf_counter()
+
+                    gpu_wait_ms.append((w1 - w0) * 1000)
+                    transfer_ms.append((w2 - w1) * 1000)
+                    display_ms.append((w3 - w2) * 1000)
+                    pacing_ms.append((w4 - w3) * 1000)
+                    events.append((start_ev, end_ev))
+                except Exception as exc:
+                    errors.append(exc)
+
+        thread = threading.Thread(target=writer, name="slm-upload-timed", daemon=True)
+        thread.start()
+
+        n_frames = 0
+        try:
+            for item in frames:
+                upload_queue.put(item)
+                n_frames += 1
+        finally:
+            upload_queue.put(None)
+            thread.join()
+
+        if errors:
+            raise errors[0]
+        if first_frame_at:
+            self.last_first_frame_at = first_frame_at[0]
+
+        # Read the events only now that every frame has completed. Calling
+        # get_elapsed_time on a still-pending event would block and perturb the
+        # very run it is measuring.
+        gpu_compute_ms = [float(cp.cuda.get_elapsed_time(s, e)) for s, e in events]
+
+        return n_frames, {
+            "gpu_compute_ms": gpu_compute_ms,
+            "gpu_wait_ms": gpu_wait_ms,
+            "transfer_ms": transfer_ms,
+            "display_ms": display_ms,
+            "pacing_ms": pacing_ms,
+            "pinned_alloc_ms": pinned_alloc_ms[0],
+        }
+
+    @staticmethod
+    def _pairing_record(plan):
+        """Host-side copy of the JV assignment produced by ``plan_rearrangement``.
+
+        Indices are flat trap indices: ``moving_idx``/``occ_mask`` index the
+        initial array in the same order as the occupancy mask (i.e. the scorer's
+        ``np.fliplr(score_grid).flatten()`` order), ``final_idx`` indexes the
+        target array. Together they say which atom was sent to which target site,
+        which is what a per-atom survival analysis needs afterwards.
+
+        Called only once the run is over - every ``.get()`` here is a device sync
+        and inside a timed span would be billed as setup or frame time.
+        """
+        occ_mask = cp.asnumpy(plan["occ_mask"]).astype(bool)
+        moving_idx = cp.asnumpy(plan["moving_idx"]).astype(np.int32)
+        final_idx = cp.asnumpy(plan["final_idx"]).astype(np.int32)
+        n_targets = int(plan["n_targets"])
+
+        occupied_idx = np.flatnonzero(occ_mask).astype(np.int32)
+        filled = np.zeros(n_targets, dtype=bool)
+        filled[final_idx] = True
+
+        return {
+            "occ_mask": occ_mask,
+            "occupied_idx": occupied_idx,
+            "moving_idx": moving_idx,
+            "final_idx": final_idx,
+            "pos_init": cp.asnumpy(plan["pos_init"]).astype(np.float32),
+            "pos_final": cp.asnumpy(plan["pos_final"]).astype(np.float32),
+            # Loaded sites the assignment left behind (more atoms than targets);
+            # these traps are switched off by the sequence.
+            "discarded_idx": np.setdiff1d(occupied_idx, moving_idx).astype(np.int32),
+            # Target sites no atom was available for (more targets than atoms).
+            "unfilled_target_idx": np.flatnonzero(~filled).astype(np.int32),
+            "n_occupied": int(occupied_idx.size),
+            "n_moving": int(moving_idx.size),
+            "n_targets": n_targets,
+        }
+
+    def arm_rearrangement_timings(self):
+
         self._require_gpu()
         self._require_initialised()
 
@@ -456,49 +587,30 @@ class Rearrangement(Coordinator):
 
         self.slm.update_mask(s["pm_init_uint8"])
 
-        warm_up_mask = np.zeros(arr_shape1, dtype=bool) # use bool to avoid unnecessary memory usage
-
-
-        # create a small helper function to consume first frame from the generator and discard it
-        def warm_up_generator():
-            try:
-                generator = PM.iter_rearrangement_sequence(
-                    s["terms1"], s["terms2"], warm_up_mask,
-                    d0=s["d0"],
-                    profile=s.get("profile", "linear"),
-                    to_host=False,
-                )
-                next(iter(generator), None)  # consume first frame to warm up the generator
-            except Exception:
-                pass  
-
-        warmup_task = asyncio.create_task(asyncio.to_thread(warm_up_generator))
-
-    
+        # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
         img_array0 = self.camera.acquire_n_frames(1)[0]
-
-
-        # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
-        # the same order as the spans measured here.
         t1 = time.perf_counter()
 
+        # 2. Occupancy mask.
         occ_mask = self._extract_occupancy(img_array0, arr_shape1, s["threshold"])
         t2 = time.perf_counter()
 
-
-        await warmup_task  # ensure the generator is warmed up before proceeding should be well done by here 
-
-        frames = PM.iter_rearrangement_sequence(
+        # 3. One-time pairing and interpolation setup, eager so it lands in its
+        #    own span instead of on frame 0.
+        plan = PM.plan_rearrangement(
             s["terms1"], s["terms2"], occ_mask,
             d0=s["d0"],
             profile=s.get("profile", "minimum_jerk"),
-            to_host=False,
         )
-        n_frames = self._play_sequence_pipelined(frames)
+        t_plan = time.perf_counter()
+
+        # 4. Per-frame generation, transfer and upload, still pipelined.
+        frames = PM.iter_rearrangement_sequence_timings(plan, to_host=False)
+        n_frames, stage = self._play_sequence_pipelined_timings(frames)
         t3 = time.perf_counter()
 
-        # 4. Follow up images image.
+        # 5. Follow up images
         try:
             self.camera.start_acquisition()
             img_array1 = self.camera.acquire_n_frames(s["num_images"])
@@ -506,18 +618,68 @@ class Rearrangement(Coordinator):
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros((s["num_images"], *img_array0.shape))
 
+        # After the reset image, so the syncs it costs land outside every timed
+        # span and never delay arming the camera.
+        pairing = self._pairing_record(plan)
+
+        ttff_ms = (
+            (self.last_first_frame_at - t2) * 1000
+            if self.last_first_frame_at is not None else float("nan")
+        )
+        med = {k: _steady_median(stage[k])
+               for k in ("gpu_compute_ms", "gpu_wait_ms", "transfer_ms",
+                         "display_ms", "pacing_ms")}
+
+        # After the reset image, so the syncs it costs land outside every timed
+        # span and never delay arming the camera.
+        pairing = self._pairing_record(plan)
+
+        ttff_ms = (
+            (self.last_first_frame_at - t2) * 1000
+            if self.last_first_frame_at is not None else float("nan")
+        )
+        med = {k: _steady_median(stage[k])
+               for k in ("gpu_compute_ms", "gpu_wait_ms", "transfer_ms",
+                         "display_ms", "pacing_ms")}
+
         print(
             f"Rearrangement complete: {n_frames} frames, {(t3 - t1)*1000:.4f}ms total "
-            f"(occupancy {(t2 - t1)*1000:.4f}ms, calculation+upload {(t3 - t2)*1000:.4f}ms)."
+            f"(occupancy {(t2 - t1)*1000:.4f}ms, pairing+setup {(t_plan - t2)*1000:.4f}ms, "
+            f"streaming {(t3 - t_plan)*1000:.4f}ms).\n"
+            f"  per-frame medians (frame 0 excluded): compute {med['gpu_compute_ms']:.4f}ms, "
+            f"gpu-wait {med['gpu_wait_ms']:.4f}ms, transfer {med['transfer_ms']:.4f}ms, "
+            f"board-write {med['display_ms']:.4f}ms, pacing {med['pacing_ms']:.4f}ms.\n"
+            f"  time to first frame {ttff_ms:.4f}ms, "
+            f"pinned alloc {stage['pinned_alloc_ms']:.4f}ms."
         )
-        
         timings = {
             "n_frames": n_frames,
-            "occupancy_extraction_ms": (t2 - t1)*1000,
-            "calculation_and_upload_ms": (t3 - t2)*1000,
-            "total_rearrangement_ms": (t3 - t1)*1000
+            "occupancy_extraction_ms": (t2 - t1) * 1000,
+            "calculation_and_upload_ms": (t3 - t2) * 1000,
+            "total_rearrangement_ms": (t3 - t1) * 1000,
+
+            # One-time costs, now separated out of calculation_and_upload_ms.
+            "pairing_and_setup_ms": (t_plan - t2) * 1000,
+            "streaming_ms": (t3 - t_plan) * 1000,
+            "time_to_first_frame_ms": ttff_ms,
+            "pinned_alloc_ms": stage["pinned_alloc_ms"],
+            "n_moving": plan["n_moving"],
+
+            # Per-frame series, one entry per frame, in frame order.
+            "gpu_compute_ms": stage["gpu_compute_ms"],
+            "gpu_wait_ms": stage["gpu_wait_ms"],
+            "transfer_ms": stage["transfer_ms"],
+            "display_ms": stage["display_ms"],
+            "pacing_ms": stage["pacing_ms"],
+
+            # Steady-state medians of the above, frame 0 dropped.
+            "gpu_compute_median_ms": med["gpu_compute_ms"],
+            "gpu_wait_median_ms": med["gpu_wait_ms"],
+            "transfer_median_ms": med["transfer_ms"],
+            "display_median_ms": med["display_ms"],
+            "pacing_median_ms": med["pacing_ms"],
         }
-        return np.asarray(img_array0), np.asarray(img_array1), timings
+        return np.asarray(img_array0), np.asarray(img_array1), timings, pairing
 
     def arm_rearrangement_preload_trigger(self, pulser, period_us: float = 700, profile: str = None, restore_initial_array: bool = True):
         self._require_gpu()
