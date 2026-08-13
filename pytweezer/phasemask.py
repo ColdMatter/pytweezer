@@ -722,6 +722,123 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             frame = self.transform_phase_8bit(composite_pm)
             yield frame.get() if to_host else frame
 
+   
+    def plan_rearrangement(self, terms1, terms2, occ_mask, d0=0.5,
+                           profile="minimum_jerk"):
+        if profile not in ("minimum_jerk", "linear"):
+            raise ValueError(
+                f"profile must be 'minimum_jerk' or 'linear', got {profile!r}"
+            )
+        w1, phi1, x1, y1, arr1 = terms1
+        w2, phi2, x2, y2, _ = terms2
+        occ_mask = cp.asarray(occ_mask)
+
+        pos1 = cp.stack((x1, y1), axis=-1)
+        pos2 = cp.stack((x2, y2), axis=-1)
+
+        occ_indices = cp.where(occ_mask)[0]
+        init = pos1[occ_indices]
+        final = pos2
+
+        init_idx, final_idx = get_jv_pairing_lap(init, final)
+        moving_idx = occ_indices[init_idx]
+
+        off_mask = cp.ones(len(pos1), dtype=bool)
+        off_mask[moving_idx] = False
+
+        pos_init = pos1[moving_idx]
+        pos_final = pos2[final_idx]
+        vec = pos_final - pos_init
+
+        max_dist = cp.linalg.norm(vec, axis=1).max()
+        steps_scale = 1.0 if profile == "linear" else 1.875
+        n_steps = int(cp.ceil(steps_scale * max_dist / d0))
+
+        curr_w = cp.asarray(w1, dtype=cp.float32)
+        curr_phi = cp.asarray(phi1, dtype=cp.float32)
+        curr_x = cp.asarray(x1, dtype=cp.float32)
+        curr_y = cp.asarray(y1, dtype=cp.float32)
+
+        tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
+        if profile == "linear":
+            s_profile = tau
+        else:
+            s_profile = 10 * tau**3 - 15 * tau**4 + 6 * tau**5
+        ds_profile_cpu = cp.diff(s_profile).get()
+
+        dw = cp.zeros_like(curr_w)
+        dphi = cp.zeros_like(curr_phi)
+        total_dx = cp.zeros_like(curr_x)
+        total_dy = cp.zeros_like(curr_y)
+
+        w1_gpu, w2_gpu = cp.asarray(w1), cp.asarray(w2)
+        phi1_gpu, phi2_gpu = cp.asarray(phi1), cp.asarray(phi2)
+
+        dw[moving_idx] = (w2_gpu[final_idx] - w1_gpu[moving_idx]) / n_steps
+        total_dx[moving_idx] = vec[:, 0].astype(cp.float32)
+        total_dy[moving_idx] = vec[:, 1].astype(cp.float32)
+
+        phase_diff = (phi2_gpu[final_idx] - phi1_gpu[moving_idx] + cp.pi) % (2 * cp.pi) - cp.pi
+        dphi[moving_idx] = phase_diff / n_steps
+
+        dw[off_mask] = 0.0
+        curr_w[off_mask] = 0.0
+
+        static_background = self.superimpose([self.fresnel, self.blaze, self.zernike])
+
+        # The trailing fancy-index writes and the background superposition are
+        # async launches. Without this sync their GPU tail would land on frame 0
+        # and be billed as frame time - exactly the misattribution this split
+        # exists to remove. Costs a stall here, which is the point: it belongs
+        # to setup.
+        cp.cuda.Stream.null.synchronize()
+
+        return {
+            "n_steps": n_steps,
+            "ds_profile_cpu": ds_profile_cpu,
+            "dw": dw, "dphi": dphi,
+            "total_dx": total_dx, "total_dy": total_dy,
+            "curr_w": curr_w, "curr_phi": curr_phi,
+            "curr_x": curr_x, "curr_y": curr_y,
+            "arr1": arr1,
+            "static_background": static_background,
+            "n_moving": int(moving_idx.size),
+            "profile": profile,
+
+            # The JV assignment itself, kept on the device. Reading it here would
+            # cost a sync inside the timed setup span, so the caller copies it to
+            # the host once the run is over.
+            "occ_mask": occ_mask,
+            "occ_indices": occ_indices,
+            "moving_idx": moving_idx,
+            "final_idx": final_idx,
+            "pos_init": pos_init,
+            "pos_final": pos_final,
+            "n_targets": int(pos2.shape[0]),
+        }
+
+    def iter_rearrangement_sequence_timings(self, plan, to_host=False):
+        dw, dphi = plan["dw"], plan["dphi"]
+        total_dx, total_dy = plan["total_dx"], plan["total_dy"]
+        curr_w, curr_phi = plan["curr_w"], plan["curr_phi"]
+        curr_x, curr_y = plan["curr_x"], plan["curr_y"]
+        arr1 = plan["arr1"]
+        static_background = plan["static_background"]
+        ds_profile_cpu = plan["ds_profile_cpu"]
+
+        for n in range(plan["n_steps"]):
+            start_ev = cp.cuda.Event()
+            end_ev = cp.cuda.Event()
+            start_ev.record()
+            ds = float(ds_profile_cpu[n])
+            update_state_kernel(dw, dphi, total_dx, total_dy, ds, curr_w, curr_phi, curr_x, curr_y)
+            terms_gpu = (curr_w, curr_phi, curr_x, curr_y, arr1)
+            pm_slm = self.generate_phasemask(terms_gpu)
+            composite_pm = self.superimpose([pm_slm, static_background])
+            frame = self.transform_phase_8bit(composite_pm)
+            end_ev.record()
+            yield (frame.get() if to_host else frame), start_ev, end_ev
+
 # Define this fused kernel outside the loop (or at the module level).
 # CuPy will compile it once on the first run and cache it, saving massive
 # overhead by doing 4 state updates in a single GPU kernel launch.
