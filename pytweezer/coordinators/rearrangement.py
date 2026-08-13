@@ -290,14 +290,11 @@ class Rearrangement(Coordinator):
         if detector is not None:
             return detector.occupancy(image)
 
-        from pytweezer import analysis_old as an
-
         grid_positions = self._state["grid_positions"]
         window_size = self._state["window_size"]
         feature_size = self._state["feature_size"]
 
         cpp_morph = _morph_cpp()
-        cpp_morph = None
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
             img = cpp_morph.tophat(np.ascontiguousarray(image, dtype=np.uint16),
                                    feature_size=feature_size)
@@ -305,7 +302,6 @@ class Rearrangement(Coordinator):
             img = an.morphological_tophat_high_pass(image, feature_size=feature_size)
 
         cpp_sum = _sum_cpp()
-        cpp_sum = None
         if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
             pixel_sums = cpp_sum.sum_pixel_values(
                 img, grid_positions, array_shape, window_size=window_size
