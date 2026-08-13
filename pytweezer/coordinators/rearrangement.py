@@ -241,6 +241,7 @@ class Rearrangement(Coordinator):
         feature_size: int = 10,
         profile: str = "linear",
         detector=None,
+        num_images: int = 1
     ) -> None:
 
         self._require_gpu()
@@ -266,7 +267,7 @@ class Rearrangement(Coordinator):
             terms1=terms1, terms2=terms2,
             pm_init_uint8=pm_init_uint8,
             d0=d0, fps=fps, threshold=threshold, grid_positions=grid_positions, window_size=window_size, feature_size=feature_size,
-            profile=profile, detector=detector,
+            profile=profile, detector=detector, num_images=num_images
         )
         self._initialised = True
         if detector is not None:
@@ -420,13 +421,13 @@ class Rearrangement(Coordinator):
         n_frames = self._play_sequence_pipelined(frames)
         t3 = time.perf_counter()
 
-        # 4. Reset image.
+        # 4. Follow up images image.
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(1)[0]
+            img_array1 = self.camera.acquire_n_frames(s["num_images"])
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
-            img_array1 = np.zeros_like(img_array0)
+            img_array1 = np.zeros((s["num_images"], *img_array0.shape))
 
         print(
             f"Rearrangement complete: {n_frames} frames, {(t3 - t1)*1000:.4f}ms total "
@@ -497,13 +498,13 @@ class Rearrangement(Coordinator):
         n_frames = self._play_sequence_pipelined(frames)
         t3 = time.perf_counter()
 
-        #  Reset image.
+        # 4. Follow up images image.
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(1)[0]
+            img_array1 = self.camera.acquire_n_frames(s["num_images"])
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
-            img_array1 = np.zeros_like(img_array0)
+            img_array1 = np.zeros((s["num_images"], *img_array0.shape))
 
         print(
             f"Rearrangement complete: {n_frames} frames, {(t3 - t1)*1000:.4f}ms total "

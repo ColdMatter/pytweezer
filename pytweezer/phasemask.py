@@ -432,6 +432,26 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         
         return cp.angle(U_tot).astype(cp.float32)
 
+    def evaluate_trap_fields(self, pm_slm, x_n, y_n):
+        am_slm = cp.asarray(self.generate_source_amplitude())
+        pm_slm = cp.asarray(pm_slm)
+        x_n_cp = cp.asarray(x_n)
+        y_n_cp = cp.asarray(y_n)
+
+        X_phase = cp.exp(self.j_k * x_n_cp[:, None] * self.x_slm[None, :]) # Shape: (N_traps, Nx)
+        Y_phase = cp.exp(self.j_k * y_n_cp[:, None] * self.y_slm[None, :]) # Shape: (N_traps, Ny)
+        X_phase_conj = cp.conj(X_phase)
+        Y_phase_conj = cp.conj(Y_phase)
+        
+        U_slm = am_slm * cp.exp(1j * pm_slm)
+        U_foc_n = U_slm @ X_phase_conj.T # Shape: (Ny, Nx) @ (Nx, N_traps) -> (Ny, N_traps)
+        U_foc = cp.sum(Y_phase_conj * U_foc_n.T, axis=1) # Shape: (N_traps,)
+        w_foc = cp.abs(U_foc)
+        phi_foc = cp.angle(U_foc)
+        I_foc = w_foc**2
+
+        return I_foc.get(), phi_foc.get()
+
     def simulate_focal_plane(self, pm_slm, Nx_pad=2048, Ny_pad=2048, show=False, zoom_pixels=100, cmap='viridis'):
         am_slm = cp.asarray(self.generate_source_amplitude())
         field_slm = am_slm * cp.exp(1j * cp.asarray(pm_slm))
