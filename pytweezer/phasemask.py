@@ -249,6 +249,50 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         print(f"Spacing: {spacing} um")
                     
         return [Wn, Thetan, Xn, Yn, dim]
+
+    def generate_kagome_lattice(target_sites, spacing):
+        """
+        Generates a circularly symmetric Kagome lattice of tweezer sites.
+        
+        Parameters:
+        - target_sites (int): The desired number of trap sites.
+        - spacing (float): The nearest-neighbor site spacing in microns.
+        
+        Returns:
+        - x_pos (np.ndarray): Array of x coordinates for the trap sites.
+        - y_pos (np.ndarray): Array of y coordinates for the trap sites.
+        """
+        k_max = int(1.5 * np.sqrt(target_sites)) + 2
+        m_vals = np.arange(-k_max, k_max + 1)
+        n_vals = np.arange(-k_max, k_max + 1)
+        m, n = np.meshgrid(m_vals, n_vals)
+        m = m.flatten()
+        n = n.flatten()
+        a1 = np.array([2 * spacing, 0])
+        a2 = np.array([spacing, np.sqrt(3) * spacing])
+        b1 = np.array([spacing, 0])
+        b2 = np.array([spacing / 2, np.sqrt(3) * spacing / 2])
+        b3 = np.array([-spacing / 2, np.sqrt(3) * spacing / 2])
+        centers = np.outer(m, a1) + np.outer(n, a2)
+        sites_b1 = centers + b1
+        sites_b2 = centers + b2
+        sites_b3 = centers + b3
+        all_sites = np.vstack((sites_b1, sites_b2, sites_b3))
+        distances = np.linalg.norm(all_sites, axis=1)
+        rounded_distances = np.round(distances, decimals=5)
+        unique_radii, counts = np.unique(rounded_distances, return_counts=True)
+        cumulative_sites = np.cumsum(counts)
+        idx_closest = np.argmin(np.abs(cumulative_sites - target_sites))
+        optimal_radius = unique_radii[idx_closest]
+        actual_sites = cumulative_sites[idx_closest]
+        mask = rounded_distances <= optimal_radius
+        final_sites = all_sites[mask]
+        x_pos = final_sites[:, 0]
+        y_pos = final_sites[:, 1]
+        
+        print(f"Target sites: {target_sites} | Closest symmetric match: {actual_sites} sites")
+
+        return x_pos, y_pos
     
     def generate_zernike_phasemask(self, zernike_coeffs, wrap=False):
         """
@@ -393,7 +437,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
                 if iteration % 10 == 0:
                     print(f"Iteration {iteration:03d} | Mean-Squared Error: {float(mse):.2e} | Uniformity: {float(uniformity)*100:.2f}% | Min/Max ratio: {float(minmax_ratio):.3f}")
 
-        trap_weights = I_foc.reshape(array_shape)
+        trap_weights = I_foc
         print(f"Iteration {iteration:03d} | Mean-Squared Error: {float(mse):.2e} | Uniformity: {float(uniformity)*100:.2f}% | Min/Max ratio: {float(minmax_ratio):.3f}")
         print(f"Optimization finished in {time.time() - start_time:.2f} seconds.")
         
@@ -432,7 +476,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         
         return cp.angle(U_tot).astype(cp.float32)
 
-    def evaluate_trap_fields(self, pm_slm, x_n, y_n):
+    def evaluate_traps(self, pm_slm, x_n, y_n):
         am_slm = cp.asarray(self.generate_source_amplitude())
         pm_slm = cp.asarray(pm_slm)
         x_n_cp = cp.asarray(x_n)

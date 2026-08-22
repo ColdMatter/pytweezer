@@ -265,11 +265,10 @@ def OptimiseMOTNumber(motcam, exp, img_it=10, bg_it=2):
     rep_vva_max = vva_list[max_index]
     print(f"MOT Repump VVA resonance: {rep_vva_max}")
     ExpParams.set_parameter("tMOTLoadRepVVA", rep_vva_max)
-
     ExpParams.save_parameters()
 
 
-def OptimiseMOTShimParameters(hamcam, exp, n_calls=50, init_calls=10, xlim=(0.0, 10.0), ylim=(-5.0, 5.0), zlim=(-1.0, 1.0)):
+def OptimiseMOTShimParameters(hamcam, exp, n_it_per_exp=20, n_calls=50, init_calls=10, xlim=(0.0, 10.0), ylim=(-5.0, 5.0), zlim=(-1.0, 1.0)):
     dimensions = [  
         Real(name='tMOTShimXccValue', low=xlim[0], high=xlim[1]),
         Real(name='tMOTShimYccValue', low=ylim[0], high=ylim[1]),
@@ -277,7 +276,7 @@ def OptimiseMOTShimParameters(hamcam, exp, n_calls=50, init_calls=10, xlim=(0.0,
     ]
 
     # Experiment and camera setup
-    n_iterations = 50
+    n_iterations = n_it_per_exp
     exp.set_motmaster_experiment("RbTweezerBasic2026_2")
     exp.set_iterations(n_iterations)
     hamcam.setup_acquisition("snap", n_iterations * 2)
@@ -295,12 +294,12 @@ def OptimiseMOTShimParameters(hamcam, exp, n_calls=50, init_calls=10, xlim=(0.0,
                 "tImgCoolVCO1": ExpParams.get_parameter("tImgCoolVCO"), "tImgCoolVVA1": ExpParams.get_parameter("tImgCoolVVA"), 
                 "tImgCoolVCO2": ExpParams.get_parameter("tImgCoolVCO"), "tImgCoolVVA2": ExpParams.get_parameter("tImgCoolVVA"),
                 "tMOTShimXccValue": tMOTShimXccValue, "tMOTShimYccValue": tMOTShimYccValue, "tMOTShimZccValue": tMOTShimZccValue,
+                "tMolassesShimXccValue": ExpParams.get_parameter("tMolassesShimXccValue"), "tMolassesShimYccValue": ExpParams.get_parameter("tMolassesShimYccValue"), "tMolassesShimZccValue": ExpParams.get_parameter("tMolassesShimZccValue"),
                 "tMOTLoadingDuration": 10000, "PatternLength": 40000})
 
         imgs = hamcam.acquire_n_frames(n_iterations * 2)
         imgs1, imgs2 = imgs[::2], imgs[1::2]
         imgs_filtered_1 = [an.morphological_tophat_high_pass(img, feature_size=ExpParams.get_parameter("feature_size")) for img in imgs1]
-
         _, loading_probabilities, _, fidelity = an.get_array_loading_statistics(imgs_filtered_1, ExpParams.get_parameter("site_positions"), ExpParams.get_parameter("array_shape"), threshold_detection=False, threshold=1.6, window_size=ExpParams.get_parameter("sum_window"), binning=60, verbose=False, show_histogram=False)
         mean_loading_probability = np.mean(loading_probabilities)
         measured_loss = 1.0 - mean_loading_probability
@@ -332,17 +331,90 @@ def OptimiseMOTShimParameters(hamcam, exp, n_calls=50, init_calls=10, xlim=(0.0,
     print("\n" + "="*40)
     print("Optimization Complete!")
     print("="*40)
-
     high_score = 1 - result.fun
     best_params = result.x
-
     print(f"High score: {high_score:.4f}  |  Best parameters:")
     for dim, value in zip(dimensions, best_params):
         print(f"  {dim.name}: {value:.4f}")
+        ExpParams.set_parameter(dim.name, value)
+    ExpParams.save_parameters()
 
-    ExpParams.set_parameter("tMOTShimXccValue", best_params[0])
-    ExpParams.set_parameter("tMOTShimYccValue", best_params[1])
-    ExpParams.set_parameter("tMOTShimZccValue", best_params[2])
+def OptimiseMolassesShimParameters(hamcam, exp, n_it_per_exp=20, n_calls=50, init_calls=10, xlim=(0.0, 10.0), ylim=(-5.0, 5.0), zlim=(-1.0, 1.0)):
+    dimensions = [  
+        Real(name='tMolassesShimXccValue', low=xlim[0], high=xlim[1]),
+        Real(name='tMolassesShimYccValue', low=ylim[0], high=ylim[1]),
+        Real(name='tMolassesShimZccValue', low=zlim[0], high=zlim[1])
+    ]
+
+    # Experiment and camera setup
+    n_iterations = n_it_per_exp
+    exp.set_motmaster_experiment("RbTweezerBasic2026_2")
+    exp.set_iterations(n_iterations)
+    hamcam.setup_acquisition("snap", n_iterations * 2)
+
+    @use_named_args(dimensions=dimensions)
+    def tweezer_exp_objective(tMolassesShimXccValue, tMolassesShimYccValue, tMolassesShimZccValue):
+        # Check loading probability
+        hamcam.start_acquisition()
+        exp.start_motmaster_experiment({
+            "tMOTLoadRepVCO": ExpParams.get_parameter("tMOTLoadRepVCO"), "tMOTLoadCoolVCO": ExpParams.get_parameter("tMOTLoadCoolVCO"),
+            "tMOTLoadRepVVA": ExpParams.get_parameter("tMOTLoadRepVVA"), "tMOTLoadCoolVVA": ExpParams.get_parameter("tMOTLoadCoolVVA"),
+            "tMolCoolVCO1": ExpParams.get_parameter("tMolCoolVCO1"), "tMolRepVCO1": ExpParams.get_parameter("tMolRepVCO1"),
+            "tMolCoolVVA1": ExpParams.get_parameter("tMolCoolVVA1"), "tMolRepVVA1": ExpParams.get_parameter("tMolRepVVA1"),
+            "tMolCoolVCO2": ExpParams.get_parameter("tMolCoolVCO2"), "tMolRepVCO2": ExpParams.get_parameter("tMolRepVCO2"),
+            "tMolCoolVVA2": ExpParams.get_parameter("tMolCoolVVA2"), "tMolRepVVA2": ExpParams.get_parameter("tMolRepVVA2"),
+            "tImgCoolVCO1": ExpParams.get_parameter("tImgCoolVCO"), "tImgCoolVVA1": ExpParams.get_parameter("tImgCoolVVA"),
+            "tImgCoolVCO2": ExpParams.get_parameter("tImgCoolVCO"), "tImgCoolVVA2": ExpParams.get_parameter("tImgCoolVVA"),
+            "tMOTShimXccValue": ExpParams.get_parameter("tMOTShimXccValue"), "tMOTShimYccValue": ExpParams.get_parameter("tMOTShimYccValue"), "tMOTShimZccValue": ExpParams.get_parameter("tMOTShimZccValue"),
+            "tMolassesShimXccValue": tMolassesShimXccValue, "tMolassesShimYccValue": tMolassesShimYccValue, "tMolassesShimZccValue": tMolassesShimZccValue, 
+            "BackgroundDrop": 1, "tDropDuration": int(4)})
+        imgs = hamcam.acquire_n_frames(n_iterations * 2)
+        imgs1, imgs2 = imgs[::2], imgs[1::2]
+        imgs_filtered_1 = [an.morphological_tophat_high_pass(img, feature_size=ExpParams.get_parameter("feature_size")) for img in imgs1]
+        imgs_filtered_2 = [an.morphological_tophat_high_pass(img, feature_size=ExpParams.get_parameter("feature_size")) for img in imgs2]
+        _, loading_probabilities, threshold, _ = an.get_array_loading_statistics(imgs_filtered_1, ExpParams.get_parameter("site_positions"), ExpParams.get_parameter("array_shape"), threshold_detection=True, threshold=ExpParams.get_parameter("threshold"), binning=60, window_size=ExpParams.get_parameter("sum_window"), show_histogram=False, verbose=False)
+        mean_loading_probability = loading_probabilities.mean()
+
+        if mean_loading_probability < 0.5:
+            measured_loss = 1 - mean_loading_probability
+            survival_probability = np.nan
+        else:
+            survival_probability = an.extract_survival_probability(imgs_filtered_1, imgs_filtered_2, ExpParams.get_parameter("site_positions"), ExpParams.get_parameter("array_shape"), threshold=ExpParams.get_parameter("threshold"), window_size=ExpParams.get_parameter("sum_window"))
+            measured_loss = 0.4 - survival_probability
+
+        print(f"tMolassesShimXccValue = {tMolassesShimXccValue:.2f}, tMolassesShimYccValue = {tMolassesShimYccValue:.2f}, tMolassesShimZccValue = {tMolassesShimZccValue:.2f}  |  Loading Probability = {mean_loading_probability:.4f}  |  40 us Survival Probability = {survival_probability:.4f}")
+        return measured_loss
+
+    print("Starting Bayesian Optimization with dynamic exploration...")
+    xi_start = 0.100
+    xi_end = 0.001
+    opt = Optimizer(
+        dimensions=dimensions,
+        n_initial_points=init_calls,
+        acq_func='EI',
+        random_state=50
+    )
+
+    for i in range(n_calls):
+        current_xi = xi_start - (xi_start - xi_end) * (i / (n_calls - 1))
+        opt.acq_func_kwargs = {'xi': current_xi}
+        suggested_params = opt.ask()
+        loss = tweezer_exp_objective(suggested_params)
+        result = opt.tell(suggested_params, loss)
+        print(f"Iteration {i+1}/{n_calls} (xi = {current_xi:.4f})")
+        print(f"  Current score: {(1-loss):.4f}")
+        print(f"  Best score: {(1-result.fun):.4f}\n")
+
+    # --- 4. Analyze the Results ---
+    print("\n" + "="*40)
+    print("Optimization Complete!")
+    print("="*40)
+    high_score = 1 - result.fun
+    best_params = result.x
+    print(f"High score: {high_score:.4f}  |  Best parameters:")
+    for dim, value in zip(dimensions, best_params):
+        print(f"  {dim.name}: {value:.4f}")
+        ExpParams.set_parameter(dim.name, value)
     ExpParams.save_parameters()
     
 
