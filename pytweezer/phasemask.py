@@ -248,9 +248,9 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         print(f"Grid: {dim[0]}x{dim[1]}")
         print(f"Spacing: {spacing} um")
                     
-        return [Wn, Thetan, Xn, Yn, dim]
+        return [Wn, Thetan, Xn, Yn]
 
-    def generate_kagome_lattice(target_sites, spacing):
+    def generate_kagome_lattice(self, target_sites, spacing):
         """
         Generates a circularly symmetric Kagome lattice of tweezer sites.
         
@@ -378,7 +378,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         am_slm = cp.asarray(self.generate_source_amplitude())
 
         # 4. Define Target Trap Coordinates
-        w_n, theta_n, x_n, y_n, array_shape = target
+        w_n, theta_n, x_n, y_n = target
         
         # Move variables to GPU
         w_n_cp = cp.asarray(w_n)
@@ -441,14 +441,14 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         print(f"Iteration {iteration:03d} | Mean-Squared Error: {float(mse):.2e} | Uniformity: {float(uniformity)*100:.2f}% | Min/Max ratio: {float(minmax_ratio):.3f}")
         print(f"Optimization finished in {time.time() - start_time:.2f} seconds.")
         
-        return pm_slm, [w_n_cp, theta_n_cp, x_n_cp, y_n_cp, array_shape], [cp.asnumpy(uniformity_history), cp.asnumpy(minmax_history), cp.asnumpy(mse_history), cp.asnumpy(trap_weights)]
+        return pm_slm, [w_n_cp, theta_n_cp, x_n_cp, y_n_cp], [cp.asnumpy(uniformity_history), cp.asnumpy(minmax_history), cp.asnumpy(mse_history), cp.asnumpy(trap_weights)]
 
     def generate_phasemask(self, trap_terms):
         """
         Generates the phase mask using pure CuPy high-speed matrix multiplication.
         """
         # Unpack once
-        w_n, theta_n, x_n, y_n, array_shape = trap_terms
+        w_n, theta_n, x_n, y_n = trap_terms
         
         # 3. TRANSFER AND CAST TO 32-BIT
         # If your arrays are already on the GPU, cp.asarray does nothing (zero overhead)
@@ -575,11 +575,6 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         plt.tight_layout()
         plt.show()
 
-    def save_phasemask(self, phasemask):
-        phasemask_bmp = Image.fromarray(phasemask)
-        phasemask_bmp.save('C:\\Users\\CaFMOT\\OneDrive - Imperial College London\\caftweezers\\MeadowController\\phasemasks\\phasemask.bmp')
-        print('Phasemask generated and saved as an 8bit.bmp')
-
     def superimpose(self, phasemasks):
         return cp.mod(sum(phasemasks), 2*cp.pi)
     
@@ -593,8 +588,8 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             """
             start = time.time()
         
-            w1, phi1, x1, y1, arr1 = terms1
-            w2, phi2, x2, y2, _ = terms2
+            w1, phi1, x1, y1 = terms1
+            w2, phi2, x2, y2 = terms2
             occ_mask = cp.asarray(occ_mask)
             
             pos1 = cp.stack((x1, y1), axis=-1)
@@ -679,7 +674,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
                 update_state_kernel(dw, dphi, total_dx, total_dy, ds, curr_w, curr_phi, curr_x, curr_y)
                 
                 # Repack the terms and call the generator.
-                terms_gpu = (curr_w, curr_phi, curr_x, curr_y, arr1)
+                terms_gpu = (curr_w, curr_phi, curr_x, curr_y)
                 pm_slm = self.generate_phasemask(terms_gpu)
                 
                 # Only superimpose the moving traps with the pre-calculated static background
@@ -720,8 +715,8 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             raise ValueError(
                 f"profile must be 'minimum_jerk' or 'linear', got {profile!r}"
             )
-        w1, phi1, x1, y1, arr1 = terms1
-        w2, phi2, x2, y2, _ = terms2
+        w1, phi1, x1, y1 = terms1
+        w2, phi2, x2, y2 = terms2
         occ_mask = cp.asarray(occ_mask)
 
         pos1 = cp.stack((x1, y1), axis=-1)
@@ -780,12 +775,11 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         for n in range(n_steps):
             ds = float(ds_profile_cpu[n])
             update_state_kernel(dw, dphi, total_dx, total_dy, ds, curr_w, curr_phi, curr_x, curr_y)
-            terms_gpu = (curr_w, curr_phi, curr_x, curr_y, arr1)
+            terms_gpu = (curr_w, curr_phi, curr_x, curr_y)
             pm_slm = self.generate_phasemask(terms_gpu)
             composite_pm = self.superimpose([pm_slm, static_background])
             frame = self.transform_phase_8bit(composite_pm)
             yield frame.get() if to_host else frame
-
    
     def plan_rearrangement(self, terms1, terms2, occ_mask, d0=0.5,
                            profile="minimum_jerk"):
@@ -793,8 +787,8 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             raise ValueError(
                 f"profile must be 'minimum_jerk' or 'linear', got {profile!r}"
             )
-        w1, phi1, x1, y1, arr1 = terms1
-        w2, phi2, x2, y2, _ = terms2
+        w1, phi1, x1, y1 = terms1
+        w2, phi2, x2, y2 = terms2
         occ_mask = cp.asarray(occ_mask)
 
         pos1 = cp.stack((x1, y1), axis=-1)
@@ -864,7 +858,6 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             "total_dx": total_dx, "total_dy": total_dy,
             "curr_w": curr_w, "curr_phi": curr_phi,
             "curr_x": curr_x, "curr_y": curr_y,
-            "arr1": arr1,
             "static_background": static_background,
             "n_moving": int(moving_idx.size),
             "profile": profile,
@@ -886,7 +879,6 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         total_dx, total_dy = plan["total_dx"], plan["total_dy"]
         curr_w, curr_phi = plan["curr_w"], plan["curr_phi"]
         curr_x, curr_y = plan["curr_x"], plan["curr_y"]
-        arr1 = plan["arr1"]
         static_background = plan["static_background"]
         ds_profile_cpu = plan["ds_profile_cpu"]
 
@@ -896,7 +888,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             start_ev.record()
             ds = float(ds_profile_cpu[n])
             update_state_kernel(dw, dphi, total_dx, total_dy, ds, curr_w, curr_phi, curr_x, curr_y)
-            terms_gpu = (curr_w, curr_phi, curr_x, curr_y, arr1)
+            terms_gpu = (curr_w, curr_phi, curr_x, curr_y)
             pm_slm = self.generate_phasemask(terms_gpu)
             composite_pm = self.superimpose([pm_slm, static_background])
             frame = self.transform_phase_8bit(composite_pm)

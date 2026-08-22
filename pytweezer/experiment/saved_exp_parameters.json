@@ -29,5 +29,9 @@
         "em_gain": 600,
         "conversion_factor": 0.0098313,
         "conversion_offset": 1916.85
+    },
+    "image_analysis": {
+        "x_centre": 117.95833333333333,
+        "y_centre": 134.02777777777777
     }
 }

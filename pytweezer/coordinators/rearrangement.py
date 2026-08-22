@@ -237,8 +237,6 @@ class Rearrangement(Coordinator):
         self,
         data1: np.ndarray,
         data2: np.ndarray,
-        array_shape1,
-        array_shape2,
         d0: float,
         fps: float,
         threshold: float,
@@ -260,8 +258,8 @@ class Rearrangement(Coordinator):
         # under NEP-18, so a cupy input falls through to __array__ and raises.
         w1, phi1, x1, y1 = cp.asarray(data1)
         w2, phi2, x2, y2 = cp.asarray(data2)
-        terms1 = (w1, phi1, x1, y1, array_shape1)
-        terms2 = (w2, phi2, x2, y2, array_shape2)
+        terms1 = (w1, phi1, x1, y1)
+        terms2 = (w2, phi2, x2, y2)
 
         # The initial array to load onto the SLM before each rearrangement.
         pm_array_init = self.pm_gen.generate_phasemask(list(terms1))
@@ -285,7 +283,7 @@ class Rearrangement(Coordinator):
     # Arm / run one rearrangement
     # ------------------------------------------------------------------ #
 
-    def _extract_occupancy(self, image, array_shape, threshold):
+    def _extract_occupancy(self, image, threshold):
         
         detector = self._state.get("detector")
         if detector is not None:
@@ -302,16 +300,16 @@ class Rearrangement(Coordinator):
         else:
             img = an.morphological_tophat_high_pass(image, feature_size=feature_size)
 
-        cpp_sum = _sum_cpp()
-        if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
-            pixel_sums = cpp_sum.sum_pixel_values(
-                img, grid_positions, array_shape, window_size=window_size
-            )
-        else:
-            pixel_sums = an.sum_pixel_values(
-                img, grid_positions, array_shape, window_size=window_size
-            )
-        return np.fliplr(pixel_sums).flatten() > threshold
+        #cpp_sum = _sum_cpp()
+        #if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
+        #    pixel_sums = cpp_sum.sum_pixel_values(
+        #        img, grid_positions, array_shape, window_size=window_size
+        #    )
+        #else:
+        pixel_sums = an.sum_pixel_values(
+            img, grid_positions, window_size=window_size
+        )
+        return pixel_sums > threshold
 
     def _play_sequence_pipelined(self, frames):
         """Display each frame on the SLM as it is produced."""
@@ -401,20 +399,19 @@ class Rearrangement(Coordinator):
 
         s = self._state
         PM = s["PM"]
-        arr_shape1 = s["terms1"][4]
 
         # Load the initial array onto the SLM.
         self.slm.update_mask(s["pm_init_uint8"])
 
         # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
-        img_array0 = self.camera.acquire_n_frames(1)[0]
+        img_array0 = np.fliplr(self.camera.acquire_n_frames(1)[0])
         # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
         # the same order as the spans measured here.
         t1 = time.perf_counter()
 
         # 2. Occupancy mask.
-        occ_mask = self._extract_occupancy(img_array0, arr_shape1, s["threshold"])
+        occ_mask = self._extract_occupancy(img_array0, s["threshold"])
         t2 = time.perf_counter()
 
         # 3. Pairing, interpolation and SLM upload, pipelined.
@@ -430,7 +427,7 @@ class Rearrangement(Coordinator):
         # 4. Follow up images image.
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(s["num_images"])
+            img_array1 = np.fliplr(self.camera.acquire_n_frames(s["num_images"]))
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros((s["num_images"], *img_array0.shape))
@@ -583,17 +580,16 @@ class Rearrangement(Coordinator):
 
         s = self._state
         PM = s["PM"]
-        arr_shape1 = s["terms1"][4]
 
         self.slm.update_mask(s["pm_init_uint8"])
 
         # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
-        img_array0 = self.camera.acquire_n_frames(1)[0]
+        img_array0 = np.fliplr(self.camera.acquire_n_frames(1)[0])
         t1 = time.perf_counter()
 
         # 2. Occupancy mask.
-        occ_mask = self._extract_occupancy(img_array0, arr_shape1, s["threshold"])
+        occ_mask = self._extract_occupancy(img_array0, s["threshold"])
         t2 = time.perf_counter()
 
         # 3. One-time pairing and interpolation setup, eager so it lands in its
@@ -613,7 +609,7 @@ class Rearrangement(Coordinator):
         # 5. Follow up images
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(s["num_images"])
+            img_array1 = np.fliplr(self.camera.acquire_n_frames(s["num_images"]))
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros((s["num_images"], *img_array0.shape))
@@ -687,20 +683,19 @@ class Rearrangement(Coordinator):
 
         s = self._state
         PM = s["PM"]
-        arr_shape1 = s["terms1"][4]
 
         # Load the initial array onto the SLM.
         self.slm.update_mask(s["pm_init_uint8"])
 
         # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
-        img_array0 = self.camera.acquire_n_frames(1)[0]
+        img_array0 = np.fliplr(self.camera.acquire_n_frames(1)[0])
         # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
         # the same order as the spans measured here.
         t1 = time.perf_counter()
 
         # 2. Occupancy mask.
-        occ_mask = self._extract_occupancy(img_array0, arr_shape1, s["threshold"])
+        occ_mask = self._extract_occupancy(img_array0, s["threshold"])
         t2 = time.perf_counter()
 
         # 3. Pairing, interpolation and on-board preload, pipelined.
@@ -730,7 +725,7 @@ class Rearrangement(Coordinator):
         # 5. Reset image.
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(1)[0]
+            img_array1 = np.fliplr(self.camera.acquire_n_frames(1)[0])
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)

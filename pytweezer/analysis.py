@@ -10,6 +10,8 @@ from sklearn.mixture import GaussianMixture
 from scipy import integrate
 from scipy.stats import norm
 from pytweezer.experiment.experiment_parameter_manager import ExpParameterManager
+from scipy.spatial.distance import cdist
+from scipy.optimize import linear_sum_assignment
 
 exp_params = ExpParameterManager()
 
@@ -17,6 +19,10 @@ exp_params = ExpParameterManager()
 
 # Fundamental Constants
 motcam_mm_per_px = 1e3 / 194902.8581 # mm / px
+hamcam_px_per_um = 2.0714285714285716
+hamcam_um_per_px = 1 / hamcam_px_per_um
+
+
 MRb = 1.44316e-25  # kg
 kB = 1.380649e-23  # J/K
 c = 299792458
@@ -42,6 +48,67 @@ w = 2 * np.pi * c / (wavelen)
 ####################################################################################################
 
 cool_vco_resonance = exp_params.get_parameter("cool_vco_resonance")
+
+def rotate_coordinates(x, y, angle_deg, center_x=0, center_y=0):
+    angle_rad = np.radians(angle_deg)
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+
+    # Shift to origin
+    x_shifted = x - center_x
+    y_shifted = y - center_y
+
+    # Rotate
+    x_rotated = x_shifted * cos_a - y_shifted * sin_a
+    y_rotated = x_shifted * sin_a + y_shifted * cos_a
+
+    # Shift back
+    x_final = x_rotated + center_x
+    y_final = y_rotated + center_y
+
+    return x_final, y_final
+
+def pair_coordinates(x_pos, y_pos, u_pos, v_pos):
+    # Convert the inputs into 2D numpy arrays of coordinates
+    # shape will be (N, 2)
+    pts1 = np.column_stack((x_pos, y_pos))
+    pts2 = np.column_stack((u_pos, v_pos))
+    
+    # Calculate the distance matrix between all points in pts1 and pts2
+    # distance_matrix[i, j] is the distance between pts1[i] and pts2[j]
+    distance_matrix = cdist(pts1, pts2)
+    
+    # Use the Hungarian algorithm to find the optimal 1-to-1 matching.
+    row_indices, col_indices = linear_sum_assignment(distance_matrix)
+    
+    # Reorder the u and v arrays based on the optimal matching
+    u_pos_sorted = np.array(u_pos)[col_indices]
+    v_pos_sorted = np.array(v_pos)[col_indices]
+    
+    return u_pos_sorted, v_pos_sorted
+
+def set_array_centre(grid_positions_img):
+    exp_params = ExpParameterManager()
+    y0 = np.mean([pos[0] for pos in grid_positions_img.values()])
+    x0 = np.mean([pos[1] for pos in grid_positions_img.values()])
+    exp_params.set_parameter("x_centre", x0)
+    exp_params.set_parameter("y_centre", y0)
+    exp_params.save_parameters()
+
+def index_grid_positions(grid_positions, x_n, y_n):
+    exp_params = ExpParameterManager()
+    y_img = np.array([pos[0] for pos in grid_positions.values()])
+    x_img = np.array([pos[1] for pos in grid_positions.values()])
+    y_0 = exp_params.get_parameter("y_centre")
+    x_0 = exp_params.get_parameter("x_centre")
+    y_pos = (y_img - y_0) * hamcam_um_per_px
+    x_pos = (x_img - x_0) * hamcam_um_per_px
+    x_n_rot, y_n_rot = rotate_coordinates(x_n, y_n, angle_deg=-2.5)
+    x_pos_sorted, y_pos_sorted = pair_coordinates(x_n_rot, y_n_rot, x_pos, y_pos)
+    x_img_sorted = (x_pos_sorted * hamcam_px_per_um + x_0).astype('int64')
+    y_img_sorted = (y_pos_sorted * hamcam_px_per_um + y_0).astype('int64')
+    grid_positions_sorted = dict(enumerate(zip(y_img_sorted, x_img_sorted)))
+    return grid_positions_sorted
 
 def convert_vco_detuning(vco_array):
     detuning_array = (vco_array - cool_vco_resonance) * 12.24 # Convert to MHz
@@ -108,7 +175,7 @@ def sort_into_grid(centers, grid_shape = [2,2]):
             grid_positions[index] = tuple(sorted_array[index])
         return grid_positions, num_row, num_col
 
-def detect_trap_sites(img_array, grid_shape, detection_step = 100):
+def detect_trap_sites_grid(img_array, grid_shape, detection_step = 100):
     print('Looking for trap sites...')
     detection_threshold = img_array.max()
     while 1:
@@ -125,7 +192,7 @@ def detect_trap_sites(img_array, grid_shape, detection_step = 100):
             print(f'{grid_shape[0]}x{grid_shape[1]} array detected.')
             return grid_positions, detection_threshold
 
-def detect_trap_sites_general(img_array, atom_number, detection_step=100):
+def detect_trap_sites(img_array, atom_number, detection_step=100):
     print('Looking for trap sites...')
     detection_threshold = img_array.max()
     while 1:
@@ -144,20 +211,7 @@ def detect_trap_sites_general(img_array, atom_number, detection_step=100):
         grid_positions[i] = tuple(centers[i])
     return grid_positions, detection_threshold
 
-# Sum pixel values in a 5x5 region around each detected center
-def sum_pixel_values(image_array, grid_positions, grid_shape, window_size=10):
-    half_size = window_size // 2
-    pixel_sums = np.zeros(grid_shape, dtype=int)  # Create empty 2D array
-
-    for (i, j),(y, x) in grid_positions.items():
-        # Extract 5x5 region and sum pixel values
-        region = image_array[max(y-half_size, 0):min(y+half_size+1, image_array.shape[0]),
-                             max(x-half_size, 0):min(x+half_size+1, image_array.shape[1])]
-        pixel_sums[i, j] = np.sum(region)
-
-    return pixel_sums
-
-def sum_pixel_values_general(image_array, grid_positions, window_size=10):
+def sum_pixel_values(image_array, grid_positions, window_size=10):
     half_size = window_size // 2
     pixel_sums = np.zeros(len(grid_positions), dtype=int)  # Create empty 2D array
 
@@ -242,7 +296,7 @@ class SiteScorer:
     mean-subtracted, so flat background scores zero and no top-hat is needed.
     """
 
-    def __init__(self, grid_positions, grid_shape, method="box", window_size=None,
+    def __init__(self, grid_positions, method="box", window_size=None,
                  templates=None, feature_size=10, threshold=None):
         if method not in ("box", "psf"):
             raise ValueError(f"method must be 'box' or 'psf', got {method!r}")
@@ -251,7 +305,6 @@ class SiteScorer:
 
         self.method = method
         self.grid_positions = dict(grid_positions)
-        self.grid_shape = tuple(grid_shape)
         self.templates = templates
         self.feature_size = feature_size
         self.threshold = threshold
@@ -267,9 +320,9 @@ class SiteScorer:
         cols = np.array([self.grid_positions[k][1] for k in self.keys])
         self._rows = rows[:, None, None] + offsets[None, :, None]
         self._cols = cols[:, None, None] + offsets[None, None, :]
-        self._flat = np.array([r * self.grid_shape[1] + c for r, c in self.keys])
 
         # Cached: the hot path should not re-read these per frame.
+        exp_params = ExpParameterManager()
         self._offset = exp_params.get_parameter("conversion_offset")
         self._factor = exp_params.get_parameter("conversion_factor")
 
@@ -283,11 +336,11 @@ class SiteScorer:
         return "PSF" if self.method == "psf" else "box sum"
 
     @classmethod
-    def from_images(cls, images, grid_positions, grid_shape, window_size=9,
+    def from_images(cls, images, grid_positions, window_size=9,
                     min_samples=10, **kwargs):
         """Build PSF templates from a stack, then a scorer that uses them."""
         templates = build_psf_templates(images, grid_positions, window_size, min_samples)
-        return cls(grid_positions, grid_shape, method="psf", window_size=window_size,
+        return cls(grid_positions, method="psf", window_size=window_size,
                    templates=templates, **kwargs)
 
     def site_scores(self, image):
@@ -301,14 +354,8 @@ class SiteScorer:
             counts = np.einsum("swh,swh->s", crops, self._weights)
         return (counts - self._offset) * self._factor / 0.7
 
-    def score_grid(self, image):
-        """Photon rates laid out on the array grid."""
-        grid = np.empty(self.grid_shape, dtype=np.float32)
-        grid.flat[self._flat] = self.site_scores(image)
-        return grid
-
     def score_stack(self, images):
-        return np.stack([self.score_grid(image) for image in images])
+        return np.stack([self.site_scores(image) for image in images])
 
     def occupancy(self, image, threshold=None):
         """Flat boolean mask in trap order, for the rearrangement coordinator.
@@ -319,7 +366,7 @@ class SiteScorer:
         cut = self.threshold if threshold is None else threshold
         if cut is None:
             raise ValueError(f"{self.name} scorer has no threshold; calibrate it first.")
-        return np.fliplr(self.score_grid(image)).flatten() > cut
+        return self.site_scores(image) > cut
 
 
 # Function to visualize results with cropping and zooming
@@ -531,18 +578,20 @@ def tweezer_show_bg_subtracted(images, backgrounds, cmap='gray', show=True, vmax
     return img_average
 
 def convert_photons_to_counts(photons):
+    exp_params = ExpParameterManager()
     conversion_factor = exp_params.get_parameter("conversion_factor")
     conversion_offset = exp_params.get_parameter("conversion_offset")
     counts_array = photons * 0.7 / conversion_factor + conversion_offset
     return counts_array
 
 def convert_counts_to_photons(counts):
+    exp_params = ExpParameterManager()
     conversion_factor = exp_params.get_parameter("conversion_factor")
     conversion_offset = exp_params.get_parameter("conversion_offset")
     photons_array = (counts - conversion_offset) * conversion_factor / 0.7
     return photons_array
 
-def get_array_loading_statistics(images, grid_positions, grid_shape, threshold=1.0, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True, method="box", scorer=None, psf_window=9):
+def get_array_loading_statistics_grid(images, grid_positions, grid_shape, threshold=1.0, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True, method="box", scorer=None, psf_window=9):
     """Loading statistics per site, scored by box sum or PSF matched filter.
 
     ``method="box"`` expects top-hat filtered ``images``; ``method="psf"`` builds a
@@ -550,6 +599,7 @@ def get_array_loading_statistics(images, grid_positions, grid_shape, threshold=1
     built elsewhere.
     """
     n_row, n_col = grid_shape
+    exp_params = ExpParameterManager()
     conversion_factor = exp_params.get_parameter("conversion_factor")
     conversion_offset = exp_params.get_parameter("conversion_offset")
 
@@ -638,25 +688,33 @@ def get_array_loading_statistics(images, grid_positions, grid_shape, threshold=1
 
     return photon_array, loading_probabilities, threshold, fidelity
 
-def get_array_loading_statistics_general(images, grid_positions, threshold=1.0, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True):
+def get_array_loading_statistics(images, grid_positions, threshold=1.0, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True, method="box", scorer=None, psf_window=9, show_site_labels=False):
     """Loading statistics per site, scored by box sum or PSF matched filter.
 
     ``method="box"`` expects top-hat filtered ``images``; ``method="psf"`` builds a
     template per site and takes the raw frames. Pass ``scorer`` to reuse templates
     built elsewhere.
     """
+    exp_params = ExpParameterManager()
     conversion_factor = exp_params.get_parameter("conversion_factor")
     conversion_offset = exp_params.get_parameter("conversion_offset")
 
-    raw_counts = np.array([sum_pixel_values(image, grid_positions, window_size=window_size) for image in images])
-    photon_array = (raw_counts - conversion_offset) * conversion_factor / 0.7
+    if scorer is None and method == "psf":
+        scorer = SiteScorer.from_images(images, grid_positions, window_size=psf_window)
+
+    # Extract photon counts for each image and each trap site
+    if scorer is not None:
+        photon_array = scorer.score_stack(images)   # SiteScorer already returns photons
+    else:
+        raw_counts = np.array([sum_pixel_values(image, grid_positions, window_size=window_size) for image in images])
+        photon_array = (raw_counts - conversion_offset) * conversion_factor / 0.7
     tot_photon_array = photon_array.flatten()
 
     # Threshold detection and fidelity calculation
     threshold_detection_success = False
     if threshold_detection:
         try:
-            threshold, bg_params, sig_params = an.detect_loading_threshold(tot_photon_array)
+            threshold, bg_params, sig_params = detect_loading_threshold(tot_photon_array)
             mu_bg, var_bg, weight_bg  = bg_params
             mu_sig, var_sig, weight_sig = sig_params
             prob_false_negative = norm.cdf(threshold, loc=mu_sig, scale=np.sqrt(var_sig))
@@ -713,6 +771,9 @@ def get_array_loading_statistics_general(images, grid_positions, threshold=1.0, 
         X, Y = np.array(list(grid_positions.values())).T
         ax[2].scatter(Y, X, c=loading_probabilities, cmap='viridis', s=200)
         ax[2].invert_yaxis()
+        if show_site_labels:
+            for i, (x, y) in enumerate(zip(X, Y)):
+                ax[2].text(y, x, str(i), color='white', fontsize=8, ha='center', va='center')
         cbar = plt.colorbar(ax[2].collections[0], ax=ax[2])
         cbar.set_label('Loading Probability')
 
@@ -727,13 +788,13 @@ def get_array_loading_statistics_general(images, grid_positions, threshold=1.0, 
 
     return photon_array, loading_probabilities, threshold, fidelity
 
-def extract_survival_probability(imgs1, imgs2, grid_positions, grid_shape, threshold='auto', window_size=5):
+def extract_survival_probability(imgs1, imgs2, grid_positions, threshold='auto', window_size=5):
     if threshold == 'auto':
-        pr_1, eta_1, thresh_1, fidelity_1 = get_array_loading_statistics(imgs1, grid_positions, grid_shape, threshold_detection=True, window_size=window_size, binning=60, show_histogram=False, verbose=False)
-        pr_2, eta_2, thresh_2, fidelity_2 = get_array_loading_statistics(imgs2, grid_positions, grid_shape, threshold_detection=True, window_size=window_size, binning=60, show_histogram=False, verbose=False)
+        pr_1, eta_1, thresh_1, fidelity_1 = get_array_loading_statistics(imgs1, grid_positions, threshold_detection=True, window_size=window_size, binning=60, show_histogram=False, verbose=False)
+        pr_2, eta_2, thresh_2, fidelity_2 = get_array_loading_statistics(imgs2, grid_positions, threshold_detection=True, window_size=window_size, binning=60, show_histogram=False, verbose=False)
     else:
-        pr_1, eta_1, thresh_1, fidelity_1 = get_array_loading_statistics(imgs1, grid_positions, grid_shape, threshold_detection=False, threshold=threshold, window_size=window_size, binning=60, show_histogram=False, verbose=False)
-        pr_2, eta_2, thresh_2, fidelity_2 = get_array_loading_statistics(imgs2, grid_positions, grid_shape, threshold_detection=False, threshold=threshold, window_size=window_size, binning=60, show_histogram=False, verbose=False)
+        pr_1, eta_1, thresh_1, fidelity_1 = get_array_loading_statistics(imgs1, grid_positions, threshold_detection=False, threshold=threshold, window_size=window_size, binning=60, show_histogram=False, verbose=False)
+        pr_2, eta_2, thresh_2, fidelity_2 = get_array_loading_statistics(imgs2, grid_positions, threshold_detection=False, threshold=threshold, window_size=window_size, binning=60, show_histogram=False, verbose=False)
     survival_fractions = []
     for i in range(pr_1.shape[0]):
 
@@ -754,6 +815,7 @@ def extract_survival_probability(imgs1, imgs2, grid_positions, grid_shape, thres
     return survival_probability
 
 def recapture_prob_fit(tarray, T, a, b):
+    exp_params = ExpParameterManager()
     P = exp_params.get_parameter("mean_tweezer_power_mW") * 1E-3
     wr = exp_params.get_parameter("radial_trap_freq_kHz") * 1E3 * 2 * np.pi
 
