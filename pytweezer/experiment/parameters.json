@@ -28,10 +28,10 @@
     "emccd_parameters": {
         "em_gain": 600,
         "conversion_factor": 0.009508957628343926,
-        "conversion_offset": 1917.5467529296875
+        "conversion_offset": 1917.66064453125
     },
     "image_analysis": {
-        "x_centre": 136.11111111111111,
-        "y_centre": 133.68055555555554
+        "x_centre": 135.50694444444446,
+        "y_centre": 132.34722222222223
     }
 }

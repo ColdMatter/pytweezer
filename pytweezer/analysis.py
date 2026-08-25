@@ -95,6 +95,7 @@ def set_array_centre(grid_positions_img):
     exp_params.set_parameter("x_centre", x0)
     exp_params.set_parameter("y_centre", y0)
     exp_params.save_parameters()
+    return x0, y0
 
 def index_grid_positions(grid_positions, x_n, y_n):
     exp_params = ExpParameterManager()

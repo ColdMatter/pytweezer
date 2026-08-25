@@ -1,7 +1,7 @@
 import json
 
 class ExpParameterManager():
-    def __init__(self, json_file="C:\\Users\\tweez\\ColdMatter\\pytweezer\\pytweezer\\experiment\\saved_exp_parameters.json"):
+    def __init__(self, json_file="C:\\Users\\tweez\\ColdMatter\\pytweezer\\pytweezer\\experiment\\parameters.json"):
         self.json_file = json_file
         self.load_parameters()
 
