@@ -405,7 +405,7 @@ class Rearrangement(Coordinator):
 
         # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
-        img_array0 = np.fliplr(self.camera.acquire_n_frames(1)[0])
+        img_array0 = self.camera.acquire_n_frames(1)[0]
         # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
         # the same order as the spans measured here.
         t1 = time.perf_counter()
@@ -427,7 +427,7 @@ class Rearrangement(Coordinator):
         # 4. Follow up images image.
         try:
             self.camera.start_acquisition()
-            img_array1 = np.fliplr(self.camera.acquire_n_frames(s["num_images"]))
+            img_array1 = self.camera.acquire_n_frames(s["num_images"])
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros((s["num_images"], *img_array0.shape))
@@ -585,7 +585,7 @@ class Rearrangement(Coordinator):
 
         # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
-        img_array0 = np.fliplr(self.camera.acquire_n_frames(1)[0])
+        img_array0 = self.camera.acquire_n_frames(1)[0]
         t1 = time.perf_counter()
 
         # 2. Occupancy mask.
@@ -609,7 +609,7 @@ class Rearrangement(Coordinator):
         # 5. Follow up images
         try:
             self.camera.start_acquisition()
-            img_array1 = np.fliplr(self.camera.acquire_n_frames(s["num_images"]))
+            img_array1 = self.camera.acquire_n_frames(s["num_images"])
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros((s["num_images"], *img_array0.shape))
@@ -689,7 +689,7 @@ class Rearrangement(Coordinator):
 
         # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
-        img_array0 = np.fliplr(self.camera.acquire_n_frames(1)[0])
+        img_array0 = self.camera.acquire_n_frames(1)[0]
         # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
         # the same order as the spans measured here.
         t1 = time.perf_counter()
@@ -725,7 +725,7 @@ class Rearrangement(Coordinator):
         # 5. Reset image.
         try:
             self.camera.start_acquisition()
-            img_array1 = np.fliplr(self.camera.acquire_n_frames(1)[0])
+            img_array1 = self.camera.acquire_n_frames(1)[0]
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)

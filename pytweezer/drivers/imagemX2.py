@@ -144,7 +144,7 @@ class ImagEMX2Camera:
         autosave: bool = False,
         broadcast: bool = False,
     ) -> np.ndarray:
-        self.dcam.wait_for_frame(n_frames=1, timeout=timeout)
+        self.dcam.wait_for_frame(nframes=1, timeout=timeout)
         image, _info = self.dcam.read_newest_image(return_info=True)
         image = np.asarray(image)
         if autosave:

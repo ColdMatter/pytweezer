@@ -13,7 +13,7 @@ from pytweezer.experiment.experiment_parameter_manager import ExpParameterManage
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 
-exp_params = ExpParameterManager()
+
 
 ####################################################################################################
 
@@ -47,6 +47,7 @@ w = 2 * np.pi * c / (wavelen)
 
 ####################################################################################################
 
+exp_params = ExpParameterManager()
 cool_vco_resonance = exp_params.get_parameter("cool_vco_resonance")
 
 def rotate_coordinates(x, y, angle_deg, center_x=0, center_y=0):
@@ -102,10 +103,10 @@ def index_grid_positions(grid_positions, x_n, y_n):
     y_0 = exp_params.get_parameter("y_centre")
     x_0 = exp_params.get_parameter("x_centre")
     y_pos = (y_img - y_0) * hamcam_um_per_px
-    x_pos = (x_img - x_0) * hamcam_um_per_px
+    x_pos = (x_img - x_0) * -hamcam_um_per_px
     x_n_rot, y_n_rot = rotate_coordinates(x_n, y_n, angle_deg=-2.5)
     x_pos_sorted, y_pos_sorted = pair_coordinates(x_n_rot, y_n_rot, x_pos, y_pos)
-    x_img_sorted = (x_pos_sorted * hamcam_px_per_um + x_0).astype('int64')
+    x_img_sorted = (x_pos_sorted * -hamcam_px_per_um + x_0).astype('int64')
     y_img_sorted = (y_pos_sorted * hamcam_px_per_um + y_0).astype('int64')
     grid_positions_sorted = dict(enumerate(zip(y_img_sorted, x_img_sorted)))
     return grid_positions_sorted
@@ -403,7 +404,7 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
 
     # Draw 5x5 squares and labels
     half_size = window_size // 2
-    for (i, j), (y, x) in grid_positions.items():
+    for (i), (y, x) in grid_positions.items():
         # Draw grid label
         if index_labels:
             ax[1].text(x+5, y, f"({i},{j})", color='white', fontsize=6, weight='bold')
