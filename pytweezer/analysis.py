@@ -1,22 +1,116 @@
 import numpy as np
 from scipy.optimize import curve_fit
-from scipy.ndimage import center_of_mass, label
+from scipy.ndimage import center_of_mass, label, gaussian_filter, white_tophat
 import matplotlib.pyplot as plt
 from time import sleep
 import matplotlib.patches as patches
 from rich.progress import track
 from scipy.special import erf
 from sklearn.mixture import GaussianMixture
+from scipy import integrate
 from scipy.stats import norm
-from scipy.ndimage import gaussian_filter, white_tophat
 from pytweezer.experiment.experiment_parameter_manager import ExpParameterManager
+from scipy.spatial.distance import cdist
+from scipy.optimize import linear_sum_assignment
 
-exp_params = ExpParameterManager()
 
-gamma = 1e3 / 194902.8581 # mm / px
+
+####################################################################################################
+
+# Fundamental Constants
+motcam_mm_per_px = 1e3 / 194902.8581 # mm / px
+hamcam_px_per_um = 2.0714285714285716
+hamcam_um_per_px = 1 / hamcam_px_per_um
+
+
 MRb = 1.44316e-25  # kg
 kB = 1.380649e-23  # J/K
+c = 299792458
+e0 = 8.854e-12
+e = 1.6e-19
+me = 9.109e-31
+hbar = 1.05e-34
+
+# D2 Line
+wD2 = 2 * np.pi * 384.230484e12
+muD2 = 2.069e-29
+gammaD2 = 2*np.pi*6.065*1e6
+
+# D1 Line
+wD1 = 2 * np.pi * 377.107463e12
+muD1 = 1.46e-29
+gammaD1 = 2*np.pi*5.746*1e6
+
+# System Parameters
+wavelen = 852e-9 # m
+w = 2 * np.pi * c / (wavelen)
+
+####################################################################################################
+
+exp_params = ExpParameterManager()
 cool_vco_resonance = exp_params.get_parameter("cool_vco_resonance")
+
+def rotate_coordinates(x, y, angle_deg, center_x=0, center_y=0):
+    angle_rad = np.radians(angle_deg)
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+
+    # Shift to origin
+    x_shifted = x - center_x
+    y_shifted = y - center_y
+
+    # Rotate
+    x_rotated = x_shifted * cos_a - y_shifted * sin_a
+    y_rotated = x_shifted * sin_a + y_shifted * cos_a
+
+    # Shift back
+    x_final = x_rotated + center_x
+    y_final = y_rotated + center_y
+
+    return x_final, y_final
+
+def pair_coordinates(x_pos, y_pos, u_pos, v_pos):
+    # Convert the inputs into 2D numpy arrays of coordinates
+    # shape will be (N, 2)
+    pts1 = np.column_stack((x_pos, y_pos))
+    pts2 = np.column_stack((u_pos, v_pos))
+    
+    # Calculate the distance matrix between all points in pts1 and pts2
+    # distance_matrix[i, j] is the distance between pts1[i] and pts2[j]
+    distance_matrix = cdist(pts1, pts2)
+    
+    # Use the Hungarian algorithm to find the optimal 1-to-1 matching.
+    row_indices, col_indices = linear_sum_assignment(distance_matrix)
+    
+    # Reorder the u and v arrays based on the optimal matching
+    u_pos_sorted = np.array(u_pos)[col_indices]
+    v_pos_sorted = np.array(v_pos)[col_indices]
+    
+    return u_pos_sorted, v_pos_sorted
+
+def set_array_centre(grid_positions_img):
+    exp_params = ExpParameterManager()
+    y0 = np.mean([pos[0] for pos in grid_positions_img.values()])
+    x0 = np.mean([pos[1] for pos in grid_positions_img.values()])
+    exp_params.set_parameter("x_centre", x0)
+    exp_params.set_parameter("y_centre", y0)
+    exp_params.save_parameters()
+    return x0, y0
+
+def index_grid_positions(grid_positions, x_n, y_n):
+    exp_params = ExpParameterManager()
+    y_img = np.array([pos[0] for pos in grid_positions.values()])
+    x_img = np.array([pos[1] for pos in grid_positions.values()])
+    y_0 = exp_params.get_parameter("y_centre")
+    x_0 = exp_params.get_parameter("x_centre")
+    y_pos = (y_img - y_0) * hamcam_um_per_px
+    x_pos = (x_img - x_0) * -hamcam_um_per_px
+    x_n_rot, y_n_rot = rotate_coordinates(x_n, y_n, angle_deg=-2.5)
+    x_pos_sorted, y_pos_sorted = pair_coordinates(x_n_rot, y_n_rot, x_pos, y_pos)
+    x_img_sorted = (x_pos_sorted * -hamcam_px_per_um + x_0).astype('int64')
+    y_img_sorted = (y_pos_sorted * hamcam_px_per_um + y_0).astype('int64')
+    grid_positions_sorted = dict(enumerate(zip(y_img_sorted, x_img_sorted)))
+    return grid_positions_sorted
 
 def convert_vco_detuning(vco_array):
     detuning_array = (vco_array - cool_vco_resonance) * 12.24 # Convert to MHz
@@ -83,7 +177,7 @@ def sort_into_grid(centers, grid_shape = [2,2]):
             grid_positions[index] = tuple(sorted_array[index])
         return grid_positions, num_row, num_col
 
-def detect_trap_sites(img_array, grid_shape, detection_step = 100):
+def detect_trap_sites_grid(img_array, grid_shape, detection_step = 100):
     print('Looking for trap sites...')
     detection_threshold = img_array.max()
     while 1:
@@ -100,17 +194,34 @@ def detect_trap_sites(img_array, grid_shape, detection_step = 100):
             print(f'{grid_shape[0]}x{grid_shape[1]} array detected.')
             return grid_positions, detection_threshold
 
-# Sum pixel values in a 5x5 region around each detected center
-def sum_pixel_values(image_array, grid_positions, grid_shape, window_size=10):
-    half_size = window_size // 2
-    pixel_sums = np.zeros(grid_shape, dtype=int)  # Create empty 2D array
+def detect_trap_sites(img_array, atom_number, detection_step=100):
+    print('Looking for trap sites...')
+    detection_threshold = img_array.max()
+    while 1:
+        if detection_threshold < 1: 
+            print('Could not detect.')
+            break
+            
+        centers = detect_bright_points(img_array, threshold=detection_threshold)
+        if len(centers) != atom_number:
+            detection_threshold -= detection_step
+        else:
+            print(f'{len(centers)} Atoms Detected.')
+            break
+    grid_positions = {}
+    for i in range(len(centers)):
+        grid_positions[i] = tuple(centers[i])
+    return grid_positions, detection_threshold
 
-    for (i, j),(y, x) in grid_positions.items():
+def sum_pixel_values(image_array, grid_positions, window_size=10):
+    half_size = window_size // 2
+    pixel_sums = np.zeros(len(grid_positions), dtype=int)  # Create empty 2D array
+
+    for (i),(y, x) in grid_positions.items():
         # Extract 5x5 region and sum pixel values
         region = image_array[max(y-half_size, 0):min(y+half_size+1, image_array.shape[0]),
                              max(x-half_size, 0):min(x+half_size+1, image_array.shape[1])]
-        pixel_sums[i, j] = np.sum(region)
-
+        pixel_sums[i] = np.sum(region)
     return pixel_sums
 
 def extract_crops(images, grid_positions, window_size=9):
@@ -187,7 +298,7 @@ class SiteScorer:
     mean-subtracted, so flat background scores zero and no top-hat is needed.
     """
 
-    def __init__(self, grid_positions, grid_shape, method="box", window_size=None,
+    def __init__(self, grid_positions, method="box", window_size=None,
                  templates=None, feature_size=10, threshold=None):
         if method not in ("box", "psf"):
             raise ValueError(f"method must be 'box' or 'psf', got {method!r}")
@@ -196,7 +307,6 @@ class SiteScorer:
 
         self.method = method
         self.grid_positions = dict(grid_positions)
-        self.grid_shape = tuple(grid_shape)
         self.templates = templates
         self.feature_size = feature_size
         self.threshold = threshold
@@ -212,9 +322,9 @@ class SiteScorer:
         cols = np.array([self.grid_positions[k][1] for k in self.keys])
         self._rows = rows[:, None, None] + offsets[None, :, None]
         self._cols = cols[:, None, None] + offsets[None, None, :]
-        self._flat = np.array([r * self.grid_shape[1] + c for r, c in self.keys])
 
         # Cached: the hot path should not re-read these per frame.
+        exp_params = ExpParameterManager()
         self._offset = exp_params.get_parameter("conversion_offset")
         self._factor = exp_params.get_parameter("conversion_factor")
 
@@ -228,11 +338,11 @@ class SiteScorer:
         return "PSF" if self.method == "psf" else "box sum"
 
     @classmethod
-    def from_images(cls, images, grid_positions, grid_shape, window_size=9,
+    def from_images(cls, images, grid_positions, window_size=9,
                     min_samples=10, **kwargs):
         """Build PSF templates from a stack, then a scorer that uses them."""
         templates = build_psf_templates(images, grid_positions, window_size, min_samples)
-        return cls(grid_positions, grid_shape, method="psf", window_size=window_size,
+        return cls(grid_positions, method="psf", window_size=window_size,
                    templates=templates, **kwargs)
 
     def site_scores(self, image):
@@ -246,14 +356,8 @@ class SiteScorer:
             counts = np.einsum("swh,swh->s", crops, self._weights)
         return (counts - self._offset) * self._factor / 0.7
 
-    def score_grid(self, image):
-        """Photon rates laid out on the array grid."""
-        grid = np.empty(self.grid_shape, dtype=np.float32)
-        grid.flat[self._flat] = self.site_scores(image)
-        return grid
-
     def score_stack(self, images):
-        return np.stack([self.score_grid(image) for image in images])
+        return np.stack([self.site_scores(image) for image in images])
 
     def occupancy(self, image, threshold=None):
         """Flat boolean mask in trap order, for the rearrangement coordinator.
@@ -264,7 +368,7 @@ class SiteScorer:
         cut = self.threshold if threshold is None else threshold
         if cut is None:
             raise ValueError(f"{self.name} scorer has no threshold; calibrate it first.")
-        return np.fliplr(self.score_grid(image)).flatten() > cut
+        return self.site_scores(image) > cut
 
 
 # Function to visualize results with cropping and zooming
@@ -301,7 +405,7 @@ def visualize_results(image_array, grid_positions, margin=50, window_size=5, thr
 
     # Draw 5x5 squares and labels
     half_size = window_size // 2
-    for (i, j), (y, x) in grid_positions.items():
+    for (i), (y, x) in grid_positions.items():
         # Draw grid label
         if index_labels:
             ax[1].text(x+5, y, f"({i},{j})", color='white', fontsize=6, weight='bold')
@@ -400,10 +504,10 @@ def extract_cloud_temperature(images, tau_list, show_plots=True):
         sy_list.append(sy)
 
     tau_list_ms = tau_list * 1 / 100
-    sx_array = np.array(sx_list) * gamma
-    sy_array = np.array(sy_list) * gamma
-    x0_array = np.array(x0_list) * gamma
-    y0_array = np.array(y0_list) * gamma
+    sx_array = np.array(sx_list) * motcam_mm_per_px
+    sy_array = np.array(sy_list) * motcam_mm_per_px
+    x0_array = np.array(x0_list) * motcam_mm_per_px
+    y0_array = np.array(y0_list) * motcam_mm_per_px
 
     lin_fit = lambda x, m, c: m * x + c
     px, pcovx = curve_fit(lin_fit, tau_list_ms**2, sx_array**2)
@@ -476,18 +580,20 @@ def tweezer_show_bg_subtracted(images, backgrounds, cmap='gray', show=True, vmax
     return img_average
 
 def convert_photons_to_counts(photons):
+    exp_params = ExpParameterManager()
     conversion_factor = exp_params.get_parameter("conversion_factor")
     conversion_offset = exp_params.get_parameter("conversion_offset")
     counts_array = photons * 0.7 / conversion_factor + conversion_offset
     return counts_array
 
 def convert_counts_to_photons(counts):
+    exp_params = ExpParameterManager()
     conversion_factor = exp_params.get_parameter("conversion_factor")
     conversion_offset = exp_params.get_parameter("conversion_offset")
     photons_array = (counts - conversion_offset) * conversion_factor / 0.7
     return photons_array
 
-def get_array_loading_statistics(images, grid_positions, grid_shape, threshold=1.0, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True, method="box", scorer=None, psf_window=9):
+def get_array_loading_statistics_grid(images, grid_positions, grid_shape, threshold=1.0, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True, method="box", scorer=None, psf_window=9):
     """Loading statistics per site, scored by box sum or PSF matched filter.
 
     ``method="box"`` expects top-hat filtered ``images``; ``method="psf"`` builds a
@@ -495,6 +601,7 @@ def get_array_loading_statistics(images, grid_positions, grid_shape, threshold=1
     built elsewhere.
     """
     n_row, n_col = grid_shape
+    exp_params = ExpParameterManager()
     conversion_factor = exp_params.get_parameter("conversion_factor")
     conversion_offset = exp_params.get_parameter("conversion_offset")
 
@@ -573,7 +680,7 @@ def get_array_loading_statistics(images, grid_positions, grid_shape, threshold=1
         fig.colorbar(cax, ax=ax[2])
 
     if verbose:
-        print(f"Detected Loading Threshold: {threshold:.2f} kHz")
+        print(f"Detected Loading Threshold: {threshold:.2f} photons")
         print(f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean()*100:.2f} %")
         print(f"Mean Loading Probability: {loading_probabilities.mean()*100:.2f} %")
         if fidelity is not np.nan:
@@ -583,9 +690,113 @@ def get_array_loading_statistics(images, grid_positions, grid_shape, threshold=1
 
     return photon_array, loading_probabilities, threshold, fidelity
 
-def extract_survival_probability(imgs1, imgs2, grid_positions, grid_shape, window_size=5):
-    pr_1, eta_1, thresh_1, fidelity_1 = get_array_loading_statistics(imgs1, grid_positions, grid_shape, threshold_detection=True, window_size=window_size, binning=60, show_histogram=False, verbose=False)
-    pr_2, eta_2, thresh_2, fidelity_2 = get_array_loading_statistics(imgs2, grid_positions, grid_shape, threshold_detection=False, threshold=thresh_1, window_size=window_size, binning=60, show_histogram=False, verbose=False)
+def get_array_loading_statistics(images, grid_positions, threshold=1.0, window_size=5, binning=20, show_histogram=True, threshold_detection=True, verbose=True, method="box", scorer=None, psf_window=9, show_site_labels=False):
+    """Loading statistics per site, scored by box sum or PSF matched filter.
+
+    ``method="box"`` expects top-hat filtered ``images``; ``method="psf"`` builds a
+    template per site and takes the raw frames. Pass ``scorer`` to reuse templates
+    built elsewhere.
+    """
+    exp_params = ExpParameterManager()
+    conversion_factor = exp_params.get_parameter("conversion_factor")
+    conversion_offset = exp_params.get_parameter("conversion_offset")
+
+    if scorer is None and method == "psf":
+        scorer = SiteScorer.from_images(images, grid_positions, window_size=psf_window)
+
+    # Extract photon counts for each image and each trap site
+    if scorer is not None:
+        photon_array = scorer.score_stack(images)   # SiteScorer already returns photons
+    else:
+        raw_counts = np.array([sum_pixel_values(image, grid_positions, window_size=window_size) for image in images])
+        photon_array = (raw_counts - conversion_offset) * conversion_factor / 0.7
+    tot_photon_array = photon_array.flatten()
+
+    # Threshold detection and fidelity calculation
+    threshold_detection_success = False
+    if threshold_detection:
+        try:
+            threshold, bg_params, sig_params = detect_loading_threshold(tot_photon_array)
+            mu_bg, var_bg, weight_bg  = bg_params
+            mu_sig, var_sig, weight_sig = sig_params
+            prob_false_negative = norm.cdf(threshold, loc=mu_sig, scale=np.sqrt(var_sig))
+            prob_false_positive = 1.0 - norm.cdf(threshold, loc=mu_bg, scale=np.sqrt(var_bg))
+            total_error = (weight_bg * prob_false_positive) + (weight_sig * prob_false_negative)
+            fidelity = 1.0 - total_error
+            threshold_detection_success = True
+        except Exception as e:
+            print(f"Threshold detection failed: {e}. Trying default threshold of {threshold:.2f} kHz.")
+            try:
+                mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
+                mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
+                var_bg = tot_photon_array[tot_photon_array < threshold].var()
+                var_sig = tot_photon_array[tot_photon_array >= threshold].var()
+                fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg)))
+            except Exception as e:
+                print(f"Fallback threshold calculation failed: {e}. Setting fidelity to 0.")
+                fidelity = np.nan      
+    else:
+        try:
+            mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
+            mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
+            var_bg = tot_photon_array[tot_photon_array < threshold].var()
+            var_sig = tot_photon_array[tot_photon_array >= threshold].var()
+            fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg)))
+        except Exception as e:
+            print(f"Fallback threshold calculation failed: {e}. Setting fidelity to 0.")
+            fidelity = np.nan
+
+    # Atom counting and loading probabilities
+    atom_counter = (photon_array > threshold).astype(int).sum(axis=0)
+    loading_probabilities = atom_counter / len(images)
+    
+    if show_histogram:
+        fig, ax = plt.subplots(1, 3, figsize = (17,5), constrained_layout=True)
+        for i in range(len(grid_positions)):
+            ax[0].hist(photon_array[:, i], bins=40, density=True, alpha=0.6, range=(min(tot_photon_array), max(tot_photon_array)))
+            ax[0].set_xlabel('Photons')
+            ax[0].set_ylabel('Probability Density')
+            if verbose:
+                print(f'Trap ({i}) Loading Probability : {loading_probabilities[i]*100:.2f} %')
+        if threshold_detection and threshold_detection_success:
+            x_fit = np.linspace(min(tot_photon_array), max(tot_photon_array), 1000)
+            pdf_bg = weight_bg * norm.pdf(x_fit, mu_bg, np.sqrt(var_bg))
+            pdf_sig = weight_sig * norm.pdf(x_fit, mu_sig, np.sqrt(var_sig))
+            ax[1].plot(x_fit, pdf_bg + pdf_sig, 'k-', lw=2,)
+            ax[1].plot(x_fit, pdf_bg, 'b--', lw=2, label=f'Background Fit ($\mu$={mu_bg:.1f})')
+            ax[1].plot(x_fit, pdf_sig, 'r--', lw=2, label=f'Signal Fit ($\mu$={mu_sig:.1f})')
+        ax[1].hist(tot_photon_array, bins=binning, density=True, alpha=0.5, color='gray', edgecolor='black', label='Raw Data')
+        ax[1].axvline(x=threshold, color='green', linestyle='--', lw=2, label=f'Threshold ({threshold:.1f})')
+        ax[1].set_xlabel('Photons')
+        ax[1].set_ylabel('Probability Density')
+        ax[1].legend()
+        X, Y = np.array(list(grid_positions.values())).T
+        ax[2].scatter(Y, X, c=loading_probabilities, cmap='viridis', s=200)
+        ax[2].invert_yaxis()
+        if show_site_labels:
+            for i, (x, y) in enumerate(zip(X, Y)):
+                ax[2].text(y, x, str(i), color='white', fontsize=8, ha='center', va='center')
+        cbar = plt.colorbar(ax[2].collections[0], ax=ax[2])
+        cbar.set_label('Loading Probability')
+
+    if verbose:
+        print(f"Detected Loading Threshold: {threshold:.2f} photons")
+        print(f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean()*100:.2f} %")
+        print(f"Mean Loading Probability: {loading_probabilities.mean()*100:.2f} %")
+        if fidelity is not np.nan:
+            print(f"Detection Fidelity: {fidelity*100:.2f} %")
+            print(f"Mean Background Photon Count: {mu_bg:.2f} photons, Variance: {var_bg:.2f} photons^2")
+            print(f"Mean Signal Photon Count: {mu_sig:.2f} photons, Variance: {var_sig:.2f} photons^2")
+
+    return photon_array, loading_probabilities, threshold, fidelity
+
+def extract_survival_probability(imgs1, imgs2, grid_positions, threshold='auto', window_size=5):
+    if threshold == 'auto':
+        pr_1, eta_1, thresh_1, fidelity_1 = get_array_loading_statistics(imgs1, grid_positions, threshold_detection=True, window_size=window_size, binning=60, show_histogram=False, verbose=False)
+        pr_2, eta_2, thresh_2, fidelity_2 = get_array_loading_statistics(imgs2, grid_positions, threshold_detection=True, window_size=window_size, binning=60, show_histogram=False, verbose=False)
+    else:
+        pr_1, eta_1, thresh_1, fidelity_1 = get_array_loading_statistics(imgs1, grid_positions, threshold_detection=False, threshold=threshold, window_size=window_size, binning=60, show_histogram=False, verbose=False)
+        pr_2, eta_2, thresh_2, fidelity_2 = get_array_loading_statistics(imgs2, grid_positions, threshold_detection=False, threshold=threshold, window_size=window_size, binning=60, show_histogram=False, verbose=False)
     survival_fractions = []
     for i in range(pr_1.shape[0]):
 
@@ -604,3 +815,47 @@ def extract_survival_probability(imgs1, imgs2, grid_positions, grid_shape, windo
 
     survival_probability = np.mean(survival_fractions)
     return survival_probability
+
+def recapture_prob_fit(tarray, T, a, b):
+    exp_params = ExpParameterManager()
+    P = exp_params.get_parameter("mean_tweezer_power_mW") * 1E-3
+    wr = exp_params.get_parameter("radial_trap_freq_kHz") * 1E3 * 2 * np.pi
+
+    C = 1/(2*c*e0) * muD2**2/hbar * (1/(wD2 - w) + 1/(wD2 + w)) + 1/(2*c*e0) * muD1**2/hbar * (1/(wD1 - w) + 1/(wD1 + w)) # This is the combined polarizability term U0 / I0
+    U0 = np.sqrt(C * P * MRb * wr**2 / (2 * np.pi))
+    w0 = np.sqrt(4*U0 / (MRb * wr**2))
+
+    probs = []
+    for t in tarray:
+        escape_v_ineq = lambda ve, t: 0.5 * MRb * ve**2 - U0 * np.exp(- 2 * ve**2 * t**2 / w0**2)
+        maxwell_p = lambda v, T: (MRb*v)/(kB*T) * np.exp(-MRb*v**2 / (2*kB*T))
+        xx = np.linspace(0, 1, 100000)
+        y = escape_v_ineq(xx, t)
+        ve = xx[np.argmin(np.abs(y))]
+        prob = integrate.quad(maxwell_p, 0, ve, args=(T))[0]
+        probs.append(prob)
+    return a * np.array(probs) + b
+
+def extract_temperature(dropTimeList, survival_prob_list, plot=True):
+    dropt = dropTimeList*10*1e-6
+    survival_prob_list = np.array(survival_prob_list)
+    survival_prob_list = survival_prob_list[~np.isnan(survival_prob_list)]
+    dropt = dropt[~np.isnan(survival_prob_list)]
+    try:
+        params, pcov = curve_fit(recapture_prob_fit, dropt, survival_prob_list, p0 = [50e-6, 1.5, 0.1])
+        temperature = params[0] * 1e6
+    except:
+        temperature = 100
+    if plot:
+        xfit = np.linspace(dropt.min(), dropt.max(), 100)
+        yfit = recapture_prob_fit(xfit, temperature*1e-6, params[1], params[2])
+        plt.figure()
+        plt.plot(dropt*1e6, survival_prob_list, 'o', label='Data', color='blue')
+        plt.plot(xfit*1e6, yfit, '-', color='red', label=f'Temperature = {temperature:.2f} uK')
+        plt.grid()
+        plt.xlabel('Drop Time (us)')
+        plt.ylabel('Survival Probability')
+        plt.legend()
+        plt.show()
+
+    return temperature

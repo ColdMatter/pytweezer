@@ -1,0 +1,37 @@
+{
+    "motmaster_parameters": {
+        "tMOTLoadCoolVCO": 4.2631578947368425,
+        "tMOTLoadRepVCO": 1.8421052631578947,
+        "tMolCoolVCO1": 0.0,
+        "tMolRepVCO1": 0.6047449054854965,
+        "tMolCoolVVA1": 0.7308656225895502,
+        "tMolRepVVA1": 1.0,
+        "tMolCoolVCO2": 2.01361451071215,
+        "tMolRepVCO2": 0.8323988883557638,
+        "tMolCoolVVA2": 1.0,
+        "tMolRepVVA2": 0.5756171087721563,
+        "tMOTShimXccValue": 0.4991451750157772,
+        "tMOTShimYccValue": -1.8648591545365227,
+        "tMOTShimZccValue": -0.08719931424260197,
+        "tMOTLoadRepVVA": 0.6526315789473685,
+        "tMOTLoadCoolVVA": 0.9210526315789475,
+        "tImgCoolVCO": 2.328,
+        "tImgCoolVVA": 1.0,
+        "tMolassesShimXccValue": 5.609956063783662,
+        "tMolassesShimYccValue": 4.465918604815521,
+        "tMolassesShimZccValue": 0.13646836204370819
+    },
+    "misc_parameters": {
+        "rep_vco_resonance": 4.473684210526316,
+        "cool_vco_resonance": 4.789473684210526
+    },
+    "emccd_parameters": {
+        "em_gain": 600,
+        "conversion_factor": 0.009508957628343926,
+        "conversion_offset": 1917.66064453125
+    },
+    "image_analysis": {
+        "x_centre": 135.50694444444446,
+        "y_centre": 132.34722222222223
+    }
+}
