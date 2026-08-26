@@ -69,8 +69,15 @@ def _connect(device):
     return get_device(device)
 
 
-def _disable_em_gain(cam):
-    """Put the camera in normal (non-EM) CCD mode before acquiring.
+def _set_ccd_mode(cam, em):
+    """Select the ImagEM's readout port: EM register (``em=True``) or conventional.
+
+    This choice dominates the measurement, so it is not incidental setup. The
+    two ports run at wildly different rates -- the ImagEM X2 reports
+    ``internal_frame_rate`` of 70.4 fps on the EM register against 2.37 fps
+    conventional, i.e. 14.2 ms vs 422 ms per frame at 512x512. Benchmarking the
+    conventional port buries the RPC cost under half a second of acquisition per
+    frame and makes the readline fix look irrelevant.
 
     Changing ``ccd_mode`` needs the camera idle, and a merely stopped
     acquisition still holds its DCAM buffers -- hence the close/reopen fallback.
@@ -84,12 +91,12 @@ def _disable_em_gain(cam):
     except Exception:
         pass
     try:
-        cam.enable_em_gain(False)
+        cam.enable_em_gain(em)
     except Exception:
         cam.relinquish_camera()
         time.sleep(1.0)
         cam.reacquire_camera()
-        cam.enable_em_gain(False)
+        cam.enable_em_gain(em)
 
 
 def _run_client(which, device, nframes, exposure, setup, repeats):
