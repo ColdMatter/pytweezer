@@ -432,6 +432,39 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         
         return cp.angle(U_tot).astype(cp.float32)
 
+    def refine_phasemask(self, trap_terms, target_norm, iters, damping=0.5):
+        """generate_phasemask plus `iters` weighted-GS updates, trap phases held fixed.
+
+        Only the weights move; theta stays at the interpolated value. Letting theta float
+        makes the iteration non-contractive, so freezing it is what allows a handful of
+        iterations to help rather than wander.
+
+        target_norm is the desired normalised intensity per site (zero on inactive sites).
+        Returns the phasemask and the refined weights, for warm-starting the next frame.
+        """
+        w_n, theta_n, x_n, y_n, array_shape = trap_terms
+        w = cp.asarray(w_n, dtype=cp.float32)
+        theta = cp.asarray(theta_n, dtype=cp.float32)
+
+        X_phase = cp.exp(self.j_k * cp.asarray(x_n, dtype=cp.float32)[:, None] * self.x_slm[None, :])
+        Y_phase = cp.exp(self.j_k * cp.asarray(y_n, dtype=cp.float32)[:, None] * self.y_slm[None, :])
+        X_conj, Y_conj = cp.conj(X_phase), cp.conj(Y_phase)
+        am_slm = self.generate_source_amplitude().astype(cp.complex64)
+
+        for _ in range(iters):
+            pm_slm = cp.angle((Y_phase * (w * cp.exp(cp.complex64(1j) * theta))[:, None]).T @ X_phase)
+            U_slm = am_slm * cp.exp(cp.complex64(1j) * pm_slm)
+            I_foc = cp.abs(cp.sum(Y_conj * (U_slm @ X_conj.T).T, axis=1)) ** 2
+            I_norm = I_foc / I_foc.sum()
+            # inactive sites carry target_norm == 0 and w == 0, so leave them alone
+            ratio = cp.where(target_norm > 0,
+                             (target_norm / cp.maximum(I_norm, cp.float32(1e-20))) ** damping,
+                             cp.float32(1.0))
+            w = w * ratio
+
+        U_tot = (Y_phase * (w * cp.exp(cp.complex64(1j) * theta))[:, None]).T @ X_phase
+        return cp.angle(U_tot).astype(cp.float32), w
+
     def simulate_focal_plane(self, pm_slm, Nx_pad=2048, Ny_pad=2048, show=False, zoom_pixels=100, cmap='viridis'):
         am_slm = cp.asarray(self.generate_source_amplitude())
         field_slm = am_slm * cp.exp(1j * cp.asarray(pm_slm))
@@ -631,7 +664,8 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             return phasemasks_sequence
 
     def iter_rearrangement_sequence(self, terms1, terms2, occ_mask, d0=0.5,
-                                    profile="minimum_jerk", to_host=True):
+                                    profile="minimum_jerk", to_host=True,
+                                    refine_iters=0, refine_damping=0.5):
         """Streaming variant of :meth:`generate_rearrangement_sequence`.
 
         Yields each interpolated phasemask the moment it is computed, instead of
@@ -651,6 +685,12 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         ``numpy`` frames (the copy runs here). ``False`` yields ``cupy`` frames so a
         consumer thread can do the ``.get()`` itself, keeping the PCIe transfer off
         this loop.
+
+        ``refine_iters`` > 0 spends the GPU idle time inside each frame: instead of one
+        superposition GEMM from the interpolated terms, it runs that many weighted-GS
+        weight updates with the interpolated trap phases frozen, warm-started from the
+        previous frame. The pipeline is board-write bound (~0.59 ms) against ~0.26 ms of
+        compute, so 1-2 iterations land inside the existing cycle time.
         """
         if profile not in ("minimum_jerk", "linear"):
             raise ValueError(
@@ -681,10 +721,13 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         steps_scale = 1.0 if profile == "linear" else 1.875
         n_steps = int(cp.ceil(steps_scale * max_dist / d0))
 
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # .copy() matters: cp.asarray is a no-op on an array already float32 on the GPU,
+        # and update_state_kernel writes in place - without it the caller's terms1 is
+        # walked to the final positions and a second rearrangement starts wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
 
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
         if profile == "linear":
@@ -713,11 +756,21 @@ class OptimisationBasedPhasemaskGeneratorGPU:
 
         static_background = self.superimpose([self.fresnel, self.blaze, self.zernike])
 
+        # uniform target intensity across the moving traps; parked traps stay at zero
+        target_norm = cp.zeros_like(curr_w)
+        target_norm[moving_idx] = cp.float32(1.0 / len(moving_idx))
+        refine_w = curr_w.copy() if refine_iters else None
+
         for n in range(n_steps):
             ds = float(ds_profile_cpu[n])
             update_state_kernel(dw, dphi, total_dx, total_dy, ds, curr_w, curr_phi, curr_x, curr_y)
-            terms_gpu = (curr_w, curr_phi, curr_x, curr_y, arr1)
-            pm_slm = self.generate_phasemask(terms_gpu)
+            if refine_iters:
+                terms_gpu = (refine_w, curr_phi, curr_x, curr_y, arr1)
+                pm_slm, refine_w = self.refine_phasemask(
+                    terms_gpu, target_norm, refine_iters, refine_damping)
+            else:
+                terms_gpu = (curr_w, curr_phi, curr_x, curr_y, arr1)
+                pm_slm = self.generate_phasemask(terms_gpu)
             composite_pm = self.superimpose([pm_slm, static_background])
             frame = self.transform_phase_8bit(composite_pm)
             yield frame.get() if to_host else frame
