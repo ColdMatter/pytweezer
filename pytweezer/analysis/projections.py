@@ -5,13 +5,15 @@ Input:
 
 Output:
     Two *data* streams (published on the Data hub, not the Image hub):
-      * ``<name>_x`` -- profile summed down the columns (intensity vs x),
-      * ``<name>_y`` -- profile summed across the rows (intensity vs y).
+
+    * ``<name>_x`` -- profile summed down the columns (intensity vs x),
+    * ``<name>_y`` -- profile summed across the rows (intensity vs y).
+
     Each is sent as a 2xN ``[coords, values]`` array so ``live_plot.py`` and
     ``gaussian_fit.py`` can read ``A[0]`` as the axis and ``A[1]`` as the data.
 
 Properties:
-    *   imagestreams: ([str]) input image streams.
+    * imagestreams: ([str]) input image streams.
 
 This consumes images but emits 1-D data, so (like ``find_tweezer_atoms.py``) it
 subscribes with the inherited :class:`ImageAnalysis` client and publishes on a

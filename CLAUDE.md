@@ -60,12 +60,18 @@ in a non-interactive shell.
 
 ### Documentation
 
-- Use **Google-style docstrings** for Sphinx autodoc
+- Sphinx docs live in `docs/`. Build locally: `cd docs && poetry run make html`,
+  then open `docs/_build/html/index.html`. Install the toolchain first with
+  `poetry install --with docs`.
+- The API reference is auto-generated from docstrings by `sphinx-apidoc` at
+  build time and is not checked in (`docs/api/`, `docs/_build/` are gitignored).
+- Use **Google-style docstrings** for new code (napoleon is enabled); existing
+  reStructuredText-markup docstrings also render fine.
 - Docstrings should describe the current behaviour only; do not keep change history in them
-- Documentation auto-generates from experiment files
-- Build docs locally: `nix run .#docs`
-- Documentation deploys to GitLab Pages on master branch
 - Use UK English spelling throughout
+- `.github/workflows/docs.yml` builds the docs on every push/PR and deploys
+  `main` to GitHub Pages (`https://coldmatter.github.io/pytweezer/`). A build
+  failure fails CI, so keep the docs building.
 
 
 ### Comments and self-documenting code

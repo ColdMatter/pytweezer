@@ -240,6 +240,7 @@ class DeviceStatusClient(QtCore.QObject):
     """
 
     status_received = QtCore.pyqtSignal(object)
+    """Emitted with the newest snapshot's ``devices`` dict on each poll."""
 
     def __init__(self, host=None, pub_port=None, poll_interval_ms=200, parent=None):
         super().__init__(parent)

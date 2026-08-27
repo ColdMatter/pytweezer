@@ -76,6 +76,14 @@ scikit-learn = "^1.9.0"
 pybase64 = "^1.4.3"
 ruff = "^0.16.4"
 
+[tool.poetry.group.docs]
+optional = true
+
+[tool.poetry.group.docs.dependencies]
+sphinx = "*"
+furo = "*"
+myst-parser = "*"
+
 [tool.ruff]
 target-version = "py311"
 # Notebooks throughout the tree are exploratory scratch, not maintained code.
