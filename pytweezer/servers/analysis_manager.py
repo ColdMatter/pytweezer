@@ -2,15 +2,14 @@ import argparse
 import os
 import signal
 import subprocess
-import time
 from typing import Any
 
 import zmq
 
-from pytweezer.servers import Properties, tweezerpath, zmqcontext
-from pytweezer.servers.configreader import ConfigReader
-
+from pytweezer.configuration.config import get_config
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers import Properties, tweezerpath, zmqcontext
+
 logger = get_logger("pytweezer.servers.analysis_manager")
 
 
@@ -19,7 +18,7 @@ class AnalysisManagerService:
 
     def __init__(self, server_name: str = "Analysis Manager") -> None:
         self.server_name = server_name
-        self.conf = ConfigReader.getConfiguration()
+        self.conf = get_config()
         self.server_conf = self.conf.get("Servers", {}).get(server_name, {})
         host = self.server_conf.get("host", "localhost")
         port = self.server_conf.get("port", 3111)
@@ -27,7 +26,9 @@ class AnalysisManagerService:
 
         # Keep legacy property namespace so existing analysis configs still work.
         self.props = Properties("Analysis")
-        self.analysisdir = self.props.get("analysisdir", tweezerpath + "/pytweezer/analysis/")
+        self.analysisdir = self.props.get(
+            "analysisdir", tweezerpath + "/pytweezer/analysis/"
+        )
 
         self.context = zmqcontext
         self.socket = self.context.socket(zmq.REP)
@@ -132,7 +133,9 @@ class AnalysisManagerService:
             return self._start_process(category, name)
         return self._stop_process(category, name)
 
-    def _add_filter(self, category: str, name: str, script: str, streams: list[str]) -> dict[str, Any]:
+    def _add_filter(
+        self, category: str, name: str, script: str, streams: list[str]
+    ) -> dict[str, Any]:
         cat_dict = self.props.get(category, {})
         if not isinstance(cat_dict, dict):
             cat_dict = {}
@@ -176,9 +179,13 @@ class AnalysisManagerService:
                 active=bool(request.get("active", False)),
             )
         if command == "start":
-            return self._start_process(category=request.get("category"), name=request.get("name"))
+            return self._start_process(
+                category=request.get("category"), name=request.get("name")
+            )
         if command == "stop":
-            return self._stop_process(category=request.get("category"), name=request.get("name"))
+            return self._stop_process(
+                category=request.get("category"), name=request.get("name")
+            )
         if command == "add_filter":
             return self._add_filter(
                 category=request.get("category"),
@@ -187,7 +194,9 @@ class AnalysisManagerService:
                 streams=request.get("streams", []),
             )
         if command == "delete_filter":
-            return self._delete_filter(category=request.get("category"), name=request.get("name"))
+            return self._delete_filter(
+                category=request.get("category"), name=request.get("name")
+            )
         if command == "shutdown":
             self._running = False
             return {"ok": True}
@@ -241,7 +250,7 @@ def main() -> None:
     )
     args, _unknown = parser.parse_known_args()
 
-    conf = ConfigReader.getConfiguration()
+    conf = get_config()
     server_name = _resolve_server_name(args.name, conf)
 
     service = AnalysisManagerService(server_name=server_name)

@@ -33,15 +33,14 @@ from PyQt6 import QtCore
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
+from pytweezer.configuration.config import HOSTS, get_config
+from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
-from pytweezer.configuration.config import HOSTS
+from pytweezer.logging_utils import get_logger
 from pytweezer.servers import tweezerpath
-from pytweezer.servers.configreader import ConfigReader, DEVICE_SERVER_SCRIPT
 from pytweezer.servers.device_status import DeviceStatusClient
 from pytweezer.servers.reachability import is_reachable
-
-from pytweezer.logging_utils import get_logger
 
 logger = get_logger("managed_panel")
 
@@ -111,9 +110,18 @@ class _ProbeWorker(QThread):
 class ManagedRow(QFrame):
     """One config entry: status indicator + optional Start/Stop toggle."""
 
-    def __init__(self, name, script=None, active=False, tooltip=None,
-                 controllable=True, show_last_seen=False, indent=0,
-                 reserve_control=False, parent=None):
+    def __init__(
+        self,
+        name,
+        script=None,
+        active=False,
+        tooltip=None,
+        controllable=True,
+        show_last_seen=False,
+        indent=0,
+        reserve_control=False,
+        parent=None,
+    ):
         super().__init__(parent)
         self.process = None
         self.script = script
@@ -245,7 +253,7 @@ class ManagedRow(QFrame):
             return
         self.terminateProcess()
         logger.info(f"Starting process {self.name} with script {self.script}")
-        self.process = subprocess.Popen(['python3', self.script, self.name])
+        self.process = subprocess.Popen(["python3", self.script, self.name])
         if self._self_polling:
             # The subprocess *is* the service, so liveness is the truth.
             self._poll_self()
@@ -351,7 +359,7 @@ class ControlPanel(BWidget):
         columns = [(item_label, 150), ("Address", 170)]
         outer.addLayout(_header_row(columns, controllable))
 
-        conf = ConfigReader.getConfiguration()
+        conf = get_config()
         entries = conf.get(category, {})
         probe_targets = {}
         for pname, params in sorted(entries.items()):
@@ -365,7 +373,9 @@ class ControlPanel(BWidget):
                 controllable=controllable,
                 show_last_seen=False,
             )
-            row.addressLabel.setText(f"{host}:{port}" if port else (str(host) if host else "—"))
+            row.addressLabel.setText(
+                f"{host}:{port}" if port else (str(host) if host else "—")
+            )
             if controllable:
                 # Authoritative: this PC owns the subprocess.
                 row.enable_self_polling()
@@ -438,16 +448,14 @@ class DevicesPanel(BWidget):
         columns = [("Device", 150), ("Address", 170), ("Last seen", 80)]
         outer.addLayout(_header_row(columns, controllable=True))
 
-        conf = ConfigReader.getConfiguration()
+        conf = get_config()
         devices = conf.get("Devices", {})
         for pname, params in sorted(devices.items()):
             local = self.check_host(params.get("host"))
             row = ManagedRow(
                 pname,
                 script=(
-                    tweezerpath + "/bin/" + DEVICE_SERVER_SCRIPT
-                    if local
-                    else None
+                    tweezerpath + "/bin/" + DEVICE_SERVER_SCRIPT if local else None
                 ),
                 active=params.get("active", False) if local else False,
                 tooltip=params.get("tooltip"),

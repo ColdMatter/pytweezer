@@ -2,7 +2,7 @@ import os
 
 HOSTS = {
     "PH-BEAST": "10.59.3.1",
-    "IC-CZC4287H3W": "10.59.3.2", # rb pc
+    "IC-CZC4287H3W": "10.59.3.2",  # rb pc
     "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
 }
@@ -10,9 +10,11 @@ HOSTS = {
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
-SIMULATING = False # set to True to run in simulation mode (no real devices, no real cameras, etc.)
+SIMULATING = False  # set to True to run in simulation mode (no real devices, no real cameras, etc.)
 LOCAL = False
-SERVER_HOST = HOSTS["PH-BEAST"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
+SERVER_HOST = (
+    HOSTS["PH-BEAST"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
+)
 
 # Self-hosted InfluxDB 2.x connection. Every value can be overridden by an
 # environment variable so the token need not be hardcoded in a real deployment;
@@ -32,7 +34,7 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/servers/analysis_manager.py",
             "host": SERVER_HOST,
-            "port": get_next_port()
+            "port": get_next_port(),
         },
         "Device Status": {
             "active": True,
@@ -46,7 +48,7 @@ CONFIG = {
             "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
-            "script": "../pytweezer/servers/xsub_xpub.py", 
+            "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Commandhub": {
             "active": True,
@@ -81,7 +83,7 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/servers/propertylogger.py",
             "host": SERVER_HOST,
-            "port": get_next_port()
+            "port": get_next_port(),
         },
         "Datalogger": {
             "active": True,
@@ -92,7 +94,7 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/servers/imagelogger.py",
             "host": SERVER_HOST,
-        }
+        },
     },
     # Each entry names
     # its backend class directly as "class" (a "module.path:ClassName" string), plus
@@ -103,14 +105,14 @@ CONFIG = {
     # whole category, including composite sub-devices, because get_device()
     # addresses them all by name.
     "Devices": {
-         "Rb MotMaster": {
+        "Rb MotMaster": {
             "active": True,
             "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "teardown": "disconnect",
             "config_file": "rb_mm_config.json",
             "host": HOSTS["IC-CZC4287H3W"],
             "port": get_next_port(),
-            "simulate": SIMULATING
+            "simulate": SIMULATING,
         },
         "CaF MotMaster": {
             "active": True,
@@ -119,7 +121,7 @@ CONFIG = {
             "config_file": "caf_mm_config.json",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
-            "simulate": SIMULATING
+            "simulate": SIMULATING,
         },
         "CaF HamCam": {
             "active": True,
@@ -130,7 +132,7 @@ CONFIG = {
             "simulate": SIMULATING,
             "stream_name": "caf_hamcam",
             "timeout": 5.0,
-            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Rb ThorCam": {
             "active": True,
@@ -141,7 +143,7 @@ CONFIG = {
             "simulate": SIMULATING,
             "stream_name": "rb_thorcam",
             "timeout": 5.0,
-            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Tweezer Monitor ThorCam": {
             "active": True,
@@ -152,7 +154,7 @@ CONFIG = {
             "simulate": SIMULATING,
             "stream_name": "rb_thorcam2",
             "timeout": 5.0,
-            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         # Atom-rearrangement rig: a rearrangement camera and the Blink SLM in one
         # process, with the rearrangement coordinator streaming GPU-computed phase
@@ -172,7 +174,7 @@ CONFIG = {
                     "role": "camera",
                     "stream_name": "rb_hamcam",
                     "timeout": 20.0,
-                    "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver"
+                    "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
                 },
                 "Rb SLM": {
                     "class": "pytweezer.drivers.slm:SLM",
@@ -210,11 +212,11 @@ CONFIG = {
         # },
         "StreamMonitor": {
             "active": True,
-            "script": "../pytweezer/GUI/streammonitor.py"
+            "script": "../pytweezer/GUI/streammonitor.py",
         },
         "Applet Launcher": {
             "active": True,
-            "script": "../pytweezer/GUI/applet_launcher.py"
+            "script": "../pytweezer/GUI/applet_launcher.py",
         },
         # "H5 Manager": {
         #     "active": False,
@@ -222,7 +224,7 @@ CONFIG = {
         # },
         "Property_Editor": {
             "active": False,
-            "script": "../pytweezer/GUI/property_editor.py"
+            "script": "../pytweezer/GUI/property_editor.py",
         },
         # "Live Plot": {
         #     "active": False,
@@ -230,7 +232,16 @@ CONFIG = {
         # },
         "Analysis Manager UI": {
             "active": True,
-            "script": "../pytweezer/GUI/analysismanager.py"
-        }
+            "script": "../pytweezer/GUI/analysismanager.py",
+        },
     },
 }
+
+
+def get_config():
+    """Return the configuration dict.
+
+    The single accessor for ``CONFIG`` used across the servers, drivers and GUI.
+    Tests monkeypatch this (per importing module) to inject a fake config.
+    """
+    return CONFIG

@@ -6,10 +6,10 @@ effects (a real DevicesPanel spawns device subprocesses for active devices).
 
 from bin.managed_panel import DevicesPanel, ManagedRow
 
-
 # --------------------------------------------------------------------------- #
 # Host filtering (pure logic; no Qt construction)
 # --------------------------------------------------------------------------- #
+
 
 def test_devices_panel_check_host_is_case_and_whitespace_insensitive():
     panel = DevicesPanel.__new__(DevicesPanel)
@@ -33,6 +33,7 @@ def test_devices_panel_check_host_none_is_false():
 # --------------------------------------------------------------------------- #
 # Real widget construction, headless (needs the QApplication fixture)
 # --------------------------------------------------------------------------- #
+
 
 def test_bwidget_constructs_headless_without_property_hub(qapp):
     from pytweezer.GUI.pytweezerQt import BWidget
@@ -90,7 +91,10 @@ _PANEL_CONFIG = {
         "Rig": {
             "host": "10.0.0.1",  # not this machine -> nothing is ever spawned
             "port": 1,
-            "devices": {"Rig SLM": {"class": "pkg:Slm"}, "Rig Cam": {"class": "pkg:Cam"}},
+            "devices": {
+                "Rig SLM": {"class": "pkg:Slm"},
+                "Rig Cam": {"class": "pkg:Cam"},
+            },
             "coordinator": "pkg:Coord",
         },
     }
@@ -98,15 +102,15 @@ _PANEL_CONFIG = {
 
 
 def _devices_panel(qapp, monkeypatch):
-    import bin.managed_panel as managed_panel
+    from bin import managed_panel
 
-    monkeypatch.setattr(
-        managed_panel.ConfigReader, "getConfiguration", staticmethod(lambda: _PANEL_CONFIG)
-    )
+    monkeypatch.setattr(managed_panel, "get_config", lambda: _PANEL_CONFIG)
     # The panel subscribes to the cross-PC status feed on construction; without a
     # hub there is nothing to receive, so skip it rather than bind a ZMQ socket.
     monkeypatch.setattr(
-        managed_panel, "DeviceStatusClient", lambda *a, **k: (_ for _ in ()).throw(OSError)
+        managed_panel,
+        "DeviceStatusClient",
+        lambda *a, **k: (_ for _ in ()).throw(OSError),
     )
     return managed_panel.DevicesPanel("Devices")
 

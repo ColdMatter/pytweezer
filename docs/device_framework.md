@@ -64,7 +64,7 @@ The config keys `build_spec` reads:
 Every device is launched by the same file, `device_server.py`. Because device
 entries omit `"script"` while every other category names one, that path lives in
 exactly one place — the `DEVICE_SERVER_SCRIPT` constant in
-`pytweezer/servers/configreader.py` — and `DevicesPanel` and `process_cleanup`
+`pytweezer/configuration/paths.py` — and `DevicesPanel` and `process_cleanup`
 reference it directly rather than indexing `params["script"]`.
 
 **Device names must be unique across the whole category**, composite sub-devices
@@ -114,12 +114,14 @@ no-op stub for every one the decorated class doesn't already define itself:
 ```python
 @simulate(ImagEMX2Camera)
 class SimulatedImagEMX2Camera:
-    def __init__(self, image_dir=None, timeout=5.0, stream_name=None):
-        ...
-    def _generate_frame(self) -> np.ndarray:
-        ...  # Gaussian-noise background + scattered atom blobs
-    def acquire_n_frames(self, nframes, start_frame=0, autosave=False, broadcast=False):
-        ...
+    def __init__(self, image_dir=None, timeout=5.0, stream_name=None): ...
+    def _generate_frame(
+        self,
+    ) -> np.ndarray: ...  # Gaussian-noise background + scattered atom blobs
+    def acquire_n_frames(
+        self, nframes, start_frame=0, autosave=False, broadcast=False
+    ): ...
+
     # set_ccd_mode, enable_em_gain, set_sensitivity, ... are all auto-stubbed
 ```
 
@@ -237,7 +239,7 @@ class per device:
 from pytweezer.servers.device_client import get_device
 
 cam = get_device("Rb HamCam")
-cam.acquire()          # remote call, transparently proxied
+cam.acquire()  # remote call, transparently proxied
 cam.close_rpc()
 ```
 
@@ -250,8 +252,8 @@ or shares one with other devices — the caller never needs to know which proces
 device lives in, nor that sipyco targets exist:
 
 ```python
-cam = get_device("Rb HamCam")          # a server of its own
-cam = get_device("Rb Feedback Cam")    # shares a process with a DAC; same call shape
+cam = get_device("Rb HamCam")  # a server of its own
+cam = get_device("Rb Feedback Cam")  # shares a process with a DAC; same call shape
 ```
 
 `target_name` therefore rarely needs passing. Its `AutoTarget` default now means
@@ -291,13 +293,13 @@ cam = get_device("Rb HamCam")
 mm1 = get_device("Rb MotMaster Server")
 mm2 = get_device("CaF MotMaster Server")
 
-cam.start_acquisition()          # arm the camera (returns immediately)
-mm1.set_trigger_mode(True)       # mm1's Go() will wait for a hardware trigger
+cam.start_acquisition()  # arm the camera (returns immediately)
+mm1.set_trigger_mode(True)  # mm1's Go() will wait for a hardware trigger
 
 frame, _, _ = run_parallel(
-    lambda: cam.acquire_n_frames(1),               # blocks reading the frame
-    mm1.start_motmaster_experiment,                # armed; waits for trigger
-    after(0.05, mm2.start_motmaster_experiment),   # fires 50 ms later
+    lambda: cam.acquire_n_frames(1),  # blocks reading the frame
+    mm1.start_motmaster_experiment,  # armed; waits for trigger
+    after(0.05, mm2.start_motmaster_experiment),  # fires 50 ms later
 )
 ```
 
@@ -412,12 +414,12 @@ Sub-devices are addressed by name, like everything else. The composite's own
 name resolves to its coordinator:
 
 ```python
-cam   = get_device("Rb Feedback Cam")    # camera target on the rig's server
-dac   = get_device("Rb Feedback DAC")    # same server, same port, different target
-coord = get_device("Rb Feedback Rig")    # the composite -> its coordinator
+cam = get_device("Rb Feedback Cam")  # camera target on the rig's server
+dac = get_device("Rb Feedback DAC")  # same server, same port, different target
+coord = get_device("Rb Feedback Rig")  # the composite -> its coordinator
 
-coord.image_to_dac(setpoint=130.0, gain=0.01, channel="Dev1/ao0")   # one step
-coord.run_n(50, setpoint=130.0, gain=0.01, channel="Dev1/ao0")      # 50 steps, one RPC
+coord.image_to_dac(setpoint=130.0, gain=0.01, channel="Dev1/ao0")  # one step
+coord.run_n(50, setpoint=130.0, gain=0.01, channel="Dev1/ao0")  # 50 steps, one RPC
 ```
 
 A composite with no coordinator has nothing to serve under its own name, so

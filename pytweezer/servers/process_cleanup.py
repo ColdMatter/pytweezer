@@ -24,7 +24,8 @@ import signal
 import subprocess
 import time
 
-from pytweezer.servers.configreader import ConfigReader, DEVICE_SERVER_SCRIPT, tweezerpath
+from pytweezer.configuration.config import get_config
+from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT, tweezerpath
 
 MANAGED_CATEGORIES = ("Servers", "Devices", "Loggers")
 
@@ -37,7 +38,7 @@ def _managed_scripts():
     unnormalized) so it lines up character-for-character (after
     case/slash-folding) with what actually shows up in the process's argv.
     """
-    conf = ConfigReader.getConfiguration()
+    conf = get_config()
     scripts = {}
     for category in MANAGED_CATEGORIES:
         for name, params in conf.get(category, {}).items():
@@ -55,11 +56,19 @@ def _list_processes_windows():
     """Yield ``(pid, commandline)`` for every process, via PowerShell CIM."""
     result = subprocess.run(
         [
-            "powershell", "-NoProfile", "-NonInteractive", "-Command",
-            "Get-CimInstance Win32_Process | "
-            "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress",
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            (
+                "Get-CimInstance Win32_Process | "
+                "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
+            ),
         ],
-        capture_output=True, text=True, timeout=20,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
     )
     if result.returncode != 0 or not result.stdout.strip():
         return
@@ -85,7 +94,9 @@ def _list_processes_posix():
             continue
         try:
             with open(os.path.join(proc_dir, pid_str, "cmdline"), "rb") as f:
-                cmdline = f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+                cmdline = (
+                    f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+                )
         except OSError:
             continue
         yield int(pid_str), cmdline

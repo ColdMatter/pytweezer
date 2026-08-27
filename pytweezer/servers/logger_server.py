@@ -20,7 +20,7 @@ launcher.
 import argparse
 import signal
 
-from pytweezer.servers.configreader import ConfigReader
+from pytweezer.configuration.config import get_config
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("logger server")
@@ -29,6 +29,7 @@ logger = get_logger("logger server")
 # --------------------------------------------------------------------------- #
 # Logger-type factories: (name, conf) -> Logger instance
 # --------------------------------------------------------------------------- #
+
 
 def _make_ni_adc(name, conf):
     from pytweezer.loggers.ni_adc_logger import NIADCLogger
@@ -46,6 +47,7 @@ LOGGER_REGISTRY = {
 # Launcher
 # --------------------------------------------------------------------------- #
 
+
 def _normalize(s):
     """Collapse whitespace and lowercase, for lenient name matching."""
     return "".join(s.split()).lower()
@@ -58,7 +60,7 @@ def resolve_logger(name):
     command-line callers can pass ``rblaserlogger`` for ``"Rb Laser Logger"``.
     Raises ``KeyError`` listing the available loggers if nothing matches.
     """
-    loggers = ConfigReader.getConfiguration().get("Loggers", {})
+    loggers = get_config().get("Loggers", {})
     if name in loggers:
         return name, loggers[name]
 
@@ -108,9 +110,7 @@ def run_logger(name):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Start a configured InfluxDB logger"
-    )
+    parser = argparse.ArgumentParser(description="Start a configured InfluxDB logger")
     parser.add_argument("name", help="logger name (key in CONFIG['Loggers'])")
     args, _unknown = parser.parse_known_args()
 
