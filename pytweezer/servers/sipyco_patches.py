@@ -25,7 +25,7 @@ from sipyco import pc_rpc
 #: to tens of MB, so the 4 kB sipyco default costs thousands of extra syscalls.
 RECV_BUFSIZE = 64 * 1024
 
-_sipyco_patched_applied = False
+_sipyco_patches_applied = False
 
 
 def _socket_readline(sock, bufsize=RECV_BUFSIZE):
@@ -47,8 +47,8 @@ def _socket_readline(sock, bufsize=RECV_BUFSIZE):
 
 def apply_patches():
     """Install the patches into ``sipyco``. Idempotent."""
-    global _sipyco_patched_applied
-    if _sipyco_patched_applied:
+    global _sipyco_patches_applied
+    if _sipyco_patches_applied:
         return
     pc_rpc._socket_readline = _socket_readline
-    _sipyco_patched_applied = True
+    _sipyco_patches_applied = True
