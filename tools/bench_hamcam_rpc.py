@@ -124,7 +124,7 @@ def _run_client(which, device, nframes, exposure, setup, repeats):
     # reader's penalty is worst on the first grabs and shrinks as the allocator
     # settles into reusing one arena for the reply buffer, so a single averaged
     # number is misleading in either direction -- the shape of the curve is the
-    # result. See the header of docs/hamcam_rpc_slowness_investigation.md.
+    # result.
     times = []
     for _ in range(repeats):
         if setup:

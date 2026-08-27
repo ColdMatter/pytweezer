@@ -39,8 +39,7 @@ devices from one process and one port, one RPC target each, optionally alongside
 *coordinator* target — a class named by ``"coordinator"`` (again ``"module:Class"``)
 that drives those backends through direct Python calls rather than RPC. That is how
 a camera-to-SLM step avoids serializing a frame. Sub-devices stay
-individually addressable: ``get_device("RbHamCam")``. See
-``docs/device_framework.md``.
+individually addressable: ``get_device("RbHamCam")``.
 """
 
 import argparse

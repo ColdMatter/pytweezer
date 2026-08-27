@@ -7,44 +7,35 @@ description: Write a new InfluxDB logger for pytweezer — a Logger subclass in 
 
 A logger is a small background process that reads a source it owns and pushes
 numbers into InfluxDB on an interval. `pytweezer/loggers/base.py` owns the
-polling loop, the writing and the teardown, so writing a logger means **one
-class with a `setup` and a `read` method**, plus two lines of wiring.
-
-Three edits, always the same three:
+polling loop, the writing and the teardown, so writing one means **a class with
+`setup` and `read`**, plus two lines of wiring:
 
 1. a `Logger` subclass in `pytweezer/loggers/<name>_logger.py`
 2. a factory in `LOGGER_REGISTRY` (`pytweezer/servers/logger_server.py`)
 3. an entry in `CONFIG["Loggers"]` (`pytweezer/configuration/config.py`)
 
-A logger **owns its data source** — it opens the DAQ, serial port or socket
-itself. Reading a value off a device that already has a driver and an RPC server
-is a different job with a different answer (`InfluxWriter` inside that driver);
-see `docs/influx_logging.md` §6 and don't build a Logger for it.
+**A logger owns its data source** — it opens the DAQ, serial port or socket
+itself. To log a value off a device that already has a driver and an RPC server,
+don't build a logger: give that driver its own `InfluxWriter` and write from
+inside it, where the value is already in hand. `InfluxWriter.write()` never
+raises, so that is safe even in a hot path.
 
-## How the framework runs your logger
+## What the base class does to you
 
-Worth reading before writing code, because two of these steps decide where your
-mistakes will surface:
+`Logger.__init__` calls your `setup()`, so hardware opens at process start and a
+`setup()` that raises kills the logger immediately — the GUI tile shows Crashed
+and the traceback exists only in the log. After that `run()` loops `read()` →
+write → sleep, and `close()` runs on Ctrl-C or SIGTERM.
 
-1. `run_logger(name)` resolves the config entry and calls the factory that
-   `"logger"` names in `LOGGER_REGISTRY`.
-2. `Logger.__init__` stores `conf`, reads `interval`, builds an `InfluxWriter`,
-   and **calls your `setup()`** — so opening the hardware happens at process
-   start. A `setup()` that raises kills the logger immediately; the GUI tile
-   shows Crashed and the traceback only exists in the log.
-3. `run()` loops: `read()` → `_write_points(...)` → sleep `interval`.
-4. Ctrl-C or SIGTERM unwinds the loop and calls `close()`.
+Nothing else is fatal: `read()` raising is caught and retried next cycle, and
+`InfluxWriter.write()` swallows a dead database. That resilience is deliberate,
+and it is why **a broken logger looks exactly like a working one** — nothing
+crashes, values just never arrive. Verify with the checker, not by watching the
+tile.
 
-`read()` raising is *not* fatal — `run()` catches it, logs it, and polls again
-next cycle, so a sensor that drops out doesn't take the process down. Neither
-does InfluxDB: `InfluxWriter.write()` never raises, it logs a warning and
-returns. That resilience is deliberate, and it's also why a broken logger looks
-exactly like a working one from the outside — nothing crashes, values just never
-arrive. Verify with the bundled checker rather than by watching the tile.
-
-The sleep is spent in 0.1 s slices so a stop signal takes effect promptly, which
-makes the interval accurate to about that. Loggers are for monitoring cadences
-(seconds to minutes), not acquisition.
+The sleep runs in 0.1 s slices so a stop signal lands promptly, which also sets
+how accurate `interval` is. Loggers are for monitoring cadences (seconds to
+minutes), not acquisition.
 
 ## Writing the class
 
@@ -76,55 +67,48 @@ class ChamberPressureLogger(Logger):
         super().close()
 ```
 
-`pytweezer/loggers/ni_adc_logger.py` is the worked example to follow.
+`pytweezer/loggers/ni_adc_logger.py` is the worked example to follow. The
+conventions behind that shape:
 
-The conventions behind that shape:
-
-- **Everything configurable comes from `self.conf`, with a default.** The config
-  entry is the only knob a labmate has; a value hardcoded in `setup()` means
-  editing Python to retune a channel. Nothing validates the keys you read, so
+- **Everything configurable comes from `self.conf`, with a default** — the config
+  entry is the only knob a labmate has. Nothing validates the keys you read, so
   the checker's unread-key warning is how a typo gets caught.
-- **Import the vendor library inside `setup()`, not at module top.** Every logger
-  module is importable on every machine that way — including the dev laptop
-  running the tests, and `logger_server.py` itself.
-- **Handle `simulate` and return plausible fake readings.** `SIMULATING` in the
-  config makes the whole system runnable with no hardware; a logger that can't
-  simulate is a logger nobody can develop against. Fake values should look like
-  the real signal (a slow drift, a little noise) — a constant makes a broken
-  plot indistinguishable from a working one.
-- **`close()` ends with `super().close()`**, which closes the writer. Releasing
-  a serial port or DAQ task but leaking the Influx client is the usual slip.
-- **Return `None` from `read()` when there's nothing to report** — a
-  misconfigured or idle logger should sit quietly rather than write garbage.
+- **Import the vendor library inside `setup()`**, so every logger module stays
+  importable on a machine without that hardware.
+- **Handle `simulate`, and make the fake look like the real signal** (a slow
+  drift, a little noise). A constant makes a broken plot indistinguishable from
+  a working one.
+- **`close()` ends with `super().close()`** — releasing the port but leaking the
+  Influx client is the usual slip.
+- **Return `None` from `read()`** when there is nothing to report.
 
 For a source that *pushes* (a ZMQ subscription, a callback-driven SDK), override
-`run()` instead of `read()`, and call `close()` on the way out — you're
-replacing the loop, so the teardown is yours to preserve.
+`run()` instead of `read()` and call `close()` on the way out — you are replacing
+the loop, so its teardown becomes yours.
 
-## What `read()` returns, and what InfluxDB will keep
+## What `read()` returns, and what InfluxDB keeps
 
 An iterable of `(measurement, fields)` or `(measurement, fields, tags)`, or
-`None`. One point per measurement per cycle; several tuples if you're logging
-into more than one measurement.
+`None`; several tuples if you log into more than one measurement.
 
-- **Fields must be numeric or bool.** `InfluxWriter` drops everything else
-  silently — a string status, `None`, a numpy array — and if that leaves no
-  fields, the whole point is discarded. No exception, no warning above debug
-  level. This is the single most common way a logger appears to work and stores
-  nothing. Encode a state as a number (`{"locked": 1}`) or put it in a tag.
-- **Tags are indexed strings, so keep them static and low-cardinality** —
-  `{"system": "Rb"}`, `{"channel": "ai0"}`. A tag that changes every cycle (a
-  timestamp, a reading) creates a new series each time and will bloat the
-  database.
-- **Field names are the schema.** Renaming a field later leaves the old series
-  orphaned, so pick names that will still read well in a year: `ai0`, not
-  `value1`.
-- Timestamps are added for you at write time. Pass one explicitly only if the
-  reading carries its own clock.
+- **Fields must be numeric or bool.** Anything else — a string status, `None`, a
+  numpy array — is dropped silently, and if that empties the point, the point
+  goes too. No exception, no warning above debug level. This is the most common
+  way a logger appears to work and stores nothing. Encode states as numbers
+  (`{"locked": 1}`) or put them in a tag.
+- **Tags are indexed strings: keep them static and low-cardinality**
+  (`{"system": "Rb"}`). A tag that changes every cycle creates a new series each
+  time and bloats the database.
+- **Field names are the schema** — renaming one later orphans the old series, so
+  pick `ai0`, not `value1`.
+- Timestamps are added at write time; pass one only if the reading carries its
+  own clock.
 
-## Register the type
+## Wiring it up
 
-In `pytweezer/servers/logger_server.py`, add a factory and one registry entry:
+In `pytweezer/servers/logger_server.py`, a factory plus one registry entry — the
+import goes *inside* the factory so a missing dependency can't break importing
+the launcher every other logger needs:
 
 ```python
 def _make_chamber_pressure(name, conf):
@@ -133,21 +117,10 @@ def _make_chamber_pressure(name, conf):
     return ChamberPressureLogger(name, conf)
 
 
-LOGGER_REGISTRY = {
-    "ni_adc": _make_ni_adc,
-    "chamber_pressure": _make_chamber_pressure,
-}
+LOGGER_REGISTRY = {"ni_adc": _make_ni_adc, "chamber_pressure": _make_chamber_pressure}
 ```
 
-The import lives inside the factory so that a logger whose dependency isn't
-installed can't break importing the launcher — which every other logger needs.
-
-A *new instance* of an existing logger type needs no code at all: a second
-config entry pointing at the same `"logger"` key is enough.
-
-## The config entry
-
-Under `CONFIG["Loggers"]` in `pytweezer/configuration/config.py`:
+Then the config entry under `CONFIG["Loggers"]`:
 
 ```python
 "Chamber Pressure Logger": {
@@ -163,81 +136,82 @@ Under `CONFIG["Loggers"]` in `pytweezer/configuration/config.py`:
 },
 ```
 
-- **`script`** is that exact path for every logger, and it is not optional:
-  the Loggers tab indexes `params["script"]` with no default, so omitting it
-  raises `KeyError` while the tab is being built and takes out *every* logger
-  row, not just yours.
-- **`logger`** selects the registry factory; it must match the key you added.
-- **`host`** is `SERVER_HOST` — loggers run on the server PC, next to InfluxDB.
-- **No `port`.** A logger binds nothing and serves nothing, so don't copy
-  `get_next_port()` over from a device entry; its row is statused by polling the
+- **`script`** is that exact path for every logger and is **not optional** — the
+  Loggers tab indexes it with no default, so omitting it raises `KeyError` while
+  the tab builds and takes out *every* logger row, not just yours.
+- **`logger`** must match the registry key; **`host`** is `SERVER_HOST` (loggers
+  run next to InfluxDB); **`simulate`** is the `SIMULATING` flag, not a literal.
+- **No `port`** — a logger binds nothing; its row is statused by polling the
   subprocess, not by probing a socket.
-- **`active: True`** starts the logger automatically when the server GUI opens.
-  Leave it `False` until the hardware is actually there.
-- **`simulate`** is the module-level `SIMULATING` flag, not a hardcoded bool.
-- Remaining keys are yours, read by `setup()`/`read()` through `self.conf`.
+- `active: True` auto-starts it with the server GUI; leave it `False` until the
+  hardware is there. Remaining keys are yours, read through `self.conf`.
 
-Connection details (URL, token, org, bucket) are not your concern — they live in
-the `INFLUXDB` block and `InfluxWriter` reads them itself.
+Connection details (URL, token, org, bucket) live in the `INFLUXDB` block;
+`InfluxWriter` reads them itself.
+
+A *new instance* of an existing logger type needs no code — just a second config
+entry pointing at the same `"logger"` key.
 
 ## Verify it
 
-Run the bundled checker. It builds the logger exactly as production would, with
-simulation forced on and InfluxDB replaced by a recorder, then does one dry
-`read()` and reports what would actually have been stored:
+The bundled checker builds the logger as production would, with simulation
+forced on and InfluxDB replaced by a recorder, does one dry `read()`, and reports
+what would actually have been stored — flagging the silent failures: an
+unregistered `"logger"`, a missing `script`, config keys nothing reads, fields
+InfluxDB would drop, a `read()` shape the loop can't unpack, a `close()` that
+forgets the writer.
 
 ```bash
 poetry run python .claude/skills/add-logger/scripts/check_logger.py "Chamber Pressure Logger"
 ```
 
-It flags the silent ones — an unregistered `"logger"` type, a missing `script`,
-config keys nothing reads, fields InfluxDB would drop, a `read()` shape the loop
-can't unpack, a `close()` that forgets the writer.
-
-Then add a case to `tests/test_loggers.py`, copying the bundled starter first if
-that file doesn't exist yet:
-
-```bash
-cp .claude/skills/add-logger/assets/test_loggers.py tests/test_loggers.py
-```
-
+Then add a case to `tests/test_loggers.py` (copy the starter first if that file
+doesn't exist: `cp .claude/skills/add-logger/assets/test_loggers.py tests/`). Its
 `build(cls, conf)` constructs the logger with the writer stubbed and `simulate`
-on, so a test is a plain function call with no hardware and no database.
-`assert_storable(points)` is the guard worth applying to every logger — it fails
-on exactly the fields InfluxDB would have thrown away:
+on, and `assert_storable(points)` fails on exactly the fields InfluxDB would have
+discarded — worth applying in every logger's test:
 
 ```python
 def test_chamber_pressure_reads_one_point():
-    from pytweezer.loggers.chamber_pressure_logger import ChamberPressureLogger
-
     points = build(ChamberPressureLogger, {"measurement": "chamber"}).read()
 
     assert_storable(points)
     assert points[0][1]["pressure"] > 0
 ```
 
-Test what actually bites: the reading-to-fields mapping for a known input, the
-degenerate case (no channels configured, sensor returning nothing) that must
-return `None` rather than raise, and `close()` releasing both the source and the
-writer. Run:
-
-```bash
-poetry run pytest tests/ -q
-```
+Test what bites: the reading-to-fields mapping, the degenerate case (no channels,
+sensor returning nothing) returning `None` rather than raising, and `close()`
+releasing both the source and the writer. Then `poetry run pytest tests/ -q`.
 
 ## Turning it on
 
-From the GUI: `pytweezer-server` → **Loggers** tab → Start. Standalone:
+`pytweezer-server` → **Loggers** tab → Start, or standalone:
 
 ```bash
 poetry run pytweezer-logger "Chamber Pressure Logger"
 ```
 
 Values land in the `devices` bucket; the Influx UI is at
-<http://localhost:8086> on the server PC. If InfluxDB isn't running yet,
-`docs/influx_logging.md` §1 has the one-command Docker setup.
+<http://localhost:8086> on the server PC. If InfluxDB isn't running there yet,
+2.7 OSS is one self-initialising container:
 
-A green checker and a passing test prove the transform and the wiring, not that
-the serial port speaks what you assumed or that the numbers mean the right
-physics. Say which of those you actually verified rather than implying the
-logger is confirmed end to end.
+```bash
+docker run -d --name influxdb -p 8086:8086 \
+  -v influxdb-data:/var/lib/influxdb2 \
+  -e DOCKER_INFLUXDB_INIT_MODE=setup \
+  -e DOCKER_INFLUXDB_INIT_USERNAME=admin \
+  -e DOCKER_INFLUXDB_INIT_PASSWORD=changeme-please \
+  -e DOCKER_INFLUXDB_INIT_ORG=pytweezer \
+  -e DOCKER_INFLUXDB_INIT_BUCKET=devices \
+  -e DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=pytweezer-token \
+  influxdb:2.7
+```
+
+Those values match the `INFLUXDB` defaults, so a fresh checkout works untouched;
+data persists in the `influxdb-data` volume, and every value is overridable by
+env var (`INFLUXDB_URL`, `INFLUXDB_TOKEN`, `INFLUXDB_ORG`, `INFLUXDB_BUCKET`) so
+a real deployment need not commit a token.
+
+A green checker and a passing test prove the transform and the wiring — not that
+the serial port speaks what you assumed, or that the numbers mean the right
+physics. Say which you actually verified.

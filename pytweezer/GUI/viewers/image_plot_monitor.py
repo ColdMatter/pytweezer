@@ -1,6 +1,6 @@
 """Image viewer with projection line plots above and to the left of the image.
 
-Built on :class:`pytweezer.GUI.applet.Applet` — see ``docs/applets.md``.
+Built on :class:`pytweezer.GUI.applet.Applet`.
 
 Like :mod:`pytweezer.GUI.viewers.image_monitor` it shows an image stream with a
 colormap, histogram LUT and ROIs, but adds two line plots whose axes are linked
