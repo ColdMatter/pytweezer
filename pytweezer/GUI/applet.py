@@ -10,8 +10,7 @@ launcher and the applet's Properties namespace.
 Rather than have every applet script re-implement the same boilerplate
 (Properties connection, window title, geometry persistence, an update timer,
 and the subscription/configure context-menu dialogs), applets subclass
-:class:`Applet` and override a few hooks. See ``docs/applets.md`` for the full
-writeup.
+:class:`Applet` and override a few hooks.
 """
 
 import argparse

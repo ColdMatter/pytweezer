@@ -41,8 +41,7 @@ def test_simulated_backend_methods_are_pyon_safe(driver):
             try:
                 result = method()
             except TypeError:
-                # Needs real arguments we can't guess here; exercised by the
-                # manual verification steps in docs/device_framework.md instead.
+                # Needs real arguments we can't guess here; verify those by hand.
                 continue
             except RuntimeError:
                 # Expected state-machine guard (e.g. "camera is not running").

@@ -1,6 +1,6 @@
 """Image-viewer applet: subscribes to image streams and displays them live.
 
-Built on :class:`pytweezer.GUI.applet.Applet` — see ``docs/applets.md``.
+Built on :class:`pytweezer.GUI.applet.Applet`.
 """
 
 import matplotlib.pyplot as plt

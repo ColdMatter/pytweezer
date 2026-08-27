@@ -131,8 +131,8 @@ Add to `CONFIG["Devices"]` in `pytweezer/configuration/config.py`:
 - Remaining keys are your constructor's arguments, and must spell its parameter
   names exactly.
 
-For multi-device rigs sharing one process and a coordinator, see
-`docs/device_framework.md` — that's a different shape than covered here.
+For multi-device rigs sharing one process and a coordinator, load the
+`pytweezer-device-framework` skill — that's a different shape than covered here.
 
 ## Verify it
 

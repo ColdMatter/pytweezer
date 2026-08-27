@@ -40,8 +40,10 @@ raise a clear error where the GPU stack is absent.
 
 The remaining timing optimisation — preloading frames into the SLM's on-board memory
 and clocking them out with a hardware trigger (``preload_sequence`` /
-``start_auto_increment``) instead of per-frame software writes — is described in
-``docs/rearrangement_coordinator.md``.
+``start_auto_increment``) instead of per-frame software writes — is not wired up:
+:meth:`arm_rearrangement` still plays the sequence software-timed through
+``run_sequence``, and nothing yet arms the SLM's external trigger or clocks the
+frames.
 """
 
 import queue

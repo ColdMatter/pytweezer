@@ -1,6 +1,6 @@
 """Rolling history of a scalar carried in a data stream's header.
 
-Built on :class:`pytweezer.GUI.applet.Applet` — see ``docs/applets.md``.
+Built on :class:`pytweezer.GUI.applet.Applet`.
 
 Where :mod:`pytweezer.GUI.viewers.live_plot` draws a whole array per message,
 this draws *one number* per message against arrival order, so a quantity an

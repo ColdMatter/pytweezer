@@ -1,6 +1,6 @@
 """Live-plot applet: subscribes to 1-D data streams and plots them live.
 
-Built on :class:`pytweezer.GUI.applet.Applet` — see ``docs/applets.md``.
+Built on :class:`pytweezer.GUI.applet.Applet`.
 """
 
 import numpy as np

@@ -16,8 +16,10 @@ There is no config category to edit. The Applet Launcher runs
 namespace, and the launcher label at once. Two entries running the same script
 under different names are fully independent instances.
 
-Background, including the launcher and the storage format:
-[`docs/applets.md`](../../../docs/applets.md).
+The launcher keeps the applet catalogue in Properties under the `"Applets"` key
+(`{name: {"script", "description"}}`), so every PC sees the same list; *which*
+applets are running is per-machine and lives in local `QSettings` instead.
+Relative `script` paths resolve against `tweezerpath`.
 
 ## First check it is an applet
 

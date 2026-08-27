@@ -19,7 +19,6 @@ SERVER_HOST = (
 # Self-hosted InfluxDB 2.x connection. Every value can be overridden by an
 # environment variable so the token need not be hardcoded in a real deployment;
 # the defaults let a fresh checkout "just work" against a local InfluxDB.
-# See docs/influx_logging.md for the one-command self-hosted setup.
 INFLUXDB = {
     "url": os.environ.get("INFLUXDB_URL", f"http://{SERVER_HOST}:8086"),
     "token": os.environ.get("INFLUXDB_TOKEN", "pytweezer-token"),
@@ -160,8 +159,7 @@ CONFIG = {
         # process, with the rearrangement coordinator streaming GPU-computed phase
         # frames straight to slm.update_mask() (no socket). Needs cupy/lap + a CUDA
         # GPU on this host to arm; status()/test() work without them. The SLM is
-        # addressable on its own as get_device("Rb SLM"). See
-        # docs/rearrangement_coordinator.md.
+        # addressable on its own as get_device("Rb SLM").
         "Rb Rearrangement Rig": {
             "active": True,
             "host": SERVER_HOST,
@@ -191,7 +189,7 @@ CONFIG = {
     # Background InfluxDB loggers. Each entry runs pytweezer/servers/logger_server.py,
     # which builds the Logger subclass named by "logger" and polls it on "interval".
     # This is opt-in: nothing is pushed to InfluxDB unless a logger (or explicit
-    # InfluxWriter/log() call) writes it. See docs/influx_logging.md.
+    # InfluxWriter/log() call) writes it.
     "Loggers": {
         "NI ADC Logger": {
             "active": False,
