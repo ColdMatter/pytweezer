@@ -1,70 +1,71 @@
-
-from PyQt6.QtWidgets import *
-from pytweezer.servers import Properties,tweezerpath,PropertyAttribute
 from PyQt6 import QtCore
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtWidgets import *
 
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers import Properties
+
 logger = get_logger("pytweezer.GUI.pytweezerQt")
 
 
 class BWidget(QWidget):
-    """ base class of pytweezer Widgets
-        includes logging of move and resize events"""
+    """base class of pytweezer Widgets
+    includes logging of move and resize events"""
 
-    def __init__(self,name='Noname',parent=None, create_props=True):
+    def __init__(self, name="Noname", parent=None, create_props=True):
         super().__init__(parent)
         if create_props:
             self._props = Properties(name)
         self._name = name
-        settings=QtCore.QSettings("pytweezer", self._name)
+        settings = QtCore.QSettings("pytweezer", self._name)
         try:
             self.restoreGeometry(settings.value("geometry"))
         except:
-            logger.info(f'geometry not found for {name}, using default geometry')
+            logger.info(f"geometry not found for {name}, using default geometry")
 
-    def closeEvent(self,event):
-        settings=QtCore.QSettings("pytweezer", self._name)
+    def closeEvent(self, event):
+        settings = QtCore.QSettings("pytweezer", self._name)
         settings.setValue("geometry", self.saveGeometry())
         super().closeEvent(event)
 
 
 class BFrame(QFrame):
-    """ base class of pytweezer Widgets
-        includes logging of move and resize events"""
+    """base class of pytweezer Widgets
+    includes logging of move and resize events"""
 
-    def __init__(self,name='Noname',parent=None):
+    def __init__(self, name="Noname", parent=None):
         super().__init__(parent)
-        self._props=Properties(name)
+        self._props = Properties(name)
         self._name = name
-        settings=QtCore.QSettings("pytweezer", self._name)
+        settings = QtCore.QSettings("pytweezer", self._name)
         try:
-            #print(settings.value('geometry'))
+            # print(settings.value('geometry'))
             self.restoreGeometry(settings.value("geometry"))
         except:
-            logger.info(f'geometry not found for {name}, using default geometry')
+            logger.info(f"geometry not found for {name}, using default geometry")
 
-    def closeEvent(self,event):
-        settings=QtCore.QSettings("pytweezer", self._name)
+    def closeEvent(self, event):
+        settings = QtCore.QSettings("pytweezer", self._name)
         settings.setValue("geometry", self.saveGeometry())
-        #print('dddd',self.saveGeometry().toHex())
+        # print('dddd',self.saveGeometry().toHex())
         super().closeEvent(event)
 
+
 class BMainWindow(QMainWindow):
-    def __init__(self,name='Noname',parent=None):
+    def __init__(self, name="Noname", parent=None):
         super().__init__(parent)
-        self._props=Properties(name)
+        self._props = Properties(name)
         self._name = name
-        settings=QtCore.QSettings("pytweezer", self._name)
+        settings = QtCore.QSettings("pytweezer", self._name)
         try:
             self.restoreGeometry(settings.value("geometry"))
         except:
-            logger.info(f'geometry not found for {name}, using default geometry')
+            logger.info(f"geometry not found for {name}, using default geometry")
         self.setWindowTitle(name)
 
-    def closeEvent(self,event):
-        settings=QtCore.QSettings("pytweezer", self._name)
+    def closeEvent(self, event):
+        settings = QtCore.QSettings("pytweezer", self._name)
         settings.setValue("geometry", self.saveGeometry())
         super().closeEvent(event)
 
@@ -78,19 +79,22 @@ class SearchComboBox(QComboBox):
     match_flag: can be either 'contains' or 'begins to get the matchFlag to MatchContains or MatchStartsWith.
     Has a custom QLineEdit called SearchLineEdit.
     """
-    def __init__(self, parent=None, match_flag='contains'):
+
+    def __init__(self, parent=None, match_flag="contains"):
         super().__init__(parent)
         self.setLineEdit(SearchLineEdit(self))
         self.setEditable(True)
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.completer().setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        if match_flag == 'contains':
+        if match_flag == "contains":
             self.matchFlag = Qt.MatchFlag.MatchContains
-        elif match_flag == 'begins':
+        elif match_flag == "begins":
             self.matchFlag = Qt.MatchFlag.MatchStartsWith
         else:
-            print('SearchComboBox: invalid matchflag set. Must be either contains or begins')
-            print('Setting to default: contains')
+            print(
+                "SearchComboBox: invalid matchflag set. Must be either contains or begins"
+            )
+            print("Setting to default: contains")
             self.matchFlag = Qt.MatchFlag.MatchContains
         self.completer().setFilterMode(self.matchFlag)
         self.setDuplicatesEnabled(False)
@@ -116,6 +120,7 @@ class SearchLineEdit(QLineEdit):
     On focus out or pressing enter, the current text is stored. When pressing escape, the stored text is applied.
     On escape, reverts the
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -129,7 +134,9 @@ class SearchLineEdit(QLineEdit):
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
-        QTimer.singleShot(0, self.selectAll)  # ensures other events are processed first. Prevents UI locking up.
+        QTimer.singleShot(
+            0, self.selectAll
+        )  # ensures other events are processed first. Prevents UI locking up.
 
     def focusOutEvent(self, event):
         super().focusInEvent(event)

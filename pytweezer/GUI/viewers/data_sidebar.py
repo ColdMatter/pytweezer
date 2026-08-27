@@ -11,8 +11,8 @@ Call :meth:`update` from the host applet's poll loop to drain new data.
 from PyQt6 import QtWidgets
 from PyQt6.QtWidgets import QDialog, QVBoxLayout
 
-from pytweezer.servers import DataClient
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
+from pytweezer.servers import DataClient
 
 
 def _format_value(value):
@@ -45,7 +45,9 @@ class DataSidebar(QtWidgets.QWidget):
         self.table.setHorizontalHeaderLabels(["field", "value"])
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
+        )
         layout.addWidget(self.table)
 
         self.setMinimumWidth(180)

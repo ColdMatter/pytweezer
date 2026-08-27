@@ -15,7 +15,8 @@ import pathlib
 import subprocess
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import numpy as np
 from rich.progress import track
@@ -25,10 +26,13 @@ from pytweezer.servers.device_client import get_device
 # NOTE: these imports will only work with the pythonnet package
 try:
     import clr
+    from System import (  # type: ignore
+        Activator,  # type: ignore
+        Int32,  # type: ignore
+        Object,
+        String,
+    )
     from System.Collections.Generic import Dictionary  # type: ignore
-    from System import String, Object  # type: ignore
-    from System import Activator   # type: ignore
-    from System import Int32  # type: ignore
 except Exception as e:
     print(f"Error: {e} encountered, probably no pythonnet")
 
@@ -84,7 +88,7 @@ def _ensure_motmaster_running(
     exe_path = config["motmaster"]["exe_path"]
     process_name = pathlib.Path(exe_path).name
     if _is_process_running(process_name):
-        return None
+        return
 
     print(f"MOTMaster process '{process_name}' not found. Starting it now...")
     _start_process(exe_path)
@@ -93,7 +97,7 @@ def _ensure_motmaster_running(
     while time.time() < deadline:
         if _is_process_running(process_name):
             print(f"MOTMaster process '{process_name}' is running.")
-            return None
+            return
         time.sleep(poll_interval)
 
     raise RuntimeError(
@@ -102,7 +106,7 @@ def _ensure_motmaster_running(
 
 
 class MotMasterInterface:
-    def __init__(self, config_file: str, interval: Union[int, float] = 0.1) -> None:
+    def __init__(self, config_file: str, interval: float = 0.1) -> None:
         # ``config_file`` names a JSON file in the package ``configuration/`` dir; an
         # absolute path is taken as-is. Bringing the device up — making sure the
         # MOTMaster application is running, then connecting — happens here, so a
@@ -125,12 +129,8 @@ class MotMasterInterface:
         _path = pathlib.Path(path)
         sys.path.append(_path.parent)
         clr.AddReference(path)
-        return None
 
-
-    def connect(
-        self
-    ) -> None:
+    def connect(self) -> None:
         for path in self.config["dll_paths"].values():
             clr.AddReference(path)
         for key, path_info in self.config.items():
@@ -140,10 +140,10 @@ class MotMasterInterface:
             elif key == "motmaster":
                 self._add_ref(path_info["exe_path"])
                 try:
-                    import MOTMaster # type: ignore
+                    import MOTMaster  # type: ignore
+
                     self.motmaster = Activator.GetObject(
-                        MOTMaster.Controller,
-                        path_info["remote_path"]
+                        MOTMaster.Controller, path_info["remote_path"]
                     )
                 except Exception as e:
                     print(f"Error: {e} encountered")
@@ -151,9 +151,9 @@ class MotMasterInterface:
                 self._add_ref(path_info["exe_path"])
                 try:
                     import CaFBECHadwareController  # type: ignore
+
                     self.hardware_controller = Activator.GetObject(
-                        CaFBECHadwareController.Controller,
-                        path_info["remote_path"]
+                        CaFBECHadwareController.Controller, path_info["remote_path"]
                     )
                 except Exception as e:
                     print(f"Error: {e} encountered")
@@ -161,9 +161,9 @@ class MotMasterInterface:
                 self._add_ref(path_info["exe_path"])
                 try:
                     import MoleculeMOTHardwareControl  # type: ignore
+
                     self.hardware_controller = Activator.GetObject(
-                        MoleculeMOTHardwareControl.Controller,
-                        path_info["remote_path"]
+                        MoleculeMOTHardwareControl.Controller, path_info["remote_path"]
                     )
                 except Exception as e:
                     print(f"Error: {e} encountered")
@@ -171,9 +171,9 @@ class MotMasterInterface:
                 self._add_ref(path_info["exe_path"])
                 try:
                     import TransferCavityLock2012  # type: ignore
+
                     self.transfer_cavity_lock = Activator.GetObject(
-                        TransferCavityLock2012.Controller,
-                        path_info["remote_path"]
+                        TransferCavityLock2012.Controller, path_info["remote_path"]
                     )
                 except Exception as e:
                     print(f"Error: {e} encountered")
@@ -181,56 +181,58 @@ class MotMasterInterface:
                 self._add_ref(path_info["exe_path"])
                 try:
                     import WavemeterLock  # type: ignore
+
                     self.wavemeter_lock = Activator.GetObject(
-                        WavemeterLock.Controller,
-                        path_info["remote_path"]
+                        WavemeterLock.Controller, path_info["remote_path"]
                     )
                 except Exception as e:
                     print(f"Error: {e} encountered")
-            elif key == "picomotor":
-                if "connect" in path_info:
-                    if path_info["connect"]:
-                        self.picomotor_default_axis = None
-                        self.picomotor_default_speed = None
-                        self.picomotor_default_acceleration = None
-                        self.picomotor_default_steps = None
-                        self.picomotor_default_max_steps = None
-                        self.picomotor_steps_moved = 0
-                        try:
-                            from pylablib.devices import Newport
-                            n = Newport.get_usb_devices_number_picomotor()
-                            if n == 1:
-                                self.stage = Newport.Picomotor8742()
-                                if "motor" in path_info["defaults"]:
-                                    self.picomotor_default_motor = \
-                                        path_info["defaults"]["motor"]
-                                if "speed" in path_info["defaults"]:
-                                    self.picomotor_default_speed = \
-                                        path_info["defaults"]["speed"]
-                                if "aceeleration" in path_info["defaults"]:
-                                    self.picomotor_default_acceleration = \
-                                        path_info["defaults"]["acceleration"]
-                                if "steps" in path_info["defaults"]:
-                                    self.picomotor_default_steps = \
-                                        path_info["defaults"]["steps"]
-                                if "max_steps" in path_info["defaults"]:
-                                    self.picomotor_default_max_steps = \
-                                        path_info["defaults"]["max_steps"]
-                            elif n == 0:
-                                print("No PicoMotor device detected!")
-                            else:
-                                print("Too many PicoMotor device detected!")
-                        except Exception as e:
-                            print(f"Error: {e} encountered")
+            elif key == "picomotor" and path_info.get("connect"):
+                self.picomotor_default_axis = None
+                self.picomotor_default_speed = None
+                self.picomotor_default_acceleration = None
+                self.picomotor_default_steps = None
+                self.picomotor_default_max_steps = None
+                self.picomotor_steps_moved = 0
+                try:
+                    from pylablib.devices import Newport
+
+                    n = Newport.get_usb_devices_number_picomotor()
+                    if n == 1:
+                        self.stage = Newport.Picomotor8742()
+                        if "motor" in path_info["defaults"]:
+                            self.picomotor_default_motor = path_info["defaults"][
+                                "motor"
+                            ]
+                        if "speed" in path_info["defaults"]:
+                            self.picomotor_default_speed = path_info["defaults"][
+                                "speed"
+                            ]
+                        if "aceeleration" in path_info["defaults"]:
+                            self.picomotor_default_acceleration = path_info["defaults"][
+                                "acceleration"
+                            ]
+                        if "steps" in path_info["defaults"]:
+                            self.picomotor_default_steps = path_info["defaults"][
+                                "steps"
+                            ]
+                        if "max_steps" in path_info["defaults"]:
+                            self.picomotor_default_max_steps = path_info["defaults"][
+                                "max_steps"
+                            ]
+                    elif n == 0:
+                        print("No PicoMotor device detected!")
+                    else:
+                        print("Too many PicoMotor device detected!")
+                except Exception as e:
+                    print(f"Error: {e} encountered")
         print(self.hardware_controller)
-        return None
 
     def disconnect(self) -> None:
         self.motmaster = None
         self.hardware_controller = None
         if hasattr(self, "stage"):
             self.stage.close()
-        return None
 
     def set_motmaster_experiment(
         self,
@@ -243,7 +245,6 @@ class MotMasterInterface:
             print(f"MotMaster script set to {script}.")
         except Exception as e:
             print(f"Error: {e} encountered")
-        return None
 
     def get_motmaster_dictionary(self):
         self.parameter_dictionary = self.motmaster.GetParameters()
@@ -261,10 +262,7 @@ class MotMasterInterface:
             pars_csdict[key] = value
         return pars_csdict
 
-
-    def start_motmaster_experiment(
-        self, parameters: Optional[dict] = None
-    ):
+    def start_motmaster_experiment(self, parameters: dict | None = None):
         if self.script is None:
             raise ValueError(
                 "MotMaster script not set. Please call set_motmaster_experiment first."
@@ -278,7 +276,6 @@ class MotMasterInterface:
             time.sleep(self.interval)
         except Exception as e:
             print(f"Error starting MotMaster experiment {self.script}: {e}")
-        return None
 
     def get_params(self):
         return dict(self.motmaster.GetParameters())
@@ -288,7 +285,7 @@ class MotMasterInterface:
 
     def set_run_until_stopped(self, value: bool):
         self.motmaster.SetRunUntilStopped(value)
-    
+
     def set_iterations(self, iterations: int):
         self.motmaster.SetIterations(iterations)
 
@@ -297,92 +294,72 @@ class MotMasterInterface:
 
     def set_trigger_mode(self, value: bool):
         self.motmaster.SetTriggered(value)
-        
+
     def save_pattern_info(self, save_folder, file_tag, task_nr):
         """Save pattern information to files. calls saveToFiles from MMDataIOHelper"""
         if self.script is None:
             raise ValueError(
                 "MotMaster script not set. Please call set_motmaster_experiment first."
             )
-        self.motmaster.ioHelper.saveToFiles(file_tag, save_folder, task_nr, self.script_path)
+        self.motmaster.ioHelper.saveToFiles(
+            file_tag, save_folder, task_nr, self.script_path
+        )
 
-
-
-    def _move_picomotor_with_default_settings(
-        self
-    ) -> None:
-        if (self.picomotor_default_speed is not None) and \
-                (self.picomotor_default_acceleration is not None):
+    def _move_picomotor_with_default_settings(self) -> None:
+        if (self.picomotor_default_speed is not None) and (
+            self.picomotor_default_acceleration is not None
+        ):
             self.stage.setup_velocity(
                 speed=self.picomotor_default_speed,
-                accel=self.picomotor_default_acceleration
+                accel=self.picomotor_default_acceleration,
             )
-        if (self.picomotor_default_axis is not None) and \
-                (self.picomotor_default_steps is not None):
+        if (self.picomotor_default_axis is not None) and (
+            self.picomotor_default_steps is not None
+        ):
             motor: str = self.picomotor_default_motor
             self.stage.move_by(
                 axis=self.config["picomotor"]["motor_to_axis"][motor],
-                steps=self.picomotor_default_steps
+                steps=self.picomotor_default_steps,
             )
             self.stage.wait_move()
             self.picomotor_steps_moved += abs(self.picomotor_default_steps)
-            if self.picomotor_steps_moved >= \
-                    self.picomotor_default_max_steps:
+            if self.picomotor_steps_moved >= self.picomotor_default_max_steps:
                 self.picomotor_default_steps *= -1.0
-        return None
 
-    def get_laser_set_points_tcl(
-        self
-    ) -> Dict[str, Dict[str, float]]:
+    def get_laser_set_points_tcl(self) -> dict[str, dict[str, float]]:
         lasers = {}
         for laser, cavity in self.config["lasers"].items():
-            voltage = self.transfer_cavity_lock.GetLaserVoltage(
-                cavity, laser
-            )
-            set_point = self.transfer_cavity_lock.GetLaserSetpoint(
-                cavity, laser
-            )
+            voltage = self.transfer_cavity_lock.GetLaserVoltage(cavity, laser)
+            set_point = self.transfer_cavity_lock.GetLaserSetpoint(cavity, laser)
             lasers[laser] = {"voltage": voltage, "set_point": set_point}
-            print(
-                f"{laser}: voltage = {voltage}, set_point = {set_point}"
-            )
+            print(f"{laser}: voltage = {voltage}, set_point = {set_point}")
         return lasers
 
-    def get_laser_set_points_wml(
-        self
-    ) -> Dict[str, Dict[str, float]]:
+    def get_laser_set_points_wml(self) -> dict[str, dict[str, float]]:
         lasers = {}
-        for laser, _ in self.config["lasers"].items():
-            set_point = self.wavemeter_lock.getSlaveFrequency(
-                laser
-            )
+        for laser in self.config["lasers"]:
+            set_point = self.wavemeter_lock.getSlaveFrequency(laser)
             lasers[laser] = {"set_point": set_point}
-            print(
-                f"{laser}: set_point = {set_point}"
-            )
+            print(f"{laser}: set_point = {set_point}")
         return lasers
 
-    def get_laser_frequencies_actual(
-        self
-    ) -> Dict[str, Dict[str, float]]:
+    def get_laser_frequencies_actual(self) -> dict[str, dict[str, float]]:
         lasers = {}
-        for laser, _ in self.config["lasers"].items():
+        for laser in self.config["lasers"]:
             channel = int(self.wavemeter_lock.getChannelNum(laser))
             frequency = float(self.wavemeter_lock.getFrequency(channel))
             lasers[laser] = {"frequency": frequency}
-            #print(f"{laser}: frequency = {frequency} THz")
+            # print(f"{laser}: frequency = {frequency} THz")
         return lasers
-
-
 
     def scan_motmaster_parameter(
         self,
         script: str,
         parameter: str,
-        values: List[Union[int, float]],
+        values: list[int | float],
         move_yag_spot: bool = False,
-        callback: Callable = None
-    ) -> List[Any]:
+        callback: Callable | None = None,
+    ) -> list[Any]:
         """Run ``script`` once per entry in ``values``, with the MOTMaster
         parameter ``parameter`` set to that entry. ``callback`` is called with
         the value after each shot and its return appended to the results."""
@@ -393,9 +370,7 @@ class MotMasterInterface:
             for i in track(range(len(values))):
                 if move_yag_spot:
                     self._move_picomotor_with_default_settings()
-                self.motmaster.Go(
-                    self.python_to_cs_dict({parameter: values[i]})
-                )
+                self.motmaster.Go(self.python_to_cs_dict({parameter: values[i]}))
                 time.sleep(self.interval)
                 if callback is not None:
                     result = callback(values[i])
@@ -408,18 +383,16 @@ class MotMasterInterface:
         self,
         script: str,
         laser: str,
-        values: List[Union[int, float]],
+        values: list[int | float],
         move_yag_spot: bool = False,
-        callback: Callable = None,
-        motmaster_parameter: str = None,
-        motmaster_value: Union[int, float] = None
-    ) -> List[Any]:
+        callback: Callable | None = None,
+        motmaster_parameter: str | None = None,
+        motmaster_value: float | None = None,
+    ) -> list[Any]:
         _dictionary = Dictionary[String, Object]()
         path = str(self.script_root.joinpath(f"{script}.cs"))
         cavity = self.config["lasers"][laser]
-        current_set_point = self.transfer_cavity_lock.GetLaserSetpoint(
-            cavity, laser
-        )
+        current_set_point = self.transfer_cavity_lock.GetLaserSetpoint(cavity, laser)
         results = []
         try:
             self.motmaster.SetScriptPath(path)
@@ -440,9 +413,7 @@ class MotMasterInterface:
                 )
                 time.sleep(0.1)
             for i in track(range(len(values))):
-                self.transfer_cavity_lock.SetLaserSetpoint(
-                    cavity, laser, values[i]
-                )
+                self.transfer_cavity_lock.SetLaserSetpoint(cavity, laser, values[i])
                 self.motmaster.Go(_dictionary)
                 time.sleep(self.interval)
                 if callback is not None:
@@ -456,17 +427,15 @@ class MotMasterInterface:
         self,
         script: str,
         laser: str,
-        values: List[Union[int, float]],
+        values: list[int | float],
         move_yag_spot: bool = False,
-        callback: Callable = None,
-        motmaster_parameter: str = None,
-        motmaster_value: Union[int, float] = None
-    ) -> List[Any]:
+        callback: Callable | None = None,
+        motmaster_parameter: str | None = None,
+        motmaster_value: float | None = None,
+    ) -> list[Any]:
         _dictionary = Dictionary[String, Object]()
         path = str(self.script_root.joinpath(f"{script}.cs"))
-        current_set_point = float(self.wavemeter_lock.getSlaveFrequency(
-            laser
-        ))
+        current_set_point = float(self.wavemeter_lock.getSlaveFrequency(laser))
         results = []
         try:
             self.motmaster.SetScriptPath(path)
@@ -476,20 +445,14 @@ class MotMasterInterface:
                 _dictionary[motmaster_parameter] = motmaster_value
             while current_set_point > values[0]:
                 current_set_point -= 0.00001
-                self.wavemeter_lock.setSlaveFrequency(
-                    laser, current_set_point
-                )
+                self.wavemeter_lock.setSlaveFrequency(laser, current_set_point)
                 time.sleep(0.05)
             while current_set_point < values[0]:
                 current_set_point += 0.00001
-                self.wavemeter_lock.setSlaveFrequency(
-                    laser, current_set_point
-                )
+                self.wavemeter_lock.setSlaveFrequency(laser, current_set_point)
                 time.sleep(0.1)
             for i in track(range(len(values))):
-                self.wavemeter_lock.setSlaveFrequency(
-                    laser, values[i]
-                )
+                self.wavemeter_lock.setSlaveFrequency(laser, values[i])
                 self.motmaster.Go(_dictionary)
                 time.sleep(self.interval)
                 if callback is not None:
@@ -503,36 +466,28 @@ class MotMasterInterface:
         self,
         script: str,
         laser: str,
-        values: List[Union[int, float]],
+        values: list[int | float],
         move_yag_spot: bool = False,
-        callback: Callable = None,
-        motmaster_parameter: str = None,
-        motmaster_values: List[Union[int, float]] = None
-    ) -> List[Any]:
+        callback: Callable | None = None,
+        motmaster_parameter: str | None = None,
+        motmaster_values: list[int | float] | None = None,
+    ) -> list[Any]:
         _dictionary = Dictionary[String, Object]()
         path = str(self.script_root.joinpath(f"{script}.cs"))
-        current_set_point = float(self.wavemeter_lock.getSlaveFrequency(
-            laser
-        ))
+        current_set_point = float(self.wavemeter_lock.getSlaveFrequency(laser))
         results = []
         try:
             self.motmaster.SetScriptPath(path)
             while current_set_point > values[0]:
                 current_set_point -= 0.00001
-                self.wavemeter_lock.setSlaveFrequency(
-                    laser, current_set_point
-                )
+                self.wavemeter_lock.setSlaveFrequency(laser, current_set_point)
                 time.sleep(0.05)
             while current_set_point < values[0]:
                 current_set_point += 0.00001
-                self.wavemeter_lock.setSlaveFrequency(
-                    laser, current_set_point
-                )
+                self.wavemeter_lock.setSlaveFrequency(laser, current_set_point)
                 time.sleep(0.1)
             for i in track(range(len(values))):
-                self.wavemeter_lock.setSlaveFrequency(
-                    laser, values[i]
-                )
+                self.wavemeter_lock.setSlaveFrequency(laser, values[i])
                 if move_yag_spot:
                     self._move_picomotor_with_default_settings()
                 if (motmaster_parameter and motmaster_values) is not None:
@@ -557,41 +512,33 @@ class MotMasterInterface:
         self,
         script: str,
         laser: str,
-        values: List[Union[int, float]],
+        values: list[int | float],
         move_yag_spot: bool = False,
-        callback: Callable = None,
-        motmaster_parameters: List[str] = None,
-        motmaster_values: List[Tuple[Union[int, float]]] = None
-    ) -> List[Any]:
+        callback: Callable | None = None,
+        motmaster_parameters: list[str] | None = None,
+        motmaster_values: list[tuple[int | float]] | None = None,
+    ) -> list[Any]:
         _dictionary = Dictionary[String, Object]()
         path = str(self.script_root.joinpath(f"{script}.cs"))
-        current_set_point = float(self.wavemeter_lock.getSlaveFrequency(
-            laser
-        ))
+        current_set_point = float(self.wavemeter_lock.getSlaveFrequency(laser))
         results = []
         try:
             self.motmaster.SetScriptPath(path)
             while current_set_point > values[0]:
                 current_set_point -= 0.00001
-                self.wavemeter_lock.setSlaveFrequency(
-                    laser, current_set_point
-                )
+                self.wavemeter_lock.setSlaveFrequency(laser, current_set_point)
                 time.sleep(0.05)
             while current_set_point < values[0]:
                 current_set_point += 0.00001
-                self.wavemeter_lock.setSlaveFrequency(
-                    laser, current_set_point
-                )
+                self.wavemeter_lock.setSlaveFrequency(laser, current_set_point)
                 time.sleep(0.1)
             for i in track(range(len(values))):
-                self.wavemeter_lock.setSlaveFrequency(
-                    laser, values[i]
-                )
+                self.wavemeter_lock.setSlaveFrequency(laser, values[i])
                 if move_yag_spot:
                     self._move_picomotor_with_default_settings()
                 if (motmaster_parameters and motmaster_values) is not None:
                     for k in range(len(motmaster_values)):
-                        motmaster_value: Tuple = motmaster_values[k]
+                        motmaster_value: tuple = motmaster_values[k]
                         for t, parameter in enumerate(motmaster_parameters):
                             _dictionary[parameter] = motmaster_value[t]
                         self.motmaster.Go(_dictionary)
@@ -609,51 +556,43 @@ class MotMasterInterface:
             print(f"Error: {e} encountered")
         return results
 
-
-
     def scan_microwave_amplitude(
         self,
         script: str,
         synthesizer: str = "Gigatronics Synthesizer 2",
-        values: List[float] = [],
-        move_yag_spot: bool = False
+        values: Sequence[float] = (),
+        move_yag_spot: bool = False,
     ) -> None:
         path = str(self.script_root.joinpath(f"{script}.cs"))
         try:
             self.motmaster.SetScriptPath(path)
             for i in track(range(len(values))):
-                self.hardware_controller.tabs[synthesizer].SetAmplitude(
-                    values[i]
-                )
+                self.hardware_controller.tabs[synthesizer].SetAmplitude(values[i])
                 if move_yag_spot:
                     self._move_picomotor_with_default_settings()
                 self.motmaster.Go()
                 time.sleep(self.interval)
         except Exception as e:
             print(f"Error: {e} encountered")
-        return None
 
     def scan_microwave_frequency(
         self,
         script: str,
         synthesizer: str = "Gigatronics Synthesizer 2",
-        values: List[float] = [],
-        move_yag_spot: bool = False
+        values: Sequence[float] = (),
+        move_yag_spot: bool = False,
     ) -> None:
         path = str(self.script_root.joinpath(f"{script}.cs"))
         try:
             self.motmaster.SetScriptPath(path)
             for i in track(range(len(values))):
-                self.hardware_controller.tabs[synthesizer].SetFrequency(
-                    values[i]
-                )
+                self.hardware_controller.tabs[synthesizer].SetFrequency(values[i])
                 if move_yag_spot:
                     self._move_picomotor_with_default_settings()
                 self.motmaster.Go()
                 time.sleep(self.interval)
         except Exception as e:
             print(f"Error: {e} encountered")
-        return None
 
     def scan_picomotor_steps(
         self,
@@ -661,12 +600,12 @@ class MotMasterInterface:
         motor: str,
         interval_steps: int,
         total_steps: int,
-        speed: int = None,
-        accel: int = None,
-        callback: Callable = None,
-        motmaster_parameter: str = None,
-        motmaster_values: List[Tuple[Union[int, float]]] = None
-    ) -> List[Any]:
+        speed: int | None = None,
+        accel: int | None = None,
+        callback: Callable | None = None,
+        motmaster_parameter: str | None = None,
+        motmaster_values: list[tuple[int | float]] | None = None,
+    ) -> list[Any]:
         path = str(self.script_root.joinpath(f"{script}.cs"))
         _dictionary = Dictionary[String, Object]()
         try:
@@ -675,7 +614,7 @@ class MotMasterInterface:
             if (speed and accel) is not None:
                 self.stage.setup_velocity(speed=speed, accel=accel)
             axis: int = self.config["picomotor"]["motor_to_axis"][motor]
-            n_steps: int = int(total_steps/abs(interval_steps))
+            n_steps: int = int(total_steps / abs(interval_steps))
             for step_index in track(range(n_steps)):
                 self.stage.move_by(axis=axis, steps=interval_steps)
                 self.stage.wait_move()
@@ -699,15 +638,15 @@ class MotMasterInterface:
 
     def auto_mot(
         self,
-        scan_ranges: Dict[str, Sequence[float]],
-        camera: Union[str, Any],
+        scan_ranges: dict[str, Sequence[float]],
+        camera: str | Any,
         shots_per_point: int = 1,
         script: str = "AMOTBasic",
         field_parameter: str = "MOTCoilsCurrentValue",
         bg_field_value: float = 0.0,
         mot_field_value: float = 1.0,
-        display_results: bool = False
-    ) -> Dict[str, Dict[str, Any]]:
+        display_results: bool = False,
+    ) -> dict[str, dict[str, Any]]:
         """Tune the MOT by scanning wavemeter-lock set points laser by laser.
 
         A background is taken first with the MOT coils at ``bg_field_value``, then
@@ -734,8 +673,13 @@ class MotMasterInterface:
         client = get_device(camera) if isinstance(camera, str) else camera
         try:
             results = self._auto_mot(
-                scan_ranges, client, int(shots_per_point), script,
-                field_parameter, bg_field_value, mot_field_value
+                scan_ranges,
+                client,
+                int(shots_per_point),
+                script,
+                field_parameter,
+                bg_field_value,
+                mot_field_value,
             )
         finally:
             try:
@@ -749,20 +693,20 @@ class MotMasterInterface:
 
     def _auto_mot(
         self,
-        scan_ranges: Dict[str, Sequence[float]],
+        scan_ranges: dict[str, Sequence[float]],
         camera: Any,
         shots_per_point: int,
         script: str,
         field_parameter: str,
         bg_field_value: float,
-        mot_field_value: float
-    ) -> Dict[str, Dict[str, Any]]:
+        mot_field_value: float,
+    ) -> dict[str, dict[str, Any]]:
         """The body of :meth:`auto_mot`, with the camera already connected."""
         # Frames are numbered from the arming below and read in consecutive
         # windows, so every shot's frames are the ones that shot produced.
         frames_read = 0
 
-        def grab(value: float) -> Tuple[float, np.ndarray]:
+        def grab(value: float) -> tuple[float, np.ndarray]:
             nonlocal frames_read
             images = camera.acquire_n_frames(shots_per_point, start_frame=frames_read)
             frames_read += shots_per_point
@@ -770,11 +714,7 @@ class MotMasterInterface:
 
         camera.start_acquisition()
         background = self.scan_motmaster_parameter(
-            script,
-            field_parameter,
-            [bg_field_value],
-            False,
-            grab
+            script, field_parameter, [bg_field_value], False, grab
         )
         if not background or background[0][1].size == 0:
             raise RuntimeError(
@@ -784,7 +724,7 @@ class MotMasterInterface:
         images_bg = np.mean(background[0][1], axis=0)
         time.sleep(1)
 
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
         for laser, scan_range in scan_ranges.items():
             if laser not in self.config["lasers"]:
                 raise KeyError(
@@ -796,13 +736,7 @@ class MotMasterInterface:
             # plotted as a detuning from.
             start_set_point = float(self.wavemeter_lock.getSlaveFrequency(laser))
             shots = self.scan_wm_laser_set_points(
-                script,
-                laser,
-                scan_range,
-                False,
-                grab,
-                field_parameter,
-                mot_field_value
+                script, laser, scan_range, False, grab, field_parameter, mot_field_value
             )
             if len(shots) != len(scan_range):
                 raise RuntimeError(
@@ -823,7 +757,7 @@ class MotMasterInterface:
                 False,
                 grab,
                 field_parameter,
-                mot_field_value
+                mot_field_value,
             )
             results[laser] = {
                 "scan_range": scan_range,
@@ -835,7 +769,7 @@ class MotMasterInterface:
         return results
 
 
-def plot_auto_mot_results(results: Dict[str, Dict[str, Any]]):
+def plot_auto_mot_results(results: dict[str, dict[str, Any]]):
     """Plot the scans returned by :meth:`MotMasterInterface.auto_mot`: one panel per
     laser, normalised number against detuning from the set point the laser started
     on, with an arrow marking the set point chosen. Returns the ``(figure, axes)``
@@ -845,8 +779,7 @@ def plot_auto_mot_results(results: Dict[str, Dict[str, Any]]):
     n_cols = min(3, max(1, len(results)))
     n_rows = max(1, -(-len(results) // n_cols))
     fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharey=True,
-        squeeze=False
+        n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharey=True, squeeze=False
     )
     flat_axes = axes.flatten()
     for ax, (laser, scan) in zip(flat_axes, results.items()):
@@ -858,13 +791,20 @@ def plot_auto_mot_results(results: Dict[str, Dict[str, Any]]):
         detunings = (np.array(scan["scan_range"]) - start) * 1e6
         ax.errorbar(detunings, numbers / scale, yerr=errors / scale, fmt="ok")
         ax.arrow(
-            (scan["set_point"] - start) * 1e6, 1.15, 0, -0.1,
-            head_width=2.0, head_length=0.03, width=1.0, fc="r", ec="r"
+            (scan["set_point"] - start) * 1e6,
+            1.15,
+            0,
+            -0.1,
+            head_width=2.0,
+            head_length=0.03,
+            width=1.0,
+            fc="r",
+            ec="r",
         )
         ax.set_title(f"{laser} set @ {scan['set_point']} THz")
         ax.set_xlabel("Detuning to previous set point [MHz]")
         ax.set_ylim((0, 1.2))
-    for ax in flat_axes[len(results):]:
+    for ax in flat_axes[len(results) :]:
         ax.set_visible(False)
     for row in axes:
         row[0].set_ylabel("Norm. number")

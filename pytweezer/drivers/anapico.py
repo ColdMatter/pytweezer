@@ -1,10 +1,11 @@
 import pyvisa
 
+
 class AnapicoSYN420:
     def __init__(self, resource_address, resource_manager=None):
         """
         Initializes the Anapico SYN420 driver.
-        
+
         Args:
             resource_address (str): The VISA address (e.g., 'USB0::0x03EB::...').
             resource_manager (pyvisa.ResourceManager, optional): Existing RM instance.
@@ -13,13 +14,12 @@ class AnapicoSYN420:
             self.rm = pyvisa.ResourceManager()
         else:
             self.rm = resource_manager
-            
+
         self.inst = self.rm.open_resource(resource_address)
-        
+
         # Configure standard termination characters if necessary (often '\n')
-        self.inst.write_termination = '\n'
-        self.inst.read_termination = '\n'
-        
+        self.inst.write_termination = "\n"
+        self.inst.read_termination = "\n"
 
     def write(self, command):
         """Wrapper for SCPI write."""
@@ -55,7 +55,7 @@ class AnapicoSYN420:
         """Gets or sets the Modulation status."""
         resp = self.query(":SOUR:FM:STAT?")
         return bool(int(resp))
-    
+
     @modulation_enabled.setter
     def modulation_enabled(self, value):
         if value:
@@ -77,8 +77,6 @@ class AnapicoSYN420:
         """Closes the VISA resource."""
         self.inst.close()
 
-
-    
     ## WARNING: THE FOLLOWING METHODS WERE WRITTEN BY GEMINI AI BASED ON A C# DRIVER.
     ## THEY HAVE NOT BEEN TESTED WITH THE ACTUAL HARDWARE.
     ## USE WITH CAUTION AND VERIFY FUNCTIONALITY BEFORE DEPLOYMENT.
@@ -86,7 +84,7 @@ class AnapicoSYN420:
     # @property
     # def list_sweep_enabled(self):
     #     """
-    #     Enables List Sweep mode on Channel 1 (and Fix on others), 
+    #     Enables List Sweep mode on Channel 1 (and Fix on others),
     #     or disables it (Fix on all).
     #     """
     #     # Basic check to see if Channel 1 is in List mode
@@ -101,7 +99,7 @@ class AnapicoSYN420:
     #         for i in range(self.number_of_channels):
     #             # Channel index is 1-based in SCPI
     #             channel_str = f":SOUR{i+1}"
-                
+
     #             if i == 0:
     #                 # Primary Channel: Set to List Mode
     #                 self.write(f"{channel_str}:FREQ:MODE LIST")
@@ -110,7 +108,7 @@ class AnapicoSYN420:
     #             else:
     #                 # Other Channels: Set to Fix Mode
     #                 self.write(f"{channel_str}:FREQ:MODE FIX")
-            
+
     #         # Trigger setup
     #         self.write(":INIT:CONT ON")
     #         self.write(":TRIG:TYPE NORM")
@@ -127,15 +125,15 @@ class AnapicoSYN420:
     # def write_list(self, data):
     #     """
     #     Writes list data to the device.
-        
+
     #     Args:
-    #         data: Can be a single string (writes to current channel) 
+    #         data: Can be a single string (writes to current channel)
     #               or a list of strings (writes to specific channels).
     #     """
     #     if isinstance(data, str):
     #         # Matches C# public void WriteList(string list)
     #         self.write(f":MEM:FILE:LIST:DATA {data}")
-            
+
     #     elif isinstance(data, list):
     #         # Matches C# public void WriteList(string[] chList)
     #         for i in range(self.number_of_channels):
@@ -143,10 +141,10 @@ class AnapicoSYN420:
     #                 list_str = data[i]
     #                 num_bytes = len(list_str)
     #                 num_digits = len(str(num_bytes))
-                    
+
     #                 # Select channel
     #                 self.write(f":SOUR:SEL {i+1}")
-                    
+
     #                 # Construct SCPI Block Header: #N + Length + Data
     #                 # Example: #3100...data...
     #                 header = f"#{num_digits}{num_bytes}"
@@ -169,15 +167,15 @@ class AnapicoSYN420:
 # Example Usage
 if __name__ == "__main__":
     # Replace with your actual VISA address
-    address = "USB0::0x03EB::0xAFFF::321-028100000-0168::INSTR" 
+    address = "USB0::0x03EB::0xAFFF::321-028100000-0168::INSTR"
     try:
         driver = AnapicoSYN420(address)
-        
+
         # Enable Output
         driver.enabled = True
-        
+
         # Set CW Frequency
-        driver.cw_frequency = 10e9 # 10 GHz
-        
+        driver.cw_frequency = 10e9  # 10 GHz
+
     except Exception as e:
         print(f"Error: {e}")

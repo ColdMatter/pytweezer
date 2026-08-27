@@ -23,7 +23,7 @@ and the call returns — so a notebook cell or a logger loop is never taken down
 the database being offline.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from numbers import Real
 
 from pytweezer.configuration.config import INFLUXDB
@@ -73,15 +73,17 @@ class InfluxWriter:
             from influxdb_client import InfluxDBClient
             from influxdb_client.client.write_api import SYNCHRONOUS
 
-            self._client = InfluxDBClient(
-                url=self.url, token=self.token, org=self.org
-            )
+            self._client = InfluxDBClient(url=self.url, token=self.token, org=self.org)
             # SYNCHRONOUS keeps ordering simple and surfaces errors on write();
             # the payloads here are low-rate, so batching buys little.
             self._write_api = self._client.write_api(write_options=SYNCHRONOUS)
             self._failed = False
-            logger.debug("Connected to InfluxDB at %s (org=%s, bucket=%s)",
-                         self.url, self.org, self.bucket)
+            logger.debug(
+                "Connected to InfluxDB at %s (org=%s, bucket=%s)",
+                self.url,
+                self.org,
+                self.bucket,
+            )
             return True
         except Exception as exc:
             if not self._failed:
@@ -112,14 +114,15 @@ class InfluxWriter:
                 point = point.tag(tag_key, str(tag_value))
             for field_key, field_value in clean.items():
                 point = point.field(field_key, field_value)
-            point = point.time(time or datetime.now(timezone.utc))
+            point = point.time(time or datetime.now(UTC))
 
             self._write_api.write(bucket=self.bucket, org=self.org, record=point)
             self._failed = False  # recovered — let the next outage log again
         except Exception as exc:
             if not self._failed:
-                logger.warning("InfluxDB write failed (measurement=%r): %s",
-                               measurement, exc)
+                logger.warning(
+                    "InfluxDB write failed (measurement=%r): %s", measurement, exc
+                )
                 self._failed = True
 
     def close(self):

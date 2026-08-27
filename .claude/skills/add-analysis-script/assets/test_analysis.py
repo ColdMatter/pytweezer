@@ -59,6 +59,7 @@ def build(cls, props=None):
 # image_stats
 # --------------------------------------------------------------------------- #
 
+
 def test_image_stats_publishes_expected_statistics():
     from pytweezer.analysis.image_stats import ImageStats
 
@@ -67,7 +68,7 @@ def test_image_stats_publishes_expected_statistics():
 
     assert stats_analysis.process({"_imgindex": 3}, frame) is None
 
-    (head, data, channel), = stats_analysis.dataq.sent
+    ((head, data, channel),) = stats_analysis.dataq.sent
     assert data is None
     assert head["n"] == 4
     assert head["mean"] == pytest.approx(3.0)
@@ -88,6 +89,7 @@ def test_image_stats_drops_empty_frame():
 # --------------------------------------------------------------------------- #
 # projections
 # --------------------------------------------------------------------------- #
+
 
 def test_projections_sums_both_axes():
     from pytweezer.analysis.projections import Projections
@@ -118,6 +120,7 @@ def test_projections_ignores_non_2d_data():
 # gaussian_fit
 # --------------------------------------------------------------------------- #
 
+
 def test_gaussian_fit_recovers_known_peak():
     from pytweezer.analysis.gaussian_fit import GaussianFit, gaussian
 
@@ -137,6 +140,7 @@ def test_gaussian_fit_recovers_known_peak():
 # roi_slice
 # --------------------------------------------------------------------------- #
 
+
 def test_roi_slice_crops_and_shifts_offset():
     from pytweezer.analysis.roi_slice import RoiSlice
 
@@ -152,7 +156,7 @@ def test_roi_slice_crops_and_shifts_offset():
 
     assert roi.process({}, frame) is None
 
-    (head, data, channel), = roi.client.sent
+    ((head, data, channel),) = roi.client.sent
     assert channel == "_slice"
     np.testing.assert_array_equal(data, frame[2:5, 1:3])
     assert head["_offset"] == [1, 2]

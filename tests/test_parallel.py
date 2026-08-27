@@ -14,6 +14,7 @@ from pytweezer.parallel import after, run_parallel
 
 def test_calls_run_concurrently():
     """Three 0.2 s sleeps finish in ~0.2 s wall time, not ~0.6 s."""
+
     def sleeper():
         time.sleep(0.2)
 
@@ -26,6 +27,7 @@ def test_calls_run_concurrently():
 
 def test_results_returned_in_call_order():
     """Result order matches call order regardless of finish order."""
+
     def slow():
         time.sleep(0.15)
         return "slow"

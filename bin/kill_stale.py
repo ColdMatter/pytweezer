@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 """Kill any leftover pytweezer server/device/logger processes.
 
 Run this before starting ``pytweezer-server``/``pytweezer-client`` if a
@@ -15,7 +14,8 @@ from pytweezer.servers.process_cleanup import kill_stale_processes
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="List what would be killed without actually killing it",
     )
     args = parser.parse_args()

@@ -22,17 +22,19 @@ import sys
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtWidgets import QDialog, QVBoxLayout
 
-from pytweezer.servers import Properties
-from pytweezer.GUI.subscription_editor import SubscriptionEditor
 from pytweezer.GUI.property_editor import PropEdit
+from pytweezer.GUI.subscription_editor import SubscriptionEditor
 from pytweezer.GUI.theme import apply_theme, curve_color
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers import Properties
 
 logger = get_logger("pytweezer.GUI.applet")
 
 #: Window/taskbar icon for every applet, so a screenful of applets is
 #: distinguishable from the main GUI at a glance.
-ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "pytweezers_viewer_icon.svg")
+ICON_PATH = os.path.join(
+    os.path.dirname(__file__), "icons", "pytweezers_viewer_icon.svg"
+)
 
 
 class Applet(QtWidgets.QWidget):

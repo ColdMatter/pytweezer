@@ -16,16 +16,16 @@ the shared x-axis, and the left plot draws ``coords`` up the shared y-axis with
 ``values`` running toward the image.
 """
 
+import matplotlib.pyplot as plt
 import numpy as np
-from PyQt6 import QtCore
-from PyQt6.QtWidgets import QVBoxLayout
 import PyQt6
 import pyqtgraph as pg
-import matplotlib.pyplot as plt
+from PyQt6 import QtCore
+from PyQt6.QtWidgets import QVBoxLayout
 
-from pytweezer.servers import ImageClient, DataClient, PropertyAttribute
-from pytweezer.GUI.viewers.archive.zmq_ROI import zmq_ROI
 from pytweezer.GUI.applet import Applet, run_applet
+from pytweezer.GUI.viewers.archive.zmq_ROI import zmq_ROI
+from pytweezer.servers import DataClient, ImageClient, PropertyAttribute
 
 
 class ImagePlotDisplay(Applet):
@@ -117,8 +117,12 @@ class ImagePlotDisplay(Applet):
     def update_subscriptions(self):
         self.imgstream.unsubscribe()
         self.imgstream.subscribe(self._imagestreams)
-        self._rebuild_curves(self.topclient, self._topstreams, self.top_plot, self.topcurves)
-        self._rebuild_curves(self.leftclient, self._leftstreams, self.left_plot, self.leftcurves)
+        self._rebuild_curves(
+            self.topclient, self._topstreams, self.top_plot, self.topcurves
+        )
+        self._rebuild_curves(
+            self.leftclient, self._leftstreams, self.left_plot, self.leftcurves
+        )
 
     def _rebuild_curves(self, client, streams, plot, curvedict):
         client.unsubscribe()

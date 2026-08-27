@@ -11,7 +11,7 @@ class ArduinoPulser:
     board.
     """
 
-    def __init__(self, port='COM5', baudrate=250000, timeout=5):
+    def __init__(self, port="COM5", baudrate=250000, timeout=5):
 
         self.port = port
         self.baudrate = baudrate
@@ -20,14 +20,13 @@ class ArduinoPulser:
         self.startup_message = None
 
     def connect(self, boot_poll_interval=0.1):
-        
+
         self.serial = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
 
-        
         while self.serial.in_waiting == 0:
             time.sleep(boot_poll_interval)
 
-        self.startup_message = self.serial.readline().decode('utf-8').strip()
+        self.startup_message = self.serial.readline().decode("utf-8").strip()
         return self.startup_message
 
     def send_pulses(self, number_of_pulses, period_us=None):
@@ -38,9 +37,9 @@ class ArduinoPulser:
             command = f"{number_of_pulses}\n"
         else:
             command = f"{number_of_pulses},{int(period_us)}\n"
-        self.serial.write(command.encode('utf-8'))
+        self.serial.write(command.encode("utf-8"))
 
-        reply = self.serial.readline().decode('utf-8').strip()
+        reply = self.serial.readline().decode("utf-8").strip()
         if not reply:
             raise RuntimeError(
                 f"No reply within {self.timeout}s for {number_of_pulses} pulses. "
@@ -52,12 +51,12 @@ class ArduinoPulser:
         return int(span_us) / 1e6
 
     def close(self):
-        ''' close the serial port '''
+        """close the serial port"""
         if self.serial is None or not self.serial.is_open:
             return None
 
-        self.serial.write(b'q\n')
-        shutdown_message = self.serial.readline().decode('utf-8').strip()
+        self.serial.write(b"q\n")
+        shutdown_message = self.serial.readline().decode("utf-8").strip()
         self.serial.close()
         return shutdown_message
 
@@ -70,13 +69,13 @@ class ArduinoPulser:
 
 
 if __name__ == "__main__":
-    arduino = ArduinoPulser('COM5')
+    arduino = ArduinoPulser("COM5")
 
     startup_message = arduino.connect()
     print(f"Connection Confirmed - Arduino: '{startup_message}'")
 
     span_s = arduino.send_pulses(10)
-    print(f"10 pulses spanned {span_s*1e3:.3f} ms (Arduino clock)")
+    print(f"10 pulses spanned {span_s * 1e3:.3f} ms (Arduino clock)")
 
     shutdown_message = arduino.close()
     print(f"Arduino: '{shutdown_message}'")

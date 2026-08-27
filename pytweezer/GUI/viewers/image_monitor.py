@@ -3,22 +3,22 @@
 Built on :class:`pytweezer.GUI.applet.Applet` — see ``docs/applets.md``.
 """
 
+import matplotlib.pyplot as plt
 import numpy as np
-from PyQt6 import QtCore
-from PyQt6.QtWidgets import (
-    QVBoxLayout,
-    QHBoxLayout,
-    QDialog,
-    QSpinBox,
-)
 import PyQt6
 import pyqtgraph as pg
-import matplotlib.pyplot as plt
+from PyQt6 import QtCore
+from PyQt6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QSpinBox,
+    QVBoxLayout,
+)
 
-from pytweezer.servers import ImageClient, tweezerpath, PropertyAttribute
+from pytweezer.GUI.applet import Applet, run_applet
 from pytweezer.GUI.viewers.archive.zmq_ROI import zmq_ROI
 from pytweezer.GUI.viewers.data_sidebar import DataSidebar
-from pytweezer.GUI.applet import Applet, run_applet
+from pytweezer.servers import ImageClient, PropertyAttribute, tweezerpath
 
 
 class ImageDisplay(Applet):

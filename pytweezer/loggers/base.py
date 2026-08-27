@@ -17,8 +17,8 @@ category. Nothing reaches InfluxDB unless a Logger (or an explicit
 import signal
 import time
 
-from pytweezer.servers.influx_client import InfluxWriter
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers.influx_client import InfluxWriter
 
 logger = get_logger("Logger")
 

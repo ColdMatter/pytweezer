@@ -24,8 +24,8 @@ import pyqtgraph as pg
 from PyQt6 import QtWidgets
 from PyQt6.QtGui import QFont
 
-from pytweezer.servers import DataClient, PropertyAttribute
 from pytweezer.GUI.applet import Applet, run_applet
+from pytweezer.servers import DataClient, PropertyAttribute
 
 
 class ScalarHistory(Applet):
@@ -97,7 +97,7 @@ class ScalarHistory(Applet):
     def clear(self):
         for points in self.points.values():
             points.clear()
-        for name, curve in self.curves.items():
+        for curve in self.curves.values():
             curve.setData([], [])
         self._refresh_readout()
 

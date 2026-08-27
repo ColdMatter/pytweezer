@@ -1,6 +1,5 @@
 from PyQt6 import QtCore
-from PyQt6.QtCore import Qt
-from PyQt6.QtCore import QDateTime
+from PyQt6.QtCore import QDateTime, Qt
 
 """
 Here we define the models Queue and PrepStation tables.
@@ -19,6 +18,7 @@ class _SyncSubstruct:
     Defines methods for manipulating a table data dictionary.
     Based on the ARTIQ models. Copied+pasted without much adaptation.
     """
+
     def __init__(self, update_cb, ref):
         self.update_cb = update_cb
         self.ref = ref
@@ -52,13 +52,15 @@ class DictSyncModel(QtCore.QAbstractTableModel):
     Base class for turning a dictionary (backing_store) into a table.
     Based on the ARTIQ models. Copied+pasted without much adaptation.
     """
+
     def __init__(self, headers, dataNames, init):
         self.headers = headers
         self.dataNames = dataNames
         self.backing_store = init  # the table data dictionary
         self.row_to_key = sorted(  # a list of the dictionary keys in the order in which they should be displayed
             self.backing_store.keys(),
-            key=lambda k: self.sort_key(k, self.backing_store[k]))
+            key=lambda k: self.sort_key(k, self.backing_store[k]),
+        )
         QtCore.QAbstractTableModel.__init__(self)
 
     def rowCount(self, parent=None):
@@ -68,14 +70,17 @@ class DictSyncModel(QtCore.QAbstractTableModel):
         return len(self.headers)
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid() or role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
+        if not index.isValid() or role not in (
+            Qt.ItemDataRole.DisplayRole,
+            Qt.ItemDataRole.EditRole,
+        ):
             return None
         else:
             k = self.row_to_key[index.row()]
             return self.convert(k, self.backing_store[k], index.column())
 
     def setData(self, index, value, role=Qt.ItemDataRole.DisplayRole):
-        if value == '':
+        if value == "":
             return False
         if role == Qt.ItemDataRole.EditRole:
             k = self.row_to_key[index.row()]
@@ -88,8 +93,10 @@ class DictSyncModel(QtCore.QAbstractTableModel):
             return True
 
     def headerData(self, col, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if (orientation == Qt.Orientation.Horizontal and
-                role == Qt.ItemDataRole.DisplayRole):
+        if (
+            orientation == Qt.Orientation.Horizontal
+            and role == Qt.ItemDataRole.DisplayRole
+        ):
             return self.headers[col]
         return None
 
@@ -97,10 +104,10 @@ class DictSyncModel(QtCore.QAbstractTableModel):
         lo = 0
         hi = len(self.row_to_key)
         while lo < hi:
-            mid = (lo + hi)//2
-            if (self.sort_key(self.row_to_key[mid],
-                              self.backing_store[self.row_to_key[mid]]) <
-                    self.sort_key(k, v)):
+            mid = (lo + hi) // 2
+            if self.sort_key(
+                self.row_to_key[mid], self.backing_store[self.row_to_key[mid]]
+            ) < self.sort_key(k, v):
                 lo = mid + 1
             else:
                 hi = mid
@@ -111,14 +118,22 @@ class DictSyncModel(QtCore.QAbstractTableModel):
             old_row = self.row_to_key.index(k)
             new_row = self._find_row(k, v)
             if old_row == new_row:
-                self.dataChanged.emit(self.index(old_row, 0),
-                                      self.index(old_row, len(self.headers)-1))
+                self.dataChanged.emit(
+                    self.index(old_row, 0), self.index(old_row, len(self.headers) - 1)
+                )
             else:
-                self.beginMoveRows(QtCore.QModelIndex(), old_row, old_row,
-                                   QtCore.QModelIndex(), new_row)
+                self.beginMoveRows(
+                    QtCore.QModelIndex(),
+                    old_row,
+                    old_row,
+                    QtCore.QModelIndex(),
+                    new_row,
+                )
             self.backing_store[k] = v
-            self.row_to_key[old_row], self.row_to_key[new_row] = \
-                self.row_to_key[new_row], self.row_to_key[old_row]
+            self.row_to_key[old_row], self.row_to_key[new_row] = (
+                self.row_to_key[new_row],
+                self.row_to_key[old_row],
+            )
             if old_row != new_row:
                 self.endMoveRows()
         else:
@@ -138,6 +153,7 @@ class DictSyncModel(QtCore.QAbstractTableModel):
     def __getitem__(self, k):
         def update():
             self[k] = self.backing_store[k]
+
         return _SyncSubstruct(update, self.backing_store[k])
 
     def sort_key(self, k, v):
@@ -157,9 +173,28 @@ class ScheduleModel(DictSyncModel):
     The keys of the main dictionary are a unique ID called the task number.
     Items are sorted first by their "priority" value, then by the task number.
     """
+
     def __init__(self, init):
-        headers = ["taskNr", "label", "experiment", "status", "rep", "run", "priority", "due"]
-        dataNames = ["task", "label", "expName", "status", "repetition", "run", "priority", "dueDateTime"]
+        headers = [
+            "taskNr",
+            "label",
+            "experiment",
+            "status",
+            "rep",
+            "run",
+            "priority",
+            "due",
+        ]
+        dataNames = [
+            "task",
+            "label",
+            "expName",
+            "status",
+            "repetition",
+            "run",
+            "priority",
+            "dueDateTime",
+        ]
         super().__init__(headers, dataNames, init)
 
     def sort_key(self, k, v):
@@ -180,7 +215,11 @@ class ScheduleModel(DictSyncModel):
 
     def flags(self, index):
         if index.column() in (4, 5, 6, 7):
-            return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable
+            return (
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsEditable
+            )
         else:
             return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
@@ -189,6 +228,7 @@ class ListSyncModel(QtCore.QAbstractTableModel):
     """
     Like DictSyncModel, but handles a list instead.
     """
+
     def __init__(self, headers, dataNames, init):
         super().__init__()
         self.backing_store = init
@@ -211,24 +251,29 @@ class ListSyncModel(QtCore.QAbstractTableModel):
             return None
 
     def setData(self, index, value, role=Qt.ItemDataRole.DisplayRole):
-        if value == '':
+        if value == "":
             return False
         if role == Qt.ItemDataRole.EditRole:
             k = index.row()
             col = index.column()
             if col == 7:
                 value = value.toString()
-            if self.backing_store[k]["status"] != 'Sleeping':
-                if QDateTime.fromString(self.backing_store[k]["dueDateTime"]) <= QDateTime.currentDateTime():
-                    self.backing_store[k]["status"] = 'Queued'
+            if self.backing_store[k]["status"] != "Sleeping":
+                if (
+                    QDateTime.fromString(self.backing_store[k]["dueDateTime"])
+                    <= QDateTime.currentDateTime()
+                ):
+                    self.backing_store[k]["status"] = "Queued"
                 else:
-                    self.backing_store[k]["status"] = 'Waiting'
+                    self.backing_store[k]["status"] = "Waiting"
             self.backing_store[k][self.dataNames[col]] = value
             return True
 
     def headerData(self, col, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if (orientation == Qt.Orientation.Horizontal and
-                role == Qt.ItemDataRole.DisplayRole):
+        if (
+            orientation == Qt.Orientation.Horizontal
+            and role == Qt.ItemDataRole.DisplayRole
+        ):
             return self.headers[col]
         return None
 
@@ -255,9 +300,28 @@ class PrepModel(ListSyncModel):
     This is the table model used by the PrepStation. Here we use a list, as the tasks in PrepStation don't need
     unique IDs and the order can be freely changed.
     """
+
     def __init__(self, init):
-        headers = ["taskNr", "label", "experiment", "status", "nReps", "nRuns", "priority", "due"]
-        dataNames = ["task", "label", "expName", "status", "nReps", "nRuns", "priority", "dueDateTime"]
+        headers = [
+            "taskNr",
+            "label",
+            "experiment",
+            "status",
+            "nReps",
+            "nRuns",
+            "priority",
+            "due",
+        ]
+        dataNames = [
+            "task",
+            "label",
+            "expName",
+            "status",
+            "nReps",
+            "nRuns",
+            "priority",
+            "dueDateTime",
+        ]
         super().__init__(headers, dataNames, init)
 
     def convert(self, row, v, column):
@@ -272,6 +336,10 @@ class PrepModel(ListSyncModel):
 
     def flags(self, index):
         if index.column() in (2, 4, 6, 7):
-            return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable
+            return (
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsEditable
+            )
         else:
             return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable

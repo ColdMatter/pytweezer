@@ -102,8 +102,9 @@ def _set_ccd_mode(cam, em):
 def _run_client(which, device, nframes, exposure, setup, repeats):
     import statistics
 
-    import pytweezer.servers  # noqa: F401 -- installs the fix on import
     from sipyco import pc_rpc
+
+    import pytweezer.servers  # noqa: F401 -- installs the fix on import
 
     if which == "stock":
         pc_rpc._socket_readline = _stock_socket_readline
@@ -141,7 +142,8 @@ def _run_client(which, device, nframes, exposure, setup, repeats):
 
     print(
         f"{times[0]:.6f} {statistics.median(times):.6f} {rtt:.6f} {images.nbytes} "
-        + "x".join(str(d) for d in images.shape) + " "
+        + "x".join(str(d) for d in images.shape)
+        + " "
         + ",".join(f"{x:.6f}" for x in times)
     )
     sys.stdout.flush()
@@ -149,16 +151,27 @@ def _run_client(which, device, nframes, exposure, setup, repeats):
 
 def _measure(device, nframes, exposure, setup, repeats, which):
     cmd = [
-        sys.executable, __file__, "client", which, device, str(nframes),
-        str(exposure), "1" if setup else "0", str(repeats),
+        sys.executable,
+        __file__,
+        "client",
+        which,
+        device,
+        str(nframes),
+        str(exposure),
+        "1" if setup else "0",
+        str(repeats),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if r.returncode != 0:
         print(r.stdout, r.stderr, file=sys.stderr)
         raise SystemExit(f"{which} arm failed at nframes={nframes}")
     first, med, rtt, nbytes, shape, series = r.stdout.strip().split(" ")
     return (
-        float(first), float(med), float(rtt), int(nbytes), shape,
+        float(first),
+        float(med),
+        float(rtt),
+        int(nbytes),
+        shape,
         [float(x) for x in series.split(",")],
     )
 
@@ -171,7 +184,9 @@ def main(argv=None):
         default=",".join(str(n) for n in DEFAULT_FRAMES),
         help="comma-separated frame counts to sweep",
     )
-    p.add_argument("--exposure", type=float, default=0.001, help="exposure time in seconds")
+    p.add_argument(
+        "--exposure", type=float, default=0.001, help="exposure time in seconds"
+    )
     p.add_argument(
         "--no-setup",
         action="store_true",
@@ -183,7 +198,9 @@ def main(argv=None):
         default=50,
         help="skip the stock arm above this frame count (it is quadratic and slow)",
     )
-    p.add_argument("--repeats", type=int, default=3, help="timed grabs per arm (median reported)")
+    p.add_argument(
+        "--repeats", type=int, default=3, help="timed grabs per arm (median reported)"
+    )
     args = p.parse_args(argv)
 
     frames = [int(x) for x in args.frames.split(",") if x.strip()]
@@ -226,8 +243,14 @@ def main(argv=None):
             flush=True,
         )
         if sser is not None:
-            print(f"{'':>26}   stock per call: " + " ".join(f"{x * 1e3:8.1f}" for x in sser))
-        print(f"{'':>26} patched per call: " + " ".join(f"{x * 1e3:8.1f}" for x in pser), flush=True)
+            print(
+                f"{'':>26}   stock per call: "
+                + " ".join(f"{x * 1e3:8.1f}" for x in sser)
+            )
+        print(
+            f"{'':>26} patched per call: " + " ".join(f"{x * 1e3:8.1f}" for x in pser),
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

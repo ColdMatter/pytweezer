@@ -92,6 +92,7 @@ Class attributes tune behavior:
 from pytweezer.servers import DataClient
 from pytweezer.GUI.applet import Applet, run_applet
 
+
 class MyPlot(Applet):
     stream_category = "Data"
     poll_interval = 10
@@ -111,10 +112,12 @@ class MyPlot(Applet):
             msg, info, array = self.stream.recv()
             ...  # draw
 
-def main(name):                 # config-/launcher-driven entry
+
+def main(name):  # config-/launcher-driven entry
     run_applet(MyPlot, default_name=name)
 
-if __name__ == "__main__":      # standalone CLI entry
+
+if __name__ == "__main__":  # standalone CLI entry
     run_applet(MyPlot, default_name="MyPlot")
 ```
 

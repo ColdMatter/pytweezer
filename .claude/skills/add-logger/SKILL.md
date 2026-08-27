@@ -60,7 +60,8 @@ class ChamberPressureLogger(Logger):
         if self.simulate:
             logger.warning("Logger %r running in SIMULATION MODE", self.name)
             return
-        import serial              # lazy: keep the import off dev machines
+        import serial  # lazy: keep the import off dev machines
+
         self._port = serial.Serial(self.conf["device"], timeout=1)
 
     def read(self):

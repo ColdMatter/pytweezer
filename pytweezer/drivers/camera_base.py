@@ -27,18 +27,15 @@ from __future__ import annotations
 
 import os
 import time
+from abc import ABC, abstractmethod
 from functools import wraps
-from typing import Optional
 
 import numpy as np
 import tifffile as tiff
 
-from abc import ABC, abstractmethod
-
+from pytweezer.logging_utils import get_logger
 from pytweezer.servers import ImageClient
 from pytweezer.servers.simulated_device import simulate
-
-from pytweezer.logging_utils import get_logger
 
 LOGGER = get_logger("camera")
 
@@ -74,7 +71,7 @@ class Camera(ABC):
         self,
         image_dir: str | None = None,
         timeout: float = 5.0,
-        stream_name: Optional[str] = None,
+        stream_name: str | None = None,
     ):
         self.image_dir = image_dir
         self.timeout = timeout
@@ -224,7 +221,7 @@ class SimulatedCamera(Camera):
         self,
         image_dir: str | None = None,
         timeout: float = 5.0,
-        stream_name: Optional[str] = None,
+        stream_name: str | None = None,
     ):
         self._shape = (256, 256)
         self._nframes = 1
@@ -293,5 +290,7 @@ def simulated_camera_for(real_cls: type) -> type:
         pass
 
     _Simulated.__name__ = _Simulated.__qualname__ = f"Simulated{real_cls.__name__}"
-    _Simulated.image_prefix = getattr(real_cls, "image_prefix", SimulatedCamera.image_prefix)
+    _Simulated.image_prefix = getattr(
+        real_cls, "image_prefix", SimulatedCamera.image_prefix
+    )
     return _Simulated

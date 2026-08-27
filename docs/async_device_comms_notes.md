@@ -49,6 +49,7 @@ without blocking in sequence.
    import asyncio
    from pytweezer.servers.device_client import get_device_async
 
+
    async def main():
        mm1 = await get_device_async("Rb MotMaster Server")
        mm2 = await get_device_async("CaF MotMaster Server")
@@ -60,6 +61,7 @@ without blocking in sequence.
        finally:
            await mm1.close_rpc()
            await mm2.close_rpc()
+
 
    asyncio.run(main())
    ```

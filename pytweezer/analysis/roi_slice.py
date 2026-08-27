@@ -69,7 +69,7 @@ class RoiSlice(ImageAnalysis):
 
     def process(self, head, data):
         if data.ndim != 2:
-            return None
+            return
 
         offset = head.get("_offset", [0, 0])
         resolution = head.get("_imgresolution", [1, 1])
@@ -98,7 +98,7 @@ class RoiSlice(ImageAnalysis):
             self.client.send(sub_head, sub, channel="_" + region)
 
         # We publish per-ROI above; nothing for the base to send.
-        return None
+        return
 
 
 if __name__ == "__main__":

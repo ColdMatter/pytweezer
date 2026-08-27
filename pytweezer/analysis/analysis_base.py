@@ -37,8 +37,7 @@ To write a new analysis, subclass one of the two and override :meth:`process`::
 
 import argparse
 
-from pytweezer.servers import DataClient, ImageClient
-from pytweezer.servers import Properties, PropertyAttribute
+from pytweezer.servers import DataClient, ImageClient, Properties, PropertyAttribute
 
 
 class AnalysisProcess:
@@ -56,19 +55,18 @@ class AnalysisProcess:
 
     #: The input streams. Subclasses override this with the property name that
     #: matches their transport (``imagestreams`` / ``datastreams``).
-    _streams = PropertyAttribute('streams', ['None'])
+    _streams = PropertyAttribute("streams", ["None"])
 
     #: Sub-channel appended to ``name`` when republishing results.
-    _out_channel = ''
+    _out_channel = ""
 
     def __init__(self, name):
         self.name = name
         self._props = Properties(name)
 
-        self.client = self.make_client(name.split('/')[-1])
+        self.client = self.make_client(name.split("/")[-1])
         self.client.subscribe(self._streams)
-        print('{} ({}) subscriptions: {}'.format(
-            type(self).__name__, name, self._streams))
+        print(f"{type(self).__name__} ({name}) subscriptions: {self._streams}")
 
     # ---- transport-specific hooks (implemented by ImageAnalysis/DataAnalysis)
 
@@ -113,8 +111,8 @@ class AnalysisProcess:
 class ImageAnalysis(AnalysisProcess):
     """Analysis process that consumes and republishes an image stream."""
 
-    _streams = PropertyAttribute('imagestreams', ['None'])
-    _out_channel = '_'
+    _streams = PropertyAttribute("imagestreams", ["None"])
+    _out_channel = "_"
 
     def make_client(self, name):
         return ImageClient(name)
@@ -123,8 +121,8 @@ class ImageAnalysis(AnalysisProcess):
 class DataAnalysis(AnalysisProcess):
     """Analysis process that consumes and republishes a data stream."""
 
-    _streams = PropertyAttribute('datastreams', ['None'])
-    _out_channel = ''
+    _streams = PropertyAttribute("datastreams", ["None"])
+    _out_channel = ""
 
     def make_client(self, name):
         return DataClient(name)
@@ -140,11 +138,11 @@ def run_analysis(analysis_cls, argv=None):
             run_analysis(MyAnalysis)
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument('name', nargs=1, help='name of this program instance')
+    parser.add_argument("name", nargs=1, help="name of this program instance")
     args = parser.parse_args(argv)
     name = args.name[0]
     analysis_cls(name).run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pass

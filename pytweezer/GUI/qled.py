@@ -4,10 +4,11 @@ from PyQt6.QtWidgets import *
 
 
 class LedIndicator(QAbstractButton):
-    '''
+    """
     Created by Nick Lamprianidis
     https://github.com/nlamprian/pyqt5-led-indicator-widget
-    '''
+    """
+
     scaledSize = 1000.0
 
     def __init__(self, parent=None):

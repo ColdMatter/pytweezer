@@ -1,4 +1,3 @@
-''' simulate a crashed analysis routine 
-'''
+"""simulate a crashed analysis routine"""
 
-print('closing dummy')
+print("closing dummy")

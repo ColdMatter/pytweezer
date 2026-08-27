@@ -81,7 +81,7 @@ class TweezerImageDisplay(ImageDisplay):
             atom_count = 0
         self.latest_atom_count = int(atom_count)
 
-        expected_sites = int(self._expected_sites) if int(self._expected_sites) > 0 else 0
+        expected_sites = max(0, int(self._expected_sites))
         if expected_sites > 0:
             self.latest_filling_fraction = float(atom_count) / float(expected_sites)
         else:
@@ -95,7 +95,8 @@ class TweezerImageDisplay(ImageDisplay):
         active = [s for s in self._positionstreams if s != "--None--"]
         if len(active) == 0:
             self.tweezer_overlay.setData([], [])
-            
+
+
 class TweezerImageWindow(ImageWindow):
     """Image window variant that uses the tweezer overlay display."""
 
@@ -111,7 +112,9 @@ class TweezerImageWindow(ImageWindow):
     def get_display_name(self):
         # Tweezer viewer configs are often stored directly at /<name>/...
         # rather than /<name>/Viewer/...
-        has_streams = self._props.get('/' + self._name + '/imagestreams', None) is not None
+        has_streams = (
+            self._props.get("/" + self._name + "/imagestreams", None) is not None
+        )
         if has_streams:
             return self._name
         return self._displayname
@@ -128,8 +131,6 @@ class TweezerImageWindow(ImageWindow):
     #         self.imDataBox.props.set("liststreams", ["N atoms", "Filling Fraction"])
 
     #     self.imDataBox.setNewData(info)
-
-
 
 
 def main(name):

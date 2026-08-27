@@ -60,7 +60,7 @@ notebook helper read them from here.
 ```python
 from pytweezer.servers.influx_client import log
 
-log("laser", power=1.23, wavelength=780)                 # fields as kwargs
+log("laser", power=1.23, wavelength=780)  # fields as kwargs
 log("chamber", {"pressure": 2.1e-9}, tags={"system": "CaF"})  # dict + tags
 ```
 
@@ -76,7 +76,7 @@ from pytweezer.servers.influx_client import InfluxWriter
 
 writer = InfluxWriter()
 writer.write("chamber", {"pressure": 2.1e-9}, tags={"system": "CaF"})
-writer.close()   # or use it as a context manager
+writer.close()  # or use it as a context manager
 ```
 
 ## 4. Writing a new Logger
@@ -99,9 +99,10 @@ hardware.
 # pytweezer/loggers/my_logger.py
 from pytweezer.loggers.base import Logger
 
+
 class MyLogger(Logger):
     def setup(self):
-        self.source = ...            # open YOUR device/handle, using self.conf
+        self.source = ...  # open YOUR device/handle, using self.conf
         self.simulate = bool(self.conf.get("simulate", False))
 
     def read(self):
@@ -109,7 +110,7 @@ class MyLogger(Logger):
         return [("my_measurement", {"value": self.source.read()}, {"system": "Rb"})]
 
     def close(self):
-        self.source.close()          # release the device
+        self.source.close()  # release the device
         super().close()
 ```
 
@@ -119,7 +120,9 @@ Register the class by adding a factory to `LOGGER_REGISTRY` in
 ```python
 def _make_my_logger(name, conf):
     from pytweezer.loggers.my_logger import MyLogger
+
     return MyLogger(name, conf)
+
 
 LOGGER_REGISTRY = {
     "ni_adc": _make_ni_adc,
