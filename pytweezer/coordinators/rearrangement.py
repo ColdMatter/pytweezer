@@ -51,10 +51,9 @@ import time
 import numpy as np
 
 from pytweezer.coordinators.base import Coordinator
-from pytweezer.logging_utils import get_logger
-
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.slm import SLM
+from pytweezer.logging_utils import get_logger
 
 LOGGER = get_logger("rearrangement")
 
@@ -107,7 +106,7 @@ def _morph_cpp():
 
             _morph_cpp_module = morph_tophat_cpp
         except Exception:  # pragma: no cover
-            # pragme no cover stops coverage.py complaining about failing imports here on machine 
+            # pragme no cover stops coverage.py complaining about failing imports here on machine
             # without the C++ extension built. The extension is optional, so this is not a test failure.
             LOGGER.debug(
                 "morph_tophat_cpp unavailable; using numpy.",
@@ -115,6 +114,7 @@ def _morph_cpp():
             )
             _morph_cpp_module = None
     return _morph_cpp_module
+
 
 def _sum_cpp():
     global _sum_cpp_module, _sum_cpp_loaded
@@ -126,7 +126,7 @@ def _sum_cpp():
             from pytweezer.cpp import sum_pixel_values_cpp
 
             _sum_cpp_module = sum_pixel_values_cpp
-        except Exception:  # pragma: no cover 
+        except Exception:  # pragma: no cover
             LOGGER.debug(
                 "sum_pixel_values_cpp unavailable; using numpy.",
                 exc_info=True,
@@ -136,19 +136,26 @@ def _sum_cpp():
 
 
 #: Default phasemask-generator geometry (the lab's Rb SLM); overridable via config.
-DEFAULT_PHASEMASK = dict(
-    wavelength_um=0.852,
-    focal_length_mm=17.3,
-    slm_pitch_um=17,
-    slm_res=(1024, 1024),
-    input_beam_waist_mm=16,
-    fresnel_f_mm=1072,
-    blaze_dx_dy_um=(48, -4),
-    zernike_coeff_dict={
-        5: 1.195, 6: 0.725, 7: 0.970, 8: 0.478, 9: -1.091,
-        10: 0.303, 11: 0.021, 12: 0.072, 13: 0.049,
+DEFAULT_PHASEMASK = {
+    "wavelength_um": 0.852,
+    "focal_length_mm": 17.3,
+    "slm_pitch_um": 17,
+    "slm_res": (1024, 1024),
+    "input_beam_waist_mm": 16,
+    "fresnel_f_mm": 1072,
+    "blaze_dx_dy_um": (48, -4),
+    "zernike_coeff_dict": {
+        5: 1.195,
+        6: 0.725,
+        7: 0.970,
+        8: 0.478,
+        9: -1.091,
+        10: 0.303,
+        11: 0.021,
+        12: 0.072,
+        13: 0.049,
     },
-)
+}
 
 #: Default camera ROI (x0, y0, width, height) if ``initialise`` isn't given one.
 DEFAULT_ROI = [50, 70, 384, 384]
@@ -190,14 +197,16 @@ class Rearrangement(Coordinator):
             raise RuntimeError(
                 f"{type(self).__name__} needs a sub-device with role "
                 f"{self.camera_role!r} for this call; this composite provides roles: "
-                f"{sorted(self.targets) or '(none)'}. Set \"role\": "
+                f'{sorted(self.targets) or "(none)"}. Set "role": '
                 f"{self.camera_role!r} on the relevant entry in the composite's "
                 '"devices" block.'
             )
 
     def _require_initialised(self):
         if not self._initialised:
-            raise RuntimeError("Rearrangement not initialised; call initialise() first.")
+            raise RuntimeError(
+                "Rearrangement not initialised; call initialise() first."
+            )
 
     # ------------------------------------------------------------------ #
     # Status
@@ -209,7 +218,9 @@ class Rearrangement(Coordinator):
             "gpu_available": _HAS_CUPY,
             "initialised": self._initialised,
             "roles": sorted(self.targets),
-            "camera_connected": bool(getattr(self.camera, "is_connected", lambda: None)()),
+            "camera_connected": bool(
+                getattr(self.camera, "is_connected", lambda: None)()
+            ),
             "slm_connected": bool(getattr(self.slm, "is_connected", lambda: None)()),
         }
 
@@ -274,13 +285,18 @@ class Rearrangement(Coordinator):
         pm_init = PM.superimpose([pm_array_init, PM.fresnel, PM.blaze, PM.zernike])
         pm_init_uint8 = PM.transform_phase_8bit(pm_init).get()
 
-        self._state = dict(
-            PM=PM,
-            terms1=terms1, terms2=terms2,
-            pm_init_uint8=pm_init_uint8,
-            d0=d0, fps=fps, threshold=threshold, grid_positions=grid_positions, roi=roi,
-            profile=profile,
-        )
+        self._state = {
+            "PM": PM,
+            "terms1": terms1,
+            "terms2": terms2,
+            "pm_init_uint8": pm_init_uint8,
+            "d0": d0,
+            "fps": fps,
+            "threshold": threshold,
+            "grid_positions": grid_positions,
+            "roi": roi,
+            "profile": profile,
+        }
         self._initialised = True
         LOGGER.info("Rearrangement node initialised.")
 
@@ -303,7 +319,6 @@ class Rearrangement(Coordinator):
         else:
             img = an.morphological_tophat_high_pass(image, feature_size=10)
             grid_positions = self._state["grid_positions"]
-
 
         cpp_sum = _sum_cpp()
         if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
@@ -445,7 +460,9 @@ class Rearrangement(Coordinator):
 
         # 3. Pairing, interpolation and SLM upload, pipelined.
         frames = PM.iter_rearrangement_sequence(
-            s["terms1"], s["terms2"], occ_mask,
+            s["terms1"],
+            s["terms2"],
+            occ_mask,
             d0=s["d0"],
             profile=s.get("profile", "minimum_jerk"),
             to_host=False,
@@ -465,7 +482,11 @@ class Rearrangement(Coordinator):
         LOGGER.info(
             "Rearrangement complete: %d frames, %.4fs total "
             "(occupancy %.4fs, sequence+upload %.4fs, reset %.4fs).",
-            n_frames, t4 - t1, t2 - t1, t3 - t2, t4 - t3,
+            n_frames,
+            t4 - t1,
+            t2 - t1,
+            t3 - t2,
+            t4 - t3,
         )
         return np.asarray(img_array0), np.asarray(img_array1)
 
@@ -492,6 +513,8 @@ class Rearrangement(Coordinator):
             try:
                 self.camera.stop_acquisition()
             except Exception:
-                LOGGER.debug("camera.stop_acquisition() during shutdown failed", exc_info=True)
+                LOGGER.debug(
+                    "camera.stop_acquisition() during shutdown failed", exc_info=True
+                )
         self._state = None
         self._initialised = False

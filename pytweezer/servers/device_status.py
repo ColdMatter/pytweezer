@@ -27,14 +27,13 @@ import zmq
 from PyQt6 import QtCore
 from sipyco.pc_rpc import Client as RPCClient
 
-from pytweezer.servers.configreader import ConfigReader
+from pytweezer.configuration.config import get_config
+from pytweezer.logging_utils import get_logger
 from pytweezer.servers.device_server import (
     composite_target_name,
     coordinator_target_name,
 )
 from pytweezer.servers.reachability import is_reachable
-
-from pytweezer.logging_utils import get_logger
 
 logger = get_logger("Device Status")
 
@@ -75,7 +74,7 @@ def server_targets(host, port, timeout=TARGET_PROBE_TIMEOUT):
 
 
 def _server_conf():
-    conf = ConfigReader.getConfiguration()
+    conf = get_config()
     return conf["Servers"][SERVER_NAME]
 
 
@@ -98,8 +97,10 @@ class DeviceStatusServer:
     RPC handshake for the targets it serves, so each sub-device gets its own entry.
     """
 
-    def __init__(self, host=None, pub_port=None, poll_interval=None, probe_timeout=PROBE_TIMEOUT):
-        conf = ConfigReader.getConfiguration()
+    def __init__(
+        self, host=None, pub_port=None, poll_interval=None, probe_timeout=PROBE_TIMEOUT
+    ):
+        conf = get_config()
         server_conf = conf["Servers"][SERVER_NAME]
         self.host = host or server_conf["host"]
         self.pub_port = int(pub_port or server_conf["pub_port"])
@@ -148,7 +149,9 @@ class DeviceStatusServer:
                 devices[name] = entry
                 continue
 
-            targets = self._composite_targets(name, host, port) if state == "up" else None
+            targets = (
+                self._composite_targets(name, host, port) if state == "up" else None
+            )
             entry["children"] = list(sub_confs)
             if state == "up" and params.get("coordinator"):
                 # The composite's own name addresses its coordinator, which stands
@@ -273,10 +276,16 @@ class DeviceStatusClient(QtCore.QObject):
 
 def main():
     parser = argparse.ArgumentParser(description="Run the device-status publisher")
-    parser.add_argument("name", nargs="?", default=None, help="process-manager label (ignored)")
+    parser.add_argument(
+        "name", nargs="?", default=None, help="process-manager label (ignored)"
+    )
     parser.add_argument("--host", default=None, help="override PUB bind host")
-    parser.add_argument("--pub-port", type=int, default=None, help="override PUB bind port")
-    parser.add_argument("--poll-interval", type=float, default=None, help="seconds between probes")
+    parser.add_argument(
+        "--pub-port", type=int, default=None, help="override PUB bind port"
+    )
+    parser.add_argument(
+        "--poll-interval", type=float, default=None, help="seconds between probes"
+    )
     args, _unknown = parser.parse_known_args()
 
     server = DeviceStatusServer(

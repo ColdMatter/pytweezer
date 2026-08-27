@@ -1,11 +1,12 @@
-import numpy as np
-from scipy import ndimage
-from pytweezer.servers import DataClient, ImageClient
-from pytweezer.servers import Properties, PropertyAttribute
 import argparse
 
+import numpy as np
+from scipy import ndimage
+
+from pytweezer.servers import DataClient, ImageClient, Properties, PropertyAttribute
+
 # filepath: /home/twalker/RbCaF/pytweezer/pytweezer/analysis/find_tweezer_atoms.py
-''' Identify atom locations in a tweezer image and stream their positions.
+""" Identify atom locations in a tweezer image and stream their positions.
 
 Input:
     Image stream with atoms in tweezers
@@ -19,24 +20,23 @@ Properties:
     *   atom_fwhm_px: (float) expected atom gaussian full-width at half maximum in pixels
     *   expected_sites: (int) expected number of available tweezer sites for filling-fraction calculation
 
-'''
+"""
 
 
-class TweezerGridAnalyzer():
-
-    _imagestreams = PropertyAttribute('imagestreams', ['None'])
-    _threshold = PropertyAttribute('threshold', 1.0)
-    _atom_fwhm_px = PropertyAttribute('atom_fwhm_px', 5.0)
-    _expected_sites = PropertyAttribute('expected_sites', 64)
+class TweezerGridAnalyzer:
+    _imagestreams = PropertyAttribute("imagestreams", ["None"])
+    _threshold = PropertyAttribute("threshold", 1.0)
+    _atom_fwhm_px = PropertyAttribute("atom_fwhm_px", 5.0)
+    _expected_sites = PropertyAttribute("expected_sites", 64)
 
     def __init__(self, name):
         self._props = Properties(name)
         self._name = name
 
-        self.imageq = ImageClient(name.split('/')[-1])
+        self.imageq = ImageClient(name.split("/")[-1])
         self.imageq.subscribe(self._imagestreams)
-        self.dataq = DataClient(name.split('/')[-1])
-        print('find_tweezer_atoms.py subscriptions: ', self._imagestreams)
+        self.dataq = DataClient(name.split("/")[-1])
+        print("find_tweezer_atoms.py subscriptions: ", self._imagestreams)
 
     @staticmethod
     def _robust_sigma(x):
@@ -46,7 +46,7 @@ class TweezerGridAnalyzer():
 
     def _refine_centroid(self, highpass, y, x, atom_sigma):
         h, w = highpass.shape
-        r = max(1, int(round(atom_sigma)))
+        r = max(1, round(atom_sigma))
         y0, y1 = max(0, y - r), min(h, y + r + 1)
         x0, x1 = max(0, x - r), min(w, x + r + 1)
 
@@ -77,16 +77,16 @@ class TweezerGridAnalyzer():
 
         # Derive peak separation from expected spot size.
         min_distance = max(3.0, 1.8 * atom_sigma)
-        win = max(3, int(round(min_distance)))
+        win = max(3, round(min_distance))
         if win % 2 == 0:
             win += 1
 
-        local_max = matched == ndimage.maximum_filter(matched, size=win, mode='nearest')
+        local_max = matched == ndimage.maximum_filter(matched, size=win, mode="nearest")
         candidate_mask = local_max & (snr >= 2.8) & (matched > 0.0)
 
         raw_floor = float(self._threshold)
         if raw_floor > 0:
-            candidate_mask &= (image >= raw_floor)
+            candidate_mask &= image >= raw_floor
 
         peak_coords = np.argwhere(candidate_mask).astype(np.float64)
         if peak_coords.shape[0] == 0:
@@ -94,7 +94,7 @@ class TweezerGridAnalyzer():
 
         refined = []
         for y, x in peak_coords:
-            iy, ix = int(round(y)), int(round(x))
+            iy, ix = round(y), round(x)
             cy, cx = self._refine_centroid(matched, iy, ix, atom_sigma)
             refined.append([cy, cx])
 
@@ -105,30 +105,34 @@ class TweezerGridAnalyzer():
             msg = self.imageq.recv()
             if msg is not None:
                 msgstr, head, img = msg
-                
-                atom_positions = self.find_atoms(img)
-                atom_count = int(len(atom_positions))
 
-                expected_sites = int(self._expected_sites) if int(self._expected_sites) > 0 else 0
-                filling_fraction = float(atom_count) / float(expected_sites) if expected_sites > 0 else 0.0
-                
+                atom_positions = self.find_atoms(img)
+                atom_count = len(atom_positions)
+
+                expected_sites = max(0, int(self._expected_sites))
+                filling_fraction = (
+                    float(atom_count) / float(expected_sites)
+                    if expected_sites > 0
+                    else 0.0
+                )
+
                 output_data = {
-                    'positions': atom_positions,
-                    'count': atom_count,
-                    'n_atoms': atom_count,
-                    'filling_fraction': filling_fraction,
-                    'timestamp': head.get('timestamp', 0)
+                    "positions": atom_positions,
+                    "count": atom_count,
+                    "n_atoms": atom_count,
+                    "filling_fraction": filling_fraction,
+                    "timestamp": head.get("timestamp", 0),
                 }
 
                 stats_data = {
-                    'n_atoms': atom_count,
-                    'filling_fraction': filling_fraction,
-                    'expected_sites': expected_sites,
-                    'timestamp': head.get('timestamp', 0),
+                    "n_atoms": atom_count,
+                    "filling_fraction": filling_fraction,
+                    "expected_sites": expected_sites,
+                    "timestamp": head.get("timestamp", 0),
                 }
 
-                self.dataq.send(output_data, channel='_')
-                self.dataq.send(stats_data, channel='_stats')
+                self.dataq.send(output_data, channel="_")
+                self.dataq.send(stats_data, channel="_stats")
 
 
 def main_run(name):
@@ -138,7 +142,7 @@ def main_run(name):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('name', nargs=1, help='name of this program instance')
+    parser.add_argument("name", nargs=1, help="name of this program instance")
     args = parser.parse_args()
     name = args.name[0]
     main_run(name)

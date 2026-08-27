@@ -35,7 +35,7 @@ class Projections(ImageAnalysis):
 
     def process(self, head, data):
         if data.ndim != 2:
-            return None
+            return
 
         h, w = data.shape
         offset = head.get("_offset", [0, 0])
@@ -50,7 +50,7 @@ class Projections(ImageAnalysis):
 
         self.dataq.send(head, np.vstack([x_coords, x_values]), channel="_x")
         self.dataq.send(head, np.vstack([y_coords, y_values]), channel="_y")
-        return None
+        return
 
 
 if __name__ == "__main__":

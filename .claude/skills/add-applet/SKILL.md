@@ -35,24 +35,26 @@ job. The preview script warns when it sees this.
 
 ```python
 class AtomCount(Applet):
-    stream_category = "Data"     # "Data" or "Image" — which catalog the
-    poll_interval = 50           #   subscription editor lists
+    stream_category = "Data"  # "Data" or "Image" — which catalog the
+    poll_interval = 50  #   subscription editor lists
     default_size = (520, 300)
 
     _threshold = PropertyAttribute("threshold", 0.5)
 
-    def init_gui(self):          # once: build widgets, make stream clients
+    def init_gui(self):  # once: build widgets, make stream clients
         ...
         self.update_subscriptions()
 
-    def update_subscriptions(self):   # after either dialog closes
+    def update_subscriptions(self):  # after either dialog closes
         ...
 
-    def poll(self):              # every poll_interval ms
+    def poll(self):  # every poll_interval ms
         ...
+
 
 def main(name):
     run_applet(AtomCount, default_name=name)
+
 
 if __name__ == "__main__":
     run_applet(AtomCount, default_name="Atom Count")
@@ -81,14 +83,14 @@ field is happy with two:
 
 ```python
 message = self.stream.recv()
-if message is None or len(message) < 3:     # drawing an array
+if message is None or len(message) < 3:  # drawing an array
     continue
 channel, head, array = message
 
 message = self.stream.recv()
-if message is None or len(message) < 2:     # reading a header field
+if message is None or len(message) < 2:  # reading a header field
     continue
-channel, head = message[0], message[1]      # tolerate a trailing array
+channel, head = message[0], message[1]  # tolerate a trailing array
 ```
 
 **Drain the queue with `while`, not `if`.** One `recv()` per poll falls behind
@@ -231,11 +233,13 @@ Add an entry to `DEFAULT_APPLETS` in `pytweezer/GUI/applet_launcher.py` so it is
 offered as a template in the **Applets** tab:
 
 ```python
-{
-    "name": "Atom Count",
-    "script": "pytweezer/GUI/viewers/atom_count.py",
-    "description": "Rolling history of the atom number",
-},
+(
+    {
+        "name": "Atom Count",
+        "script": "pytweezer/GUI/viewers/atom_count.py",
+        "description": "Rolling history of the atom number",
+    },
+)
 ```
 
 The list seeds the Properties `"Applets"` key only on a *first* run, so on a

@@ -1,52 +1,54 @@
-""" Monitor the content of streams """
-import sys
-import json
+"""Monitor the content of streams"""
+
 import datetime
+import json
+import sys
 from collections import deque
+
 from PyQt6 import QtCore
 from PyQt6.QtGui import *
 from PyQt6.QtWidgets import *
-from pytweezer.servers import DataClient,ImageClient,CommandClient
-from pytweezer.servers.messageclient import MessageClient
-from pytweezer.GUI.pytweezerQt import BWidget
+
 from pytweezer.GUI.theme import UI_FONT_FAMILY, UI_FONT_POINT_SIZE
 from pytweezer.logging_utils import get_daily_log_path
+from pytweezer.servers import CommandClient, DataClient, ImageClient
+from pytweezer.servers.messageclient import MessageClient
 
 
 class StreamMonitor(QWidget):
-    def __init__(self,name,streamtype='Data',parent=None):
+    def __init__(self, name, streamtype="Data", parent=None):
         super().__init__(parent)
-        if streamtype=='Data':    
-            self.stream=DataClient(name)
-        elif streamtype=='Image':
-            self.stream=ImageClient(name)
-        elif streamtype =='Command':
-            self.stream=CommandClient(name)
-        elif streamtype =='Message':
-            self.stream=MessageClient(name)
-        self.stream.subscribe('')       #listen to all streams
-        self.msglist=[]
+        if streamtype == "Data":
+            self.stream = DataClient(name)
+        elif streamtype == "Image":
+            self.stream = ImageClient(name)
+        elif streamtype == "Command":
+            self.stream = CommandClient(name)
+        elif streamtype == "Message":
+            self.stream = MessageClient(name)
+        self.stream.subscribe("")  # listen to all streams
+        self.msglist = []
 
-        layout=QVBoxLayout()
+        layout = QVBoxLayout()
         layout.addWidget(QLabel(name))
-        self.text=QTextEdit()
+        self.text = QTextEdit()
         layout.addWidget(self.text)
         self.setLayout(layout)
-        self.resize(800,800)
+        self.resize(800, 800)
 
-        timer=QtCore.QTimer(self)
+        timer = QtCore.QTimer(self)
         timer.timeout.connect(self._update_list)
         timer.start(100)
-        self.timer=timer
+        self.timer = timer
 
     def _update_list(self):
-        
+
         while self.stream.has_new_data():
-            msg=self.stream.recv()
+            msg = self.stream.recv()
             if msg != None:
-                self.msglist=[msg[0]+repr(msg[1])[:80]]+self.msglist
-                self.msglist=self.msglist[:40]
-                self.text.setPlainText('\n'.join(self.msglist))
+                self.msglist = [msg[0] + repr(msg[1])[:80]] + self.msglist
+                self.msglist = self.msglist[:40]
+                self.text.setPlainText("\n".join(self.msglist))
 
 
 def _format_timestamp(raw):
@@ -73,11 +75,11 @@ class LogMonitor(QWidget):
     def __init__(self, name, parent=None):
         super().__init__(parent)
         self.stream = MessageClient(name)
-        self.stream.subscribe('Logs')
+        self.stream.subscribe("Logs")
         self.max_rows = 200
 
         layout = QVBoxLayout()
-        layout.addWidget(QLabel('Logs'))
+        layout.addWidget(QLabel("Logs"))
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
             ["Timestamp", "Level", "Host", "Process", "Message"]
@@ -101,7 +103,9 @@ class LogMonitor(QWidget):
 
         copy_action = QAction("Copy", self.table)
         copy_action.setShortcut(QKeySequence.StandardKey.Copy)
-        copy_action.setShortcutContext(QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        copy_action.setShortcutContext(
+            QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
         copy_action.triggered.connect(self._copy_selection)
         self.table.addAction(copy_action)
 
@@ -153,7 +157,9 @@ class LogMonitor(QWidget):
             # Hover any cell in the row to read the full (untruncated) message.
             item.setToolTip(message)
             if col == self.MESSAGE_COL:
-                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop)
+                item.setTextAlignment(
+                    QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop
+                )
             self.table.setItem(row, col, item)
 
         if self.table.rowCount() > self.max_rows:
@@ -213,7 +219,6 @@ class LogMonitor(QWidget):
         dialog.exec()
 
 
-
 def make_stream_monitor(name, parent=None):
     """Build the nested stream-monitor tab widget without owning a QApplication.
 
@@ -222,10 +227,10 @@ def make_stream_monitor(name, parent=None):
     window.
     """
     tabs = QTabWidget(parent)
-    tabs.addTab(StreamMonitor(name, 'Image'), "Image")
-    tabs.addTab(StreamMonitor(name, 'Data'), "Data")
-    tabs.addTab(StreamMonitor(name, 'Command'), "Command")
-    tabs.addTab(StreamMonitor(name, 'Message'), "Message")
+    tabs.addTab(StreamMonitor(name, "Image"), "Image")
+    tabs.addTab(StreamMonitor(name, "Data"), "Data")
+    tabs.addTab(StreamMonitor(name, "Command"), "Command")
+    tabs.addTab(StreamMonitor(name, "Message"), "Message")
     tabs.addTab(LogMonitor(name), "Logs")
     return tabs
 
@@ -237,17 +242,6 @@ def main(name):
     qApp.exec()
 
 
-
-
-if __name__ == '__main__':
-    if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
-        main('StreamMonitor')
-
-
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    if (sys.flags.interactive != 1) or not hasattr(QtCore, "PYQT_VERSION"):
+        main("StreamMonitor")

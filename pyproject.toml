@@ -4,10 +4,7 @@ version = "0.2.1"
 description = "Pytweezer package"
 authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
 readme = "README.md"
-packages = [
-	{ include = "pytweezer" },
-	{ include = "bin" },
-]
+packages = [{ include = "pytweezer" }, { include = "bin" }]
 
 [tool.poetry.scripts]
 pytweezer-server = "bin.gui:server_main"
@@ -62,13 +59,13 @@ pydantic = "^2.10.5"
 # paramiko = "^3.4.1"     # SSH client
 # rpyc = "^5.3.0"
 # plumbum = "^1.8.3"
-pythonnet = "^3.0.5"    # .NET integration
+pythonnet = "^3.0.5" # .NET integration
 # wakepy = "^0.9.1"       # from pip section
 # iso8601 = "^2.1.0"      # from pip section
 scikit-image = "^0.26.0"
 pyvisa-py = "^0.8.1"
-sipyco = {git = "https://github.com/m-labs/sipyco.git"}
-pycaf = {git = "https://github.com/ColdMatter/pycaf", branch = "cafmot"}
+sipyco = { git = "https://github.com/m-labs/sipyco.git" }
+pycaf = { git = "https://github.com/ColdMatter/pycaf", branch = "cafmot" }
 simple-pyspin = "^0.1.1"
 easypyspin = "^2.0.1"
 opencv-python = "^4.13.0.92"
@@ -77,6 +74,65 @@ influxdb-client = "^1.50.0"
 nidaqmx = "^1.5.0"
 scikit-learn = "^1.9.0"
 pybase64 = "^1.4.3"
+ruff = "^0.16.4"
+
+[tool.ruff]
+target-version = "py311"
+# Notebooks throughout the tree are exploratory scratch, not maintained code.
+extend-exclude = [
+	"**/archive/**",
+	"**/*.ipynb",
+	"pytweezer/drivers/Blink Plus/manual.md", # vendor manual, latin-1 encoded
+]
+
+[tool.ruff.lint]
+# Ruff's default rule set is enforced, minus rules that fire pervasively for
+# patterns that are deliberate here: broad `except Exception` in the pub/sub
+# server loops, `a, _ = f()`-style throwaway unpacking, %-format strings, naive
+# `datetime.now()`, and so on. Re-enable individually as the code is cleaned up.
+ignore = [
+	"BLE001", # blind-except (server loops intentionally catch broadly)
+	"RUF059", # unused unpacked variable
+	# "RUF013", # implicit Optional in annotations
+	# "F841",   # unused local variable
+	# "B006",  # mutable default argument
+	# "B008",  # function call in default argument
+	"UP031", # printf-style string formatting
+	"E722",  # bare except
+	"S110",  # try-except-pass
+	"S112",  # try-except-continue
+	# "SIM102",  # collapsible if
+	"SIM105", # suppressible exception
+	# "SIM118",  # key in dict.keys()
+	"DTZ005", # datetime.now() without tz
+	"DTZ011", # date.today()
+	"LOG015", # logging call on root logger
+	# "RUF046", # unnecessary int() cast
+	# "PERF102", # incorrect dict iterator
+	# "PLR1722", # sys.exit() alias
+	# "PLW1510", # subprocess.run without check=
+	"TRY201", # verbose raise
+	"TRY002", # raise vanilla Exception
+	"TRY003", # long message in raise
+	# "C408",   # unnecessary dict()/list() call
+	# "C409",   # unnecessary literal in tuple() call
+	# "EXE001", # shebang, file not executable
+	# "EXE002", # executable file, no shebang
+	# "ISC003", # explicit string concatenation
+	# "PIE810", # single startswith/endswith call
+	# "RUF015", # unnecessary iterable allocation for first element
+	"D419", # empty docstring
+	"N999", # invalid module name
+]
+
+[tool.ruff.lint.per-file-ignores]
+# tests/ holds the pytest suite plus experiment scripts and tools/ holds one-off
+# benchmarks; also exempt them from bare-assert / blind-raise-assert / "useless
+# expression" (`1 / 0` raised on purpose) checks.
+"tests/**" = ["S101", "S603", "S607", "B017", "B018"]
+"tools/**" = ["S101", "S603", "S607", "B017", "B018", "F821"]
+# Package __init__.py files are re-export hubs.
+"__init__.py" = ["F401"]
 
 [build-system]
 requires = ["poetry-core", "pybind11>=2.10.0", "setuptools", "numpy"]

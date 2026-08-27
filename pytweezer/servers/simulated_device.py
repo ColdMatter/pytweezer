@@ -17,14 +17,17 @@ real class changes.
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("simulated device")
 
 
-def public_methods(real_cls: type, *, exclude: Iterable[str] = ()) -> dict[str, Callable]:
+def public_methods(
+    real_cls: type, *, exclude: Iterable[str] = ()
+) -> dict[str, Callable]:
     """Return ``{name: unbound function}`` for every public method of ``real_cls``.
 
     Inspects the class itself, not an instance, so building this mapping

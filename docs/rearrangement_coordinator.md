@@ -43,9 +43,11 @@ Rb Rearrangement Rig            (composite: has a "devices" sub-dict)
 Addressing (see `docs/device_framework.md` for the general rule):
 
 ```python
-slm   = get_device("Rb SLM")                 # the SLM on its own
-coord = get_device("Rb Rearrangement Rig")   # the composite -> its coordinator
-coord.initialise(data1, data2, array_shape1, array_shape2, d0, fps, threshold, grid_positions, roi)
+slm = get_device("Rb SLM")  # the SLM on its own
+coord = get_device("Rb Rearrangement Rig")  # the composite -> its coordinator
+coord.initialise(
+    data1, data2, array_shape1, array_shape2, d0, fps, threshold, grid_positions, roi
+)
 img0, img1 = (r := coord.arm_rearrangement())["img0"], r["img1"]
 ```
 
@@ -72,13 +74,13 @@ clear error where the GPU stack is absent.
 `arm_rearrangement` is:
 
 ```python
-self.slm.update_mask(pm_init_uint8)                      # load initial array
-img0 = self.camera.acquire_n_frames(1)[0]                # occupancy image
-occ  = an.morphological_tophat_high_pass(img0, 10)       # background subtract
+self.slm.update_mask(pm_init_uint8)  # load initial array
+img0 = self.camera.acquire_n_frames(1)[0]  # occupancy image
+occ = an.morphological_tophat_high_pass(img0, 10)  # background subtract
 occ_mask = np.fliplr(an.sum_pixel_values(occ, ...)).flatten() > threshold
 sequence, _ = PM.generate_rearrangement_sequence(terms1, terms2, occ_mask, d0=d0)
-self.slm.run_sequence(sequence, fps=fps)                 # play to SLM
-img1 = self.camera.acquire_n_frames(1)[0]                # reset image
+self.slm.run_sequence(sequence, fps=fps)  # play to SLM
+img1 = self.camera.acquire_n_frames(1)[0]  # reset image
 return img0, img1
 ```
 
@@ -98,7 +100,7 @@ deterministic-timing path is to preload it into the SLM's on-board memory and cl
 it out with the SLM's external trigger instead:
 
 ```python
-self.slm.preload_sequence(sequence)      # DMA all frames to on-board memory
+self.slm.preload_sequence(sequence)  # DMA all frames to on-board memory
 # ... arm the SLM's external trigger; MotMaster/experiment clocks each frame ...
 ```
 

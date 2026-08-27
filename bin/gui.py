@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 """
 Role-based tabbed GUIs for pytweezer.
 
@@ -44,7 +43,6 @@ from bin.managed_panel import ControlPanel, DevicesPanel
 from pytweezer.GUI.applet_launcher import AppletLauncher
 from pytweezer.GUI.streammonitor import make_stream_monitor
 from pytweezer.GUI.theme import DARK_STYLESHEET
-
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer GUI")
@@ -71,6 +69,7 @@ def _safe_panel(label, factory):
 # Shared tabbed window shell
 # --------------------------------------------------------------------------- #
 
+
 class TabbedGUI(QMainWindow):
     """A titled main window hosting each panel in a dock widget.
 
@@ -89,7 +88,9 @@ class TabbedGUI(QMainWindow):
         self.setDockNestingEnabled(True)
         # Tabbed docks default to a bottom tab bar; put it on top to match the
         # conventional tab-widget look.
-        self.setTabPosition(Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
+        self.setTabPosition(
+            Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North
+        )
         # QMainWindow always reserves a central area; a zero-size placeholder
         # lets the tabified docks fill the window like a plain tab widget.
         central = QWidget()
@@ -160,24 +161,44 @@ class TabbedGUI(QMainWindow):
 # GUI builders and entry points
 # --------------------------------------------------------------------------- #
 
+
 def build_gui(server: bool) -> TabbedGUI:
-    from pytweezer.GUI.property_editor import PropEdit
     from pytweezer.GUI.analysismanager import AnalysisManager
+    from pytweezer.GUI.property_editor import PropEdit
 
     name = "Server" if server else "Client"
-    
+
     return TabbedGUI(
         f"PyTweezer {name}",
         [
-            ("Servers", _safe_panel("Servers", lambda: ControlPanel("server", "Servers", controllable=server))),
+            (
+                "Servers",
+                _safe_panel(
+                    "Servers",
+                    lambda: ControlPanel("server", "Servers", controllable=server),
+                ),
+            ),
             ("Devices", _safe_panel("Devices", lambda: DevicesPanel("device"))),
-            ("Loggers", _safe_panel("Loggers", lambda: ControlPanel("logger", "Loggers", controllable=server))),
-            ("Streams", _safe_panel("Streams", lambda: make_stream_monitor("Stream Monitor"))),
-            ("Applets", _safe_panel("Applets", lambda: AppletLauncher("Applet Launcher"))),
+            (
+                "Loggers",
+                _safe_panel(
+                    "Loggers",
+                    lambda: ControlPanel("logger", "Loggers", controllable=server),
+                ),
+            ),
+            (
+                "Streams",
+                _safe_panel("Streams", lambda: make_stream_monitor("Stream Monitor")),
+            ),
+            (
+                "Applets",
+                _safe_panel("Applets", lambda: AppletLauncher("Applet Launcher")),
+            ),
             ("Analysis", _safe_panel("Analysis", lambda: AnalysisManager("Analysis"))),
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],
     )
+
 
 def build_server_gui():
     return build_gui(True)

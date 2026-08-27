@@ -31,7 +31,7 @@ class ImageStats(ImageAnalysis):
         values = np.asarray(data, dtype=np.float64)
         n = int(values.size)
         if n == 0:
-            return None
+            return
 
         mean = float(values.mean())
         std = float(values.std())
@@ -50,7 +50,7 @@ class ImageStats(ImageAnalysis):
             stats["timestamp"] = head["timestamp"]
 
         self.dataq.send(stats, None)
-        return None
+        return
 
 
 if __name__ == "__main__":

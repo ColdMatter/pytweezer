@@ -1,18 +1,16 @@
 import argparse
 import copy
 import threading
-from typing import Any, Optional
+from typing import Any
 
 import zmq
 from PyQt6 import QtCore
 from PyQt6.QtCore import QDateTime, Qt
 
+from pytweezer.configuration.config import get_config
 from pytweezer.GUI.models import PrepModel, ScheduleModel
 
-from pytweezer.servers.configreader import ConfigReader
-
-cr = ConfigReader.getConfiguration()
-host = cr["Servers"]["Model Sync"].get("host", "10.59.3.1")
+host = get_config()["Servers"]["Model Sync"].get("host", "10.59.3.1")
 
 
 class ModelSyncServer:
@@ -21,7 +19,7 @@ class ModelSyncServer:
         bind_host: str = host,
         command_port: int = 6010,
         publish_port: int = 6011,
-        models: Optional[dict[str, dict[str, Any]]] = None,
+        models: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self.bind_host = bind_host
         self.command_port = command_port
@@ -59,11 +57,11 @@ class ModelSyncServer:
             "data": copy.deepcopy(model_entry["data"]),
         }
 
-    def _set_data(self, model_name: str, row_or_key: Any, field: str, value: Any) -> dict[str, Any]:
+    def _set_data(
+        self, model_name: str, row_or_key: Any, field: str, value: Any
+    ) -> dict[str, Any]:
         model_entry = self._validate_model(model_name)
-        if model_entry["kind"] == "dict":
-            model_entry["data"][row_or_key][field] = value
-        elif model_entry["kind"] == "list":
+        if model_entry["kind"] == "dict" or model_entry["kind"] == "list":
             model_entry["data"][row_or_key][field] = value
         else:
             raise ValueError(f"Unsupported model kind '{model_entry['kind']}'")
@@ -81,9 +79,7 @@ class ModelSyncServer:
 
     def _del_item(self, model_name: str, key: Any) -> dict[str, Any]:
         model_entry = self._validate_model(model_name)
-        if model_entry["kind"] == "dict":
-            del model_entry["data"][key]
-        elif model_entry["kind"] == "list":
+        if model_entry["kind"] == "dict" or model_entry["kind"] == "list":
             del model_entry["data"][key]
         else:
             raise ValueError(f"Unsupported model kind '{model_entry['kind']}'")
@@ -134,7 +130,9 @@ class ModelSyncServer:
             return self._list_append(model_name, request.get("value"))
 
         if command == "list_insert":
-            return self._list_insert(model_name, request.get("index"), request.get("value"))
+            return self._list_insert(
+                model_name, request.get("index"), request.get("value")
+            )
 
         if command == "shutdown":
             self._running = False
@@ -334,7 +332,10 @@ class SyncedPrepModel(PrepModel):
             if col == 7:
                 value = value.toString()
             if self.backing_store[k]["status"] != "Sleeping":
-                if QDateTime.fromString(self.backing_store[k]["dueDateTime"]) <= QDateTime.currentDateTime():
+                if (
+                    QDateTime.fromString(self.backing_store[k]["dueDateTime"])
+                    <= QDateTime.currentDateTime()
+                ):
                     status_value = "Queued"
                 else:
                     status_value = "Waiting"
@@ -364,7 +365,9 @@ class SyncedPrepModel(PrepModel):
             raise RuntimeError(response)
 
     def append(self, value: dict[str, Any]) -> None:
-        response = self._sync.apply_operation({"command": "list_append", "value": value})
+        response = self._sync.apply_operation(
+            {"command": "list_append", "value": value}
+        )
         if not response.get("ok"):
             raise RuntimeError(response)
 
@@ -377,8 +380,8 @@ class SyncedPrepModel(PrepModel):
 
 
 def run_model_sync_server(
-    schedule_data: Optional[dict[Any, dict[str, Any]]] = None,
-    prep_data: Optional[list[dict[str, Any]]] = None,
+    schedule_data: dict[Any, dict[str, Any]] | None = None,
+    prep_data: list[dict[str, Any]] | None = None,
     command_port: int = 6010,
     publish_port: int = 6011,
 ) -> None:
@@ -397,8 +400,12 @@ def run_model_sync_server(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run table-model sync server")
     # parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind")
-    parser.add_argument("--command-port", type=int, default=6010, help="Command TCP port")
-    parser.add_argument("--publish-port", type=int, default=6011, help="Publish TCP port")
+    parser.add_argument(
+        "--command-port", type=int, default=6010, help="Command TCP port"
+    )
+    parser.add_argument(
+        "--publish-port", type=int, default=6011, help="Publish TCP port"
+    )
     args, _unknown = parser.parse_known_args()
 
     run_model_sync_server(

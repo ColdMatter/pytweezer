@@ -44,7 +44,9 @@ def settings_dir(tmp_path):
     from PyQt6.QtCore import QSettings
 
     previous = QSettings.defaultFormat()
-    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
+    QSettings.setPath(
+        QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path)
+    )
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
     yield tmp_path
     QSettings.setDefaultFormat(previous)
@@ -76,6 +78,7 @@ def make_launcher(name="TestLauncher", applets=None, active=None, props=None, qt
 # --------------------------------------------------------------------------- #
 # Local active-set persistence
 # --------------------------------------------------------------------------- #
+
 
 def test_active_set_round_trips_through_local_settings(settings_dir):
     launcher = make_launcher(active={"Live Plot", "Image Monitor"})
@@ -134,6 +137,7 @@ def test_set_active_persists_locally_and_not_to_properties(settings_dir):
 # Startup: launch only what this machine was running
 # --------------------------------------------------------------------------- #
 
+
 def test_start_active_applets_starts_only_the_locally_active_ones(settings_dir):
     launcher = make_launcher(
         applets={
@@ -168,6 +172,7 @@ def test_start_active_applets_prunes_applets_deleted_elsewhere(settings_dir):
 # --------------------------------------------------------------------------- #
 # Stop vs shutdown
 # --------------------------------------------------------------------------- #
+
 
 def test_shutdown_terminates_children_but_keeps_the_active_set(settings_dir, qapp):
     """Closing the GUI must not erase what was running, or nothing auto-starts."""
@@ -224,6 +229,7 @@ def test_applet_that_exits_on_its_own_is_forgotten(settings_dir):
 # --------------------------------------------------------------------------- #
 # Shared list carries no running-state
 # --------------------------------------------------------------------------- #
+
 
 def test_load_applets_strips_a_legacy_active_flag():
     props = FakeProps(

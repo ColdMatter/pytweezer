@@ -6,15 +6,13 @@ import socket
 from pathlib import Path
 from typing import Any
 
-
 _LOG_TOPIC = "Logs"
 _ENV_LOG_LEVEL = "PYTWEEZER_LOG_LEVEL"
 _LOG_DIR_ENV = "PYTWEEZER_LOG_DIR"
 _LOG_FILE_PREFIX = "pytweezer"
 _LOG_FILE_EXTENSION = ".jsonl"
 _DEFAULT_FORMAT = (
-    f"%(asctime)s | %(levelname)-8s | {socket.gethostname()} | "
-    "%(name)s | %(message)s"
+    f"%(asctime)s | %(levelname)-8s | {socket.gethostname()} | %(name)s | %(message)s"
 )
 _DEFAULT_DATEFMT = "%Y-%m-%d %H:%M:%S"
 
@@ -104,8 +102,6 @@ class DailyJsonFileHandler(logging.Handler):
                 handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
         except Exception:
             self.handleError(record)
-
-
 
 
 def configure_logging(level: str | None = None) -> None:

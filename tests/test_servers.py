@@ -11,7 +11,6 @@ import pytest
 from pytweezer.servers import device_client, device_server
 from pytweezer.servers.reachability import is_reachable
 
-
 # --------------------------------------------------------------------------- #
 # device_server: name resolution
 # --------------------------------------------------------------------------- #
@@ -34,11 +33,7 @@ _FAKE_DEVICES = {
 
 @pytest.fixture
 def fake_config(monkeypatch):
-    monkeypatch.setattr(
-        device_server.ConfigReader,
-        "getConfiguration",
-        staticmethod(lambda: _FAKE_DEVICES),
-    )
+    monkeypatch.setattr(device_server, "get_config", lambda: _FAKE_DEVICES)
     return _FAKE_DEVICES
 
 
@@ -70,6 +65,7 @@ def test_resolve_device_unknown_lists_available(fake_config):
 # --------------------------------------------------------------------------- #
 # device_server: build_spec class loading and error handling
 # --------------------------------------------------------------------------- #
+
 
 def test_build_spec_missing_class_key():
     with pytest.raises(KeyError, match="no 'class'"):
@@ -131,8 +127,13 @@ def test_build_spec_sim_class_used_when_simulating():
 #: A sub-device whose backend class cannot even be imported, standing in for any
 #: device that is absent at build time (no hardware, missing driver library, ...).
 _UNAVAILABLE = {"class": "no.such.module:Nope"}
-_WORKING_SLM = {"class": "pytweezer.drivers.slm:SimulatedSLM", "teardown": "close",
-                "role": "slm", "width": 8, "height": 8}
+_WORKING_SLM = {
+    "class": "pytweezer.drivers.slm:SimulatedSLM",
+    "teardown": "close",
+    "role": "slm",
+    "width": 8,
+    "height": 8,
+}
 
 
 def _rig(sub_confs, coordinator=None):
@@ -212,13 +213,10 @@ def test_composite_still_rejects_a_nested_composite():
 # device_client
 # --------------------------------------------------------------------------- #
 
+
 @pytest.fixture
 def fake_client_config(monkeypatch):
-    monkeypatch.setattr(
-        device_client.ConfigReader,
-        "getConfiguration",
-        staticmethod(lambda: _FAKE_DEVICES),
-    )
+    monkeypatch.setattr(device_server, "get_config", lambda: _FAKE_DEVICES)
 
 
 def test_get_device_config_found(fake_client_config):
@@ -278,9 +276,9 @@ def test_get_device_overrides_win_over_config(fake_client_config, monkeypatch):
 
 def test_get_device_no_port_raises(monkeypatch):
     monkeypatch.setattr(
-        device_client.ConfigReader,
-        "getConfiguration",
-        staticmethod(lambda: {"Devices": {"NoPort": {"host": "1.2.3.4"}}}),
+        device_server,
+        "get_config",
+        lambda: {"Devices": {"NoPort": {"host": "1.2.3.4"}}},
     )
     with pytest.raises(ValueError, match="no 'port' configured"):
         device_client.get_device("NoPort")
@@ -304,9 +302,9 @@ def test_get_device_async_uses_config_host_and_port(fake_client_config, monkeypa
 
 def test_get_device_async_no_port_raises(monkeypatch):
     monkeypatch.setattr(
-        device_client.ConfigReader,
-        "getConfiguration",
-        staticmethod(lambda: {"Devices": {"NoPort": {"host": "1.2.3.4"}}}),
+        device_server,
+        "get_config",
+        lambda: {"Devices": {"NoPort": {"host": "1.2.3.4"}}},
     )
     import asyncio
 
@@ -340,11 +338,7 @@ _COMPOSITE_DEVICES = {
 
 @pytest.fixture
 def composite_client_config(monkeypatch):
-    monkeypatch.setattr(
-        device_client.ConfigReader,
-        "getConfiguration",
-        staticmethod(lambda: _COMPOSITE_DEVICES),
-    )
+    monkeypatch.setattr(device_server, "get_config", lambda: _COMPOSITE_DEVICES)
 
 
 @pytest.fixture
@@ -372,12 +366,16 @@ def test_get_device_sub_device_uses_composite_endpoint(
     assert captured_rpc == {"host": "1.2.3.9", "port": 6000, "target_name": target}
 
 
-def test_get_device_composite_resolves_to_coordinator(composite_client_config, captured_rpc):
+def test_get_device_composite_resolves_to_coordinator(
+    composite_client_config, captured_rpc
+):
     device_client.get_device("Rb Feedback Rig")
     assert captured_rpc["target_name"] == "coordinator"
 
 
-def test_get_device_plain_device_still_uses_autotarget(composite_client_config, captured_rpc):
+def test_get_device_plain_device_still_uses_autotarget(
+    composite_client_config, captured_rpc
+):
     device_client.get_device("Rb HamCam")
     assert captured_rpc["target_name"] is device_client.AutoTarget
     assert captured_rpc["port"] == 5000
@@ -392,7 +390,9 @@ def test_get_device_config_finds_sub_device(composite_client_config):
     assert device_client.get_device_config("Rb Feedback DAC")["role"] == "dac"
 
 
-def test_get_device_coordinatorless_composite_names_its_sub_devices(monkeypatch, captured_rpc):
+def test_get_device_coordinatorless_composite_names_its_sub_devices(
+    monkeypatch, captured_rpc
+):
     conf = {
         "Devices": {
             "Rig": {
@@ -402,9 +402,7 @@ def test_get_device_coordinatorless_composite_names_its_sub_devices(monkeypatch,
             }
         }
     }
-    monkeypatch.setattr(
-        device_client.ConfigReader, "getConfiguration", staticmethod(lambda: conf)
-    )
+    monkeypatch.setattr(device_server, "get_config", lambda: conf)
     with pytest.raises(KeyError) as exc:
         device_client.get_device("Rig")
     assert "has no coordinator" in str(exc.value)
@@ -414,6 +412,7 @@ def test_get_device_coordinatorless_composite_names_its_sub_devices(monkeypatch,
 # --------------------------------------------------------------------------- #
 # device_status.build_snapshot (state machine, is_reachable stubbed)
 # --------------------------------------------------------------------------- #
+
 
 def _status_server(devices, reachable, monkeypatch, targets=None):
     from pytweezer.servers import device_status
@@ -433,7 +432,9 @@ def _status_server(devices, reachable, monkeypatch, targets=None):
 
 def test_build_snapshot_disabled_device(monkeypatch):
     server = _status_server(
-        {"Cam": {"active": False, "host": "h", "port": 1}}, reachable=True, monkeypatch=monkeypatch
+        {"Cam": {"active": False, "host": "h", "port": 1}},
+        reachable=True,
+        monkeypatch=monkeypatch,
     )
     snap = server.build_snapshot()
     assert snap["type"] == "device_status"
@@ -443,14 +444,18 @@ def test_build_snapshot_disabled_device(monkeypatch):
 
 def test_build_snapshot_missing_host_or_port_is_down(monkeypatch):
     server = _status_server(
-        {"Cam": {"active": True, "host": None, "port": 1}}, reachable=True, monkeypatch=monkeypatch
+        {"Cam": {"active": True, "host": None, "port": 1}},
+        reachable=True,
+        monkeypatch=monkeypatch,
     )
     assert server.build_snapshot()["devices"]["Cam"]["state"] == "down"
 
 
 def test_build_snapshot_up_when_reachable(monkeypatch):
     server = _status_server(
-        {"Cam": {"active": True, "host": "h", "port": 1}}, reachable=True, monkeypatch=monkeypatch
+        {"Cam": {"active": True, "host": "h", "port": 1}},
+        reachable=True,
+        monkeypatch=monkeypatch,
     )
     entry = server.build_snapshot()["devices"]["Cam"]
     assert entry["state"] == "up"
@@ -459,7 +464,9 @@ def test_build_snapshot_up_when_reachable(monkeypatch):
 
 def test_build_snapshot_down_when_unreachable(monkeypatch):
     server = _status_server(
-        {"Cam": {"active": True, "host": "h", "port": 1}}, reachable=False, monkeypatch=monkeypatch
+        {"Cam": {"active": True, "host": "h", "port": 1}},
+        reachable=False,
+        monkeypatch=monkeypatch,
     )
     assert server.build_snapshot()["devices"]["Cam"]["state"] == "down"
 
@@ -481,7 +488,9 @@ _STATUS_RIG = {
 
 def test_build_snapshot_composite_reports_each_sub_device(monkeypatch):
     server = _status_server(
-        _STATUS_RIG, reachable=True, monkeypatch=monkeypatch,
+        _STATUS_RIG,
+        reachable=True,
+        monkeypatch=monkeypatch,
         targets={"rigcam", "rigslm", "coordinator"},
     )
     devices = server.build_snapshot()["devices"]
@@ -489,8 +498,11 @@ def test_build_snapshot_composite_reports_each_sub_device(monkeypatch):
     assert devices["Rig"]["children"] == ["Rig Cam", "Rig SLM"]
     assert devices["Rig Cam"]["state"] == "up"
     assert devices["Rig SLM"] == {
-        "state": "up", "host": "h", "port": 1,
-        "last_seen": devices["Rig SLM"]["last_seen"], "parent": "Rig",
+        "state": "up",
+        "host": "h",
+        "port": 1,
+        "last_seen": devices["Rig SLM"]["last_seen"],
+        "parent": "Rig",
     }
 
 
@@ -523,7 +535,9 @@ def test_build_snapshot_composite_reuses_targets_while_the_server_is_busy(monkey
     from pytweezer.servers import device_status
 
     server = _status_server(
-        _STATUS_RIG, reachable=True, monkeypatch=monkeypatch,
+        _STATUS_RIG,
+        reachable=True,
+        monkeypatch=monkeypatch,
         targets={"rigcam", "rigslm", "coordinator"},
     )
     server.build_snapshot()
@@ -546,6 +560,7 @@ def test_build_snapshot_composite_sub_devices_follow_a_down_rig(monkeypatch):
 # --------------------------------------------------------------------------- #
 # reachability (real local socket, no mocking)
 # --------------------------------------------------------------------------- #
+
 
 def test_is_reachable_true_against_listening_socket():
     srv = socket.socket()

@@ -1,15 +1,16 @@
 import argparse
+import sys
 
 import pylablib.devices.DCAM as dcam
-from sipyco.pc_rpc import Client as RPCClient, simple_server_loop
+from sipyco.pc_rpc import Client as RPCClient
+from sipyco.pc_rpc import simple_server_loop
 
+from pytweezer.configuration.config import get_config
 from pytweezer.drivers.camera_base import (
     Camera,
     requires_camera,
     simulated_camera_for,
 )
-from pytweezer.servers.configreader import ConfigReader
-
 from pytweezer.logging_utils import get_logger
 
 IMAGE_DIRECTORY = (
@@ -138,7 +139,7 @@ class ImagEMX2CameraClient(RPCClient):
         timeout: float | None = 5.0,
     ):
 
-        conf = ConfigReader.getConfiguration()
+        conf = get_config()
         server_conf = conf.get("Devices", {}).get(server_name, {})
 
         self.host = host or server_conf.get("host", "127.0.0.1")
@@ -187,9 +188,7 @@ def run_server(
 def main():
     parser = argparse.ArgumentParser(description="ImagEM X2 sipyco RPC server launcher")
     parser.add_argument(
-        "name",
-        help="process-manager label or explicit server name",
-        default=None
+        "name", help="process-manager label or explicit server name", default=None
     )
     parser.add_argument(
         "--stream-name",
@@ -209,10 +208,9 @@ def main():
     )
     args = parser.parse_args()
 
-    conf = ConfigReader.getConfiguration()
+    conf = get_config()
 
     if args.name is not None:
-
         server_name = args.name
         server_conf = conf["Devices"][server_name]
         host = server_conf["host"]
@@ -230,8 +228,10 @@ def main():
         stream_name = args.stream_name
 
     if host is None or port is None:
-        print("Error: RPC host and port must be specified either via command-line or configuration.")
-        exit(1)
+        print(
+            "Error: RPC host and port must be specified either via command-line or configuration."
+        )
+        sys.exit(1)
 
     print(
         f"Starting ImagEM X2 Camera server with configuration:\n"

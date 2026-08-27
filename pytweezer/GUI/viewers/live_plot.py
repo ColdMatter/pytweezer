@@ -7,8 +7,8 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6 import QtWidgets
 
-from pytweezer.servers import DataClient
 from pytweezer.GUI.applet import Applet, run_applet
+from pytweezer.servers import DataClient
 
 
 class LivePlot(Applet):

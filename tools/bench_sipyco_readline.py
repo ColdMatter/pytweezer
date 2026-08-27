@@ -46,13 +46,17 @@ def main():
     srv = subprocess.Popen([sys.executable, __file__, "server"])
     time.sleep(3)
     try:
-        print(f"{'frames':>7} {'raw MB':>7} {'stock ms':>11} {'patched ms':>12} {'speedup':>9}")
+        print(
+            f"{'frames':>7} {'raw MB':>7} {'stock ms':>11} {'patched ms':>12} {'speedup':>9}"
+        )
         for n in (1, 10, 50, 100):
             out = {}
             for which in ("stock", "patched"):
                 r = subprocess.run(
                     [sys.executable, __file__, "client", which, str(n)],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
                 if r.returncode != 0:
                     print(r.stdout, r.stderr, file=sys.stderr)

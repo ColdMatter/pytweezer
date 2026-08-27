@@ -1,26 +1,22 @@
-import PyQt6
-
-import pyqtgraph as pg
+import numpy
+import pyqtgraph.parametertree.parameterTypes as pTypes
+from pyqtgraph.parametertree import Parameter, ParameterItem, registerParameterType
 from pyqtgraph.Qt import QtCore, QtGui
 
-import pyqtgraph.parametertree.parameterTypes as pTypes
-from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
 
-import re, sys, os
-import numpy
-
-#==================================================================================================
+# ==================================================================================================
 class table_parameterItem(pTypes.WidgetParameterItem):
     """
-    A table widget used to edit a numpy record array. 
-    
+    A table widget used to edit a numpy record array.
+
     ================= ==================================================================
     **Arguments:**
-    value             (numpy RecArray) initial value of the recArray. It must be provided 
+    value             (numpy RecArray) initial value of the recArray. It must be provided
                       to define the size and structure of the table.
     others            any other arguments are passed to *Parameter*
     ================= ==================================================================
     """
+
     def __init__(self, param, depth):
         pTypes.WidgetParameterItem.__init__(self, param, depth)
         self.hideWidget = False
@@ -35,40 +31,40 @@ class table_parameterItem(pTypes.WidgetParameterItem):
         nr = value.size
         nc = len(self.dtype.names)
         w = QtGui.QTableWidget(nr, nc)
-        #w = pg.TableWidget(nr, nc)
-        
+        # w = pg.TableWidget(nr, nc)
+
         hheader = QtGui.QHeaderView(QtCore.Qt.Orientation.Horizontal)
         hheader.setResizeMode(QtGui.QHeaderView.ResizeToContents)
         w.setHorizontalHeader(hheader)
         w.setHorizontalHeaderLabels(value.dtype.names)
-            
+
         w.sigChanged = w.cellChanged
         w.value = self.value
         w.setValue = self.setValue
 
         self.widget = w
         return w
-        
+
     def value(self):
         w = self.widget
-        
+
         nr = w.rowCount()
         arr = numpy.zeros((nr,), dtype=self.dtype)
 
-        try:        
-            for ir in xrange(nr):
+        try:
+            for ir in range(nr):
                 for ic, n in enumerate(self.dtype.names):
-                    arr[n][ir] =  w.item(ir, ic).text()
+                    arr[n][ir] = w.item(ir, ic).text()
         except:
             arr = self.param.opts.get("value")
-        
+
         return arr
-            
+
     def setValue(self, arr):
         nr = arr.size
         w = self.widget
-        
-        for ir in xrange(nr):
+
+        for ir in range(nr):
             for ic, n in enumerate(self.dtype.names):
                 item = QtGui.QTableWidgetItem(str(arr[n][ir]))
                 w.setItem(ir, ic, item)
@@ -80,12 +76,15 @@ class table_parameterItem(pTypes.WidgetParameterItem):
         try:
             if force or numpy.any(val != self.widget.value()):
                 self.widget.setValue(val)
-            self.updateDisplayLabel(val)  ## always make sure label is updated, even if values match!
+            self.updateDisplayLabel(
+                val
+            )  ## always make sure label is updated, even if values match!
         finally:
             self.widget.sigChanged.connect(self.widgetValueChanged)
         self.updateDefaultBtn()
-    
-#==================================================================================================
+
+
+# ==================================================================================================
 class table_parameter(Parameter):
     itemClass = table_parameterItem
 
@@ -100,21 +99,22 @@ class table_parameter(Parameter):
         try:
             if blockSignal is not None:
                 self.sigValueChanged.disconnect(blockSignal)
-            if numpy.all(self.opts['value'] == value):
+            if numpy.all(self.opts["value"] == value):
                 return value
-            self.opts['value'] = value
+            self.opts["value"] = value
             self.sigValueChanged.emit(self, value)
         finally:
             if blockSignal is not None:
                 self.sigValueChanged.connect(blockSignal)
-            
+
         return value
 
     def valueIsDefault(self):
         """Returns True if this parameter's value is equal to the default value."""
         return numpy.all(self.value() == self.defaultValue())
 
-registerParameterType('table', table_parameter, override=True)
+
+registerParameterType("table", table_parameter, override=True)
 
 # #==================================================================================================
 # # Replace original getValues of class Parameter. this new function returns more
@@ -129,6 +129,5 @@ registerParameterType('table', table_parameter, override=True)
 #         else:
 #             vals[ch.name()] = ch.value()
 #     return vals
-# 
+#
 # Parameter.getValues = getValues
-

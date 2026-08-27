@@ -1,32 +1,33 @@
-
+from PyQt5 import QtCore
+from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
-from pytweezer.GUI.pytweezerQt import BWidget, BFrame
-from PyQt5.QtCore import *
-import PyQt5.QtCore as QtCore
+
+from pytweezer.GUI.property_editor import PropSelector
+from pytweezer.GUI.pytweezerQt import BFrame
 from pytweezer.GUI.subscription_editor import SubscriptionEditor
 from pytweezer.GUI.viewers.archive.live_plot import PlotDataEditor
-from pytweezer.GUI.property_editor import PropEdit, PropSelector
 from pytweezer.servers import DataClient, Properties
 
+
 class ParameterBox(BFrame):
-    ''' Show individual parameters '''
-    def __init__(self,name,parent=None):
-        super().__init__(name,parent)
+    """Show individual parameters"""
+
+    def __init__(self, name, parent=None):
+        super().__init__(name, parent)
         self.setFrameStyle(QFrame.StyledPanel | QFrame.Plain)
         self.setLineWidth(1)
-        self.datadict={}
+        self.datadict = {}
         self.stream_data = {}
         self.propname = name
         self.props = Properties(self.propname)
-        self.datalist = self.props.get('ydata', [''])
+        self.datalist = self.props.get("ydata", [""])
         self.dataname = self.datalist[0]
-
 
         # set names
         self.name = name
         self.datastream = DataClient(self.propname)
-        self.subscription_names = self.props.get('datastreams', [''])
+        self.subscription_names = self.props.get("datastreams", [""])
         self.dataBoxes = []
         self.row_config = []
 
@@ -38,7 +39,7 @@ class ParameterBox(BFrame):
             layout.addWidget(box)
         self.setLayout(layout)
 
-        #Context Menu
+        # Context Menu
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.openMenu)
         self.updateSubscription()
@@ -47,19 +48,19 @@ class ParameterBox(BFrame):
         timer = QTimer(self)
         timer.timeout.connect(self.setNewData)
         timer.start(500)
-        self.timer=timer
+        self.timer = timer
 
     def setNewData(self):
         got_new = False
         while self.datastream.has_new_data():
-            recvmsg=self.datastream.recv()
+            recvmsg = self.datastream.recv()
             if recvmsg is None:
                 continue
-            A=None
-            if len(recvmsg)==2:
-                msg,di=recvmsg
-            elif len(recvmsg)==3:
-                msg,di,A=recvmsg
+            A = None
+            if len(recvmsg) == 2:
+                msg, di = recvmsg
+            elif len(recvmsg) == 3:
+                msg, di, A = recvmsg
             else:
                 continue
             if isinstance(di, dict):
@@ -71,41 +72,43 @@ class ParameterBox(BFrame):
             self._update_rows()
 
     def openMenu(self, position):
-        menu=QMenu()
-        subscribe_menu=menu.addAction('subscriptions')
+        menu = QMenu()
+        subscribe_menu = menu.addAction("subscriptions")
         subscribe_menu.triggered.connect(self.subscribe_window)
-        subscribe_menu=menu.addAction('selectData')
+        subscribe_menu = menu.addAction("selectData")
         subscribe_menu.triggered.connect(self.dataSelectDialog)
         menu.exec_(self.mapToGlobal(position))
 
     def dataSelectDialog(self):
         d = QDialog()
-        layout=QVBoxLayout()
+        layout = QVBoxLayout()
         d.setWindowTitle("Select Data")
-        editor = PlotDataEditor(self.props, self.datadict, parent=self, preselect=self.dataname)
+        editor = PlotDataEditor(
+            self.props, self.datadict, parent=self, preselect=self.dataname
+        )
         layout.addWidget(editor)
         d.setLayout(layout)
         d.exec_()
 
         # update configured parameters and plot
         self.updateDataLists()
-        #self.updatePlotContent()
+        # self.updatePlotContent()
 
     def subscribe_window(self):
         d = QDialog()
-        layout=QVBoxLayout()
+        layout = QVBoxLayout()
         d.setWindowTitle("Subscriptions")
-        editor = SubscriptionEditor(self.props,'Data')
+        editor = SubscriptionEditor(self.props, "Data")
         layout.addWidget(editor)
         d.setLayout(layout)
-        #d.setWindowModality(QtGui.ApplicationModal)
+        # d.setWindowModality(QtGui.ApplicationModal)
         d.exec_()
 
         # after the window is closed, update all plot properties
         self.updateSubscription()
 
     def updateSubscription(self):
-        self.subscription_names = self.props.get('datastreams', [''])
+        self.subscription_names = self.props.get("datastreams", [""])
         stream_names = [s for s in self.subscription_names if isinstance(s, str) and s]
         # we first unsubsribe from the old datastream, then subsribe to the new one
         self.datastream.unsubscribe()
@@ -114,14 +117,16 @@ class ParameterBox(BFrame):
         self.stream_data = {}
 
     def updateDataLists(self):
-        self.datalist = self.props.get('ydata', [''])
+        self.datalist = self.props.get("ydata", [""])
         if len(self.datalist) == 0:
-            self.datalist = ['']
+            self.datalist = [""]
         self.dataname = self.datalist[0]
 
-        streams = [s for s in self.props.get('datastreams', ['']) if isinstance(s, str) and s]
+        streams = [
+            s for s in self.props.get("datastreams", [""]) if isinstance(s, str) and s
+        ]
         if len(streams) == 0:
-            streams = ['']
+            streams = [""]
 
         n_rows = max(len(streams), len(self.datalist))
         if len(self.datalist) == 1 and n_rows > 1:
@@ -129,11 +134,11 @@ class ParameterBox(BFrame):
         else:
             keys = list(self.datalist)
             while len(keys) < n_rows:
-                keys.append(keys[-1] if len(keys) > 0 else '')
+                keys.append(keys[-1] if len(keys) > 0 else "")
 
         stream_list = list(streams)
         while len(stream_list) < n_rows:
-            stream_list.append(stream_list[-1] if len(stream_list) > 0 else '')
+            stream_list.append(stream_list[-1] if len(stream_list) > 0 else "")
 
         self.row_config = list(zip(stream_list, keys))
         self._update_rows()
@@ -142,15 +147,17 @@ class ParameterBox(BFrame):
         for box in self.dataBoxes:
             box.hide()
 
-        for i, (stream_name, data_key) in enumerate(self.row_config[:len(self.dataBoxes)]):
+        for i, (stream_name, data_key) in enumerate(
+            self.row_config[: len(self.dataBoxes)]
+        ):
             box = self.dataBoxes[i]
-            label = stream_name if stream_name else 'stream'
+            label = stream_name if stream_name else "stream"
             if data_key:
-                label = f'{label}: {data_key}'
+                label = f"{label}: {data_key}"
             box.label.setText(label)
 
             di = self.stream_data.get(stream_name, None)
-            val = '---'
+            val = "---"
             if isinstance(di, dict) and data_key in di:
                 raw = di[data_key]
                 if isinstance(raw, (float, int)):
@@ -160,15 +167,16 @@ class ParameterBox(BFrame):
             box.value.setText(val)
             box.show()
 
+
 class ImageDataBox(BFrame):
-    def __init__(self,name,parent=None):
-        super().__init__(name,parent)
+    def __init__(self, name, parent=None):
+        super().__init__(name, parent)
         self.setFrameStyle(QFrame.StyledPanel | QFrame.Plain)
         self.setLineWidth(1)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
         self.propname = name
         self.props = Properties(self.propname)
-        self.datalist = self.props.get('ydata', [''])
+        self.datalist = self.props.get("ydata", [""])
         self.dataname = self.datalist[0]
         self.imDataDict = {}
         self.dataBoxes = []
@@ -186,10 +194,9 @@ class ImageDataBox(BFrame):
         self.customContextMenuRequested.connect(self.openMenu)
         self.updateSubscription()
 
-
     def openMenu(self, position):
-        menu=QMenu()
-        subscribe_menu=menu.addAction('subscriptions')
+        menu = QMenu()
+        subscribe_menu = menu.addAction("subscriptions")
         subscribe_menu.triggered.connect(self.subscribe_window)
         # subscribe_menu=menu.addAction('selectData')
         # subscribe_menu.triggered.connect(self.dataSelectDialog)
@@ -199,12 +206,14 @@ class ImageDataBox(BFrame):
 
     def subscribe_window(self):
         d = QDialog()
-        layout=QVBoxLayout()
+        layout = QVBoxLayout()
         d.setWindowTitle("Subscriptions")
-        editor = SubscriptionEditor(self.props, category='List', fullList=self.imDataDict.keys())
+        editor = SubscriptionEditor(
+            self.props, category="List", fullList=self.imDataDict.keys()
+        )
         layout.addWidget(editor)
         d.setLayout(layout)
-        #d.setWindowModality(QtGui.ApplicationModal)
+        # d.setWindowModality(QtGui.ApplicationModal)
         d.exec_()
 
         # after the window is closed, update all plot properties
@@ -219,9 +228,9 @@ class ImageDataBox(BFrame):
 
     def dataSelectDialog(self):
         d = QDialog()
-        layout=QHBoxLayout()
+        layout = QHBoxLayout()
         d.setWindowTitle("Select Data")
-        layout.addWidget(QLabel('y1: '))
+        layout.addWidget(QLabel("y1: "))
         dataCombo = QComboBox()
         for dataname in self.imDataDict.keys():
             dataCombo.addItem(dataname)
@@ -232,43 +241,44 @@ class ImageDataBox(BFrame):
 
         # update configured parameters and plot
         self.updateDataLists()
-        #self.updatePlotContent()
+        # self.updatePlotContent()
 
-    def setNewData(self,imDataDict):
+    def setNewData(self, imDataDict):
         for box in self.dataBoxes:
             box.hide()
         self.imDataDict = imDataDict
-        #print('datadict:',imDataDict)
-        streams = self.props.get('liststreams',[])
-        for i,key in enumerate(streams):
+        # print('datadict:',imDataDict)
+        streams = self.props.get("liststreams", [])
+        for i, key in enumerate(streams):
             box = self.dataBoxes[i]
             box.label.setText(key)
             val = imDataDict[key]
-            box.value.setText(str(round(val,5)))
+            box.value.setText(str(round(val, 5)))
             box.show()
-        #val = self.datadict[self.dataname]
-        #self.dataValue.setText(str(val))
+        # val = self.datadict[self.dataname]
+        # self.dataValue.setText(str(val))
 
     def setNewDataName(self, name):
         self.dataname = name
 
+
 class CamPropsBox(ImageDataBox):
-    def __init__(self,name,parent=None):
-        super().__init__(name,parent)
-        self.keyList = self.props.get('keyList',[])
-        self.camName = self.props.get('camName','Axial')
-        self.subtree = self.props.get('subtree','/Cameras/Axial/DefaultConfig/')
+    def __init__(self, name, parent=None):
+        super().__init__(name, parent)
+        self.keyList = self.props.get("keyList", [])
+        self.camName = self.props.get("camName", "Axial")
+        self.subtree = self.props.get("subtree", "/Cameras/Axial/DefaultConfig/")
 
         timer = QTimer(self)
         timer.timeout.connect(self.setNewData)
         timer.start(1000)
-        self.timer=timer
+        self.timer = timer
 
     def openMenu(self, position):
-        menu=QMenu()
-        subscribe_menu=menu.addAction('props')
+        menu = QMenu()
+        subscribe_menu = menu.addAction("props")
         subscribe_menu.triggered.connect(self.props_window)
-        subscribe_menu=menu.addAction('select camera')
+        subscribe_menu = menu.addAction("select camera")
         subscribe_menu.triggered.connect(self.cams_window)
         # subscribe_menu=menu.addAction('configure')
         # subscribe_menu.triggered.connect(self.configureWindow)
@@ -276,23 +286,25 @@ class CamPropsBox(ImageDataBox):
 
     def props_window(self):
         d = QDialog()
-        layout=QVBoxLayout()
+        layout = QVBoxLayout()
         d.setWindowTitle("Subscriptions")
         self.setNewSubtree()
-        editor = PropSelector(self.propname, self.props, subtree=self.subtree, parent=self)
+        editor = PropSelector(
+            self.propname, self.props, subtree=self.subtree, parent=self
+        )
         layout.addWidget(editor)
         d.setLayout(layout)
-        #d.setWindowModality(QtGui.ApplicationModal)
+        # d.setWindowModality(QtGui.ApplicationModal)
         d.exec_()
 
     def cams_window(self):
         d = QDialog()
-        layout=QHBoxLayout()
+        layout = QHBoxLayout()
         d.setWindowTitle("Select Camera")
-        layout.addWidget(QLabel('Camera Name:'))
+        layout.addWidget(QLabel("Camera Name:"))
         camCombo = QComboBox()
-        camlist = self.props.get('/Cameras',{})
-        #print(camlist.keys())
+        camlist = self.props.get("/Cameras", {})
+        # print(camlist.keys())
         for camName in camlist.keys():
             camCombo.addItem(camName)
         idx = camCombo.findText(self.camName)
@@ -303,40 +315,42 @@ class CamPropsBox(ImageDataBox):
         d.setLayout(layout)
         d.exec_()
 
-
     def setNewData(self):
         self.setNewSubtree()
-        if self.subtree != '':
+        if self.subtree != "":
             for box in self.dataBoxes:
                 box.hide()
-            self.keyList = self.props.get('keyList', [])
-            for i,key in enumerate(self.keyList):
+            self.keyList = self.props.get("keyList", [])
+            for i, key in enumerate(self.keyList):
                 box = self.dataBoxes[i]
                 if isinstance(key, str):
                     box.label.setText(key)
-                    val = self.props.get(self.subtree+key,'param not set')
+                    val = self.props.get(self.subtree + key, "param not set")
                     if isinstance(val, float) or isinstance(val, int):
                         box.value.setText(str(round(val, 1)))
                     elif isinstance(val, str):
                         box.value.setText(val)
                     else:
-                        box.value.setText('nan')
+                        box.value.setText("nan")
                     box.show()
         else:
-            print('no subtree set')
+            print("no subtree set")
 
     def setNewCamName(self, name):
-        self.props.set('camName', name)
+        self.props.set("camName", name)
         self.camName = name
         self.setNewSubtree()
 
     def setNewSubtree(self):
-        self.currentConfig = self.props.get('/Cameras/'+self.camName+'/Configuration_name', 'DefaultConfig')
-        self.subtree='/Cameras/'+self.camName+'/'+self.currentConfig+'/'
-        self.props.set('subtree', self.subtree)
+        self.currentConfig = self.props.get(
+            "/Cameras/" + self.camName + "/Configuration_name", "DefaultConfig"
+        )
+        self.subtree = "/Cameras/" + self.camName + "/" + self.currentConfig + "/"
+        self.props.set("subtree", self.subtree)
+
 
 class DataBox(QWidget):
-    def __init__(self,name='',value='',parent=None):
+    def __init__(self, name="", value="", parent=None):
         super().__init__(parent)
         self.qlayout = QHBoxLayout()
         self.label = QLabel(name)
@@ -347,4 +361,4 @@ class DataBox(QWidget):
         # set names
 
     def sizeHint(self):
-        return QtCore.QSize(200,200)
+        return QtCore.QSize(200, 200)

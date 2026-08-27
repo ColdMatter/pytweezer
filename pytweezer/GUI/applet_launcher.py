@@ -8,8 +8,8 @@ from PyQt6.QtCore import Qt
 
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
-from pytweezer.servers import tweezerpath
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers import tweezerpath
 
 logger = get_logger("Applet Launcher")
 
@@ -407,7 +407,7 @@ class AppletLauncher(BWidget):
             self._set_active(name, False)
             self._set_status(name, "stopped")
 
-        for name in self._applets.keys():
+        for name in self._applets:
             if name in self._processes:
                 self._set_status(name, "running")
 

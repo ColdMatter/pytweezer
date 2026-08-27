@@ -47,10 +47,8 @@ counterpart if you want to drive the servers with coroutines directly::
 from sipyco.pc_rpc import AsyncioClient, AutoTarget
 from sipyco.pc_rpc import Client as RPCClient
 
-from pytweezer.servers.configreader import ConfigReader
-from pytweezer.servers.device_server import resolve_address
-
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers.device_server import resolve_address
 
 logger = get_logger("device client")
 
@@ -147,7 +145,9 @@ def get_device(name, host=None, port=None, target_name=AutoTarget, timeout=None)
         Call ``.close_rpc()`` when finished to release the socket.
     """
     host, port, target_name = _resolve_endpoint(name, host, port, target_name)
-    logger.debug("Connecting to device %r at %s:%s (target %s)", name, host, port, target_name)
+    logger.debug(
+        "Connecting to device %r at %s:%s (target %s)", name, host, port, target_name
+    )
     try:
         return RPCClient(host, port, target_name=target_name, timeout=timeout)
     except ValueError as exc:

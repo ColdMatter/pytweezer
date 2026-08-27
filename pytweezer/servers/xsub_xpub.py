@@ -1,27 +1,28 @@
+import os
+import signal
+import sys
+import time
 from typing import Any
 
 import zmq
-import sys
-import os
-import signal
-import time
 
-sys.path.append('../../')
-sys.path.append('../')
-from pytweezer import *
-import json
+sys.path.append("../../")
+sys.path.append("../")
 import argparse
-from pytweezer.servers.configreader import ConfigReader
-from pytweezer.logging_utils import get_logger
 import threading
+
 from zmq.utils.monitor import recv_monitor_message
+
+from pytweezer import *
+from pytweezer.configuration.config import get_config
+from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.servers.xsub_xpub")
 
 EVENT_MAP = {}
 # print("Event names:")
 for name in dir(zmq):
-    if name.startswith('EVENT_'):
+    if name.startswith("EVENT_"):
         value = getattr(zmq, name)
         # print("%21s : %4i" % (name, value))
         EVENT_MAP[value] = name
@@ -46,7 +47,9 @@ def _terminate_stale_instances(instance_name: str, grace_s: float = 1.5) -> None
             cmdline_path = os.path.join(proc_dir, pid_str, "cmdline")
             try:
                 with open(cmdline_path, "rb") as f:
-                    cmdline = f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+                    cmdline = (
+                        f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+                    )
             except Exception:
                 continue
 
@@ -97,17 +100,19 @@ def _terminate_stale_instances(instance_name: str, grace_s: float = 1.5) -> None
             logger.warning("Failed SIGKILL to pid %s: %s", pid, error)
 
 
-def run_server(name, pubbinding_override=None, subbinding_override=None, kill_stale=True):
-    conf = ConfigReader.getConfiguration()
-    c = conf['Servers'][name]
-    host = c['host']
-    pub_port = c['pub_port']
-    sub_port = c['sub_port']
+def run_server(
+    name, pubbinding_override=None, subbinding_override=None, kill_stale=True
+):
+    conf = get_config()
+    c = conf["Servers"][name]
+    host = c["host"]
+    pub_port = c["pub_port"]
+    sub_port = c["sub_port"]
     pubbinding = pubbinding_override or f"tcp://{host}:{pub_port}"
     subbinding = subbinding_override or f"tcp://{host}:{sub_port}"
-    #print(name + " starting on")
-    #print('XSUB: ', subbinding)
-    #print('XPUB: ', pubbinding)
+    # print(name + " starting on")
+    # print('XSUB: ', subbinding)
+    # print('XPUB: ', pubbinding)
 
     if kill_stale:
         _terminate_stale_instances(name)
@@ -119,17 +124,17 @@ def run_server(name, pubbinding_override=None, subbinding_override=None, kill_st
     sock_pub.bind(pubbinding)
 
     pub_mon = sock_pub.get_monitor_socket()
-    pub_mon_thread = threading.Thread(target=event_monitor, args=(pub_mon, name, 'PUB'))
+    pub_mon_thread = threading.Thread(target=event_monitor, args=(pub_mon, name, "PUB"))
     pub_mon_thread.start()
     sub_mon = sock_sub.get_monitor_socket()
-    sub_mon_thread = threading.Thread(target=event_monitor, args=(sub_mon, name, 'SUB'))
+    sub_mon_thread = threading.Thread(target=event_monitor, args=(sub_mon, name, "SUB"))
     sub_mon_thread.start()
 
     # run server forever
     zmq.proxy(sock_sub, sock_pub)
 
     # clean up(never reached)
-    print("server {} cleanup was reached, the comment on line 30 lied".format(name))
+    print(f"server {name} cleanup was reached, the comment on line 30 lied")
     sock_sub.close()
     sock_pub.close()
     context.term()
@@ -140,12 +145,12 @@ def event_monitor(monitor: zmq.Socket, name, pub_sub) -> None:
         evt: dict[str, Any] = {}
         mon_evt = recv_monitor_message(monitor)
         evt.update(mon_evt)
-        evt['description'] = EVENT_MAP[evt['event']]
-        #if evt['event'] == zmq.EVENT_DISCONNECTED:
+        evt["description"] = EVENT_MAP[evt["event"]]
+        # if evt['event'] == zmq.EVENT_DISCONNECTED:
         #    logger.warning('%s %s Event: %s', name, pub_sub, evt)
-        #else:
+        # else:
         #    print(name, pub_sub, f"Event: {evt}")
-        if evt['event'] == zmq.EVENT_MONITOR_STOPPED:
+        if evt["event"] == zmq.EVENT_MONITOR_STOPPED:
             break
     monitor.close()
     print()
@@ -154,14 +159,26 @@ def event_monitor(monitor: zmq.Socket, name, pub_sub) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('name', nargs='?', default=None, help='name of this program instance')
-    parser.add_argument('--pub', default=None, help='Optional XPUB bind address override')
-    parser.add_argument('--sub', default=None, help='Optional XSUB bind address override')
-    parser.add_argument('--no-kill-stale', action='store_true', help='Disable stale-instance cleanup on startup')
+    parser.add_argument(
+        "name", nargs="?", default=None, help="name of this program instance"
+    )
+    parser.add_argument(
+        "--pub", default=None, help="Optional XPUB bind address override"
+    )
+    parser.add_argument(
+        "--sub", default=None, help="Optional XSUB bind address override"
+    )
+    parser.add_argument(
+        "--no-kill-stale",
+        action="store_true",
+        help="Disable stale-instance cleanup on startup",
+    )
     args, _unknown = parser.parse_known_args()
 
     if args.name is None:
-        raise ValueError("Missing required process name argument (e.g. Servers/Imagehub)")
+        raise ValueError(
+            "Missing required process name argument (e.g. Servers/Imagehub)"
+        )
 
     run_server(
         args.name,

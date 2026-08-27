@@ -5,14 +5,12 @@ fake "real" classes so nothing here depends on hardware backends.
 
 from functools import wraps
 
-import pytest
-
 from pytweezer.servers.simulated_device import public_methods, simulate
-
 
 # --------------------------------------------------------------------------- #
 # Fixtures: tiny stand-in "real" backend classes
 # --------------------------------------------------------------------------- #
+
 
 def _guard(func):
     """A functools.wraps-based decorator, mirroring imagemX2's requires_camera,
@@ -57,6 +55,7 @@ class Real(RealBase):
 # public_methods
 # --------------------------------------------------------------------------- #
 
+
 def test_public_methods_enumerates_public_and_inherited():
     names = set(public_methods(Real))
     assert "acquire" in names
@@ -87,6 +86,7 @@ def test_public_methods_does_not_instantiate_real_class():
 # --------------------------------------------------------------------------- #
 # simulate
 # --------------------------------------------------------------------------- #
+
 
 def test_simulate_autostubs_missing_methods():
     @simulate(Real)
@@ -176,6 +176,7 @@ def test_simulate_exclude_leaves_method_unstubbed():
 # --------------------------------------------------------------------------- #
 # Interface parity of the real simulated backends
 # --------------------------------------------------------------------------- #
+
 
 def test_simulated_imagemx2_covers_real_interface():
     from pytweezer.drivers.imagemX2 import ImagEMX2Camera, SimulatedImagEMX2Camera

@@ -39,6 +39,7 @@ def _coord():
 # Construction / roles
 # --------------------------------------------------------------------------- #
 
+
 def test_requires_camera_and_slm_roles():
     coord = _coord()
     assert coord.camera is not None
@@ -64,10 +65,15 @@ def test_phasemask_kwargs_merge_config_over_defaults():
 # status / test (no GPU needed)
 # --------------------------------------------------------------------------- #
 
+
 def test_status_shape():
     status = _coord().status()
     assert set(status) == {
-        "gpu_available", "initialised", "roles", "camera_connected", "slm_connected"
+        "gpu_available",
+        "initialised",
+        "roles",
+        "camera_connected",
+        "slm_connected",
     }
     assert status["initialised"] is False
     assert status["roles"] == ["camera", "slm"]
@@ -88,14 +94,20 @@ def test_get_slm_temperature_proxies_to_slm():
 # No-GPU fallback
 # --------------------------------------------------------------------------- #
 
+
 def test_initialise_without_cupy_raises_clearly(monkeypatch):
     monkeypatch.setattr(rearr, "_HAS_CUPY", False)
     coord = _coord()
     with pytest.raises(RuntimeError, match="needs cupy/lap and a CUDA GPU"):
         coord.initialise(
-            data1=np.zeros((4, 2)), data2=np.zeros((4, 2)),
-            array_shape1=(1, 2), array_shape2=(1, 2),
-            d0=0.5, fps=30, threshold=1.0, grid_positions=None,
+            data1=np.zeros((4, 2)),
+            data2=np.zeros((4, 2)),
+            array_shape1=(1, 2),
+            array_shape2=(1, 2),
+            d0=0.5,
+            fps=30,
+            threshold=1.0,
+            grid_positions=None,
         )
 
 
@@ -122,6 +134,7 @@ def test_arm_before_initialise_raises(monkeypatch):
 # ARM pipeline: iter_rearrangement_sequence streamed to the SLM
 # --------------------------------------------------------------------------- #
 
+
 class FakePM:
     """Stands in for the GPU phasemask generator's rearrangement entry point.
 
@@ -132,12 +145,17 @@ class FakePM:
         self.n_frames = n_frames
         self.called_with = None
 
-    def iter_rearrangement_sequence(self, terms1, terms2, occ_mask, d0,
-                                    profile="minimum_jerk", to_host=True):
-        self.called_with = dict(
-            terms1=terms1, terms2=terms2, occ_mask=occ_mask, d0=d0,
-            profile=profile, to_host=to_host,
-        )
+    def iter_rearrangement_sequence(
+        self, terms1, terms2, occ_mask, d0, profile="minimum_jerk", to_host=True
+    ):
+        self.called_with = {
+            "terms1": terms1,
+            "terms2": terms2,
+            "occ_mask": occ_mask,
+            "d0": d0,
+            "profile": profile,
+            "to_host": to_host,
+        }
         for _ in range(self.n_frames):
             yield np.zeros((8, 8), dtype=np.uint8)
 
@@ -145,12 +163,18 @@ class FakePM:
 def _patch_occupancy(monkeypatch):
     """Fake occupancy extraction so no real analysis/GPU/C++ is needed."""
     from pytweezer.analysis import analysis as an
+
     # Force the numpy branch so the patched sum_pixel_values is the one used.
     monkeypatch.setattr(rearr, "USE_SUM_CPP", False)
-    monkeypatch.setattr(an, "morphological_tophat_high_pass", lambda img, feature_size: img)
+    monkeypatch.setattr(
+        an, "morphological_tophat_high_pass", lambda img, feature_size: img
+    )
     # np.fliplr is applied to this before thresholding, so [[5, 0]] -> [0, 5].
-    monkeypatch.setattr(an, "sum_pixel_values",
-                        lambda img, grid, shape, window_size: np.array([[5.0, 0.0]]))
+    monkeypatch.setattr(
+        an,
+        "sum_pixel_values",
+        lambda img, grid, shape, window_size: np.array([[5.0, 0.0]]),
+    )
 
 
 def _armed_coord(pm, slm=None, camera=None):
@@ -158,14 +182,18 @@ def _armed_coord(pm, slm=None, camera=None):
     slm = slm or SimulatedSLM()
     coord = Rearrangement({"camera": camera, "slm": slm}, {})
     coord._initialised = True
-    coord._state = dict(
-        PM=pm,
-        terms1=("w1", "phi1", "x1", "y1", (1, 2)),
-        terms2=("w2", "phi2", "x2", "y2", (1, 2)),
-        pm_init_uint8=np.zeros((1024, 1024), dtype=np.uint8),
-        d0=0.5, fps=1000.0, threshold=1.0, grid_positions=None, roi=None,
-        profile="minimum_jerk",
-    )
+    coord._state = {
+        "PM": pm,
+        "terms1": ("w1", "phi1", "x1", "y1", (1, 2)),
+        "terms2": ("w2", "phi2", "x2", "y2", (1, 2)),
+        "pm_init_uint8": np.zeros((1024, 1024), dtype=np.uint8),
+        "d0": 0.5,
+        "fps": 1000.0,
+        "threshold": 1.0,
+        "grid_positions": None,
+        "roi": None,
+        "profile": "minimum_jerk",
+    }
     return coord
 
 
@@ -223,6 +251,7 @@ def test_arm_reraises_slm_upload_error(monkeypatch):
 # Teardown
 # --------------------------------------------------------------------------- #
 
+
 def test_shutdown_is_safe_before_initialise():
     coord = _coord()
     coord.shutdown()  # must not touch the camera when never initialised
@@ -247,12 +276,15 @@ SIM_RIG = {
         "Rb Rearrangement Cam": {
             "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
             "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
-            "role": "camera", "stream_name": None, "timeout": 2.0,
+            "role": "camera",
+            "stream_name": None,
+            "timeout": 2.0,
         },
         "Rb SLM": {
             "class": "pytweezer.drivers.slm:SLM",
             "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
-            "teardown": "close", "role": "slm",
+            "teardown": "close",
+            "role": "slm",
         },
     },
     "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",

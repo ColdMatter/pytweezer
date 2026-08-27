@@ -13,8 +13,6 @@ fields must be scalar, and ``InfluxWriter`` silently drops the ones that aren't
 anywhere. A test is the only place that mistake surfaces cheaply.
 """
 
-import pytest
-
 from pytweezer.loggers import base as logger_base
 from pytweezer.servers.influx_client import _coerce_fields
 
@@ -93,7 +91,7 @@ def test_ni_adc_reads_one_point_per_cycle_with_a_field_per_channel():
     assert len(points) == 1
     measurement, fields, tags = points[0]
     assert measurement == "ni_adc"
-    assert set(fields) == {"ai0", "ai1"}          # device prefix stripped
+    assert set(fields) == {"ai0", "ai1"}  # device prefix stripped
     assert tags == {"system": "Rb"}
 
 
@@ -120,13 +118,16 @@ def test_interval_comes_from_config():
 # base loop
 # --------------------------------------------------------------------------- #
 
+
 def test_write_points_accepts_both_two_and_three_element_points():
     logger = _ni_logger()
-    logger._write_points([
-        ("a", {"x": 1.0}),
-        ("b", {"y": 2.0}, {"system": "CaF"}),
-        None,                                   # skipped, not an error
-    ])
+    logger._write_points(
+        [
+            ("a", {"x": 1.0}),
+            ("b", {"y": 2.0}, {"system": "CaF"}),
+            None,  # skipped, not an error
+        ]
+    )
 
     assert [p[0] for p in logger.writer.points] == ["a", "b"]
     assert logger.writer.points[0][2] is None
@@ -145,6 +146,7 @@ def test_read_failures_do_not_stop_the_run_loop():
     logger.interval = 0.01
 
     import threading
+
     thread = threading.Thread(target=logger.run, daemon=True)
     thread.start()
     thread.join(timeout=0.3)

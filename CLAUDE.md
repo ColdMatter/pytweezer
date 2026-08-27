@@ -1,6 +1,17 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. Ignore anything in */archive/* folders unless explicity told to look at them.
+## Maintaining this file: prefer skills
+
+This file is loaded into context on **every** agent run, so keep it lean -
+only conventions that apply to most tasks belong here. Anything situational
+(setup recipes, niche workflows, deep reference material) belongs in a Claude
+Code skill under `.claude/skills/`, which agents load on demand.
+
+If a user asks you to "remember" something - even if they explicitly say to
+add it to this file - and it would not be used in every run, suggest making a
+skill instead and explain why: lean always-on context plus progressive
+disclosure through skills gets noticeably better performance out of agents.
+
 
 ## What this is
 
@@ -10,9 +21,9 @@ MotMaster experiment sequencers) across multiple lab PCs.
 
 ## Commands
 
-This project uses Poetry. There is no configured linter or formatter. There is a
-real pytest suite under `tests/` (`conftest.py` sets `QT_QPA_PLATFORM=offscreen`
-before any PyQt5 import, so Qt widget tests run headless) — run it after
+This project uses Poetry.
+Code is lined and formatted with ruff. There is a pre-commit hook to run ruff on staged files, but you can also run it manually.
+There is a pytest suite under `tests/` — run it after
 touching code it covers, and add cases there instead of writing one-off
 verification scripts when the change fits its scope.
 
@@ -46,37 +57,28 @@ already in use".
 Set `QT_QPA_PLATFORM=offscreen` before running any script that imports Qt widgets
 in a non-interactive shell.
 
-**`os._exit(0)` swallows piped stdout.** `bin/gui.py`'s `_run()` hard-exits after
-the Qt loop ends (see "Non-daemon threads" below). If you're capturing output
-from a script that goes through that path, `sys.stdout.flush()` before exit or
-the output will be lost when piped.
 
-**Don't run multi-line Python through `python -c`.** In this environment a `-c`
-string with embedded or leading newlines frequently returns empty output — this
-is a real quoting/flushing failure, not a cosmetic "shell quirk," and rerunning
-the same `-c` command with slightly different quoting will not fix it. Do not
-diagnose it as an environment glitch and move on. Instead, for anything beyond a
-single trivial expression, write a `.py` file to the scratchpad dir (see the
-Scratchpad section) and run it with `poetry run python <file>.py`.
-Keep `-c` only for one true one-liner with no newlines. When a script's output
-matters, end it with `sys.stdout.flush()` (or `print(..., flush=True)`).
+### Documentation
 
-Pyright type checking is explicitly off (`pyrightconfig.json`); don't expect or
-enforce type-check cleanliness.
+- Use **Google-style docstrings** for Sphinx autodoc
+- Docstrings should describe the current behaviour only; do not keep change history in them
+- Documentation auto-generates from experiment files
+- Build docs locally: `nix run .#docs`
+- Documentation deploys to GitLab Pages on master branch
+- Use UK English spelling throughout
 
-## Writing docs and comments
 
-Docstrings and comments are for the next user or developer reading the code cold.
-Write what helps *them*: what a module/function does, how to use it, the
-non-obvious constraints, and the gotchas that would otherwise cost someone an
-afternoon. Do **not** write documentation that narrates the conversation or task
-that produced the code — no "why no X", no justifying a choice against an
-alternative that was only ever discussed in chat, no "see Y for the one place we
-weighed Z", no changelog-style notes about what was changed or considered. If a
-design decision genuinely needs recording, state the constraint as a present-tense
-fact ("sums use `float64` to avoid integer overflow on raw camera counts"), not as
-a defense of the decision. When in doubt, ask whether the sentence would still
-make sense to someone who has never seen this task — if not, cut it.
+### TODO/FIXME Convention
+
+- Use `TODO` for planned improvements
+- Use `FIXME` for temporary bodges that must be removed
+
+### Git branching conventions
+
+- New features should usually be developed on feature branches
+- All branches should have an associated merge request
+- **The main branch should always be deployable** - no broken code or failing tests allowed
+
 
 ## Architecture
 
@@ -97,16 +99,20 @@ drivers). `pytweezer/configuration/config.py` is the single source of truth:
   Device entries carry **no `"script"`** (every device runs `device_server.py`;
   its `"class"` selects the behavior). Every other category names its `"script"`
   explicitly, so the only place that supplies the device launcher is the
-  `DEVICE_SERVER_SCRIPT` constant in `pytweezer/servers/configreader.py` — device
+  `DEVICE_SERVER_SCRIPT` constant in `pytweezer/configuration/paths.py` — device
   spawn sites (`DevicesPanel`, `process_cleanup`) reference it
   directly rather than indexing `params["script"]`.
 - `CONFIG["GUI"]`: standalone GUI tool entries (StreamMonitor, Applet Launcher, etc).
 
 Don't confuse this with the **root** `configuration/` directory — that holds
 `properties.json` (Properties startup state) and other JSON data files, not the
-Python `CONFIG` dict. `ConfigReader.getConfiguration()` (in
-`pytweezer/servers/configreader.py`) always returns the dict from
-`pytweezer/configuration/config.py`.
+Python `CONFIG` dict. `get_config()` (in `pytweezer/configuration/config.py`,
+next to `CONFIG` itself) is the single accessor used across the servers, drivers
+and GUI; tests monkeypatch it per importing module to inject a fake config.
+Filesystem-layout constants (`tweezerpath`, `icon_path`, `propertyfilename`,
+`DEVICE_SERVER_SCRIPT`) and `load_properties()` live in
+`pytweezer/configuration/paths.py`; `tweezerpath`/`icon_path` are also
+re-exported from `pytweezer.servers`.
 
 ### Process launching: ManagedRow → `python <script> <name>`
 

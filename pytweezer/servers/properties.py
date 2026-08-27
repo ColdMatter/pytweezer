@@ -1,15 +1,17 @@
-from pytweezer.servers import zmqcontext, EVENT_MAP
-from pytweezer.servers import configreader as cr
-from pytweezer.servers.xsub_xpub import event_monitor
 import copy
-import zmq
+import logging
 import threading
 import time
-import logging, sys
+
+import zmq
 from zmq.utils import jsonapi
 
 # logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
+from pytweezer.configuration.config import get_config
+from pytweezer.configuration.paths import load_properties
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers import zmqcontext
+from pytweezer.servers.xsub_xpub import event_monitor
 
 _logger = get_logger("Properties")
 
@@ -87,7 +89,6 @@ class PropertyAttribute:
 
 
 class Properties(threading.Thread):
-
     @staticmethod
     def _configure_tcp_socket(socket, endpoint):
         if isinstance(endpoint, str) and endpoint.startswith("tcp://"):
@@ -137,7 +138,7 @@ class Properties(threading.Thread):
 
         """
 
-        conf = cr.Config()
+        conf = get_config()
         # iniitialize dictionaries
         self.properties_lock = threading.Lock()
         # initialize sockets
@@ -180,16 +181,16 @@ class Properties(threading.Thread):
                     "Check Servers/Propertylogger/rep reachability for this client.",
                     error,
                 )
-                self.properties = cr.Properties()
+                self.properties = load_properties()
         else:
-            self.properties = cr.Properties()
+            self.properties = load_properties()
         self.recent_changes = set()  # keeps recent changes
 
         # start socket listening thread
         self.start()
         self.name = name
-        if not name in self.properties:
-            n = self.get("/" + name, {})
+        if name not in self.properties:
+            self.get("/" + name, {})
         logging.debug(self.properties)
 
         self.crashed = False
@@ -251,7 +252,7 @@ class Properties(threading.Thread):
                     prop[key] = {}
                 prop = prop[key]
             # else:
-            if isinstance(value, dict) and "options" in value.keys():
+            if isinstance(value, dict) and "options" in value:
                 if not keys[-1] in prop:
                     prop[keys[-1]] = {}
                 # print('_set received a dict')
@@ -260,7 +261,7 @@ class Properties(threading.Thread):
             elif (
                 keys[-1] in prop
                 and isinstance(prop[keys[-1]], dict)
-                and "options" in prop[keys[-1]].keys()
+                and "options" in prop[keys[-1]]
             ):
                 # print('_set found a dict')
                 # print('which was:', prop[keys[-1]])
@@ -365,7 +366,7 @@ class Properties(threading.Thread):
                 for key in keys[:-1]:
                     prop = prop[key]
                 value = copy.deepcopy(prop[keys[-1]])
-                if isinstance(value, dict) and "options" in value.keys():
+                if isinstance(value, dict) and "options" in value:
                     # print('_get found a dict')
                     # print('which is:',value)
                     value = value["value"]
@@ -377,10 +378,10 @@ class Properties(threading.Thread):
             self._set(keys, defaultvalue)
             self._send({"keys": keys, "value": defaultvalue})
             value = defaultvalue
-            print("tried to _get an unset property {}".format(keys))
-            if isinstance(value, dict) and "options" in value.keys():
+            print(f"tried to _get an unset property {keys}")
+            if isinstance(value, dict) and "options" in value:
                 value = value["value"]
-            print("setting default value: {}".format(value))
+            print(f"setting default value: {value}")
         return value
 
     def changes(self, includeparent=True):

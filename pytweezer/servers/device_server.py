@@ -47,13 +47,12 @@ import argparse
 import importlib
 import inspect
 import signal
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional
 
 from sipyco.pc_rpc import simple_server_loop
 
-from pytweezer.servers.configreader import ConfigReader
-
+from pytweezer.configuration.config import get_config
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("device server")
@@ -72,11 +71,11 @@ class DeviceServerSpec:
     therefore absent from :attr:`targets`.
     """
 
-    target_name: Optional[str] = None
-    target: Optional[object] = None
+    target_name: str | None = None
+    target: object | None = None
     description: str = ""
-    teardown: Optional[Callable[[], None]] = None
-    targets: Optional[Dict[str, object]] = None
+    teardown: Callable[[], None] | None = None
+    targets: dict[str, object] | None = None
     failed: tuple = ()
 
     def __post_init__(self):
@@ -95,6 +94,7 @@ class DeviceServerSpec:
 # --------------------------------------------------------------------------- #
 # Backend construction from config
 # --------------------------------------------------------------------------- #
+
 
 def _backend_class(name, conf):
     """Return the backend class ``conf`` selects.
@@ -246,8 +246,14 @@ def _make_composite(name, conf):
         coordinator_path = conf.get("coordinator")
         if coordinator_path is not None:
             _add_coordinator(
-                name, conf, coordinator_path, coordinator_name, roles, failed,
-                targets, teardowns,
+                name,
+                conf,
+                coordinator_path,
+                coordinator_name,
+                roles,
+                failed,
+                targets,
+                teardowns,
             )
     except Exception:
         # Release whatever already opened, or a half-built rig leaks hardware handles.
@@ -345,6 +351,7 @@ def _safe(fn):
 # Launcher
 # --------------------------------------------------------------------------- #
 
+
 def _normalize(s):
     """Collapse whitespace and lowercase, for lenient name matching."""
     return "".join(s.split()).lower()
@@ -384,7 +391,7 @@ class DeviceAddress:
     conf: dict
     owner_name: str
     owner_conf: dict
-    target_name: Optional[str] = None
+    target_name: str | None = None
 
     @property
     def is_sub_device(self):
@@ -402,7 +409,7 @@ def device_index():
     Raises ``KeyError`` if two devices share a name (case- and whitespace-insensitively),
     since such a name could not be resolved unambiguously.
     """
-    devices = ConfigReader.getConfiguration().get("Devices", {})
+    devices = get_config().get("Devices", {})
     index = {}
 
     def add(address):
@@ -459,7 +466,7 @@ def resolve_device(name):
     falls back to a whitespace-/case-insensitive match so command-line callers can
     pass ``RbHamCam`` or ``rb hamcam`` for ``"Rb HamCam"``.
     """
-    devices = ConfigReader.getConfiguration().get("Devices", {})
+    devices = get_config().get("Devices", {})
     if name in devices:
         return name, devices[name]
 
@@ -508,7 +515,7 @@ def build_spec(name, conf=None):
     teardown_method = conf.get("teardown")
     if teardown_method is not None:
         method = getattr(backend, teardown_method)
-        teardown = lambda: _safe(method)  # noqa: E731 — small local teardown wrapper
+        teardown = lambda: _safe(method)
 
     return DeviceServerSpec(
         target_name=conf.get("target_name", "device"),

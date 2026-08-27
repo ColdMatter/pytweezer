@@ -41,14 +41,14 @@ import sys
 
 sys.path.append("../")
 sys.path.append("../../")
-from pytweezer.servers import zmqcontext
-import pytweezer as bc
-import zmq
-import time
-import numpy
 import json
-from pytweezer.servers.configreader import ConfigReader
+
+import numpy
 import numpy as np
+import zmq
+
+from pytweezer.configuration.config import get_config
+from pytweezer.servers import zmqcontext
 
 
 class NpEncoder(json.JSONEncoder):
@@ -59,11 +59,12 @@ class NpEncoder(json.JSONEncoder):
             return float(obj)
         if isinstance(obj, numpy.ndarray):
             return obj.tolist()
-        return super(NpEncoder, self).default(obj)
+        return super().default(obj)
 
 
 class GenericClient:
     _hub = None
+
     def __init__(self, name="noname", recvtimeout=1000, subscribe=None):
         """send or receive data over balis ZMQ ports
         standardizes datatransfer and connects to sockets according to the central configuration
@@ -91,7 +92,7 @@ class GenericClient:
             self.subscribe(subscribe)
 
     def _connect(self):
-        conf = ConfigReader.getConfiguration()
+        conf = get_config()
         c = conf["Servers"][self._hub]
         host = c["host"]
         pub_port = c["pub_port"]
@@ -154,7 +155,6 @@ class GenericClient:
             self.pub_socket.send_string(prefix + "." + channel, flags | zmq.SNDMORE)
 
         if not isinstance(A, np.ndarray):
-
             return self.pub_socket.send_json(datadict, flags, cls=NpEncoder)
         else:
             datadict["dtype"] = str(A.dtype)
@@ -206,6 +206,7 @@ class GenericClient:
 
 class DataClient(GenericClient):
     _hub = "Datahub"
+
     def __init__(self, name, **kwargs):
         super().__init__(name, **kwargs)
 
@@ -220,7 +221,7 @@ class CommandClient(DataClient):
         super().__init__(name, **kwargs)
 
     def send(
-        self, cmd="", data={}, A=None, flags=0, copy=True, track=False, prefix=None
+        self, cmd="", data=None, A=None, flags=0, copy=True, track=False, prefix=None
     ):
         """distribute over ZMQ
 
@@ -234,11 +235,14 @@ class CommandClient(DataClient):
             flags (int) :
                 see ZMQ send flags in the ZMQ doku
         """
+        if data is None:
+            data = {}
         super().send(data, A, " " + cmd, flags, copy, track, prefix)
 
 
 class ImageClient(DataClient):
     _hub = "Imagehub"
+
     def __init__(self, name, **kwargs):
         super().__init__(name, **kwargs)
 

@@ -59,10 +59,10 @@ two examples to copy from.
 
 ```python
 def process(self, head, data):
-    if data.ndim != 2:      # guard the shape you require
+    if data.ndim != 2:  # guard the shape you require
         return None
     ...
-    out_head = dict(head)   # copy before mutating
+    out_head = dict(head)  # copy before mutating
     out_head["centre_x"] = float(cx)
     return out_head, result
 ```

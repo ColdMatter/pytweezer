@@ -19,18 +19,21 @@ hardware applies its own voltage LUT on top.
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 import numpy as np
 
-from pytweezer.servers.simulated_device import simulate
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers.simulated_device import simulate
 
 LOGGER = get_logger("slm")
 
 #: Defaults matching the lab's Blink Plus install; overridable via config.
-DEFAULT_SDK_DLL = "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\SDK\\Blink_C_wrapper"
-DEFAULT_LUT_FILE = "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\LUT Files\\slm40_at852.LUT"
+DEFAULT_SDK_DLL = (
+    "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\SDK\\Blink_C_wrapper"
+)
+DEFAULT_LUT_FILE = (
+    "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\LUT Files\\slm40_at852.LUT"
+)
 
 #: Frames the 1024x1024 board's on-board memory holds (manual S4.3.9).
 MAX_PRELOAD_FRAMES = 752
@@ -46,7 +49,7 @@ class SLM:
     def __init__(
         self,
         sdk_dll: str = DEFAULT_SDK_DLL,
-        lut_file: Optional[str] = DEFAULT_LUT_FILE,
+        lut_file: str | None = DEFAULT_LUT_FILE,
         board_number: int = 1,
         timeout_ms: int = 5000,
         wait_for_trigger: bool = False,
@@ -74,7 +77,7 @@ class SLM:
     def _connect(self) -> None:
         # Imported lazily: ctypes is stdlib, but loading the Blink DLL is what
         # actually requires the SDK to be installed on this machine.
-        from ctypes import CDLL, c_double, c_int, c_uint, byref, POINTER, c_ubyte, cdll
+        from ctypes import CDLL, POINTER, byref, c_double, c_int, c_ubyte, c_uint, cdll
 
         cdll.LoadLibrary(self.sdk_dll)
         lib = CDLL("Blink_C_wrapper")
@@ -97,7 +100,11 @@ class SLM:
         serial = lib.Read_Serial_Number(self.board_number)
         LOGGER.info(
             "SLM board %d: %dx%d @ %d-bit, serial %s, %.3f degC",
-            self.board_number, self.width, self.height, self.depth, serial,
+            self.board_number,
+            self.width,
+            self.height,
+            self.depth,
+            serial,
             lib.Read_SLM_temperature(self.board_number),
         )
 
@@ -157,7 +164,10 @@ class SLM:
             raise RuntimeError("SLM ImageWriteComplete failed")
         # debug, not info: this runs once per frame on the rearrangement hot path.
         LOGGER.debug(
-            "Wrote %dx%d mask to SLM board %d", mask.shape[1], mask.shape[0], self.board_number
+            "Wrote %dx%d mask to SLM board %d",
+            mask.shape[1],
+            mask.shape[0],
+            self.board_number,
         )
 
     def preload_sequence(self, mask_sequence: np.ndarray) -> None:
@@ -171,12 +181,17 @@ class SLM:
         list_length = int(seq.shape[0])
         t0 = time.perf_counter()
         ret = self._lib.PreLoad_sequence(
-            self.board_number, seq.ctypes.data_as(self._poi), list_length, self.timeout_ms
+            self.board_number,
+            seq.ctypes.data_as(self._poi),
+            list_length,
+            self.timeout_ms,
         )
         if ret != 1:
             raise RuntimeError("SLM PreLoad_sequence failed")
         LOGGER.info(
-            "Preloaded %d frames in %.3f ms.", list_length, (time.perf_counter() - t0) * 1000
+            "Preloaded %d frames in %.3f ms.",
+            list_length,
+            (time.perf_counter() - t0) * 1000,
         )
 
     def preload_image(self, mask_array: np.ndarray, frame: int) -> None:
@@ -191,7 +206,10 @@ class SLM:
             raise ValueError(f"frame {frame} outside 0-{MAX_PRELOAD_FRAMES - 1}")
         mask = self._as_c_uint8(mask_array)
         ret = self._lib.PreLoad_Image(
-            self.board_number, mask.ctypes.data_as(self._poi), int(frame), self.timeout_ms
+            self.board_number,
+            mask.ctypes.data_as(self._poi),
+            int(frame),
+            self.timeout_ms,
         )
         if ret != 1:
             raise RuntimeError(f"SLM PreLoad_Image failed for frame {frame}")
@@ -274,7 +292,9 @@ class SimulatedSLM:
     lab's board.
     """
 
-    def __init__(self, width: int = 1024, height: int = 1024, depth: int = 8, **_ignored):
+    def __init__(
+        self, width: int = 1024, height: int = 1024, depth: int = 8, **_ignored
+    ):
         self.width = int(width)
         self.height = int(height)
         self.depth = int(depth)

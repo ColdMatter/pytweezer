@@ -38,7 +38,7 @@ handle (the camera + two-MotMaster pattern above already does).
 import threading
 import time
 
-__all__ = ["run_parallel", "after"]
+__all__ = ["after", "run_parallel"]
 
 
 def after(delay, call):
@@ -50,6 +50,7 @@ def after(delay, call):
     other parallel calls. Returns a zero-argument callable that forwards
     ``call``'s return value.
     """
+
     def _delayed():
         time.sleep(delay)
         return call()
@@ -93,7 +94,7 @@ def run_parallel(*calls, timeout=None):
     def worker(index, call):
         try:
             results[index] = call()
-        except Exception as exc:  # noqa: BLE001 - surfaced below, per-call
+        except Exception as exc:
             errors[index] = exc
 
     threads = [

@@ -1,24 +1,23 @@
+import os
+
+import zmq
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
-    QGridLayout,
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QTreeView,
     QVBoxLayout,
     QWidget,
 )
-import os
-import zmq
 
+from pytweezer.configuration.config import get_config
 from pytweezer.GUI.property_editor import PropEdit
 from pytweezer.GUI.pytweezerQt import BWidget
-from pytweezer.servers import Properties, tweezerpath, icon_path
-from pytweezer.servers.configreader import ConfigReader
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers import icon_path, tweezerpath
 
 logger = get_logger("Analysis Manager UI")
 
@@ -56,7 +55,9 @@ class AnalysisManagerClient(QtCore.QObject):
     def close(self):
         self._reset_socket()
 
-    def request(self, payload: dict, retries: int = 2, retry_delay_s: float = 0.12) -> dict:
+    def request(
+        self, payload: dict, retries: int = 2, retry_delay_s: float = 0.12
+    ) -> dict:
         last_error = None
         attempts = max(1, int(retries) + 1)
 
@@ -87,7 +88,10 @@ class AnalysisManagerClient(QtCore.QObject):
                 self._reset_socket()
                 return {"ok": False, "error": str(error)}
 
-        return {"ok": False, "error": str(last_error) if last_error else "unknown RPC error"}
+        return {
+            "ok": False,
+            "error": str(last_error) if last_error else "unknown RPC error",
+        }
 
 
 class CheckableModel(QtGui.QStandardItemModel):
@@ -151,13 +155,14 @@ class TreeViewWidget(QWidget):
             self.add_item(name, category, script, streams, active)
 
     def add_item(self, name, category, script, streams, active):
-        key = f"{category}/{name}"
         self.filters[name] = [script, category]
 
         parent_item = self.model.invisibleRootItem()
         check_item = QtGui.QStandardItem(name)
         check_item.setCheckable(True)
-        check_item.setCheckState(Qt.CheckState.Checked if active else Qt.CheckState.Unchecked)
+        check_item.setCheckState(
+            Qt.CheckState.Checked if active else Qt.CheckState.Unchecked
+        )
 
         parent_item.appendRow(
             [
@@ -185,7 +190,9 @@ class TreeViewWidget(QWidget):
         )
         if not response.get("ok"):
             logger.error(f"AnalysisManager RPC error: {response.get('error')}")
-            item.setCheckState(Qt.CheckState.Unchecked if active else Qt.CheckState.Checked)
+            item.setCheckState(
+                Qt.CheckState.Unchecked if active else Qt.CheckState.Checked
+            )
             return
 
         self._props.set(f"{category}/{name}/active", active)
@@ -201,7 +208,11 @@ class TreeViewWidget(QWidget):
             row = item.index().row()
             category = self.model.data(self.model.index(row, 2))
             key = f"{category}/{name}"
-            should_be_checked = Qt.CheckState.Checked if running.get(key, False) else Qt.CheckState.Unchecked
+            should_be_checked = (
+                Qt.CheckState.Checked
+                if running.get(key, False)
+                else Qt.CheckState.Unchecked
+            )
             if item.checkState() != should_be_checked:
                 # Block signals to avoid sending RPC while reflecting status.
                 self.model.blockSignals(True)
@@ -239,7 +250,7 @@ class TreeViewWidget(QWidget):
             dialog = QDialog()
             dialog.setWindowTitle("Dialog")
             layout = QVBoxLayout()
-            editor = PropEdit('/Analysis/' + category + '/' + name + '/')
+            editor = PropEdit("/Analysis/" + category + "/" + name + "/")
             layout.addWidget(editor)
             dialog.setLayout(layout)
             dialog.exec()
@@ -251,17 +262,17 @@ class AddAnalysisWidget(QtWidgets.QWidget):
         self.manager = manager
 
         layout = QtWidgets.QHBoxLayout()
-        addButton = QtWidgets.QPushButton('add')
+        addButton = QtWidgets.QPushButton("add")
         addButton.clicked.connect(self.add_filter)
         layout.addWidget(addButton)
 
-        layout.addWidget(QtWidgets.QLabel('name'))
-        self.nametext = QtWidgets.QLineEdit('')
+        layout.addWidget(QtWidgets.QLabel("name"))
+        self.nametext = QtWidgets.QLineEdit("")
         layout.addWidget(self.nametext)
 
         self.analysistype = QtWidgets.QComboBox()
-        self.analysistype.addItem('Image')
-        self.analysistype.addItem('Data')
+        self.analysistype.addItem("Image")
+        self.analysistype.addItem("Data")
         self.analysistype.currentTextChanged.connect(self.update_streamlist)
         self.analysistype.currentTextChanged.connect(self.update_scriptlist)
         layout.addWidget(self.analysistype)
@@ -275,8 +286,8 @@ class AddAnalysisWidget(QtWidgets.QWidget):
         layout.addWidget(self.streamlist)
         self.setLayout(layout)
 
-        self.update_scriptlist('Image')
-        self.update_streamlist('Image')
+        self.update_scriptlist("Image")
+        self.update_streamlist("Image")
 
     @staticmethod
     def _classify_script(path):
@@ -288,30 +299,30 @@ class AddAnalysisWidget(QtWidgets.QWidget):
         itself) are left uncategorized and don't appear in either list.
         """
         try:
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 text = f.read()
         except OSError:
             return None
         has_image = "imagestreams" in text or "ImageAnalysis" in text
         has_data = "datastreams" in text or "DataAnalysis" in text
         if has_image and not has_data:
-            return 'Image'
+            return "Image"
         if has_data and not has_image:
-            return 'Data'
+            return "Data"
         return None
 
     @classmethod
     def _scan_scripts(cls, analysisdir):
-        by_category = {'Image': [], 'Data': []}
+        by_category = {"Image": [], "Data": []}
         try:
             filenames = sorted(os.listdir(analysisdir))
         except OSError:
             return by_category
         for f in filenames:
             path = analysisdir + f
-            if not os.path.isfile(path) or f[0] == '.':
+            if not os.path.isfile(path) or f[0] == ".":
                 continue
-            if not (f.endswith('.py') or f.endswith('.pyx')):
+            if not f.endswith((".py", ".pyx")):
                 continue
             category = cls._classify_script(path)
             if category is not None:
@@ -325,32 +336,34 @@ class AddAnalysisWidget(QtWidgets.QWidget):
 
     def update_streamlist(self, category):
         self.streamlist.clear()
-        di = self.manager._props.get('/Servers/' + category + 'Stream/active', {})
+        di = self.manager._props.get("/Servers/" + category + "Stream/active", {})
         for name, value in di.items():
-            timedelta = int(max(0, QtCore.QDateTime.currentSecsSinceEpoch() - value['timestamp']))
-            self.streamlist.addItem(name + '[%i s]' % timedelta)
+            timedelta = int(
+                max(0, QtCore.QDateTime.currentSecsSinceEpoch() - value["timestamp"])
+            )
+            self.streamlist.addItem(name + "[%i s]" % timedelta)
 
     def add_filter(self):
         name = self.nametext.text().strip()
         if not name:
-            logger.warning('AnalysisManager: empty filter name')
+            logger.warning("AnalysisManager: empty filter name")
             return
 
         category = self.analysistype.currentText()
         script = self.analysisscript.currentText()
         stream = self.streamlist.currentText()
-        streams = [stream.split('[')[0]] if stream else ['nostream']
+        streams = [stream.split("[")[0]] if stream else ["nostream"]
 
         response = self.manager.rpc.request(
             {
-                'command': 'add_filter',
-                'category': category,
-                'name': name,
-                'script': script,
-                'streams': streams,
+                "command": "add_filter",
+                "category": category,
+                "name": name,
+                "script": script,
+                "streams": streams,
             }
         )
-        if not response.get('ok'):
+        if not response.get("ok"):
             logger.error(f"AnalysisManager add_filter error: {response.get('error')}")
             return
 
@@ -360,17 +373,17 @@ class AddAnalysisWidget(QtWidgets.QWidget):
 class AnalysisManager(BWidget):
     """GUI client for the standalone analysis manager service."""
 
-    def __init__(self, name='Analysis', parent=None):
+    def __init__(self, name="Analysis", parent=None):
         super().__init__(name, parent)
-        self.conf = ConfigReader.getConfiguration()
-        manager_conf = self.conf['Servers']['Analysis Manager']
-        host = manager_conf['host']
-        port = manager_conf['port']
+        self.conf = get_config()
+        manager_conf = self.conf["Servers"]["Analysis Manager"]
+        host = manager_conf["host"]
+        port = manager_conf["port"]
         endpoint = f"tcp://{host}:{port}"
-        self._last_snapshot_error = ''
+        self._last_snapshot_error = ""
 
         self.rpc = AnalysisManagerClient(endpoint)
-        self.analysisdir = tweezerpath + '/pytweezer/analysis/'
+        self.analysisdir = tweezerpath + "/pytweezer/analysis/"
         self.init_gui()
         self.refresh_snapshot()
 
@@ -383,33 +396,33 @@ class AnalysisManager(BWidget):
         self.tvw = TreeViewWidget(self._props, self.rpc)
         layout.addWidget(self.tvw)
 
-        delButton = QPushButton('del')
+        delButton = QPushButton("del")
         delButton.clicked.connect(self.del_entry)
         layout.addWidget(delButton)
 
-        configureButton = QPushButton('configure')
+        configureButton = QPushButton("configure")
         configureButton.clicked.connect(self.configure_filter)
         layout.addWidget(configureButton)
 
-        refreshButton = QPushButton('refresh')
+        refreshButton = QPushButton("refresh")
         refreshButton.clicked.connect(self.refresh_snapshot)
         layout.addWidget(refreshButton)
 
         self.setLayout(layout)
 
     def refresh_snapshot(self):
-        response = self.rpc.request({'command': 'snapshot'}, retries=0, retry_delay_s=0)
-        if not response.get('ok'):
-            error_text = str(response.get('error', 'unknown error'))
+        response = self.rpc.request({"command": "snapshot"}, retries=0, retry_delay_s=0)
+        if not response.get("ok"):
+            error_text = str(response.get("error", "unknown error"))
             # Avoid flooding the console with the same timeout while service starts.
             if error_text != self._last_snapshot_error:
                 logger.warning(f"AnalysisManager snapshot error: {error_text}")
                 self._last_snapshot_error = error_text
             return
 
-        self._last_snapshot_error = ''
+        self._last_snapshot_error = ""
 
-        self.analysisdir = response.get('analysisdir', self.analysisdir)
+        self.analysisdir = response.get("analysisdir", self.analysisdir)
         self.tvw.populate(response)
 
     def del_entry(self):
@@ -424,7 +437,7 @@ def main():
 
     app = QtWidgets.QApplication(sys.argv)
     icon = QtGui.QIcon()
-    icon.addFile(icon_path + 'pytweezer_analysis_manager_icon.svg')
+    icon.addFile(icon_path + "pytweezer_analysis_manager_icon.svg")
     app.setWindowIcon(icon)
 
     window = AnalysisManager()
@@ -432,8 +445,8 @@ def main():
     app.exec()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys
 
-    if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+    if (sys.flags.interactive != 1) or not hasattr(QtCore, "PYQT_VERSION"):
         main()

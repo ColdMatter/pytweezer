@@ -1,4 +1,5 @@
 from pytweezer.experiment.motmaster_client import MotMasterClient
+
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.slm import SLM
 from pytweezer.drivers.thorcam import ThorCamera
@@ -8,6 +9,7 @@ print("Testing connections to devices...\n")
 successful_devices = []
 failed_devices = []
 
+
 def test_device(name: str, create_device):
     try:
         device = create_device()
@@ -16,6 +18,7 @@ def test_device(name: str, create_device):
     except Exception as e:
         failed_devices.append((name, e))
         print(f"Failed to connect to {name}:", e)
+
 
 test_device("MotMaster client", MotMasterClient)
 test_device("ImagEM X2 camera", ImagEMX2Camera)
@@ -29,5 +32,3 @@ if failed_devices:
         print(f"- {name}: {error}")
 else:
     print("\nSuccessfully connected to all devices.")
-
-

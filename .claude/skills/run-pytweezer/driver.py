@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Headless launch + screenshot driver for the pytweezer PyQt6 GUIs.
 
 The GUIs (``pytweezer-server`` / ``pytweezer-client``) are PyQt6 QMainWindows.
@@ -40,7 +39,6 @@ import sys
 #     does NOT render normal text glyphs — labels come out blank. Use only when
 #     there is no display; prefer the default when a session exists.
 # Respect an explicit override; otherwise leave Qt's default (native).
-
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
@@ -60,8 +58,10 @@ def _paint(app, ms):
 
 def main():
     role = sys.argv[1] if len(sys.argv) > 1 else "client"
-    outdir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "shots"
+    outdir = (
+        sys.argv[2]
+        if len(sys.argv) > 2
+        else os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")
     )
     os.makedirs(outdir, exist_ok=True)
 

@@ -1,55 +1,56 @@
-from PyQt5 import QtGui, QtCore,QtWidgets
-from PyQt5.QtWidgets import *
-import PyQt5.QtCore as Qt
-from pytweezer import *
-from pytweezer.servers import Properties,PropertyAttribute, tweezerpath, icon_path
-from pytweezer.servers.configreader import ConfigReader
-from pytweezer.GUI.viewers.image_monitor import ImageDisplay
-from pytweezer.GUI.viewers.live_plot import LivePlot
-from pytweezer.GUI.pytweezerQt import BMainWindow
-from pytweezer.GUI.viewers.archive.parameterbox import ParameterBox, ImageDataBox, CamPropsBox
-import  subprocess
-import os
-import importlib.util
-import inspect
 import argparse
 
+import PyQt5.QtCore as Qt
+from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtWidgets import *
+
+from pytweezer import *
+from pytweezer.GUI.pytweezerQt import BMainWindow
+from pytweezer.GUI.viewers.archive.parameterbox import ParameterBox
+from pytweezer.GUI.viewers.image_monitor import ImageDisplay
+from pytweezer.servers import PropertyAttribute
+
+
 class ImageWindow(BMainWindow):
-    ''' Containing an image viewer plus two plots on the sides for line plots
-    '''
+    """Containing an image viewer plus two plots on the sides for line plots"""
 
-
-    def __init__(self,name,parent=None):
-        super().__init__(name,parent)
-        type(self)._displayname  = PropertyAttribute('ImageDisplay',self._name+'/Viewer')
+    def __init__(self, name, parent=None):
+        super().__init__(name, parent)
+        type(self)._displayname = PropertyAttribute(
+            "ImageDisplay", self._name + "/Viewer"
+        )
         # type(self)._topPlotterName = PropertyAttribute('Plottertop',self._name+'/Plotline')
         # type(self)._rightPlotterName= PropertyAttribute('Plotterright',self._name+'/Plotcol')
-        type(self)._parameterBoxName= PropertyAttribute('Parameterbox',self._name+'/ParBox')
-        type(self)._imDataBoxName= PropertyAttribute('ImageDataBox',self._name+'/ImDatBox')
-        type(self)._propBoxName= PropertyAttribute('PropDataBox',self._name+'/PropBox')
+        type(self)._parameterBoxName = PropertyAttribute(
+            "Parameterbox", self._name + "/ParBox"
+        )
+        type(self)._imDataBoxName = PropertyAttribute(
+            "ImageDataBox", self._name + "/ImDatBox"
+        )
+        type(self)._propBoxName = PropertyAttribute(
+            "PropDataBox", self._name + "/PropBox"
+        )
         self.initUI()
 
-
-
     def initUI(self):
-        self.statusBar().showMessage('Ready')
+        self.statusBar().showMessage("Ready")
         self.createDockWidgets()
-        self.image_monitor = self.get_display_class()(self.get_display_name(), parent=self)
+        self.image_monitor = self.get_display_class()(
+            self.get_display_name(), parent=self
+        )
         # add LUT for ImageDisplay
         self.setCentralWidget(self.image_monitor)
-        #self.image.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Expanding)
-        #self.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Expanding)
-        #self.linedock.setMaximumWidth(100)
-        #self.linedock.setMaximumHeight(100)
-        #Qt.QTimer.singleShot(1000,self.res)
+        # self.image.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Expanding)
+        # self.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Expanding)
+        # self.linedock.setMaximumWidth(100)
+        # self.linedock.setMaximumHeight(100)
+        # Qt.QTimer.singleShot(1000,self.res)
 
     def get_display_class(self):
         return ImageDisplay
 
     def get_display_name(self):
         return self._displayname
-
-
 
     def createDockWidgets(self):
         # linedock=QDockWidget(self._topPlotterName,self)
@@ -64,29 +65,25 @@ class ImageWindow(BMainWindow):
         # self.colplot=LivePlot(self._rightPlotterName)
         # fileselectorDock.setWidget(self.colplot)
         # self.addDockWidget(Qt.Qt.RightDockWidgetArea,fileselectorDock)
-        
 
-        dock=QDockWidget("Image Info", self)
+        dock = QDockWidget("Image Info", self)
         dockWidget = QFrame()
         dockLayout = QVBoxLayout()
 
-        self.parbox=ParameterBox(self._parameterBoxName)
+        self.parbox = ParameterBox(self._parameterBoxName)
         dockLayout.addWidget(self.parbox)
 
-        #dock=QDockWidget(self._imDataBoxName,self)
+        # dock=QDockWidget(self._imDataBoxName,self)
         # self.imDataBox=ImageDataBox(self._imDataBoxName)
         # dockLayout.addWidget(self.imDataBox)
-
 
         # self.propBox=CamPropsBox(self._propBoxName)
         # dockLayout.addWidget(self.propBox)
 
-
         dockWidget.setLayout(dockLayout)
         dock.setWidget(dockWidget)
-        self.addDockWidget(Qt.Qt.TopDockWidgetArea,dock)
+        self.addDockWidget(Qt.Qt.TopDockWidgetArea, dock)
         # dock.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Minimum)
-
 
 
 def main(name):
@@ -98,12 +95,14 @@ def main(name):
     Win.show()
     app.exec_()
 
+
 ## Start Qt event loop unless running in interactive mode or using pyside.
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys
-    if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+
+    if (sys.flags.interactive != 1) or not hasattr(QtCore, "PYQT_VERSION"):
         parser = argparse.ArgumentParser()
-        parser.add_argument('name', nargs=1, help='name of this program instance')
+        parser.add_argument("name", nargs=1, help="name of this program instance")
         args = parser.parse_args()
-        name=args.name[0]
+        name = args.name[0]
         main(name)
