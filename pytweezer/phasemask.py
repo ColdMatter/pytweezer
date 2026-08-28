@@ -689,6 +689,142 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             print(f"Time Taken for {n_steps} frames: {(time.time() - start)*1000:.4f} ms")
             return phasemasks_sequence
 
+    def generate_rearrangement_sequence(self, terms1, terms2, occ_mask, d0=0.5, fade_steps=10):
+            """
+            Calculates the optimal Hungarian rearrangement path, fades out unoccupied
+            traps, and generates the full sequence of interpolated phasemasks 
+            efficiently on the GPU.
+            """
+            start = time.time()
+        
+            w1, phi1, x1, y1 = terms1
+            w2, phi2, x2, y2 = terms2
+            occ_mask = cp.asarray(occ_mask)
+            
+            pos1 = cp.stack((x1, y1), axis=-1)
+            pos2 = cp.stack((x2, y2), axis=-1)
+
+            # Jonker-Volgenant rearrangement algorithm implementation
+            occ_indices = cp.where(occ_mask)[0]
+            init = pos1[occ_indices]
+            final = pos2
+            
+            init_idx, final_idx = get_jv_pairing_lap(init, final)
+            
+            # Map the Hungarian output back to the original array indices
+            moving_idx = occ_indices[init_idx]
+            
+            # Compute mask for traps to be switched off
+            off_mask = cp.ones(len(pos1), dtype=bool)
+            off_mask[moving_idx] = False
+
+            # Determine actual fade steps (skip if no traps to turn off or fade_steps=0)
+            has_off_traps = bool(cp.any(off_mask))
+            actual_fade_steps = fade_steps if (fade_steps > 0 and has_off_traps) else 0
+            
+            # 2. CALCULATE INTERPOLATION STEPS
+            pos_init = pos1[moving_idx]
+            pos_final = pos2[final_idx]
+            vec = pos_final - pos_init
+            
+            # Faster L2 norm calculation using cupy linear algebra
+            max_dist = cp.linalg.norm(vec, axis=1).max()
+            n_steps = int(cp.ceil(1.875 * max_dist / d0))
+            
+            # Calculate total sequence size to pre-allocate correctly
+            total_steps = actual_fade_steps + n_steps
+                
+            # 3. INITIALIZE VRAM STATE MACHINE
+            curr_w = cp.asarray(w1, dtype=cp.float32)
+            curr_phi = cp.asarray(phi1, dtype=cp.float32)
+            curr_x = cp.asarray(x1, dtype=cp.float32)
+            curr_y = cp.asarray(y1, dtype=cp.float32)
+
+            # Pre-calculate the minimum jerk step multipliers on the GPU
+            tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
+            s_profile = 10 * tau**3 - 15 * tau**4 + 6 * tau**5
+
+            # ds_profile contains the fractional progression for each step n
+            ds_profile = cp.diff(s_profile)
+            
+            # CRITICAL: Pull ds_profile back to the CPU! 
+            ds_profile_cpu = ds_profile.get()
+            
+            # Initialize step vectors with zeros
+            dw = cp.zeros_like(curr_w)
+            dphi = cp.zeros_like(curr_phi)
+            total_dx = cp.zeros_like(curr_x)
+            total_dy = cp.zeros_like(curr_y)
+            
+            # Ensure array operands are on the GPU to avoid implicit CPU conversion
+            w1_gpu, w2_gpu = cp.asarray(w1), cp.asarray(w2)
+            phi1_gpu, phi2_gpu = cp.asarray(phi1), cp.asarray(phi2)
+
+            # Load steps for MOVING traps
+            dw[moving_idx] = (w2_gpu[final_idx] - w1_gpu[moving_idx]) / n_steps
+            total_dx[moving_idx] = vec[:, 0].astype(cp.float32)
+            total_dy[moving_idx] = vec[:, 1].astype(cp.float32)
+            
+            # Phase Interpolation
+            phase_diff = (phi2_gpu[final_idx] - phi1_gpu[moving_idx] + cp.pi) % (2 * cp.pi) - cp.pi
+            dphi[moving_idx] = phase_diff / n_steps
+            
+            # Load steps for OFF traps (Ensure they do not move)
+            dw[off_mask] = 0.0
+            
+            # Allocate sequence arrays for both fade and movement frames
+            phasemasks_sequence = np.empty((total_steps, self.Ny, self.Nx), dtype=np.uint8)
+            gpu_sequence = cp.empty((total_steps, self.Ny, self.Nx), dtype=cp.uint8)
+            
+            # OPTIMIZATION: Pre-calculate the static background mask ONCE
+            static_background = self.superimpose([self.fresnel, self.blaze, self.zernike])
+            
+            frame_idx = 0
+
+            # ==========================================
+            # PHASE 1: FADE OUT UNOCCUPIED TRAPS
+            # ==========================================
+            if actual_fade_steps > 0:
+                for step in range(1, actual_fade_steps + 1):
+                    progress = cp.float32(step / actual_fade_steps)
+                    
+                    # Linearly ramp down weights for traps being dropped
+                    curr_w[off_mask] = w1_gpu[off_mask] * (cp.float32(1.0) - progress)
+                    
+                    terms_gpu = (curr_w, curr_phi, curr_x, curr_y)
+                    pm_slm = self.generate_phasemask(terms_gpu)
+                    composite_pm = self.superimpose([pm_slm, static_background])
+                    
+                    gpu_sequence[frame_idx] = self.transform_phase_8bit(composite_pm)
+                    frame_idx += 1
+            
+            # Hard-set off weights to exactly 0.0 before motion starts to avoid float rounding errors
+            curr_w[off_mask] = 0.0
+
+            # ==========================================
+            # PHASE 2: REARRANGE OCCUPIED TRAPS
+            # ==========================================
+            # 4. THE ULTRA-FAST GPU LOOP
+            for n in range(n_steps):
+                
+                ds = float(ds_profile_cpu[n])
+                update_state_kernel(dw, dphi, total_dx, total_dy, ds, curr_w, curr_phi, curr_x, curr_y)
+                
+                terms_gpu = (curr_w, curr_phi, curr_x, curr_y)
+                pm_slm = self.generate_phasemask(terms_gpu)
+                
+                composite_pm = self.superimpose([pm_slm, static_background])
+                
+                # Store calculated 2D mask directly into pre-allocated VRAM chunk
+                gpu_sequence[frame_idx] = self.transform_phase_8bit(composite_pm)
+                frame_idx += 1
+
+            # Batch copy the entire sequence back to the host (CPU) once at the end
+            gpu_sequence.get(out=phasemasks_sequence)
+                
+            print(f"Time Taken for {total_steps} frames: {(time.time() - start)*1000:.4f} ms")
+            return phasemasks_sequence
+
     def iter_rearrangement_sequence(self, terms1, terms2, occ_mask, d0=0.5,
                                     profile="minimum_jerk", to_host=True):
         """Streaming variant of :meth:`generate_rearrangement_sequence`.
@@ -779,6 +915,131 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             pm_slm = self.generate_phasemask(terms_gpu)
             composite_pm = self.superimpose([pm_slm, static_background])
             frame = self.transform_phase_8bit(composite_pm)
+            yield frame.get() if to_host else frame
+
+    def iter_rearrangement_sequence_rampdown(self, terms1, terms2, occ_mask, d0=0.5,
+                                    profile="minimum_jerk", fade_steps=10, to_host=True):
+        """Streaming variant of :meth:`generate_rearrangement_sequence`.
+
+        Yields each interpolated phasemask the moment it is computed, instead of
+        buffering the whole ``(n, Ny, Nx)`` sequence and returning it at the end.
+        This lets a caller push each frame to the SLM while the GPU keeps
+        generating the rest, so generation and upload overlap (pipelined) rather
+        than running back to back.
+
+        ``profile`` selects the transport trajectory:
+
+        * ``"minimum_jerk"`` - quintic profile, ``n = ceil(1.875 * max_dist / d0)``
+          frames. Smoother acceleration, so gentler on the atoms.
+        * ``"linear"`` - constant velocity, ``n = ceil(max_dist / d0)`` frames.
+          1.875x fewer frames for the same ``d0``, at the cost of abrupt start/stop.
+
+        ``fade_steps`` dictates how many frames are used to linearly ramp down the 
+        weights of unoccupied traps to 0 before the rearrangement motion begins.
+
+        ``to_host`` controls where the GPU->host copy happens. ``True`` yields
+        ``numpy`` frames (the copy runs here). ``False`` yields ``cupy`` frames so a
+        consumer thread can do the ``.get()`` itself, keeping the PCIe transfer off
+        this loop.
+        """
+        if profile not in ("minimum_jerk", "linear"):
+            raise ValueError(
+                f"profile must be 'minimum_jerk' or 'linear', got {profile!r}"
+            )
+        
+        w1, phi1, x1, y1 = terms1
+        w2, phi2, x2, y2 = terms2
+        occ_mask = cp.asarray(occ_mask)
+
+        # 1. SETUP & PAIRING
+        pos1 = cp.stack((x1, y1), axis=-1)
+        pos2 = cp.stack((x2, y2), axis=-1)
+
+        occ_indices = cp.where(occ_mask)[0]
+        init = pos1[occ_indices]
+        final = pos2
+
+        init_idx, final_idx = get_jv_pairing_lap(init, final)
+        moving_idx = occ_indices[init_idx]
+
+        off_mask = cp.ones(len(pos1), dtype=bool)
+        off_mask[moving_idx] = False
+
+        pos_init = pos1[moving_idx]
+        pos_final = pos2[final_idx]
+        vec = pos_final - pos_init
+
+        # 2. INITIALIZE GPU STATE VECTORS
+        curr_w = cp.asarray(w1, dtype=cp.float32)
+        curr_phi = cp.asarray(phi1, dtype=cp.float32)
+        curr_x = cp.asarray(x1, dtype=cp.float32)
+        curr_y = cp.asarray(y1, dtype=cp.float32)
+
+        w1_gpu, w2_gpu = cp.asarray(w1), cp.asarray(w2)
+        phi1_gpu, phi2_gpu = cp.asarray(phi1), cp.asarray(phi2)
+
+        # Compute static background once for both phases
+        static_background = self.superimpose([self.fresnel, self.blaze, self.zernike])
+
+        # ==========================================
+        # PHASE 1: FADE OUT UNOCCUPIED TRAPS
+        # ==========================================
+        if fade_steps > 0 and cp.any(off_mask):
+            for step in range(1, fade_steps + 1):
+                # Calculate remaining weight fraction (enforce float32)
+                progress = cp.float32(step / fade_steps)
+                
+                # Linearly ramp down weights for traps that will be dropped
+                curr_w[off_mask] = w1_gpu[off_mask] * (cp.float32(1.0) - progress)
+                
+                # Generate and yield frame (positions and phases remain static)
+                terms_gpu = (curr_w, curr_phi, curr_x, curr_y)
+                pm_slm = self.generate_phasemask(terms_gpu)
+                composite_pm = self.superimpose([pm_slm, static_background])
+                frame = self.transform_phase_8bit(composite_pm)
+                
+                yield frame.get() if to_host else frame
+                
+        # Hard-set off weights to exactly 0.0 before motion starts to avoid float rounding errors
+        curr_w[off_mask] = 0.0
+        
+        # ==========================================
+        # PHASE 2: REARRANGE OCCUPIED TRAPS
+        # ==========================================
+        max_dist = cp.linalg.norm(vec, axis=1).max()
+        steps_scale = 1.0 if profile == "linear" else 1.875
+        n_steps = int(cp.ceil(steps_scale * max_dist / d0))
+
+        tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
+        if profile == "linear":
+            s_profile = tau
+        else:
+            s_profile = 10 * tau**3 - 15 * tau**4 + 6 * tau**5
+        ds_profile_cpu = cp.diff(s_profile).get()
+
+        dw = cp.zeros_like(curr_w)
+        dphi = cp.zeros_like(curr_phi)
+        total_dx = cp.zeros_like(curr_x)
+        total_dy = cp.zeros_like(curr_y)
+
+        dw[moving_idx] = (w2_gpu[final_idx] - w1_gpu[moving_idx]) / n_steps
+        total_dx[moving_idx] = vec[:, 0].astype(cp.float32)
+        total_dy[moving_idx] = vec[:, 1].astype(cp.float32)
+
+        phase_diff = (phi2_gpu[final_idx] - phi1_gpu[moving_idx] + cp.pi) % (2 * cp.pi) - cp.pi
+        dphi[moving_idx] = phase_diff / n_steps
+
+        dw[off_mask] = 0.0  # Safety precaution
+
+        for n in range(n_steps):
+            ds = float(ds_profile_cpu[n])
+            update_state_kernel(dw, dphi, total_dx, total_dy, ds, curr_w, curr_phi, curr_x, curr_y)
+            
+            terms_gpu = (curr_w, curr_phi, curr_x, curr_y)
+            pm_slm = self.generate_phasemask(terms_gpu)
+            composite_pm = self.superimpose([pm_slm, static_background])
+            frame = self.transform_phase_8bit(composite_pm)
+            
             yield frame.get() if to_host else frame
    
     def plan_rearrangement(self, terms1, terms2, occ_mask, d0=0.5,
