@@ -722,7 +722,7 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             print(f"Time Taken for {n_steps} frames: {(time.time() - start)*1000:.4f} ms")
             return phasemasks_sequence
 
-    def generate_rearrangement_sequence(self, terms1, terms2, occ_mask, d0=0.5, fade_steps=10):
+    def generate_rearrangement_sequence_rampdown(self, terms1, terms2, occ_mask, d0=0.5, fade_steps=10):
             """
             Calculates the optimal Hungarian rearrangement path, fades out unoccupied
             traps, and generates the full sequence of interpolated phasemasks 

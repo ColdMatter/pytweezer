@@ -21,17 +21,14 @@ def requires_camera(func):
 
     return wrapper
 
-
-
-
-class ImagEMX2Camera:
-    """Low-level wrapper around the Hamamatsu ImagEM X2 DCAM driver."""
+class ORCACamera:
+    """Low-level wrapper around the Hamamatsu ORCA DCAM driver."""
 
     def __init__(
         self,
         image_dir: str | None = None,
         timeout: float = 5*60.0,
-        camera_index: int = 0
+        camera_index: int = 1
     ):
         self.image_dir = image_dir or IMAGE_DIRECTORY
         self.timeout = timeout
@@ -43,22 +40,22 @@ class ImagEMX2Camera:
         try:
             self.dcam = dcam.DCAMCamera(self.camera_index)
             self.dcam.open()
-            print(f"ImagEM X2 camera initialised.")
+            print(f"ORCA camera initialised.")
         except Exception as exc:
             self.dcam = None
-            raise RuntimeError("Could not connect to ImagEM X2 camera") from exc
+            raise RuntimeError("Could not connect to ORCA camera") from exc
 
     def _require_camera(self):
         if self.dcam is None:
-            raise RuntimeError("ImagEM X2 camera connection has been relinquished")
+            raise RuntimeError("ORCA camera connection has been relinquished")
 
     def close(self):
         try:
             if self.dcam is not None:
                 self.dcam.close()
-                print(f"ImagEM X2 camera closed.")
+                print(f"ORCA camera closed.")
         except Exception:
-            print("Failed to close ImagEM X2 camera cleanly.")
+            print("Failed to close ORCA camera cleanly.")
         finally:
             self.dcam = None
 
@@ -76,20 +73,20 @@ class ImagEMX2Camera:
         self.dcam.set_roi(x0, x0 + width - 1, y0, y0 + height - 1)
 
     @requires_camera
+    def set_binning(self, binning: int):
+        self.dcam.set_attribute_value("binning", int(binning))
+
+    @requires_camera
+    def set_readout_speed(self, speed: int):
+        self.dcam.set_attribute_value("readout_speed", int(speed))
+
+    @requires_camera
     def set_ccd_mode(self, mode: int):
         self.dcam.set_attribute_value("ccd_mode", int(mode))
 
     @requires_camera
-    def enable_em_gain(self, enable: bool = True):
-        self.set_ccd_mode(2 if enable else 1)
-
-    @requires_camera
-    def set_direct_em_gain_mode(self, mode: int):
-        self.dcam.set_attribute_value("direct_em_gain_mode", int(mode))
-
-    @requires_camera
-    def enable_direct_em_gain(self, enable: bool = True):
-        self.set_direct_em_gain_mode(2 if enable else 1)
+    def set_gain(self, gain: int):
+        self.dcam.set_attribute_value("contrast gain", int(gain))
 
     @requires_camera
     def set_sensitivity(self, sensitivity: int):
@@ -129,7 +126,7 @@ class ImagEMX2Camera:
         )
         for i, image in enumerate(images):
             if autosave:
-                ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir)
+                ORCACamera.save_tiff(image=image, image_dir=self.image_dir)
             if broadcast:
                 if self.image_client is None:
                     LOGGER.error("tried to broadcast image but no client exists")
@@ -152,7 +149,7 @@ class ImagEMX2Camera:
         image, _info = self.dcam.read_newest_image(return_info=True)
         image = np.asarray(image)
         if autosave:
-            ImagEMX2Camera.save_tiff(image=image, image_dir=self.image_dir)
+            ORCACamera.save_tiff(image=image, image_dir=self.image_dir)
         info = {
             "timestamp": time.time(),
             "index": 0
