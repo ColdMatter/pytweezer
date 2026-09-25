@@ -35,3 +35,5 @@ SDK/
 # The compiled extensions themselves stay tracked so lab machines without MSVC
 # still get the fast path (rearrangement.py falls back to numpy without them).
 !pytweezer/cpp/*.pyd
+
+Plotting/

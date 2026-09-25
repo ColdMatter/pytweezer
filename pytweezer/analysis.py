@@ -129,9 +129,11 @@ def fit_gaussian(img):
     p0 = (img.max() - img.min(), com_x, com_y, 70, 70, 0, img.min())  # Initial guess for parameters
     popt, pcov = curve_fit(lambda xy, A, x0, y0, sx, sy, theta, offset: gaussian2D(xy[0], xy[1], A, x0, y0, sx, sy, theta, offset).ravel(), (x.ravel(), y.ravel()), img.ravel(), p0=p0)
     A_fit, x0_fit, y0_fit, sx_fit, sy_fit, theta_fit, offset_fit = popt
+    A_fit_err, x0_fit_err, y0_fit_err, sx_fit_err, sy_fit_err, theta_fit_err, offset_fit_err = np.sqrt(np.diag(pcov))
     sx_fit, sy_fit = sorted([abs(sx_fit), abs(sy_fit)], reverse=True)
     return {
-        "A": A_fit, "x0": x0_fit, "y0": y0_fit, "sx": abs(sx_fit), "sy": abs(sy_fit), "theta": theta_fit, "offset": offset_fit
+        "A": A_fit, "x0": x0_fit, "y0": y0_fit, "sx": abs(sx_fit), "sy": abs(sy_fit), "theta": theta_fit, "offset": offset_fit,
+        "A_err": A_fit_err, "x0_err": x0_fit_err, "y0_err": y0_fit_err, "sx_err": sx_fit_err, "sy_err": sy_fit_err, "theta_err": theta_fit_err, "offset_err": offset_fit_err
     }
 
 def get_total_counts(img, x, y, window_size):
@@ -494,20 +496,31 @@ def morphological_tophat_high_pass(image, feature_size):
 
 def extract_cloud_temperature(images, tau_list, show_plots=True):
     x0_list, y0_list, sx_list, sy_list = [], [], [], []
+    x0_err_list, y0_err_list, sx_err_list, sy_err_list = [], [], [], []
     for it, img in enumerate(images):
         gaussian_params = fit_gaussian(img)
         amp, centre_x, centre_y, sx, sy = gaussian_params["A"], int(gaussian_params["x0"]), int(gaussian_params["y0"]), gaussian_params["sx"], gaussian_params["sy"]
-        print(f"Iteration {str(it+1).zfill(2)}/{len(tau_list)}  |  TOF: {tau_list[it]/100:.6g} ms  |  Amplitude: {amp:.6g}  |  Centre: ({centre_x}, {centre_y})  |  Widths: (sx: {sx:.6g}, sy: {sy:.6g})")
+        amp_err, centre_x_err, centre_y_err, sx_err, sy_err = gaussian_params["A_err"], gaussian_params["x0_err"], gaussian_params["y0_err"], gaussian_params["sx_err"], gaussian_params["sy_err"]
+        print(f"Iteration {str(it+1).zfill(2)}/{len(tau_list)}  |  TOF: {tau_list[it]/100:.6g} ms  |  Amplitude: {amp:.6g} ± {amp_err:.6g}  |  Centre: ({centre_x} ± {centre_x_err:.6g}, {centre_y} ± {centre_y_err:.6g})  |  Widths: (sx: {sx:.6g} ± {sx_err:.6g}, sy: {sy:.6g} ± {sy_err:.6g})")
         x0_list.append(centre_x)
         y0_list.append(centre_y)
         sx_list.append(sx)
         sy_list.append(sy)
+        x0_err_list.append(centre_x_err)
+        y0_err_list.append(centre_y_err)
+        sx_err_list.append(sx_err)
+        sy_err_list.append(sy_err)
 
     tau_list_ms = tau_list * 1 / 100
     sx_array = np.array(sx_list) * motcam_mm_per_px
     sy_array = np.array(sy_list) * motcam_mm_per_px
     x0_array = np.array(x0_list) * motcam_mm_per_px
     y0_array = np.array(y0_list) * motcam_mm_per_px
+
+    sx_err_array = np.array(sx_err_list) * motcam_mm_per_px
+    sy_err_array = np.array(sy_err_list) * motcam_mm_per_px
+    x0_err_array = np.array(x0_err_list) * motcam_mm_per_px
+    y0_err_array = np.array(y0_err_list) * motcam_mm_per_px
 
     lin_fit = lambda x, m, c: m * x + c
     px, pcovx = curve_fit(lin_fit, tau_list_ms**2, sx_array**2)
@@ -535,7 +548,7 @@ def extract_cloud_temperature(images, tau_list, show_plots=True):
         # Plot sx_array, sy_array, x0_array all three side by side with respect to tau_list_ms
         plt.figure(figsize=(10, 3))
         plt.subplot(1, 3, 1)
-        plt.scatter(tau_list_ms**2, sx_array**2)
+        plt.errorbar(tau_list_ms**2, sx_array**2, yerr=sx_err_array**2, fmt='o', color='C0')
         plt.plot(t2_fit, sx2_fit, color='red', label=f"Tx = {Tx:.2f} ± {Tx_err:.2f} μK")
         plt.legend()
         plt.xlabel('τ² (ms²)')
@@ -543,7 +556,7 @@ def extract_cloud_temperature(images, tau_list, show_plots=True):
         plt.title('σx² vs τ²')
 
         plt.subplot(1, 3, 2)
-        plt.scatter(tau_list_ms**2, sy_array**2)
+        plt.errorbar(tau_list_ms**2, sy_array**2, yerr=sy_err_array**2, fmt='o', color='C0')
         plt.plot(t2_fit, sy2_fit, color='red', label=f"Ty = {Ty:.2f} ± {Ty_err:.2f} μK")
         plt.legend()
         plt.xlabel('τ² (ms²)')
@@ -551,7 +564,7 @@ def extract_cloud_temperature(images, tau_list, show_plots=True):
         plt.title('σy² vs τ²')
 
         plt.subplot(1, 3, 3)
-        plt.scatter(tau_list_ms, x0_array)
+        plt.errorbar(tau_list_ms, x0_array, yerr=x0_err_array, fmt='o', color='C0')
         plt.plot(t_fit, x0_fit, color='red', label=f"a = {a/(9.81/1000):.2f} ± {a_err/(9.81/1000):.2f} g")
         plt.legend()
         plt.xlabel('τ (ms)')
