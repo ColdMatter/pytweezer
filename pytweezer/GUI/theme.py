@@ -310,25 +310,39 @@ QFrame#Region[kind="well"] QTableWidget {
 QFrame#Region[kind="well"] QHeaderView::section {
     background-color: #141519;
 }
-QTableWidget#QueueTable::item {
+QTableWidget#QueueTable::item,
+QTableWidget#FilterTable::item {
     padding: 0 12px 0 4px;
 }
-QTableWidget#QueueTable QHeaderView::section {
+QTableWidget#QueueTable QHeaderView::section,
+QTableWidget#FilterTable QHeaderView::section {
     padding: 4px 12px 4px 4px;
+}
+QTreeWidget#MeasurementTree::item {
+    padding: 3px 6px 3px 0;
+}
+QFrame#Region[kind="well"] QPlainTextEdit {
+    background: transparent;
+    border: none;
+    font-family: "Cascadia Mono", "DejaVu Sans Mono", monospace;
 }
 QFrame#Region[kind="well"] QLineEdit {
     background-color: #1d1e24;
 }
-QSplitter#ExperimentsSplitter::handle {
+QSplitter#ExperimentsSplitter::handle,
+QSplitter#PanelSplitter::handle {
     background: transparent;
 }
-QSplitter#ExperimentsSplitter::handle:horizontal {
+QSplitter#ExperimentsSplitter::handle:horizontal,
+QSplitter#PanelSplitter::handle:horizontal {
     width: 8px;
 }
-QSplitter#ExperimentsSplitter::handle:vertical {
+QSplitter#ExperimentsSplitter::handle:vertical,
+QSplitter#PanelSplitter::handle:vertical {
     height: 8px;
 }
-QSplitter#ExperimentsSplitter::handle:hover {
+QSplitter#ExperimentsSplitter::handle:hover,
+QSplitter#PanelSplitter::handle:hover {
     background: #33343d;
 }
 QToolButton#ScanToggle {
@@ -504,6 +518,21 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
 }
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #5b8def;
+}
+
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #44454f;
+    border-radius: 3px;
+    background-color: #24252c;
+}
+QCheckBox::indicator:hover {
+    border-color: #5b8def;
+}
+QCheckBox::indicator:checked {
+    background-color: #5b8def;
     border-color: #5b8def;
 }
 

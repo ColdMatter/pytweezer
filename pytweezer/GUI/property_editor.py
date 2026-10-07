@@ -9,6 +9,7 @@ from PyQt6.QtGui import *
 from PyQt6.QtWidgets import QApplication, QFileDialog, QListWidget, QListWidgetItem
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
+from pytweezer.GUI.components import Region
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.table_parameter import *
 from pytweezer.logging_utils import get_logger
@@ -284,10 +285,6 @@ class PropEdit(BWidget):
         # print('property_editor: subtree',subtree)
         self.props = Properties(name)
 
-        # layout = QtGui.QGridLayout()  # deprecated
-        layout = QtWidgets.QGridLayout()
-        self.setLayout(layout)
-
         tree = TreeEdit(name, self, self.props, self.subtree)
         self.tree = tree
         paramTree = ParameterTree()
@@ -297,41 +294,96 @@ class PropEdit(BWidget):
         paramTree.expandToDepth(0)
         paramTree.setSortingEnabled(True)
         paramTree.sortItems(0, QtCore.Qt.SortOrder.AscendingOrder)
+        paramTree.itemSelectionChanged.connect(self._update_buttons)
         self.pTree = paramTree
-        layout.addWidget(paramTree, 1, 0, 1, 1)
 
-        # The update button is the first since it will be selected by default and one might press enter after editing.
+        self.filter = QtWidgets.QLineEdit()
+        self.filter.setPlaceholderText("Filter by name…")
+        self.filter.setClearButtonEnabled(True)
+        self.filter.setFixedWidth(240)
+        self.filter.textChanged.connect(self._apply_filter)
 
-        # Button to delete current property trre entry
-        # upButton=QtGui.QPushButton('update')  # deprecated
-        upButton = QtWidgets.QPushButton("update")
-        upButton.clicked.connect(self.update)
-        layout.addWidget(upButton)
+        region = Region(
+            "well", "Properties", "double-click a value to edit; changes apply at once"
+        )
+        region.header.addWidget(self.filter)
+        region.body.addWidget(paramTree, 1)
 
-        # Button to delete current property trre entry
-        # delButton=QtGui.QPushButton('del')  # deprecated
-        delButton = QtWidgets.QPushButton("del")
-        delButton.clicked.connect(self.delete)
-        layout.addWidget(delButton)
+        self.save_button = QtWidgets.QPushButton("Save to file…")
+        self.save_button.setToolTip("Write the properties shown to a JSON file")
+        self.save_button.clicked.connect(self.save)
+        self.load_button = QtWidgets.QPushButton("Load from file…")
+        self.load_button.setToolTip("Set properties from a JSON file")
+        self.load_button.clicked.connect(self.load)
+        self.delete_button = QtWidgets.QPushButton("Delete")
+        self.delete_button.setObjectName("DangerButton")
+        self.delete_button.setToolTip(
+            "Remove the selected property and everything under it"
+        )
+        self.delete_button.clicked.connect(self._confirm_delete)
+        buttons = QtWidgets.QHBoxLayout()
+        buttons.setSpacing(6)
+        buttons.addWidget(self.save_button)
+        buttons.addWidget(self.load_button)
+        buttons.addStretch(1)
+        buttons.addWidget(self.delete_button)
+        region.body.addLayout(buttons)
 
-        # upButton=QtGui.QPushButton('save')  # deprecated
-        upButton = QtWidgets.QPushButton("save")
-        upButton.clicked.connect(self.save)
-        layout.addWidget(upButton)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.addWidget(region)
+        self._update_buttons()
 
-        # upButton=QtGui.QPushButton('load')  # deprecated
-        upButton = QtWidgets.QPushButton("load")
-        upButton.clicked.connect(self.load)
-        layout.addWidget(upButton)
-        # timer=QtCore.QTimer(self)
-        # timer.timeout.connect(self.update)
-        # timer.start(1000)
-        # self.timer=timer
+        # Follow changes made elsewhere (other GUIs, servers) while visible.
+        self._poll = QtCore.QTimer(self)
+        self._poll.timeout.connect(self._poll_tick)
+        self._poll.start(1000)
 
         # No self.show() here: when embedded as a tab the widget is reparented,
         # and showing it first would briefly flash a stray top-level window.
         # Standalone use goes through main(), which calls show() itself.
         self.resize(800, 800)
+
+    def _poll_tick(self):
+        if not self.isVisible():
+            return
+        # Rebuilding a parameter would close an editor the user is typing in.
+        focus = QApplication.focusWidget()
+        if focus is not None and self.pTree.isAncestorOf(focus):
+            return
+        try:
+            self.update()
+        except Exception:
+            logger.debug("property update failed", exc_info=True)
+
+    def _update_buttons(self):
+        self.delete_button.setEnabled(bool(self.pTree.selectedItems()))
+
+    def _apply_filter(self, text):
+        text = text.strip().casefold()
+
+        def apply(item, ancestor_matches):
+            matches = not text or text in item.text(0).casefold()
+            child_shown = False
+            for i in range(item.childCount()):
+                child_shown |= apply(item.child(i), ancestor_matches or matches)
+            visible = matches or ancestor_matches or child_shown
+            item.setHidden(not visible)
+            if text and child_shown and not matches:
+                item.setExpanded(True)
+            return visible
+
+        root = self.pTree.invisibleRootItem()
+        for i in range(root.childCount()):
+            apply(root.child(i), False)
+
+    def _confirm_delete(self):
+        names = ", ".join(item.text(0) for item in self.pTree.selectedItems())
+        answer = QtWidgets.QMessageBox.question(
+            self, "Delete property", f"Delete {names} and everything under it?"
+        )
+        if answer == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.delete()
 
     def update(self):
         self.tree.update()

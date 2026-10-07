@@ -101,6 +101,7 @@ in a non-interactive shell.
 ### Git branching conventions
 
 - New features should usually be developed on feature branches
+- Commit and push as you go: after each coherent, tested step (e.g. one tab restyled), not in one batch at the end. Stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
 - All branches should have an associated merge request
 - **The main branch should always be deployable** - no broken code or failing tests allowed
 

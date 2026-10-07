@@ -1,19 +1,32 @@
+"""The Analysis tab: add, start, stop, configure and delete analysis filters.
+
+State comes from the Analysis Manager's snapshot, polled while the tab is
+visible; the table is updated in place so selection survives.
+"""
+
 import os
 
 import zmq
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDialog,
+    QGridLayout,
     QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
     QPushButton,
-    QTreeView,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
-    QWidget,
 )
 
 from pytweezer.configuration.config import get_config
+from pytweezer.GUI.components import Region, set_state, status_icon
 from pytweezer.GUI.property_editor import PropEdit
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.logging_utils import get_logger
@@ -23,7 +36,7 @@ logger = get_logger("Analysis Manager UI")
 
 
 class AnalysisManagerClient(QtCore.QObject):
-    def __init__(self, endpoint: str, timeout_ms: int = 2000):
+    def __init__(self, endpoint: str, timeout_ms: int = 800):
         super().__init__()
         self.endpoint = endpoint
         self.timeout_ms = timeout_ms
@@ -94,200 +107,131 @@ class AnalysisManagerClient(QtCore.QObject):
         }
 
 
-class CheckableModel(QtGui.QStandardItemModel):
-    pass
+_POLL_MS = 1000
+_COLUMNS = ["Name", "State", "Type", "Script", "Input stream"]
+_KEY = Qt.ItemDataRole.UserRole
+_STATE_TIPS = {
+    "crashed": "Was started, but its process has exited",
+}
 
 
-class TreeViewWidget(QWidget):
-    FROM, SUBJECT, DATE, STREAM = range(4)
+def filter_state(entry, running):
+    """The :data:`~pytweezer.GUI.theme.STATE_STYLE` state of one filter."""
+    if running:
+        return "running"
+    return "crashed" if entry.get("active") else "stopped"
 
-    def __init__(self, props, rpc_client, parent=None):
-        super().__init__(parent)
-        self.props = props
-        self._props = props
-        self.rpc = rpc_client
 
-        self.dataView = QTreeView()
-        self.dataView.setRootIsDecorated(False)
-        self.dataView.setAlternatingRowColors(True)
+class FilterTable(QTableWidget):
+    """One row per analysis filter, keyed ``"<category>/<name>"``."""
 
-        dataLayout = QHBoxLayout()
-        dataLayout.addWidget(self.dataView)
-        self.setLayout(dataLayout)
+    def __init__(self, parent=None):
+        super().__init__(0, len(_COLUMNS), parent)
+        self.setObjectName("FilterTable")
+        self.setShowGrid(False)
+        self.setHorizontalHeaderLabels(_COLUMNS)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.verticalHeader().setVisible(False)
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(
+            _COLUMNS.index("Input stream"), QHeaderView.ResizeMode.Stretch
+        )
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._keys = []
 
-        self.model = self.create_model(self)
-        self.dataView.setModel(self.model)
+    def selected_key(self):
+        rows = self.selectionModel().selectedRows()
+        return self.item(rows[0].row(), 0).data(_KEY) if rows else None
 
-        self.itemdict = {}
-        self.filters = {}
-
-        self.timer = QtCore.QTimer(self)
-        self.timer.setInterval(400)
-        self.timer.timeout.connect(self.refresh_status)
-        self.timer.start()
-
-    def create_model(self, parent):
-        model = CheckableModel(0, 4, parent)
-        model.setHeaderData(self.FROM, Qt.Orientation.Horizontal, "Name")
-        model.setHeaderData(self.SUBJECT, Qt.Orientation.Horizontal, "Script")
-        model.setHeaderData(self.DATE, Qt.Orientation.Horizontal, "Category")
-        model.setHeaderData(self.STREAM, Qt.Orientation.Horizontal, "Inputstream")
-        model.itemChanged.connect(self.on_item_changed)
-        return model
-
-    def clear(self):
-        self.model.removeRows(0, self.model.rowCount())
-        self.itemdict.clear()
-        self.filters.clear()
-
-    def populate(self, snapshot: dict):
-        self.clear()
-        filters = snapshot.get("filters", {})
-        running = snapshot.get("running", {})
-
-        for key in sorted(filters.keys(), key=str.casefold):
+    def update_filters(self, filters, running):
+        keys = sorted(filters, key=str.casefold)
+        selected = self.selected_key()
+        if keys != self._keys:
+            self._keys = keys
+            self.setRowCount(len(keys))
+            for row in range(len(keys)):
+                for column in range(len(_COLUMNS)):
+                    self.setItem(row, column, QTableWidgetItem())
+        for row, key in enumerate(keys):
             entry = filters[key]
-            name = entry.get("name")
-            category = entry.get("category")
-            script = entry.get("script", "")
-            streams = entry.get("streams", [])
-            active = bool(running.get(key, entry.get("active", False)))
-            self.add_item(name, category, script, streams, active)
-
-    def add_item(self, name, category, script, streams, active):
-        self.filters[name] = [script, category]
-
-        parent_item = self.model.invisibleRootItem()
-        check_item = QtGui.QStandardItem(name)
-        check_item.setCheckable(True)
-        check_item.setCheckState(
-            Qt.CheckState.Checked if active else Qt.CheckState.Unchecked
-        )
-
-        parent_item.appendRow(
-            [
-                check_item,
-                QtGui.QStandardItem(script),
-                QtGui.QStandardItem(category),
-                QtGui.QStandardItem(",".join(streams)),
+            state = filter_state(entry, running.get(key, False))
+            cells = [
+                entry["name"],
+                state.capitalize(),
+                entry["category"],
+                entry.get("script", ""),
+                ", ".join(entry.get("streams", [])),
             ]
+            for column, text in enumerate(cells):
+                item = self.item(row, column)
+                item.setText(text)
+                item.setToolTip(_STATE_TIPS.get(state, "") if column == 1 else "")
+            self.item(row, 0).setData(_KEY, key)
+            self.item(row, 1).setIcon(status_icon(state))
+            if key == selected and not self.item(row, 0).isSelected():
+                self.selectRow(row)
+
+
+class AddFilterSheet(Region):
+    """The form that adds a filter: name, type, script and input stream."""
+
+    added = QtCore.pyqtSignal(str, str, str, list)
+
+    def __init__(self, analysisdir, stream_source, parent=None):
+        super().__init__(
+            "sheet",
+            "Add a filter",
+            "runs a script from pytweezer/analysis on a live stream",
+            parent,
         )
-        self.itemdict[name] = check_item
+        self._stream_source = stream_source
+        self.scripts_by_category = self._scan_scripts(analysisdir)
 
-    def on_item_changed(self, item):
-        name = item.text()
-        index = item.index()
-        category = self.model.data(self.model.index(index.row(), 2))
-        active = item.checkState() == Qt.CheckState.Checked
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("e.g. tweezer atoms")
+        self.category = QComboBox()
+        self.category.addItems(["Image", "Data"])
+        self.script = QComboBox()
+        self.stream = QComboBox()
+        self.add_button = QPushButton("Add filter")
+        self.add_button.setObjectName("PrimaryButton")
+        for widget, width in (
+            (self.name, 240),
+            (self.category, 110),
+            (self.script, 240),
+            (self.stream, 240),
+        ):
+            widget.setFixedWidth(width)
 
-        response = self.rpc.request(
-            {
-                "command": "set_active",
-                "category": category,
-                "name": name,
-                "active": active,
-            }
-        )
-        if not response.get("ok"):
-            logger.error(f"AnalysisManager RPC error: {response.get('error')}")
-            item.setCheckState(
-                Qt.CheckState.Unchecked if active else Qt.CheckState.Checked
-            )
-            return
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(4)
+        for column, (text, widget) in enumerate(
+            [
+                ("Name", self.name),
+                ("Type", self.category),
+                ("Script", self.script),
+                ("Input stream", self.stream),
+            ]
+        ):
+            label = QLabel(text)
+            label.setProperty("role", "regionHint")
+            grid.addWidget(label, 0, column)
+            grid.addWidget(widget, 1, column)
+        grid.addWidget(self.add_button, 1, 4)
+        grid.setColumnStretch(5, 1)
+        self.body.addLayout(grid)
 
-        self._props.set(f"{category}/{name}/active", active)
-
-    def refresh_status(self):
-        # Keep checkbox state synced with actual process status.
-        response = self.rpc.request({"command": "snapshot"}, retries=0, retry_delay_s=0)
-        if not response.get("ok"):
-            return
-
-        running = response.get("running", {})
-        for name, item in self.itemdict.items():
-            row = item.index().row()
-            category = self.model.data(self.model.index(row, 2))
-            key = f"{category}/{name}"
-            should_be_checked = (
-                Qt.CheckState.Checked
-                if running.get(key, False)
-                else Qt.CheckState.Unchecked
-            )
-            if item.checkState() != should_be_checked:
-                # Block signals to avoid sending RPC while reflecting status.
-                self.model.blockSignals(True)
-                item.setCheckState(should_be_checked)
-                self.model.blockSignals(False)
-
-    def del_current(self):
-        selmodel = self.dataView.selectionModel()
-        indexlist = selmodel.selectedRows()
-        # Delete bottom-up so earlier removals don't shift the row numbers
-        # captured in the remaining indexes.
-        for index in sorted(indexlist, key=lambda idx: idx.row(), reverse=True):
-            name = self.model.data(index)
-            category = self.model.data(self.model.index(index.row(), 2))
-            response = self.rpc.request(
-                {"command": "delete_filter", "category": category, "name": name}
-            )
-            if not response.get("ok"):
-                logger.error(f"AnalysisManager delete error: {response.get('error')}")
-                continue
-            self.model.removeRow(index.row())
-            # The row's QStandardItem is destroyed by removeRow; drop our
-            # references too, or refresh_status()'s next timer tick will call
-            # .index() on a deleted C++ object and raise a RuntimeError.
-            self.itemdict.pop(name, None)
-            self.filters.pop(name, None)
-
-    def configure_current(self):
-        selmodel = self.dataView.selectionModel()
-        indexlist = selmodel.selectedRows()
-        if indexlist != []:
-            index = indexlist[0]
-            name = self.model.data(index)
-            category = self.model.data(self.model.index(index.row(), 2))
-            dialog = QDialog()
-            dialog.setWindowTitle("Dialog")
-            layout = QVBoxLayout()
-            editor = PropEdit("/Analysis/" + category + "/" + name + "/")
-            layout.addWidget(editor)
-            dialog.setLayout(layout)
-            dialog.exec()
-
-
-class AddAnalysisWidget(QtWidgets.QWidget):
-    def __init__(self, manager, parent=None):
-        super().__init__(parent)
-        self.manager = manager
-
-        layout = QtWidgets.QHBoxLayout()
-        addButton = QtWidgets.QPushButton("add")
-        addButton.clicked.connect(self.add_filter)
-        layout.addWidget(addButton)
-
-        layout.addWidget(QtWidgets.QLabel("name"))
-        self.nametext = QtWidgets.QLineEdit("")
-        layout.addWidget(self.nametext)
-
-        self.analysistype = QtWidgets.QComboBox()
-        self.analysistype.addItem("Image")
-        self.analysistype.addItem("Data")
-        self.analysistype.currentTextChanged.connect(self.update_streamlist)
-        self.analysistype.currentTextChanged.connect(self.update_scriptlist)
-        layout.addWidget(self.analysistype)
-
-        self.scripts_by_category = self._scan_scripts(manager.analysisdir)
-
-        self.analysisscript = QtWidgets.QComboBox()
-        layout.addWidget(self.analysisscript)
-
-        self.streamlist = QComboBox()
-        layout.addWidget(self.streamlist)
-        self.setLayout(layout)
-
-        self.update_scriptlist("Image")
-        self.update_streamlist("Image")
+        self.category.currentTextChanged.connect(self.update_scripts)
+        self.category.currentTextChanged.connect(self.update_streams)
+        self.name.textChanged.connect(self._update_enabled)
+        self.name.returnPressed.connect(self._add)
+        self.add_button.clicked.connect(self._add)
+        self.update_scripts()
+        self.update_streams()
 
     @staticmethod
     def _classify_script(path):
@@ -319,7 +263,7 @@ class AddAnalysisWidget(QtWidgets.QWidget):
         except OSError:
             return by_category
         for f in filenames:
-            path = analysisdir + f
+            path = os.path.join(analysisdir, f)
             if not os.path.isfile(path) or f[0] == ".":
                 continue
             if not f.endswith((".py", ".pyx")):
@@ -329,45 +273,56 @@ class AddAnalysisWidget(QtWidgets.QWidget):
                 by_category[category].append(f)
         return by_category
 
-    def update_scriptlist(self, category):
-        self.analysisscript.clear()
-        for f in self.scripts_by_category.get(category, []):
-            self.analysisscript.addItem(f)
-
-    def update_streamlist(self, category):
-        self.streamlist.clear()
-        di = self.manager._props.get("/Servers/" + category + "Stream/active", {})
-        for name, value in di.items():
-            timedelta = int(
-                max(0, QtCore.QDateTime.currentSecsSinceEpoch() - value["timestamp"])
-            )
-            self.streamlist.addItem(name + "[%i s]" % timedelta)
-
-    def add_filter(self):
-        name = self.nametext.text().strip()
-        if not name:
-            logger.warning("AnalysisManager: empty filter name")
-            return
-
-        category = self.analysistype.currentText()
-        script = self.analysisscript.currentText()
-        stream = self.streamlist.currentText()
-        streams = [stream.split("[")[0]] if stream else ["nostream"]
-
-        response = self.manager.rpc.request(
-            {
-                "command": "add_filter",
-                "category": category,
-                "name": name,
-                "script": script,
-                "streams": streams,
-            }
+    def update_scripts(self, _category=None):
+        self.script.clear()
+        self.script.addItems(
+            self.scripts_by_category.get(self.category.currentText(), [])
         )
-        if not response.get("ok"):
-            logger.error(f"AnalysisManager add_filter error: {response.get('error')}")
-            return
+        self._update_enabled()
 
-        self.manager.refresh_snapshot()
+    def update_streams(self, _category=None):
+        """Offer the streams currently publishing, keeping the user's choice."""
+        category = self.category.currentText()
+        now = QtCore.QDateTime.currentSecsSinceEpoch()
+        streams = {
+            name: max(0, now - int(value["timestamp"]))
+            for name, value in self._stream_source(category).items()
+        }
+        current = self.stream.currentData()
+        if list(streams) != [
+            self.stream.itemData(i) for i in range(self.stream.count())
+        ]:
+            self.stream.clear()
+            for name in streams:
+                self.stream.addItem(name, name)
+            index = self.stream.findData(current)
+            if index >= 0:
+                self.stream.setCurrentIndex(index)
+        for i in range(self.stream.count()):
+            age = streams[self.stream.itemData(i)]
+            self.stream.setItemText(
+                i, self.stream.itemData(i) + (f"  ({age} s ago)" if age < 3600 else "")
+            )
+        self._update_enabled()
+
+    def _update_enabled(self):
+        self.add_button.setEnabled(
+            bool(self.name.text().strip()) and self.script.count() > 0
+        )
+
+    def _add(self):
+        if not self.add_button.isEnabled():
+            return
+        stream = self.stream.currentData()
+        self.added.emit(
+            self.category.currentText(),
+            self.name.text().strip(),
+            self.script.currentText(),
+            [stream] if stream else ["nostream"],
+        )
+
+    def clear_name(self):
+        self.name.clear()
 
 
 class AnalysisManager(BWidget):
@@ -377,43 +332,86 @@ class AnalysisManager(BWidget):
         super().__init__(name, parent)
         self.conf = get_config()
         manager_conf = self.conf["Servers"]["Analysis Manager"]
-        host = manager_conf["host"]
-        port = manager_conf["port"]
-        endpoint = f"tcp://{host}:{port}"
-        self._last_snapshot_error = ""
-
+        endpoint = f"tcp://{manager_conf['host']}:{manager_conf['port']}"
         self.rpc = AnalysisManagerClient(endpoint)
         self.analysisdir = tweezerpath + "/pytweezer/analysis/"
+        self._last_snapshot_error = ""
+        self._filters = {}
+        self._running = {}
         self.init_gui()
         self.refresh_snapshot()
 
+        self._poll = QtCore.QTimer(self)
+        self._poll.timeout.connect(self._poll_tick)
+        self._poll.start(_POLL_MS)
+
     def init_gui(self):
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(8)
 
-        self.add_widget = AddAnalysisWidget(self)
-        layout.addWidget(self.add_widget)
+        self.status = QLabel("Waiting for the Analysis Manager…")
+        self.status.setObjectName("StatusLabel")
+        layout.addWidget(self.status)
 
-        self.tvw = TreeViewWidget(self._props, self.rpc)
-        layout.addWidget(self.tvw)
+        self.table = FilterTable()
+        self.table.itemSelectionChanged.connect(self._update_buttons)
+        self.table.cellDoubleClicked.connect(lambda *_: self.configure_filter())
+        self.filters_region = Region("well", "Filters", "")
+        self.filters_region.body.addWidget(self.table, 1)
 
-        delButton = QPushButton("del")
-        delButton.clicked.connect(self.del_entry)
-        layout.addWidget(delButton)
+        self.toggle_button = QPushButton("Start")
+        self.toggle_button.setObjectName("ToggleButton")
+        self.toggle_button.clicked.connect(self.toggle_filter)
+        self.configure_button = QPushButton("Configure…")
+        self.configure_button.setToolTip("Edit this filter's properties")
+        self.configure_button.clicked.connect(self.configure_filter)
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.setObjectName("DangerButton")
+        self.delete_button.setToolTip("Stop the filter and remove it from the manager")
+        self.delete_button.clicked.connect(self.del_entry)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(6)
+        buttons.addWidget(self.toggle_button)
+        buttons.addSpacing(14)
+        buttons.addWidget(self.configure_button)
+        buttons.addStretch(1)
+        buttons.addWidget(self.delete_button)
+        self.filters_region.body.addLayout(buttons)
+        layout.addWidget(self.filters_region, 1)
 
-        configureButton = QPushButton("configure")
-        configureButton.clicked.connect(self.configure_filter)
-        layout.addWidget(configureButton)
+        self.add_sheet = AddFilterSheet(self.analysisdir, self._active_streams)
+        self.add_sheet.added.connect(self.add_filter)
+        layout.addWidget(self.add_sheet)
+        self._update_buttons()
 
-        refreshButton = QPushButton("refresh")
-        refreshButton.clicked.connect(self.refresh_snapshot)
-        layout.addWidget(refreshButton)
+    def _active_streams(self, category):
+        return self._props.get("/Servers/" + category + "Stream/active", {})
 
-        self.setLayout(layout)
+    # -- state ---------------------------------------------------------------
+
+    def _poll_tick(self):
+        # Hidden behind another tab: skip, the manager may be across a network.
+        if self.isVisible():
+            self.refresh_snapshot()
+            self.add_sheet.update_streams()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_snapshot()
+        self.add_sheet.update_streams()
+
+    def _show_status(self, text, state=""):
+        self.status.setText(text)
+        set_state(self.status, state)
 
     def refresh_snapshot(self):
         response = self.rpc.request({"command": "snapshot"}, retries=0, retry_delay_s=0)
         if not response.get("ok"):
             error_text = str(response.get("error", "unknown error"))
+            self._show_status(
+                f"The Analysis Manager is not responding: {error_text}", "crashed"
+            )
             # Avoid flooding the console with the same timeout while service starts.
             if error_text != self._last_snapshot_error:
                 logger.warning(f"AnalysisManager snapshot error: {error_text}")
@@ -421,15 +419,114 @@ class AnalysisManager(BWidget):
             return
 
         self._last_snapshot_error = ""
-
         self.analysisdir = response.get("analysisdir", self.analysisdir)
-        self.tvw.populate(response)
+        filters = response.get("filters", {})
+        running = response.get("running", {})
+        self.table.update_filters(filters, running)
+        self._filters = filters
+        self._running = running
+        n_running = sum(bool(running.get(key)) for key in filters)
+        summary = f"{n_running} running, {len(filters) - n_running} not"
+        self.filters_region.set_hint(summary if filters else "none yet: add one below")
+        self._show_status("Connected to the Analysis Manager", "running")
+        self._update_buttons()
+
+    def _update_buttons(self):
+        key = self.table.selected_key()
+        filters = self._filters
+        selected = key in filters
+        self.configure_button.setEnabled(selected)
+        self.delete_button.setEnabled(selected)
+        self.toggle_button.setEnabled(selected)
+        is_running = selected and self._running.get(key, False)
+        self.toggle_button.setText("Stop" if is_running else "Start")
+        self.toggle_button.setProperty("kind", "stop" if is_running else "start")
+        self.toggle_button.style().unpolish(self.toggle_button)
+        self.toggle_button.style().polish(self.toggle_button)
+
+    # -- actions -------------------------------------------------------------
+
+    def _selected_entry(self):
+        key = self.table.selected_key()
+        return self._filters.get(key)
+
+    def _request(self, what, payload):
+        response = self.rpc.request(payload)
+        if not response.get("ok"):
+            error = response.get("error", "unknown error")
+            logger.error(f"AnalysisManager {what} error: {error}")
+            self._show_status(f"{what}: {error}", "crashed")
+            return None
+        return response
+
+    def toggle_filter(self):
+        entry = self._selected_entry()
+        if entry is None:
+            return
+        key = f"{entry['category']}/{entry['name']}"
+        active = not self._running.get(key, False)
+        if self._request(
+            "Starting" if active else "Stopping",
+            {
+                "command": "set_active",
+                "category": entry["category"],
+                "name": entry["name"],
+                "active": active,
+            },
+        ):
+            self._props.set(f"{entry['category']}/{entry['name']}/active", active)
+            self.refresh_snapshot()
+
+    def add_filter(self, category, name, script, streams):
+        if f"{category}/{name}" in self._filters:
+            self._show_status(
+                f"Adding: a {category} filter called {name} already exists", "crashed"
+            )
+            return
+        if self._request(
+            "Adding",
+            {
+                "command": "add_filter",
+                "category": category,
+                "name": name,
+                "script": script,
+                "streams": streams,
+            },
+        ):
+            self.add_sheet.clear_name()
+            self.refresh_snapshot()
 
     def del_entry(self):
-        self.tvw.del_current()
+        entry = self._selected_entry()
+        if entry is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete filter",
+            f"Stop and delete the filter {entry['name']}? Its properties are lost.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if self._request(
+            "Deleting",
+            {
+                "command": "delete_filter",
+                "category": entry["category"],
+                "name": entry["name"],
+            },
+        ):
+            self.refresh_snapshot()
 
     def configure_filter(self):
-        self.tvw.configure_current()
+        entry = self._selected_entry()
+        if entry is None:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Configure {entry['name']}")
+        dialog.resize(700, 600)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(PropEdit(f"/Analysis/{entry['category']}/{entry['name']}/"))
+        dialog.exec()
 
 
 def main():

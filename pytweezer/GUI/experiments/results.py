@@ -16,7 +16,6 @@ from PyQt6 import QtCore, QtGui
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -25,13 +24,12 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QTreeWidget,
     QTreeWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
 from pytweezer.experiment.storage import data_root, load_measurement, read_header
 from pytweezer.experiment.task import TaskRequest
-from pytweezer.GUI.components import status_icon
+from pytweezer.GUI.components import Region, status_icon
 from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND
 from pytweezer.logging_utils import get_logger
 
@@ -95,7 +93,6 @@ def resubmission(measurement):
 def describe(measurement):
     attrs = measurement.attrs
     lines = [
-        *(["SIMULATED (devices were simulated)"] if attrs.get("simulated") else []),
         f"Task {attrs['rid']}: {attrs['experiment']}.{attrs['class_name']}",
         f"Status: {attrs['status']}    points {attrs['n_done']}/{attrs['n_points']}",
         f"Label: {attrs.get('label') or '—'}",
@@ -160,7 +157,12 @@ def _show_file(item, path, status, label):
     item.setText(1, status)
     item.setText(2, label)
     failed = status in ("failed", "crashed", "unreadable")
-    item.setIcon(1, status_icon("crashed") if failed else QtGui.QIcon())
+    if failed:
+        item.setIcon(1, status_icon("crashed"))
+    elif status == "running":
+        item.setIcon(1, status_icon("running"))
+    else:
+        item.setIcon(1, QtGui.QIcon())
 
 
 class ResultsPanel(QWidget):
@@ -172,46 +174,66 @@ class ResultsPanel(QWidget):
         self.measurement = None
         self.path = None
         layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
         splitter = QSplitter(QtCore.Qt.Orientation.Horizontal)
+        splitter.setObjectName("PanelSplitter")
         layout.addWidget(splitter)
 
-        browser = QWidget()
-        browser_layout = QVBoxLayout(browser)
-        browser_layout.setContentsMargins(0, 0, 0, 0)
-        top = QHBoxLayout()
         self.show_unfinished = QCheckBox("Show running")
+        self.show_unfinished.setToolTip("Also list measurements that are still running")
         self.show_unfinished.toggled.connect(self._show_unfinished_toggled)
-        top.addWidget(self.show_unfinished)
-        top.addStretch(1)
-        browser_layout.addLayout(top)
         self.tree = QTreeWidget()
+        self.tree.setObjectName("MeasurementTree")
         self.tree.setHeaderLabels(["Measurement", "Status", "Label"])
-        self.tree.header().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
+        header = self.tree.header()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.itemExpanded.connect(self._fill_day)
         self.tree.currentItemChanged.connect(self._selected)
-        browser_layout.addWidget(self.tree, 1)
+        browser = Region("well", "Measurements", "newest first")
+        browser.header.addWidget(self.show_unfinished)
+        browser.body.addWidget(self.tree, 1)
         splitter.addWidget(browser)
 
-        detail = QSplitter(QtCore.Qt.Orientation.Vertical)
         self.metadata = QPlainTextEdit()
         self.metadata.setReadOnly(True)
-        detail.addWidget(self.metadata)
+        self.metadata.setPlaceholderText("Pick a measurement on the left to inspect it")
+        self.simulation_banner = QLabel("Simulation: devices were simulated")
+        self.simulation_banner.setObjectName("SimulationBanner")
+        self.simulation_banner.setVisible(False)
+        self.resubmit_button = QPushButton("Resubmit with these arguments")
+        self.resubmit_button.setObjectName("PrimaryButton")
+        self.resubmit_button.setToolTip(
+            "Copy this measurement's arguments and scan into the Experiments tab"
+        )
+        self.resubmit_button.clicked.connect(self._resubmit)
+        self.resubmit_button.setEnabled(False)
+        self.detail_region = Region("well", "Measurement", "")
+        self.detail_region.header.insertWidget(2, self.simulation_banner)
+        self.detail_region.body.addWidget(self.metadata, 1)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(self.resubmit_button)
+        self.detail_region.body.addLayout(buttons)
 
-        plot_box = QWidget()
-        plot_layout = QVBoxLayout(plot_box)
-        plot_layout.setContentsMargins(0, 0, 0, 0)
-        controls = QFormLayout()
         self.y_choice = QComboBox()
         self.x_choice = QComboBox()
         self.series_choice = QComboBox()
-        controls.addRow("Plot", self.y_choice)
-        controls.addRow("against", self.x_choice)
-        controls.addRow("one curve per", self.series_choice)
-        for combo in (self.y_choice, self.x_choice, self.series_choice):
+        controls = QHBoxLayout()
+        controls.setSpacing(8)
+        for text, combo in (
+            ("Plot", self.y_choice),
+            ("against", self.x_choice),
+            ("one curve per", self.series_choice),
+        ):
+            combo.setFixedWidth(160)
             combo.currentTextChanged.connect(self.replot)
-        plot_layout.addLayout(controls)
+            if controls.count():
+                controls.addSpacing(12)
+            controls.addWidget(QLabel(text))
+            controls.addWidget(combo)
+        controls.addStretch(1)
         self.plot = pg.PlotWidget(background=PLOT_BACKGROUND)
         for axis in ("left", "bottom"):
             self.plot.getAxis(axis).setPen(PLOT_FOREGROUND)
@@ -219,19 +241,22 @@ class ResultsPanel(QWidget):
             # Values are already in their display units.
             self.plot.getAxis(axis).enableAutoSIPrefix(False)
         self.plot.addLegend()
-        plot_layout.addWidget(self.plot, 1)
         self.plot_message = QLabel()
-        plot_layout.addWidget(self.plot_message)
-        buttons = QHBoxLayout()
-        self.resubmit_button = QPushButton("Resubmit with these arguments")
-        self.resubmit_button.clicked.connect(self._resubmit)
-        self.resubmit_button.setEnabled(False)
-        buttons.addStretch(1)
-        buttons.addWidget(self.resubmit_button)
-        plot_layout.addLayout(buttons)
-        detail.addWidget(plot_box)
+        self.plot_message.setProperty("role", "regionHint")
+        plot_region = Region("well", "Plot", "mean and standard error over repetitions")
+        plot_region.body.addLayout(controls)
+        plot_region.body.addWidget(self.plot, 1)
+        plot_region.body.addWidget(self.plot_message)
+
+        detail = QSplitter(QtCore.Qt.Orientation.Vertical)
+        detail.setObjectName("PanelSplitter")
+        detail.addWidget(self.detail_region)
+        detail.addWidget(plot_region)
+        detail.setStretchFactor(0, 1)
+        detail.setStretchFactor(1, 1)
         splitter.addWidget(detail)
         splitter.setStretchFactor(1, 3)
+        splitter.setSizes([480, 1000])
 
         #: Every measurement file seen: path -> (status, label, tree item or None if hidden).
         self._files = {}
@@ -365,6 +390,8 @@ class ResultsPanel(QWidget):
             measurement = load_measurement(path, results=[])
         except (OSError, KeyError, ValueError) as error:
             self.metadata.setPlainText(f"Could not read {path}:\n{error}")
+            self.detail_region.set_hint("unreadable")
+            self.simulation_banner.setVisible(False)
             self.measurement = None
             self.resubmit_button.setEnabled(False)
             return
@@ -372,6 +399,12 @@ class ResultsPanel(QWidget):
         self.path = Path(path)
         self.measurement = measurement
         self.metadata.setPlainText(describe(measurement))
+        attrs = measurement.attrs
+        self.detail_region.set_hint(
+            f"task {attrs['rid']}, {attrs['status']}, "
+            f"{attrs['n_done']}/{attrs['n_points']} points"
+        )
+        self.simulation_banner.setVisible(bool(attrs.get("simulated")))
         self.resubmit_button.setEnabled(True)
         self._fill_choices(keep_selection=not first_load)
         self.replot()
