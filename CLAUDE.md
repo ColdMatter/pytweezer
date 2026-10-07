@@ -15,7 +15,7 @@ disclosure through skills gets noticeably better performance out of agents.
 
 ## What this is
 
-Control software for an atom-tweezer experiment (Rb and CaF systems). PyQt5 GUIs,
+Control software for an atom-tweezer experiment (Rb and CaF systems). PyQt6 GUIs,
 ZMQ messaging, and sipyco RPC servers coordinate device drivers (cameras,
 MotMaster experiment sequencers) across the lab PCs.
 
@@ -46,6 +46,7 @@ poetry run pytweezer-server         # full-control GUI, run on the server PC
 poetry run pytweezer-client         # view-only GUI, run on client PCs
 poetry run pytweezer-device <name>  # start one device's RPC server standalone
 poetry run pytweezer-logger <name>  # start one InfluxDB logger standalone
+poetry run pytweezer-experiment-manager <name>  # start the experiment queue manager standalone
 poetry run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
 ```
 
@@ -53,7 +54,7 @@ poetry run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
 Run kill-stale after an unclean shutdown, when launch fails with "Address
 already in use".
 
-**Headless/offscreen testing:** PyQt5 windows can't construct without a display.
+**Headless/offscreen testing:** PyQt6 windows can't construct without a display.
 Set `QT_QPA_PLATFORM=offscreen` before running any script that imports Qt widgets
 in a non-interactive shell.
 
@@ -77,10 +78,8 @@ in a non-interactive shell.
 ### Comments and self-documenting code
 
 - **Write self-documenting code; do not over-comment.** The people reading this
-  are PhD-level physicists - do not explain standard physics (a Doppler shift, a
-  π pulse, a light shift). Prefer a good name over a comment: a variable
-  `doppler_shift_hz` needs no comment, and an expression that is obviously a
-  Doppler shift needs at most `# Doppler shift` - usually nothing.
+  are PhD-level physicists - do not explain standard physics. Prefer a good name over a comment: a variable
+  `doppler_shift_hz = ` is better than `d = # Doppler shift in Hz`.
 - **Comment only what is genuinely surprising**: a non-obvious mechanism, a
   convention we have invented, a sign or edge case that bites. Everything else
   should read straight from the code.
@@ -130,6 +129,7 @@ Load a skill when you need more than that:
 | Device server/client, `get_device()`, composites, coordinators | `pytweezer-device-framework` |
 | GUI shell, tabs, panels, process tiles, teardown | `pytweezer-gui-internals` |
 | Adding a driver / applet / analysis / InfluxDB logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
+| Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 
 Each skill is self-contained; there is no separate long-form documentation.
