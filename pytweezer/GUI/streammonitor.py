@@ -1,54 +1,156 @@
-"""Monitor the content of streams"""
+"""The Streams tab: live views of every stream type, and the log feed.
+
+Each monitor keeps listening while hidden but only draws while visible.
+"""
 
 import datetime
 import json
 import sys
 from collections import deque
+from typing import ClassVar
 
 from PyQt6 import QtCore
-from PyQt6.QtGui import *
-from PyQt6.QtWidgets import *
+from PyQt6.QtGui import QAction, QFont, QFontMetrics, QKeySequence
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QHeaderView,
+    QLineEdit,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
+from pytweezer.GUI.components import Region, status_icon
 from pytweezer.GUI.theme import UI_FONT_FAMILY, UI_FONT_POINT_SIZE
 from pytweezer.logging_utils import get_daily_log_path
 from pytweezer.servers import CommandClient, DataClient, ImageClient
 from pytweezer.servers.messageclient import MessageClient
 
+_POLL_MS = 100
+_FILTER_WIDTH = 220
+_TOOLTIP_CHARS = 2000
+_CONTENT_CHARS = 200
+
+
+def _make_table(columns, stretch_column):
+    table = QTableWidget(0, len(columns))
+    table.setObjectName("FeedTable")
+    table.setHorizontalHeaderLabels(columns)
+    table.setShowGrid(False)
+    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    table.verticalHeader().setVisible(False)
+    header = table.horizontalHeader()
+    header.setDefaultAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+    for column in range(len(columns)):
+        header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(stretch_column, QHeaderView.ResizeMode.Stretch)
+    return table
+
+
+def _filter_box(placeholder, slot):
+    box = QLineEdit()
+    box.setPlaceholderText(placeholder)
+    box.setClearButtonEnabled(True)
+    box.setFixedWidth(_FILTER_WIDTH)
+    box.textChanged.connect(slot)
+    return box
+
 
 class StreamMonitor(QWidget):
+    """The most recent messages on every stream of one type, newest first."""
+
+    COLUMNS: ClassVar = ["Received", "Stream", "Content"]
+    CONTENT_COL = 2
+
     def __init__(self, name, streamtype="Data", parent=None):
         super().__init__(parent)
-        if streamtype == "Data":
-            self.stream = DataClient(name)
-        elif streamtype == "Image":
-            self.stream = ImageClient(name)
-        elif streamtype == "Command":
-            self.stream = CommandClient(name)
-        elif streamtype == "Message":
-            self.stream = MessageClient(name)
+        clients = {
+            "Data": DataClient,
+            "Image": ImageClient,
+            "Command": CommandClient,
+            "Message": MessageClient,
+        }
+        self.stream = clients[streamtype](name)
         self.stream.subscribe("")  # listen to all streams
-        self.msglist = []
+        self.max_rows = 40
+        self.rows = deque(maxlen=self.max_rows)  # (received, topic, content)
 
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(name))
-        self.text = QTextEdit()
-        layout.addWidget(self.text)
-        self.setLayout(layout)
-        self.resize(800, 800)
+        self.filter = _filter_box("Filter by stream…", self._apply_filter)
+        self.pause = QCheckBox("Pause")
+        self.pause.setToolTip("Stop collecting messages; those that arrive are dropped")
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.clicked.connect(self.clear)
 
-        timer = QtCore.QTimer(self)
-        timer.timeout.connect(self._update_list)
-        timer.start(100)
-        self.timer = timer
+        self.table = _make_table(self.COLUMNS, self.CONTENT_COL)
+        region = Region(
+            "well",
+            f"{streamtype} streams",
+            f"last {self.max_rows} messages, newest first",
+        )
+        region.header.addWidget(self.filter)
+        region.header.addWidget(self.pause)
+        region.header.addWidget(self.clear_button)
+        region.body.addWidget(self.table, 1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.addWidget(region)
+
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self._update_list)
+        self.timer.start(_POLL_MS)
 
     def _update_list(self):
-
+        new = []
         while self.stream.has_new_data():
             msg = self.stream.recv()
-            if msg != None:
-                self.msglist = [msg[0] + repr(msg[1])[:80]] + self.msglist
-                self.msglist = self.msglist[:40]
-                self.text.setPlainText("\n".join(self.msglist))
+            if msg is not None and not self.pause.isChecked():
+                received = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                new.append((received, str(msg[0]), repr(msg[1])[:_TOOLTIP_CHARS]))
+        self.rows.extend(new)
+        if new and self.isVisible():
+            for row in new:
+                self._insert(row)
+            while self.table.rowCount() > self.max_rows:
+                self.table.removeRow(self.table.rowCount() - 1)
+
+    def _insert(self, row):
+        self.table.insertRow(0)
+        for column, text in enumerate(row):
+            item = QTableWidgetItem(text[:_CONTENT_CHARS])
+            if column == self.CONTENT_COL:
+                item.setToolTip(text)
+            self.table.setItem(0, column, item)
+        self.table.setRowHidden(0, not self._matches(row[1]))
+
+    def _matches(self, topic):
+        return self.filter.text().strip().casefold() in topic.casefold()
+
+    def _apply_filter(self):
+        for row in range(self.table.rowCount()):
+            self.table.setRowHidden(
+                row, not self._matches(self.table.item(row, 1).text())
+            )
+
+    def clear(self):
+        self.rows.clear()
+        self.table.setRowCount(0)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.table.setRowCount(0)
+        for row in self.rows:  # oldest first, so each lands above the last
+            self._insert(row)
 
 
 def _format_timestamp(raw):
@@ -68,9 +170,25 @@ def _format_timestamp(raw):
 
 
 class LogMonitor(QWidget):
+    """Log records from every process, newest first, with level and text filters."""
+
     # Column index of the (stretchy) message column, used by the double-click
-    # detail dialog and the per-item alignment tweak.
+    # detail dialog.
     MESSAGE_COL = 4
+    LEVEL_COL = 1
+    #: Unknown level names count as informational.
+    LEVELS: ClassVar = {
+        "DEBUG": 10,
+        "INFO": 20,
+        "WARNING": 30,
+        "ERROR": 40,
+        "CRITICAL": 50,
+    }
+    LEVEL_STATE: ClassVar = {
+        "WARNING": "starting",
+        "ERROR": "crashed",
+        "CRITICAL": "crashed",
+    }
 
     def __init__(self, name, parent=None):
         super().__init__(parent)
@@ -78,16 +196,17 @@ class LogMonitor(QWidget):
         self.stream.subscribe("Logs")
         self.max_rows = 200
 
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Logs"))
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(
-            ["Timestamp", "Level", "Host", "Process", "Message"]
+        self.min_level = QComboBox()
+        self.min_level.addItem("All levels", 0)
+        self.min_level.addItem("Warnings and errors", 30)
+        self.min_level.addItem("Errors only", 40)
+        self.min_level.setFixedWidth(_FILTER_WIDTH)
+        self.min_level.currentIndexChanged.connect(self._apply_filter)
+        self.filter = _filter_box("Filter by text…", self._apply_filter)
+
+        self.table = _make_table(
+            ["Timestamp", "Level", "Host", "Process", "Message"], self.MESSAGE_COL
         )
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setAlternatingRowColors(True)
         self.table.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
         # Give each row room for two lines so longer messages wrap rather than
         # being clipped to one; hover/double-click still reveal the full text.
@@ -108,33 +227,32 @@ class LogMonitor(QWidget):
         )
         copy_action.triggered.connect(self._copy_selection)
         self.table.addAction(copy_action)
+        self.table.cellDoubleClicked.connect(self._show_message_dialog)
 
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(self.MESSAGE_COL, QHeaderView.ResizeMode.Stretch)
-
-        layout.addWidget(self.table)
-        self.setLayout(layout)
-        self.resize(1000, 800)
+        region = Region(
+            "well",
+            "Logs",
+            "newest first; double-click a row to read the whole message",
+        )
+        region.header.addWidget(self.min_level)
+        region.header.addWidget(self.filter)
+        region.body.addWidget(self.table, 1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.addWidget(region)
 
         self._load_daily_logs()
 
-        timer = QtCore.QTimer(self)
-        timer.timeout.connect(self._update_list)
-        timer.start(100)
-        self.timer = timer
-
-        self.table.cellDoubleClicked.connect(self._show_message_dialog)
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self._update_list)
+        self.timer.start(_POLL_MS)
 
     def _update_list(self):
         while self.stream.has_new_data():
             msg = self.stream.recv()
             if msg is None:
                 continue
-            topic, payload = msg
+            _topic, payload = msg
             if not isinstance(payload, dict):
                 continue
             self._append_row(payload, prepend=True)
@@ -144,9 +262,10 @@ class LogMonitor(QWidget):
         self.table.insertRow(row)
 
         message = str(payload.get("message", ""))
+        level = str(payload.get("level", ""))
         values = [
             _format_timestamp(payload.get("timestamp", "")),
-            payload.get("level", ""),
+            level,
             payload.get("host", ""),
             payload.get("module", ""),
             message,
@@ -156,17 +275,36 @@ class LogMonitor(QWidget):
             item = QTableWidgetItem(str(value))
             # Hover any cell in the row to read the full (untruncated) message.
             item.setToolTip(message)
-            if col == self.MESSAGE_COL:
-                item.setTextAlignment(
-                    QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop
-                )
+            item.setTextAlignment(
+                QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop
+            )
+            if col == self.LEVEL_COL and level.upper() in self.LEVEL_STATE:
+                item.setIcon(status_icon(self.LEVEL_STATE[level.upper()]))
             self.table.setItem(row, col, item)
+        self.table.setRowHidden(row, not self._matches(level, message))
 
         if self.table.rowCount() > self.max_rows:
             if prepend:
                 self.table.removeRow(self.table.rowCount() - 1)
             else:
                 self.table.removeRow(0)
+
+    def _matches(self, level, message):
+        severity = self.LEVELS.get(level.upper(), 20)
+        needle = self.filter.text().strip().casefold()
+        return severity >= self.min_level.currentData() and (
+            not needle or needle in message.casefold()
+        )
+
+    def _apply_filter(self):
+        for row in range(self.table.rowCount()):
+            self.table.setRowHidden(
+                row,
+                not self._matches(
+                    self.table.item(row, self.LEVEL_COL).text(),
+                    self.table.item(row, self.MESSAGE_COL).text(),
+                ),
+            )
 
     def _load_daily_logs(self):
         log_path = get_daily_log_path()

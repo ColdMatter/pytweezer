@@ -311,11 +311,13 @@ QFrame#Region[kind="well"] QHeaderView::section {
     background-color: #141519;
 }
 QTableWidget#QueueTable::item,
-QTableWidget#FilterTable::item {
+QTableWidget#FilterTable::item,
+QTableWidget#FeedTable::item {
     padding: 0 12px 0 4px;
 }
 QTableWidget#QueueTable QHeaderView::section,
-QTableWidget#FilterTable QHeaderView::section {
+QTableWidget#FilterTable QHeaderView::section,
+QTableWidget#FeedTable QHeaderView::section {
     padding: 4px 12px 4px 4px;
 }
 QTreeWidget#MeasurementTree::item {
