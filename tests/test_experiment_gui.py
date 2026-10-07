@@ -133,7 +133,7 @@ def test_scan_axes_and_point_count(editor):
     mode.scan.values.setText("a, b")
     editor.repetitions.setValue(3)
     editor.order.setCurrentText("snake")
-    assert editor.point_count.text() == "30"
+    assert editor.point_count.text() == "30 points"
 
     request = editor.request()
     assert "detuning" not in request.args and "mode" not in request.args

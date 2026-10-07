@@ -31,6 +31,7 @@ COLUMNS = [
 # Task status -> theme state, so tasks share the process-status traffic lights.
 _STATUS_STATE = {
     "running": "running",
+    "completed": "disabled",
     "paused": "starting",
     "queued": "stopped",
     "held": "stopped",
@@ -74,41 +75,55 @@ class QueueView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.table = QTableWidget(0, len(COLUMNS))
+        self.table.setObjectName("QueueTable")
+        self.table.setShowGrid(False)
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # The label is the user's own note, so it gets the spare width.
+        header.setSectionResizeMode(
+            COLUMNS.index("Label"), QHeaderView.ResizeMode.Stretch
         )
+        header.setDefaultAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.table.itemSelectionChanged.connect(self._update_buttons)
         self.table.cellDoubleClicked.connect(self._show_details)
         layout.addWidget(self.table, 1)
 
+        # Grouped by what they act on; the two that lose work sit apart.
+        groups = [
+            [("pause", "Pause"), ("resume", "Resume"), ("terminate", "Terminate")],
+            [("hold", "Hold"), ("release", "Release"), ("raise", "Priority +"),
+             ("lower", "Priority −")],
+            [("edit", "Edit as new")],
+            None,
+            [("abort", "Abort"), ("delete", "Delete")],
+        ]  # fmt: skip
         buttons = QHBoxLayout()
+        buttons.setSpacing(6)
         self.buttons = {}
-        for command, text in [
-            ("pause", "Pause"),
-            ("resume", "Resume"),
-            ("terminate", "Terminate"),
-            ("abort", "Abort"),
-            ("hold", "Hold"),
-            ("release", "Release"),
-            ("delete", "Delete"),
-            ("raise", "Priority +"),
-            ("lower", "Priority −"),
-            ("edit", "Edit as new"),
-        ]:
-            button = QPushButton(text)
-            button.clicked.connect(lambda _checked, c=command: self._clicked(c))
-            buttons.addWidget(button)
-            self.buttons[command] = button
+        for group in groups:
+            if group is None:
+                buttons.addStretch(1)
+                continue
+            if self.buttons:
+                buttons.addSpacing(14)
+            for command, text in group:
+                button = QPushButton(text)
+                button.clicked.connect(lambda _checked, c=command: self._clicked(c))
+                buttons.addWidget(button)
+                self.buttons[command] = button
+        for command in ("abort", "delete"):
+            self.buttons[command].setObjectName("DangerButton")
         self.buttons["terminate"].setToolTip("Stop after the current point")
         self.buttons["abort"].setToolTip(
             "Kill the task now. A device call already in progress still completes."
         )
-        buttons.addStretch(1)
+        self.buttons["delete"].setToolTip("Remove a waiting task from the queue")
+        self.buttons["edit"].setToolTip("Copy this task's settings into the editor")
         layout.addLayout(buttons)
         self._update_buttons()
 
@@ -124,9 +139,12 @@ class QueueView(QWidget):
         self.table.setRowCount(len(rows))
         reselect = None
         for row, task in enumerate(rows):
+            shade = _ROW_SHADES.get(_row_kind(task))
             for column, text in enumerate(_cells(task)):
                 item = QTableWidgetItem(text)
                 item.setData(_TASK, task)
+                if shade is not None:
+                    item.setBackground(shade)
                 if column == 3 and task["status"] in _STATUS_STATE:
                     item.setIcon(status_icon(_STATUS_STATE[task["status"]]))
                 if task.get("error"):
@@ -199,6 +217,33 @@ class QueueView(QWidget):
         box.setText(text)
         box.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
         box.open()
+
+
+# Row backgrounds by lifecycle: the running task stands out, finished ones
+# recede. (Text colour can't vary per item: the theme's ::item rule sets it.)
+_ROW_SHADES = {
+    "running": QtGui.QColor("#1f2c45"),
+    "finished": QtGui.QColor("#111215"),
+}
+
+
+def _row_kind(task):
+    if task["status"] in ("running", "paused"):
+        return "running"
+    if task["status"] in ("queued", "held"):
+        return "waiting"
+    return "finished"
+
+
+def queue_summary(snapshot):
+    """One line for the queue's title: what's running and how much is waiting."""
+    parts = []
+    running = snapshot.get("running")
+    if running:
+        parts.append(f"task {running['rid']} {running['status']}")
+    waiting = len(snapshot.get("queue", []))
+    parts.append(f"{waiting} waiting" if waiting else "nothing waiting")
+    return ", ".join(parts)
 
 
 def _cells(task):

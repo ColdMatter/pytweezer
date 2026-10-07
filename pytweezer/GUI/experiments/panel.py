@@ -3,6 +3,8 @@
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QDockWidget,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QScrollArea,
     QSplitter,
@@ -20,7 +22,8 @@ from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, _set_state
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
 from pytweezer.GUI.experiments.feed import ExperimentFeed
-from pytweezer.GUI.experiments.queue_view import QueueView
+from pytweezer.GUI.experiments.queue_view import QueueView, queue_summary
+from pytweezer.GUI.experiments.region import Region
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.GUI.experiments")
@@ -43,31 +46,46 @@ class ExperimentsPanel(QWidget):
         self._current_key = None
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
+        status_bar = QHBoxLayout()
         self.status = QLabel("Waiting for the Experiment Manager…")
         self.status.setObjectName("StatusLabel")
-        layout.addWidget(self.status)
         self.simulation_banner = QLabel(
-            "SIMULATION: experiments use simulated devices and their data is kept "
-            "separately"
+            "Simulation: devices are simulated, data kept apart"
         )
         self.simulation_banner.setObjectName("SimulationBanner")
         self.simulation_banner.setVisible(False)
-        layout.addWidget(self.simulation_banner)
+        status_bar.addWidget(self.status, 1)
+        status_bar.addWidget(self.simulation_banner)
+        layout.addLayout(status_bar)
 
         self.catalogue = CatalogueView()
+        catalogue_region = Region("well", "Experiments", "pick one to edit")
+        catalogue_region.body.addWidget(self.catalogue, 1)
+
         self.editor = ArgumentEditor()
         editor_scroll = QScrollArea()
+        editor_scroll.setObjectName("EditorScroll")
         editor_scroll.setWidgetResizable(True)
+        editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
         editor_scroll.setWidget(self.editor)
+        editor_region = Region("sheet")
+        editor_region.body.addWidget(editor_scroll, 1)
+
         self.queue_view = QueueView()
+        self.queue_region = Region("well", "Queue", "")
+        self.queue_region.body.addWidget(self.queue_view, 1)
 
         top = QSplitter(QtCore.Qt.Orientation.Horizontal)
-        top.addWidget(self.catalogue)
-        top.addWidget(editor_scroll)
+        top.setObjectName("ExperimentsSplitter")
+        top.addWidget(catalogue_region)
+        top.addWidget(editor_region)
         top.setStretchFactor(1, 3)
+        top.setSizes([260, 900])
         main = QSplitter(QtCore.Qt.Orientation.Vertical)
+        main.setObjectName("ExperimentsSplitter")
         main.addWidget(top)
-        main.addWidget(self.queue_view)
+        main.addWidget(self.queue_region)
         main.setStretchFactor(0, 3)
         main.setStretchFactor(1, 2)
         layout.addWidget(main, 1)
@@ -111,6 +129,7 @@ class ExperimentsPanel(QWidget):
     def _queue_changed(self, snapshot):
         self.simulation_banner.setVisible(bool(snapshot.get("simulated")))
         self.queue_view.set_snapshot(snapshot)
+        self.queue_region.set_hint(queue_summary(snapshot))
         version = snapshot.get("catalogue_version")
         if version is not None and version != self._catalogue_version:
             self.refresh_catalogue()

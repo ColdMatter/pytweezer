@@ -232,8 +232,112 @@ QLabel#SimulationBanner {
     color: #1b1c22;
     background: #f5a623;
     font-weight: 600;
-    padding: 4px 8px;
+    padding: 3px 10px;
     border-radius: 4px;
+}
+
+/* Experiments tab. Depth encodes role: a well (recessed) is where you read
+   and pick, the sheet (raised, accent edge) is where you edit. */
+QFrame#Region {
+    border: 1px solid #2c2d35;
+    border-radius: 8px;
+}
+QFrame#Region[kind="well"] {
+    background-color: #141519;
+}
+QFrame#Region[kind="sheet"] {
+    background-color: #262730;
+    border-left: 3px solid #5b8def;
+}
+QWidget#ArgumentEditor,
+QScrollArea#EditorScroll,
+QScrollArea#EditorScroll > QWidget,
+QGroupBox#EditorGroup,
+QFrame#Region QStackedWidget,
+QFrame#Region QCheckBox {
+    background: transparent;
+}
+QLabel[role="regionTitle"] {
+    color: #e6e6e6;
+    font-size: 11pt;
+    font-weight: 600;
+}
+QLabel[role="regionHint"] {
+    color: #8d8e99;
+}
+QLabel[role="experimentTitle"] {
+    color: #e6e6e6;
+    font-size: 14pt;
+    font-weight: 600;
+}
+QGroupBox#EditorGroup {
+    border: 1px solid #383944;
+    border-radius: 6px;
+    margin-top: 12px;
+    padding: 12px 10px 8px 10px;
+}
+QGroupBox#EditorGroup::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+    color: #8d8e99;
+    font-weight: 600;
+}
+QFrame#Region[kind="sheet"] QLineEdit,
+QFrame#Region[kind="sheet"] QComboBox,
+QFrame#Region[kind="sheet"] QSpinBox,
+QFrame#Region[kind="sheet"] QDoubleSpinBox,
+QFrame#Region[kind="sheet"] QDateTimeEdit {
+    background-color: #30313b;
+    border: 1px solid #44454f;
+    border-radius: 4px;
+    padding: 3px 6px;
+}
+QFrame#Region[kind="well"] QTreeWidget,
+QFrame#Region[kind="well"] QTableWidget {
+    background-color: #141519;
+    alternate-background-color: #17181d;
+    border: none;
+}
+QFrame#Region[kind="well"] QHeaderView::section {
+    background-color: #141519;
+}
+QTableWidget#QueueTable::item {
+    padding: 0 12px 0 4px;
+}
+QTableWidget#QueueTable QHeaderView::section {
+    padding: 4px 12px 4px 4px;
+}
+QFrame#Region[kind="well"] QLineEdit {
+    background-color: #1d1e24;
+}
+QSplitter#ExperimentsSplitter::handle {
+    background: transparent;
+}
+QSplitter#ExperimentsSplitter::handle:horizontal {
+    width: 8px;
+}
+QSplitter#ExperimentsSplitter::handle:vertical {
+    height: 8px;
+}
+QSplitter#ExperimentsSplitter::handle:hover {
+    background: #33343d;
+}
+QToolButton#ScanToggle {
+    background: transparent;
+    color: #8d8e99;
+    border: 1px solid #44454f;
+    border-radius: 4px;
+    padding: 3px 10px;
+}
+QToolButton#ScanToggle:hover {
+    color: #e6e6e6;
+    border-color: #5b8def;
+}
+QToolButton#ScanToggle:checked {
+    background-color: #5b8def;
+    color: #ffffff;
+    border-color: #5b8def;
 }
 
 QLabel#StatusLabel {
@@ -291,6 +395,46 @@ QPushButton:hover {
 
 QPushButton:pressed {
     background-color: #23242b;
+}
+
+QPushButton:disabled {
+    color: #5c5d66;
+    background-color: #1f2026;
+    border-color: #2a2b32;
+}
+
+/* The one action a panel exists for (e.g. Submit). */
+QPushButton#PrimaryButton {
+    background-color: #5b8def;
+    border-color: #5b8def;
+    color: #ffffff;
+    font-weight: 600;
+    padding: 6px 22px;
+}
+QPushButton#PrimaryButton:hover {
+    background-color: #7aa4f3;
+    border-color: #7aa4f3;
+}
+QPushButton#PrimaryButton:disabled {
+    background-color: #2a3550;
+    border-color: #2a3550;
+    color: #7f8aa3;
+}
+
+/* Actions that lose work (abort, delete). */
+QPushButton#DangerButton {
+    color: #e74c3c;
+    border-color: #5a2f2c;
+}
+QPushButton#DangerButton:hover {
+    background-color: #e74c3c;
+    color: #3a1512;
+    border-color: #e74c3c;
+}
+QPushButton#DangerButton:disabled {
+    color: #5c5d66;
+    background-color: #1f2026;
+    border-color: #2a2b32;
 }
 
 /* Single Start/Stop toggle: green when it will start a stopped process,

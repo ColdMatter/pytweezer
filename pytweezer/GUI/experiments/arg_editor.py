@@ -54,7 +54,7 @@ class ValueField(QWidget):
 
     changed = QtCore.pyqtSignal()
 
-    def __init__(self, schema, parent=None):
+    def __init__(self, schema, parent=None, *, show_unit=True, width=240):
         super().__init__(parent)
         self.schema = schema
         self.kind = schema["kind"]
@@ -94,8 +94,15 @@ class ValueField(QWidget):
             widget.textChanged.connect(self.changed)
         if schema.get("tooltip"):
             widget.setToolTip(schema["tooltip"])
+        if self.kind != "bool":
+            widget.setFixedWidth(width)
         self.widget = widget
         layout.addWidget(widget)
+        self.unit = QLabel(schema.get("unit") or "")
+        self.unit.setProperty("role", "regionHint")
+        self.unit.setVisible(show_unit)
+        layout.addWidget(self.unit)
+        layout.addStretch(1)
         self.set_value(schema["default"])
 
     def value(self):
@@ -187,16 +194,20 @@ class ScanField(QWidget):
         linear_layout = QHBoxLayout(linear)
         linear_layout.setContentsMargins(0, 0, 0, 0)
         if numeric:
-            self.start = ValueField(schema)
-            self.stop = ValueField(schema)
+            self.start = ValueField(schema, show_unit=False, width=110)
+            self.stop = ValueField(schema, show_unit=False, width=110)
             self.steps = QSpinBox()
             self.steps.setRange(1, 1_000_000)
             self.steps.setValue(11)
             self.steps.setPrefix("n = ")
             for label, widget in (("from", self.start), ("to", self.stop)):
                 linear_layout.addWidget(QLabel(label))
-                linear_layout.addWidget(widget, 1)
+                linear_layout.addWidget(widget)
+            unit = QLabel(schema.get("unit") or "")
+            unit.setProperty("role", "regionHint")
+            linear_layout.addWidget(unit)
             linear_layout.addWidget(self.steps)
+            linear_layout.addStretch(1)
             for signal in (
                 self.start.changed,
                 self.stop.changed,
@@ -264,11 +275,14 @@ class ArgumentRow(QtCore.QObject):
         self.value = ValueField(schema)
         self.scan = ScanField(name, schema)
         self.stack = QStackedWidget()
+        self.stack.setFixedWidth(560)
         self.stack.addWidget(self.value)
         self.stack.addWidget(self.scan)
-        self.unit = QLabel(schema.get("unit") or "")
+        self.unit = self.value.unit
         self.scan_button = QToolButton()
+        self.scan_button.setObjectName("ScanToggle")
         self.scan_button.setText("Scan")
+        self.scan_button.setToolTip("Scan this argument instead of using one value")
         self.scan_button.setCheckable(True)
         self.scan_button.toggled.connect(self._scan_toggled)
         self.value.changed.connect(self._update)
@@ -305,8 +319,7 @@ class ArgumentRow(QtCore.QObject):
     def add_to(self, grid, row):
         grid.addWidget(self.label, row, 0)
         grid.addWidget(self.stack, row, 1)
-        grid.addWidget(self.unit, row, 2)
-        grid.addWidget(self.scan_button, row, 3)
+        grid.addWidget(self.scan_button, row, 2)
 
 
 class ArgumentEditor(QWidget):
@@ -319,13 +332,23 @@ class ArgumentEditor(QWidget):
         super().__init__(parent)
         self.schema = None
         self.rows = {}
+        self.setObjectName("ArgumentEditor")
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setSpacing(10)
 
-        self.title = QLabel("Select an experiment")
-        self.title.setProperty("role", "heading")
+        title_row = QHBoxLayout()
+        self.title = QLabel("Pick an experiment on the left to edit it")
+        self.title.setProperty("role", "experimentTitle")
+        self.module = QLabel()
+        self.module.setProperty("role", "regionHint")
+        title_row.addWidget(self.title)
+        title_row.addStretch(1)
+        title_row.addWidget(self.module)
         self.doc = QLabel()
         self.doc.setWordWrap(True)
-        layout.addWidget(self.title)
+        self.doc.setProperty("role", "regionHint")
+        layout.addLayout(title_row)
         layout.addWidget(self.doc)
 
         self.arguments_box = QWidget()
@@ -333,8 +356,14 @@ class ArgumentEditor(QWidget):
         self.arguments_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.arguments_box)
 
+        settings = QHBoxLayout()
+        settings.setSpacing(10)
         scan_box = QGroupBox("Scan")
+        scan_box.setObjectName("EditorGroup")
         scan_form = QFormLayout(scan_box)
+        scan_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
+        )
         self.repetitions = QSpinBox()
         self.repetitions.setRange(1, 1_000_000)
         self.order = QComboBox()
@@ -349,32 +378,38 @@ class ArgumentEditor(QWidget):
             "point: repeat each point back to back; scan: repeat the whole sweep"
         )
         self.point_count = QLabel()
+        self.point_count.setProperty("role", "regionHint")
         scan_form.addRow("Repetitions", self.repetitions)
         scan_form.addRow("Order", self.order)
         scan_form.addRow("Repeat by", self.repeat)
-        scan_form.addRow("Points", self.point_count)
         self.repetitions.valueChanged.connect(self._update_count)
-        layout.addWidget(scan_box)
+        for widget in (self.repetitions, self.order, self.repeat):
+            widget.setMinimumWidth(140)
+        settings.addWidget(scan_box, 1)
 
         queue_box = QGroupBox("Queue")
+        queue_box.setObjectName("EditorGroup")
         queue_form = QFormLayout(queue_box)
+        queue_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
+        )
         self.priority = QSpinBox()
         self.priority.setRange(-1000, 1000)
         self.priority.setToolTip("higher runs first")
         self.label = QLineEdit()
-        self.label.setPlaceholderText("optional note stored with the measurement")
+        self.label.setPlaceholderText("note saved with the measurement")
+        self.label.setMinimumWidth(300)
         self.start_at_enabled = QCheckBox("Start no earlier than")
         self.start_at = QDateTimeEdit(QtCore.QDateTime.currentDateTime())
         self.start_at.setCalendarPopup(True)
         self.start_at.setEnabled(False)
         self.start_at_enabled.toggled.connect(self.start_at.setEnabled)
-        start_row = QHBoxLayout()
-        start_row.addWidget(self.start_at_enabled)
-        start_row.addWidget(self.start_at, 1)
+        self.priority.setMinimumWidth(140)
         queue_form.addRow("Priority", self.priority)
         queue_form.addRow("Label", self.label)
-        queue_form.addRow(start_row)
-        layout.addWidget(queue_box)
+        queue_form.addRow(self.start_at_enabled, self.start_at)
+        settings.addWidget(queue_box, 1)
+        layout.addLayout(settings)
 
         buttons = QHBoxLayout()
         self.defaults_button = QPushButton("Defaults")
@@ -389,11 +424,13 @@ class ArgumentEditor(QWidget):
             )
         )
         self.submit_button = QPushButton("Submit")
+        self.submit_button.setObjectName("PrimaryButton")
         self.submit_button.setDefault(True)
         self.submit_button.clicked.connect(self._submit)
         buttons.addWidget(self.defaults_button)
         buttons.addWidget(self.last_button)
         buttons.addStretch(1)
+        buttons.addWidget(self.point_count)
         buttons.addWidget(self.submit_button)
         layout.addLayout(buttons)
         self.error = QLabel()
@@ -411,7 +448,8 @@ class ArgumentEditor(QWidget):
 
     def set_experiment(self, schema):
         self.schema = schema
-        self.title.setText(f"{schema['class_name']}  ({schema['module']})")
+        self.title.setText(schema["class_name"])
+        self.module.setText(schema["module"])
         self.doc.setText(schema.get("doc", ""))
         self.doc.setVisible(bool(schema.get("doc")))
         while self.arguments_layout.count():
@@ -427,8 +465,11 @@ class ArgumentEditor(QWidget):
             )
         for group, arguments in groups.items():
             box = QGroupBox(group)
+            box.setObjectName("EditorGroup")
             grid = QGridLayout(box)
-            grid.setColumnStretch(1, 1)
+            grid.setHorizontalSpacing(10)
+            # Fields keep a readable width; the slack goes to a trailing column.
+            grid.setColumnStretch(3, 1)
             for row, (name, argument) in enumerate(arguments):
                 argument_row = ArgumentRow(name, argument, box)
                 argument_row.add_to(grid, row)
@@ -507,7 +548,7 @@ class ArgumentEditor(QWidget):
         for row in self.rows.values():
             if row.scanning:
                 count *= row.scan.n_values()
-        self.point_count.setText(str(count))
+        self.point_count.setText(f"{count} point{'' if count == 1 else 's'}")
 
     def _submit(self):
         try:
