@@ -215,6 +215,19 @@ QLabel[role="heading"] {
     font-size: 9pt;
 }
 
+/* Experiment argument editor: an argument differing from its default, or
+   being scanned, is flagged on its label. */
+QLabel[role="argument"][state="modified"] {
+    color: #f5a623;
+}
+QLabel[role="argument"][state="scanned"] {
+    color: #5b8def;
+}
+
+QLabel#StatusLabel[state="crashed"] {
+    color: #e74c3c;
+}
+
 QLabel#StatusLabel {
     font-weight: 600;
 }

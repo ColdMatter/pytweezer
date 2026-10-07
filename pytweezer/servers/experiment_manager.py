@@ -80,6 +80,8 @@ class ExperimentManager:
         self._abort_requested: int | None = None
         self._running = True
         self._seq = 0
+        # Bumped whenever the catalogue changes, so GUIs know to fetch it again.
+        self._catalogue_version = 0
         self._dirty = True
         self._last_publish = 0.0
         self._last_rescan = 0.0
@@ -123,8 +125,8 @@ class ExperimentManager:
         monotonic = time.monotonic()
         if monotonic - self._last_rescan > CATALOGUE_RESCAN_S:
             self._last_rescan = monotonic
-            self._dirty |= self.catalogue.refresh()
-        self._dirty |= self.catalogue.poll()
+            self._catalogue_changed(self.catalogue.refresh())
+        self._catalogue_changed(self.catalogue.poll())
         if self._dirty or monotonic - self._last_publish > PUBLISH_INTERVAL_S:
             self._publish_queue()
 
@@ -150,8 +152,12 @@ class ExperimentManager:
         return {"snapshot": self._snapshot()}
 
     def _cmd_catalogue(self, request):
-        self._dirty |= self.catalogue.refresh()
-        return {"modules": self.catalogue.entries(), "busy": self.catalogue.busy}
+        self._catalogue_changed(self.catalogue.refresh())
+        return {
+            "modules": self.catalogue.entries(),
+            "busy": self.catalogue.busy,
+            "version": self._catalogue_version,
+        }
 
     def _cmd_get(self, request):
         return {"task": self.queue.get(int(request["rid"])).model_dump(mode="json")}
@@ -376,6 +382,11 @@ class ExperimentManager:
 
     # -- state and publishing ------------------------------------------------
 
+    def _catalogue_changed(self, changed: bool) -> None:
+        if changed:
+            self._catalogue_version += 1
+            self._dirty = True
+
     def _changed(self) -> None:
         self._save()
         self._dirty = True
@@ -384,7 +395,12 @@ class ExperimentManager:
         self.store.save(self.queue.state)
 
     def _snapshot(self) -> dict[str, Any]:
-        return {"seq": self._seq, "started": self.started, **self.queue.snapshot()}
+        return {
+            "seq": self._seq,
+            "started": self.started,
+            "catalogue_version": self._catalogue_version,
+            **self.queue.snapshot(),
+        }
 
     def _publish_queue(self) -> None:
         self._seq += 1

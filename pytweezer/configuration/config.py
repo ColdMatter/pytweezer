@@ -239,7 +239,7 @@ CONFIG = {
 # out ports in declaration order, so an entry inside "Servers" would shift every
 # device's port.
 CONFIG["Servers"]["Experiment Manager"] = {
-    "active": False,
+    "active": True,
     "script": "../pytweezer/servers/experiment_manager.py",
     "host": SERVER_HOST,
     "port": get_next_port(),
