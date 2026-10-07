@@ -238,13 +238,10 @@ class MotMasterInterface:
         self,
         script: str,
     ):
+        script_path = str(self.script_root.joinpath(f"{script}.cs"))
+        self.motmaster.SetScriptPath(script_path)
         self.script = script
-        self.script_path = str(self.script_root.joinpath(f"{script}.cs"))
-        try:
-            self.motmaster.SetScriptPath(self.script_path)
-            print(f"MotMaster script set to {script}.")
-        except Exception as e:
-            print(f"Error: {e} encountered")
+        self.script_path = script_path
 
     def get_motmaster_dictionary(self):
         self.parameter_dictionary = self.motmaster.GetParameters()
@@ -267,15 +264,11 @@ class MotMasterInterface:
             raise ValueError(
                 "MotMaster script not set. Please call set_motmaster_experiment first."
             )
-        try:
-            if parameters is not None:
-                pars_csdict = self.python_to_cs_dict(parameters)
-                self.motmaster.Go(pars_csdict)
-            else:
-                self.motmaster.Go()
-            time.sleep(self.interval)
-        except Exception as e:
-            print(f"Error starting MotMaster experiment {self.script}: {e}")
+        if parameters is not None:
+            self.motmaster.Go(self.python_to_cs_dict(parameters))
+        else:
+            self.motmaster.Go()
+        time.sleep(self.interval)
 
     def get_params(self):
         return dict(self.motmaster.GetParameters())
