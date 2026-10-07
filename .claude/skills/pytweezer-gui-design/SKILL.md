@@ -171,11 +171,15 @@ a factory in a scratch directory and pass `--path`:
 from PyQt6 import QtCore
 from pytweezer.GUI.experiments.panel import ExperimentsPanel
 
+
 class Feed(QtCore.QObject):  # same signals as the real feed
     queue_changed = QtCore.pyqtSignal(dict)
     point_received = QtCore.pyqtSignal(dict)
     connection_changed = QtCore.pyqtSignal(bool)
-    def close(self): pass
+
+    def close(self):
+        pass
+
 
 def panel():
     p = ExperimentsPanel(client=FakeClient(), feed=Feed())
