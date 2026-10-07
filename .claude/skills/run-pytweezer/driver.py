@@ -39,7 +39,13 @@ import sys
 #     does NOT render normal text glyphs — labels come out blank. Use only when
 #     there is no display; prefer the default when a session exists.
 # Respect an explicit override; otherwise leave Qt's default (native).
-from PyQt6.QtCore import QTimer
+
+# Like `pytweezer-server` (bin/launch.py): mark a server session before anything
+# imports the configuration, so off the server PC it runs in simulation.
+if sys.argv[1:2] == ["server"]:
+    os.environ["PYTWEEZER_ROLE"] = "server"
+
+from PyQt6.QtCore import QEventLoop, QTimer
 from PyQt6.QtWidgets import QApplication
 
 from bin.gui import build_client_gui, build_server_gui
@@ -52,8 +58,11 @@ def _paint(app, ms):
     A handful of ``processEvents()`` calls is not enough — text stays unpainted
     until the loop has actually run. A single-shot quit gives a bounded spin.
     """
-    QTimer.singleShot(ms, app.quit)
-    app.exec()
+    # A local loop, not app.exec()/app.quit(): in Qt 6 quit() also closes the
+    # window, which would stop every server a server GUI started.
+    loop = QEventLoop()
+    QTimer.singleShot(ms, loop.quit)
+    loop.exec()
 
 
 def main():
@@ -91,6 +100,9 @@ def main():
     for p in saved:
         print("  ", p)
     sys.stdout.flush()
+
+    win.close()  # stops every process a server GUI started
+    _paint(app, 2000)
 
     # bin.gui installs non-daemon ZMQ threads via embedded panels; os._exit
     # skips waiting on them (mirrors bin/gui.py's own _run()).

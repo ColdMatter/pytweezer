@@ -90,6 +90,7 @@ def resubmission(measurement):
 def describe(measurement):
     attrs = measurement.attrs
     lines = [
+        *(["SIMULATED (devices were simulated)"] if attrs.get("simulated") else []),
         f"Task {attrs['rid']}: {attrs['experiment']}.{attrs['class_name']}",
         f"Status: {attrs['status']}    points {attrs['n_done']}/{attrs['n_points']}",
         f"Label: {attrs.get('label') or '—'}",

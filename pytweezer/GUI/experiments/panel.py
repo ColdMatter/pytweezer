@@ -46,6 +46,13 @@ class ExperimentsPanel(QWidget):
         self.status = QLabel("Waiting for the Experiment Manager…")
         self.status.setObjectName("StatusLabel")
         layout.addWidget(self.status)
+        self.simulation_banner = QLabel(
+            "SIMULATION: experiments use simulated devices and their data is kept "
+            "separately"
+        )
+        self.simulation_banner.setObjectName("SimulationBanner")
+        self.simulation_banner.setVisible(False)
+        layout.addWidget(self.simulation_banner)
 
         self.catalogue = CatalogueView()
         self.editor = ArgumentEditor()
@@ -102,6 +109,7 @@ class ExperimentsPanel(QWidget):
         self.catalogue.set_modules(reply["modules"])
 
     def _queue_changed(self, snapshot):
+        self.simulation_banner.setVisible(bool(snapshot.get("simulated")))
         self.queue_view.set_snapshot(snapshot)
         version = snapshot.get("catalogue_version")
         if version is not None and version != self._catalogue_version:

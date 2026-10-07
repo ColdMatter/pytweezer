@@ -155,6 +155,12 @@ loop), `pytweezer/experiment/{queue,worker,catalogue,introspect,client}.py`.
   worker is adopted again (pid + create time), otherwise its task is settled
   from its h5 status (`interrupted`/`crashed`). A worker that can't reach the
   manager for `orphan_timeout` s stops and marks itself `interrupted`.
+- **Simulation** (`"simulate": SIMULATING` on the manager's entry, so any
+  `pytweezer-server` off the server PC): `Device(...)` gives the experiment its
+  device's simulated backend, built in the worker by the same `build_spec` as a
+  device server, so no device servers or lab network are needed. Data goes to
+  `<data_root>/simulated/`; files carry `simulated=True`; the GUI shows a
+  banner. `run_local(..., simulate=True)` does the same in a notebook.
 - Worker output goes to `logs/experiments/<rid>.log`. Workers bind no ports,
   so `pytweezer-kill-stale` ignores them.
 

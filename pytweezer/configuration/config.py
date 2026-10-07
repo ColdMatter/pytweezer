@@ -1,4 +1,5 @@
 import os
+import socket
 
 HOSTS = {
     "PH-BEAST": "10.59.3.1",
@@ -6,15 +7,25 @@ HOSTS = {
     "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
 }
+#: The PC that runs the shared servers (hubs, managers) for real.
+SERVER_PC = "PH-BEAST"
 
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
 SIMULATING = False  # set to True to run in simulation mode (no real devices, no real cameras, etc.)
 LOCAL = False
-SERVER_HOST = (
-    HOSTS["PH-BEAST"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
+
+#: Set to "server" by ``pytweezer-server`` and inherited by every process it starts.
+SERVER_ROLE_ENV = "PYTWEEZER_ROLE"
+#: A server session anywhere but SERVER_PC must not bind the lab's addresses or
+#: drive real hardware, so it simulates whatever SIMULATING says.
+SIMULATION_FORCED = (
+    os.environ.get(SERVER_ROLE_ENV) == "server"
+    and socket.gethostname().lower() != SERVER_PC.lower()
 )
+SIMULATING = SIMULATING or SIMULATION_FORCED
+SERVER_HOST = HOSTS[SERVER_PC] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
 # Self-hosted InfluxDB 2.x connection. Every value can be overridden by an
 # environment variable so the token need not be hardcoded in a real deployment;
@@ -136,7 +147,7 @@ CONFIG = {
         "Rb ThorCam": {
             "active": True,
             "class": "pytweezer.drivers.thorcam:ThorCam",
-            "sim_class": "pytweezer.drivers.thorcam:SimulatedThorCam",
+            "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -147,7 +158,7 @@ CONFIG = {
         "Tweezer Monitor ThorCam": {
             "active": True,
             "class": "pytweezer.drivers.tweezermonitorcam:ThorCam",
-            "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorCam",
+            "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorLabsCamera",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -244,6 +255,8 @@ CONFIG["Servers"]["Experiment Manager"] = {
     "host": SERVER_HOST,
     "port": get_next_port(),
     "pub_port": get_next_port(),
+    # Experiments get in-process simulated devices; data goes to <data_root>/simulated.
+    "simulate": SIMULATING,
     # Measurement files and the queue state; PYTWEEZER_DATA_DIR overrides it.
     # None means <repo>/data.
     "data_root": None,

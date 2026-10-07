@@ -50,15 +50,16 @@ def data_root() -> Path:
     """Root directory of the measurement files on this PC.
 
     ``PYTWEEZER_DATA_DIR`` wins, so a client PC can point at the server's
-    share; otherwise the Experiment Manager's ``data_root`` from CONFIG.
+    share; otherwise the Experiment Manager's ``data_root`` from CONFIG. When
+    the manager is simulating, files go in a ``simulated/`` subdirectory, so
+    simulated runs never mix with real data or use up its rids.
     """
-    env = os.environ.get("PYTWEEZER_DATA_DIR")
-    if env:
-        return Path(env)
     from pytweezer.configuration.config import get_config
 
     conf = get_config().get("Servers", {}).get("Experiment Manager", {})
-    return Path(conf.get("data_root") or Path(tweezerpath) / "data")
+    env = os.environ.get("PYTWEEZER_DATA_DIR")
+    root = Path(env or conf.get("data_root") or Path(tweezerpath) / "data")
+    return root / "simulated" if conf.get("simulate") else root
 
 
 def measurement_relpath(rid: int, class_name: str, when: datetime) -> Path:

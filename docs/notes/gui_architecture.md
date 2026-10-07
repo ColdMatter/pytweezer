@@ -40,8 +40,12 @@ Two status views, deliberately different mechanisms:
 
 ```
 pyproject.toml [tool.poetry.scripts]
-  pytweezer-server = "bin.gui:server_main"
-  pytweezer-client = "bin.gui:client_main"
+  pytweezer-server = "bin.launch:server_main"
+  pytweezer-client = "bin.launch:client_main"
+
+bin/launch.py
+  server_main() sets PYTWEEZER_ROLE=server (simulate off the server PC), then
+  calls bin.gui.server_main(); client_main() calls bin.gui.client_main()
 
 bin/gui.py
   server_main() -> _run(build_server_gui)

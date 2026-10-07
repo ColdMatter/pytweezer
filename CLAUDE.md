@@ -42,7 +42,7 @@ what you're about to hand-verify.
 Entry points (`[tool.poetry.scripts]` in `pyproject.toml`):
 
 ```bash
-poetry run pytweezer-server         # full-control GUI, run on the server PC
+poetry run pytweezer-server         # full-control GUI; simulates on any PC but the server PC
 poetry run pytweezer-client         # view-only GUI, run on client PCs
 poetry run pytweezer-device <name>  # start one device's RPC server standalone
 poetry run pytweezer-logger <name>  # start one InfluxDB logger standalone

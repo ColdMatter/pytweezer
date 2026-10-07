@@ -27,9 +27,17 @@ the GUI that shows it was launched. The server GUI can start and stop only what
 
 `pytweezer/configuration/config.py`:
 
-- `HOSTS` — hostname → IP. `SERVER_HOST` resolves from the `SIMULATING`/`LOCAL`
-  flags at the top of the file (both `False` today → the real `PH-BEAST`; set
-  either `True` to bind everything to localhost for dev/sim).
+- `HOSTS` — hostname → IP; `SERVER_PC` names the server PC. `SERVER_HOST`
+  resolves from the `SIMULATING`/`LOCAL` flags at the top of the file (both
+  `False` → the real `PH-BEAST`; either `True` binds everything to localhost).
+- **`pytweezer-server` simulates anywhere but `SERVER_PC`.** Its entry point
+  (`bin/launch.py`) sets `PYTWEEZER_ROLE=server` before anything imports the
+  config; `config.py` then forces `SIMULATING` (`SIMULATION_FORCED`) when the
+  hostname isn't `SERVER_PC`. Every process the GUI starts inherits the
+  variable, so hubs, device servers and the Experiment Manager all simulate
+  together. Clients and standalone device servers on lab PCs are unaffected.
+  Because `pytweezer/__init__` imports `pytweezer.servers` (and so the config),
+  nothing may import `pytweezer` before that variable is set.
 - `CONFIG["Servers"]` — hubs (`Imagehub`/`Commandhub`/`Datahub`/`Propertyhub`/
   `Messagehub`), the stream loggers, `Analysis Manager`, `Device Status`,
   `Experiment Manager` (queue + h5 measurement storage; see `add-experiment`).

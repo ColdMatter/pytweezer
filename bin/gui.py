@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
 )
 
 from bin.managed_panel import ControlPanel, DevicesPanel
+from pytweezer.configuration import config
 from pytweezer.GUI.applet_launcher import AppletLauncher
 from pytweezer.GUI.streammonitor import make_stream_monitor
 from pytweezer.GUI.theme import DARK_STYLESHEET
@@ -177,7 +178,7 @@ def build_gui(server: bool) -> TabbedGUI:
             results.resubmit_requested.connect(experiments.load_request)
         return results
 
-    return TabbedGUI(
+    gui = TabbedGUI(
         f"PyTweezer {name}",
         [
             (
@@ -209,6 +210,10 @@ def build_gui(server: bool) -> TabbedGUI:
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],
     )
+    if config.SIMULATING:
+        # After construction: the base title also keys the saved window layout.
+        gui.setWindowTitle(f"{gui.windowTitle()} (SIMULATION)")
+    return gui
 
 
 def build_server_gui():
@@ -249,16 +254,15 @@ def _run(build):
 
 
 def server_main():
+    """Run the server GUI; use ``bin.launch.server_main`` as the entry point so
+    that a session off the server PC simulates."""
+    if config.SIMULATION_FORCED:
+        logger.warning(
+            "Not on the server PC (%s): this session runs in SIMULATION mode",
+            config.SERVER_PC,
+        )
     _run(build_server_gui)
 
 
 def client_main():
     _run(build_client_gui)
-
-
-if __name__ == "__main__":
-    role = sys.argv[1] if len(sys.argv) > 1 else "server"
-    if role == "client":
-        client_main()
-    else:
-        server_main()

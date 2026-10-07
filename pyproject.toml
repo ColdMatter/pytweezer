@@ -7,8 +7,8 @@ readme = "README.md"
 packages = [{ include = "pytweezer" }, { include = "bin" }]
 
 [tool.poetry.scripts]
-pytweezer-server = "bin.gui:server_main"
-pytweezer-client = "bin.gui:client_main"
+pytweezer-server = "bin.launch:server_main"
+pytweezer-client = "bin.launch:client_main"
 pytweezer-device = "pytweezer.servers.device_server:main"
 pytweezer-logger = "pytweezer.servers.logger_server:main"
 pytweezer-experiment-manager = "pytweezer.servers.experiment_manager:main"

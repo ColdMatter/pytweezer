@@ -228,6 +228,14 @@ QLabel#StatusLabel[state="crashed"] {
     color: #e74c3c;
 }
 
+QLabel#SimulationBanner {
+    color: #1b1c22;
+    background: #f5a623;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
 QLabel#StatusLabel {
     font-weight: 600;
 }

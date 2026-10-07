@@ -46,6 +46,9 @@ class Experiment:
         self._clients: list[Any] = []
         self._shared_clients: dict[str, Any] = {}
         self._recorder: Any = None
+        #: A :class:`~pytweezer.experiment.simulation.SimulatedDevices` when
+        #: running in simulation; devices then come from it instead of RPC.
+        self.simulated_devices: Any = None
 
     @classmethod
     def arguments(cls) -> dict[str, Argument]:
@@ -101,8 +104,11 @@ class Experiment:
 
         Clients are not thread-safe: pass ``fresh=True`` for an extra client
         to use from another thread, e.g. with
-        :func:`pytweezer.parallel.run_parallel`.
+        :func:`pytweezer.parallel.run_parallel`. In simulation every call
+        returns the same in-process simulated backend.
         """
+        if self.simulated_devices is not None:
+            return self.simulated_devices.get(name)
         if not fresh and name in self._shared_clients:
             return self._shared_clients[name]
         client = _get_device(name, timeout)
@@ -119,5 +125,7 @@ class Experiment:
             except Exception:
                 logger.warning("Error closing a device client", exc_info=True)
         self._shared_clients.clear()
+        if self.simulated_devices is not None:
+            self.simulated_devices.close()
         for name in self.devices():
             self.__dict__.pop(name, None)

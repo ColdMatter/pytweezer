@@ -17,7 +17,7 @@ EXPERIMENT = textwrap.dedent(
     import os
     import time
 
-    from pytweezer.experiment import Experiment, Integer, Number
+    from pytweezer.experiment import Device, Experiment, Integer, Number
 
 
     class Steps(Experiment):
@@ -34,6 +34,14 @@ EXPERIMENT = textwrap.dedent(
 
     class NotRunnable(Experiment):
         pass
+
+
+    class UsesSequencer(Experiment):
+        sequencer = Device("Rb MotMaster")
+
+        def run_point(self):
+            self.sequencer.set_iterations(1)
+            self.record("backend", type(self.sequencer).__name__)
     """
 )
 
@@ -145,7 +153,7 @@ def test_catalogue_lists_runnable_experiments(harness):
     [entry] = modules
     assert entry["module"] == "labexp.steps"
     assert entry["error"] is None
-    assert [c["class_name"] for c in entry["classes"]] == ["Steps"]
+    assert [c["class_name"] for c in entry["classes"]] == ["Steps", "UsesSequencer"]
 
 
 def test_terminate_stops_at_a_point_boundary(harness):
@@ -223,3 +231,13 @@ def test_submit_checks_arguments_before_queueing():
         )
     with pytest.raises(ValueError, match="run_local"):
         submit(type("Local", (), {"__module__": "__main__"}), client=Unreachable())
+
+
+def test_simulating_manager_gives_workers_simulated_devices(harness):
+    harness.manager.simulate = True  # as "simulate": SIMULATING in CONFIG
+    rid = submit("labexp.steps:UsesSequencer", client=harness.client)
+    task = harness.wait_until(rid, lambda t: t.status.finished)
+    assert task.status == "completed", task.error
+    measurement = harness.measurement(task)
+    assert measurement.attrs["simulated"] is True
+    assert list(measurement.results["backend"]) == ["SimulatedMotMasterInterface"]

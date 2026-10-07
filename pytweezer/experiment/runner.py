@@ -13,6 +13,7 @@ from typing import Any
 
 from pytweezer.experiment.experiment import Experiment
 from pytweezer.experiment.scan import Point, Scan
+from pytweezer.experiment.simulation import SimulatedDevices
 from pytweezer.experiment.storage import (
     Measurement,
     MeasurementWriter,
@@ -41,9 +42,16 @@ def open_writer(
     args: dict[str, Any],
     scan: Scan,
     header: dict[str, Any],
+    *,
+    simulate: bool = False,
 ) -> tuple[Experiment, list[Point], MeasurementWriter]:
-    """Instantiate the experiment, expand the scan and create its measurement file."""
+    """Instantiate the experiment, expand the scan and create its measurement file.
+
+    With ``simulate`` the experiment's devices are simulated in-process.
+    """
     experiment = experiment_cls(args)
+    if simulate:
+        experiment.simulated_devices = SimulatedDevices()
     points = scan.points(experiment_cls)
     writer = MeasurementWriter(
         path,
@@ -51,6 +59,7 @@ def open_writer(
             "experiment": experiment_cls.__module__,
             "class_name": experiment_cls.__name__,
             **git_provenance(),
+            "simulated": simulate,
             **header,
         },
         argument_values=experiment.argument_values(),
@@ -129,16 +138,23 @@ def run_local(
     *,
     path: Path | str | None = None,
     label: str = "",
+    simulate: bool = False,
     **args: Any,
 ) -> Measurement:
     """Run ``experiment_cls`` in this process, bypassing the queue.
 
     For notebooks and debugging. The measurement is kept in memory unless
-    ``path`` is given. A failure doesn't raise: check ``.status`` and
-    ``.attrs["error"]`` on the returned measurement.
+    ``path`` is given. ``simulate=True`` uses in-process simulated devices.
+    A failure doesn't raise: check ``.status`` and ``.attrs["error"]`` on the
+    returned measurement.
     """
     experiment, points, writer = open_writer(
-        path, experiment_cls, args, scan or Scan(), {"rid": -1, "label": label}
+        path,
+        experiment_cls,
+        args,
+        scan or Scan(),
+        {"rid": -1, "label": label},
+        simulate=simulate,
     )
     try:
         run_points(experiment, points, writer)

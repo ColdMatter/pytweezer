@@ -64,6 +64,8 @@ class ExperimentManager:
         self.conf = get_config()["Servers"][server_name]
         self.root = Path(root) if root is not None else data_root()
         self.orphan_timeout = float(self.conf.get("orphan_timeout", 30.0))
+        #: Workers use in-process simulated devices instead of device servers.
+        self.simulate = bool(self.conf.get("simulate", False))
         host, port = self.conf["host"], self.conf["port"]
         self.rep_address = f"tcp://{host}:{port}"
         self.pub_address = f"tcp://{host}:{self.conf['pub_port']}"
@@ -104,6 +106,12 @@ class ExperimentManager:
 
     def serve_forever(self) -> None:
         logger.info("Experiment Manager serving on %s", self.rep_address)
+        if self.simulate:
+            logger.warning(
+                "Experiment Manager in SIMULATION MODE: devices are simulated, "
+                "data goes to %s",
+                self.root,
+            )
         try:
             while self._running:
                 if self.rep.poll(100, zmq.POLLIN):
@@ -146,7 +154,7 @@ class ExperimentManager:
             return {"ok": False, "error": f"{type(error).__name__}: {error}"}
 
     def _cmd_ping(self, request):
-        return {"started": self.started, "pid": os.getpid()}
+        return {"started": self.started, "pid": os.getpid(), "simulated": self.simulate}
 
     def _cmd_snapshot(self, request):
         return {"snapshot": self._snapshot()}
@@ -238,6 +246,7 @@ class ExperimentManager:
                 "task": task.model_dump(mode="json"),
                 "h5_path": str(self.root / task.h5_path),
                 "orphan_timeout": self.orphan_timeout,
+                "simulate": self.simulate,
             }
         if event == "point":
             self.queue.mark_progress(rid, int(request["done"]), int(request["total"]))
@@ -399,6 +408,7 @@ class ExperimentManager:
             "seq": self._seq,
             "started": self.started,
             "catalogue_version": self._catalogue_version,
+            "simulated": self.simulate,
             **self.queue.snapshot(),
         }
 

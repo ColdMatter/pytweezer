@@ -114,6 +114,7 @@ def run(link: ManagerLink) -> int:
                 "submitter": task.submitter,
                 "t_submit": task.t_submit.isoformat(),
             },
+            simulate=bool(reply.get("simulate", False)),
         )
     except Exception:
         error = traceback.format_exc()
