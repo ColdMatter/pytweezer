@@ -276,7 +276,7 @@ class LogMonitor(QWidget):
             # Hover any cell in the row to read the full (untruncated) message.
             item.setToolTip(message)
             item.setTextAlignment(
-                QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop
+                QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
             )
             if col == self.LEVEL_COL and level.upper() in self.LEVEL_STATE:
                 item.setIcon(status_icon(self.LEVEL_STATE[level.upper()]))
