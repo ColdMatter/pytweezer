@@ -139,6 +139,14 @@ never overwritten (mode `"x"`) and readable mid-run (`locking=False`).
 Manager"]["data_root"]`, else `<repo>/data`. On client PCs point the env var at
 the server's share. The queue state lives in `{data_root}/queue_state.json`.
 
+The manager also writes each run into the database (`pytweezer.database`): a
+`runs` row on start and finish, and a `points` row per point, holding its times,
+scanned values and 0-d numeric results. Those rows sit next to the monitor
+`readings`, so `points_with_readings(rid, "ni_adc")`
+(`pytweezer.database.analysis`) gives one row per point with the readings during
+it. `pytweezer-db-backfill` loads files the database missed. See
+`docs/notes/database.md`.
+
 ## The manager and its workers
 
 Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP+PUB

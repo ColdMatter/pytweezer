@@ -1,0 +1,192 @@
+{
+  "uid": "pytweezer-overview",
+  "title": "pytweezer overview",
+  "tags": [
+    "pytweezer"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "measurement",
+        "label": "Measurement",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "pytweezer"
+        },
+        "query": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time)",
+        "definition": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time)",
+        "refresh": 2,
+        "multi": false,
+        "includeAll": false,
+        "sort": 1,
+        "current": {},
+        "options": [],
+        "hide": 0
+      },
+      {
+        "name": "field",
+        "label": "Field",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "pytweezer"
+        },
+        "query": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement'",
+        "definition": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement'",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "current": {},
+        "options": [],
+        "hide": 0
+      },
+      {
+        "name": "scalar",
+        "label": "Point result",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "pytweezer"
+        },
+        "query": "SELECT DISTINCT jsonb_object_keys(scalars) FROM points WHERE $__timeFilter(t_start)",
+        "definition": "SELECT DISTINCT jsonb_object_keys(scalars) FROM points WHERE $__timeFilter(t_start)",
+        "refresh": 2,
+        "multi": false,
+        "includeAll": false,
+        "sort": 1,
+        "current": {},
+        "options": [],
+        "hide": 0
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Runs",
+        "enable": true,
+        "iconColor": "rgba(115, 191, 105, 0.25)",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "pytweezer"
+        },
+        "target": {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "pytweezer"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT t_start AS time, coalesce(t_end, now()) AS timeend, 'rid ' || rid || ' ' || class_name || ' (' || status || ')' AS text, class_name AS tags FROM runs WHERE t_start < $__timeTo() AND coalesce(t_end, now()) > $__timeFrom()"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "$measurement",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "pytweezer"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "pytweezer"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(time, $__interval), field AS metric, avg(value) AS value FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND field IN ($field) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Point result: $scalar",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "pytweezer"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 5
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "pytweezer"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT t_end AS time, (scalars ->> '$scalar')::float AS \"$scalar\" FROM points WHERE $__timeFilter(t_start) AND scalars ? '$scalar' ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Runs",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "pytweezer"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "pytweezer"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT rid, class_name, label, status, t_start, t_end, points_done, points_total, h5_path FROM runs WHERE $__timeFilter(t_start) ORDER BY rid DESC"
+        }
+      ]
+    }
+  ]
+}

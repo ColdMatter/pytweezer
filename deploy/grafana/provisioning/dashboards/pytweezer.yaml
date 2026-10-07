@@ -1,0 +1,12 @@
+# Copy to <Grafana>\conf\provisioning\dashboards\ on the server PC, and point
+# `path` at deploy\grafana\dashboards in that PC's pytweezer checkout, so a
+# git pull updates the dashboards.
+apiVersion: 1
+
+providers:
+  - name: pytweezer
+    folder: pytweezer
+    type: file
+    allowUiUpdates: true
+    options:
+      path: C:\pytweezer\deploy\grafana\dashboards

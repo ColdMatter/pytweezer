@@ -42,7 +42,8 @@ the GUI that shows it was launched. The server GUI can start and stop only what
   `Messagehub`), the stream loggers, `Analysis Manager`, `Device Status`,
   `Experiment Manager` (queue + h5 measurement storage; see `add-experiment`).
 - `CONFIG["Devices"]` — one entry per physical device, each with its own `host`.
-- `CONFIG["Loggers"]` — InfluxDB loggers.
+- `CONFIG["Loggers"]` — database loggers (Postgres + TimescaleDB on the server
+  PC; connection string in `DATABASE["dsn"]`).
 - `CONFIG["GUI"]` — standalone GUI tools (StreamMonitor, Applet Launcher, …).
 
 Every category names its `"script"` explicitly **except Devices**: they all run
@@ -112,9 +113,11 @@ everywhere (not bare `logging.getLogger`) — it adds structured JSONL output
 under `logs/` (or `$PYTWEEZER_LOG_DIR`) alongside console output.
 
 Do not confuse the pub/sub stream loggers (`datalogger`/`imagelogger`/
-`propertylogger`, which archive ZMQ streams) with **InfluxDB** metric logging,
-which is entirely opt-in and separate. Streams are never auto-forwarded to
-Influx.
+`propertylogger`, which archive ZMQ streams) with **database** metric logging
+(`pytweezer.database`), which is entirely opt-in and separate. Streams are never
+auto-forwarded to the database. The Experiment Manager does write a `runs` row
+per run and a `points` row per scan point there, so readings can be joined to
+runs; see `docs/notes/database.md`.
 
 ## Where to go next
 
@@ -125,7 +128,7 @@ Influx.
 | Add a driver for new hardware | `add-device-driver` skill |
 | Add a live viewer window | `add-applet` skill |
 | Add a streaming analysis | `add-analysis-script` skill |
-| Record a value in InfluxDB | `add-logger` skill |
+| Record a value in the database | `add-logger` skill |
 | Run/screenshot the GUI | `run-pytweezer` skill |
 
 Each of those skills is self-contained — the conventions and constraints that

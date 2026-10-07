@@ -45,7 +45,7 @@ Entry points (`[tool.poetry.scripts]` in `pyproject.toml`):
 poetry run pytweezer-server         # full-control GUI; simulates on any PC but the server PC
 poetry run pytweezer-client         # view-only GUI, run on client PCs
 poetry run pytweezer-device <name>  # start one device's RPC server standalone
-poetry run pytweezer-logger <name>  # start one InfluxDB logger standalone
+poetry run pytweezer-logger <name>  # start one database logger standalone
 poetry run pytweezer-experiment-manager <name>  # start the experiment queue manager standalone
 poetry run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
 ```
@@ -130,7 +130,7 @@ Load a skill when you need more than that:
 | Device server/client, `get_device()`, composites, coordinators | `pytweezer-device-framework` |
 | GUI shell, tabs, panels, process tiles, teardown | `pytweezer-gui-internals` |
 | How a panel should look, read and behave (layout, styling, wording) | `pytweezer-gui-design` |
-| Adding a driver / applet / analysis / InfluxDB logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
+| Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 

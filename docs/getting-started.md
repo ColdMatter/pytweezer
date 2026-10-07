@@ -28,7 +28,8 @@ Defined under `[tool.poetry.scripts]` in `pyproject.toml`:
 | `poetry run pytweezer-server` | full-control GUI, run on the server PC |
 | `poetry run pytweezer-client` | view-only GUI, run on client PCs |
 | `poetry run pytweezer-device <name>` | start one device's RPC server standalone |
-| `poetry run pytweezer-logger <name>` | start one InfluxDB logger standalone |
+| `poetry run pytweezer-logger <name>` | start one database logger standalone |
+| `poetry run pytweezer-db-backfill` | load existing measurement files into the database |
 | `poetry run pytweezer-kill-stale` | kill leftover processes holding ZMQ ports |
 
 `start_servers.bat` / `start_client.bat` / `kill_stale.bat` wrap these on the
