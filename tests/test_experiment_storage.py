@@ -177,3 +177,16 @@ def test_images_keep_their_native_dtype():
         writer.record("image", np.ones((4, 4), dtype=np.int32))
     assert writer.file["results/image"].dtype == np.uint16
     writer.close()
+
+
+def test_load_only_selected_results_but_know_all_shapes():
+    _, points, writer = make_writer(None)
+    writer.begin_point(points[0])
+    writer.record("image", np.zeros((8, 8)))
+    writer.record("y", 1.0)
+    writer.end_point()
+    measurement = load_measurement(writer.file, results=["y"])
+    assert list(measurement.results) == ["y"]
+    assert measurement.result_shapes == {"image": (8, 8), "y": ()}
+    assert measurement.result_kinds == {"image": "f", "y": "f"}
+    writer.close()

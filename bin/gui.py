@@ -6,7 +6,7 @@ which panels they expose:
 
 * ``pytweezer-server`` (:func:`server_main`) runs on the server PC and gives full
   start/stop control of the server processes: Servers | Devices | Loggers |
-  Streams | Applets | Analysis | Experiments | Properties.
+  Streams | Applets | Analysis | Experiments | Results | Properties.
 * ``pytweezer-client`` (:func:`client_main`) runs on client PCs with the same
   tabs, except that the Servers and Loggers tabs are view-only because those
   processes run on the server PC.
@@ -165,9 +165,17 @@ class TabbedGUI(QMainWindow):
 def build_gui(server: bool) -> TabbedGUI:
     from pytweezer.GUI.analysismanager import AnalysisManager
     from pytweezer.GUI.experiments.panel import ExperimentsPanel
+    from pytweezer.GUI.experiments.results import ResultsPanel
     from pytweezer.GUI.property_editor import PropEdit
 
     name = "Server" if server else "Client"
+    experiments = _safe_panel("Experiments", ExperimentsPanel)
+
+    def make_results():
+        results = ResultsPanel()
+        if isinstance(experiments, ExperimentsPanel):
+            results.resubmit_requested.connect(experiments.load_request)
+        return results
 
     return TabbedGUI(
         f"PyTweezer {name}",
@@ -196,7 +204,8 @@ def build_gui(server: bool) -> TabbedGUI:
                 _safe_panel("Applets", lambda: AppletLauncher("Applet Launcher")),
             ),
             ("Analysis", _safe_panel("Analysis", lambda: AnalysisManager("Analysis"))),
-            ("Experiments", _safe_panel("Experiments", ExperimentsPanel)),
+            ("Experiments", experiments),
+            ("Results", _safe_panel("Results", make_results)),
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],
     )

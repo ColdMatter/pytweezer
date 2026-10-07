@@ -26,6 +26,7 @@ import json
 import os
 import socket
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -300,6 +301,10 @@ class Measurement:
     recorded: dict[str, np.ndarray]
     constants: dict[str, Any]
     units: dict[str, str] = field(default_factory=dict)
+    #: Per-point shape of every result, including those not loaded.
+    result_shapes: dict[str, tuple[int, ...]] = field(default_factory=dict)
+    #: numpy dtype kind of every result ("O" for text), including those not loaded.
+    result_kinds: dict[str, str] = field(default_factory=dict)
     source: dict[str, str] = field(default_factory=dict)
     path: Path | None = None
 
@@ -316,11 +321,15 @@ class Measurement:
         return int(self.attrs["n_done"])
 
 
-def load_measurement(source: Path | str | h5py.File) -> Measurement:
+def load_measurement(
+    source: Path | str | h5py.File, results: Iterable[str] | None = None
+) -> Measurement:
+    """Read a measurement file; ``results`` limits which results are loaded (default all)."""
+    wanted = None if results is None else set(results)
     if isinstance(source, h5py.File):
-        return _read(source, None)
+        return _read(source, None, wanted)
     with h5py.File(source, "r", locking=False) as f:
-        return _read(f, Path(source))
+        return _read(f, Path(source), wanted)
 
 
 def read_header(path: Path | str) -> dict[str, Any]:
@@ -329,13 +338,20 @@ def read_header(path: Path | str) -> dict[str, Any]:
         return {key: _plain(value) for key, value in f.attrs.items()}
 
 
-def _read(f: h5py.File, path: Path | None) -> Measurement:
+def _read(f: h5py.File, path: Path | None, wanted: set[str] | None) -> Measurement:
     n_done = int(f.attrs["n_done"])
     units = {}
     results = {}
+    shapes = {}
+    kinds = {}
     for name, dataset in f["results"].items():
-        results[name] = _decode(dataset, dataset[:n_done])
+        shapes[name] = dataset.shape[1:]
+        kinds[name] = (
+            "O" if h5py.check_string_dtype(dataset.dtype) else dataset.dtype.kind
+        )
         units[name] = str(dataset.attrs.get("unit", ""))
+        if wanted is None or name in wanted:
+            results[name] = _decode(dataset, dataset[:n_done])
     constants = {}
     for name, dataset in f["constants"].items():
         constants[name] = _decode(dataset, dataset[()])
@@ -355,6 +371,8 @@ def _read(f: h5py.File, path: Path | None) -> Measurement:
         recorded={name: ds[:n_done] for name, ds in f["recorded"].items()},
         constants=constants,
         units=units,
+        result_shapes=shapes,
+        result_kinds=kinds,
         source={name: ds[()].decode() for name, ds in f["source"].items()},
         path=path,
     )
