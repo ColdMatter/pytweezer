@@ -97,7 +97,7 @@ not old notebooks.
 ## Running
 
 From the GUI: **Experiments** tab → pick the class → edit, toggle "Scan" per
-argument → Submit. **Results** tab browses files and quick-plots a scalar
+argument → Submit. **Results** tab lists files as they appear (it polls the data root every 2 s while visible; no refresh button) and quick-plots a scalar
 against a scan axis; "Resubmit" reloads its arguments.
 
 From a notebook or script:

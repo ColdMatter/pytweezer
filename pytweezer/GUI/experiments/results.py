@@ -1,16 +1,18 @@
 """The Results tab: browse measurement files, inspect them, quick-plot a result.
 
 Reads files directly from :func:`~pytweezer.experiment.storage.data_root`, so
-on a client PC set ``PYTWEEZER_DATA_DIR`` to the server's data share. Files
-are opened without locking, so a measurement still running can be viewed; it
-is reloaded every couple of seconds while selected.
+on a client PC set ``PYTWEEZER_DATA_DIR`` to the server's data share. The tree
+keeps itself up to date (every couple of seconds while the tab is visible):
+new measurements appear, and running ones update as they finish. Files are
+opened without locking, so the selected measurement can be watched while it
+runs.
 """
 
 from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtGui
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -36,9 +38,12 @@ from pytweezer.logging_utils import get_logger
 logger = get_logger("pytweezer.GUI.experiments.results")
 
 _PATH = QtCore.Qt.ItemDataRole.UserRole
+_FILLED = QtCore.Qt.ItemDataRole.UserRole + 1
+_POLL_MS = 2000
+#: Statuses a file can still move on from; finished files are read once.
+_UNSETTLED = {"running", "unreadable", ""}
 _NONE = "(none)"
 _POINT_INDEX = "point index"
-_LIVE_RELOAD_MS = 2000
 _CURVE_COLOURS = ["#5b8def", "#f5a623", "#2ecc71", "#c678dd", "#e5c07b", "#56b6c2"]
 
 
@@ -141,6 +146,23 @@ def _shown(measurement, name, value):
     return f"{value / (schema.get('scale') or 1.0):g} {unit}".strip()
 
 
+def _header_summary(path):
+    try:
+        header = read_header(path)
+    except OSError:
+        # Also what a file being created looks like; it is retried.
+        return "unreadable", ""
+    return str(header.get("status", "?")), str(header.get("label", ""))
+
+
+def _show_file(item, path, status, label):
+    item.setText(0, path.stem.replace("_", "  ", 1))
+    item.setText(1, status)
+    item.setText(2, label)
+    failed = status in ("failed", "crashed", "unreadable")
+    item.setIcon(1, status_icon("crashed") if failed else QtGui.QIcon())
+
+
 class ResultsPanel(QWidget):
     resubmit_requested = QtCore.pyqtSignal(object)
 
@@ -157,11 +179,8 @@ class ResultsPanel(QWidget):
         browser_layout = QVBoxLayout(browser)
         browser_layout.setContentsMargins(0, 0, 0, 0)
         top = QHBoxLayout()
-        refresh = QPushButton("Refresh")
-        refresh.clicked.connect(self.refresh)
         self.show_unfinished = QCheckBox("Show running")
-        self.show_unfinished.toggled.connect(self.refresh)
-        top.addWidget(refresh)
+        self.show_unfinished.toggled.connect(self._show_unfinished_toggled)
         top.addWidget(self.show_unfinished)
         top.addStretch(1)
         browser_layout.addLayout(top)
@@ -214,9 +233,11 @@ class ResultsPanel(QWidget):
         splitter.addWidget(detail)
         splitter.setStretchFactor(1, 3)
 
-        self._live = QtCore.QTimer(self)
-        self._live.timeout.connect(self._reload_if_running)
-        self._live.start(_LIVE_RELOAD_MS)
+        #: Every measurement file seen: path -> (status, label, tree item or None if hidden).
+        self._files = {}
+        self._poll = QtCore.QTimer(self)
+        self._poll.timeout.connect(self._poll_tick)
+        self._poll.start(_POLL_MS)
         QtCore.QTimer.singleShot(0, self.refresh)
 
     @property
@@ -225,57 +246,113 @@ class ResultsPanel(QWidget):
 
     # -- browsing ----------------------------------------------------------
 
+    def _poll_tick(self):
+        # Hidden behind another tab: skip, the data root may be a network share.
+        if self.isVisible():
+            self.refresh()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh()
+
     def refresh(self):
-        selected = self.path
-        self.tree.clear()
-        root = self.data_root
-        days = sorted(
-            (p for p in root.glob("*/*/*") if p.is_dir() and any(p.glob("*.h5"))),
-            reverse=True,
-        )
-        for day in days:
-            item = QTreeWidgetItem(["-".join(day.parts[-3:])])
-            item.setData(0, _PATH, str(day))
-            item.setChildIndicatorPolicy(
-                QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+        """Bring the tree up to date with the files on disk, in place."""
+        try:
+            days = sorted(
+                (p for p in self.data_root.glob("*/*/*") if p.is_dir()), reverse=True
             )
-            self.tree.addTopLevelItem(item)
-        if days:
+        except OSError:
+            logger.debug("Cannot list %s", self.data_root, exc_info=True)
+            return
+        newest_was_open = self._newest_day_open()
+        for day in days:
+            item = self._day_item(day)
+            if item is None and any(day.glob("*.h5")):
+                item = self._add_day(day)
+            if item is not None and item.data(0, _FILLED):
+                self._sync_day(item)
+        if newest_was_open and self.tree.topLevelItemCount():
             self.tree.topLevelItem(0).setExpanded(True)
-        if selected is not None:
-            self.select_path(selected)
+        self._reload_if_running()
+
+    def _newest_day_open(self):
+        if not self.tree.topLevelItemCount():
+            return True  # first fill: open the newest day
+        return self.tree.topLevelItem(0).isExpanded()
+
+    def _day_item(self, day):
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if item.data(0, _PATH) == str(day):
+                return item
+        return None
+
+    def _add_day(self, day):
+        item = QTreeWidgetItem(["-".join(day.parts[-3:])])
+        item.setData(0, _PATH, str(day))
+        item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+        index = 0
+        while index < self.tree.topLevelItemCount() and self.tree.topLevelItem(
+            index
+        ).data(0, _PATH) > str(day):
+            index += 1
+        self.tree.insertTopLevelItem(index, item)
+        return item
 
     def _fill_day(self, day_item):
-        if day_item.childCount():
-            return
-        for path in sorted(Path(day_item.data(0, _PATH)).glob("*.h5"), reverse=True):
-            try:
-                header = read_header(path)
-            except OSError:
-                header = {"status": "unreadable"}
-            status = str(header.get("status", "?"))
-            if status == "running" and not self.show_unfinished.isChecked():
+        if not day_item.data(0, _FILLED):
+            day_item.setData(0, _FILLED, True)
+            self._sync_day(day_item)
+
+    def _sync_day(self, day_item):
+        for path in Path(day_item.data(0, _PATH)).glob("*.h5"):
+            known = self._files.get(path)
+            if known is not None and known[0] not in _UNSETTLED:
+                continue  # a finished file never changes
+            status, label = _header_summary(path)
+            item = known[2] if known else None
+            if item is not None and (status, label) == known[:2]:
                 continue
-            item = QTreeWidgetItem(
-                [path.stem.replace("_", "  ", 1), status, str(header.get("label", ""))]
-            )
-            item.setData(0, _PATH, str(path))
-            if status in ("failed", "crashed", "unreadable"):
-                item.setIcon(1, status_icon("crashed"))
-            day_item.addChild(item)
+            visible = status != "running" or self.show_unfinished.isChecked()
+            if visible and item is None:
+                item = self._add_file_item(day_item, path)
+            elif not visible and item is not None:
+                day_item.removeChild(item)
+                item = None
+            if item is not None:
+                _show_file(item, path, status, label)
+            self._files[path] = (status, label, item)
+
+    def _add_file_item(self, day_item, path):
+        item = QTreeWidgetItem()
+        item.setData(0, _PATH, str(path))
+        index = 0
+        while index < day_item.childCount() and day_item.child(index).data(
+            0, _PATH
+        ) > str(path):
+            index += 1
+        day_item.insertChild(index, item)
+        return item
+
+    def _show_unfinished_toggled(self):
+        # Re-decide visibility of every running file on the next sync.
+        for path, (status, label, item) in list(self._files.items()):
+            if status == "running":
+                self._files[path] = ("", label, item)
+        self.refresh()
 
     def select_path(self, path):
         path = Path(path)
-        for i in range(self.tree.topLevelItemCount()):
-            day = self.tree.topLevelItem(i)
-            if Path(day.data(0, _PATH)) == path.parent:
-                day.setExpanded(True)
-                self._fill_day(day)
-                for j in range(day.childCount()):
-                    if Path(day.child(j).data(0, _PATH)) == path:
-                        self.tree.setCurrentItem(day.child(j))
-                        return True
-        return False
+        day = self._day_item(path.parent)
+        if day is None:
+            return False
+        day.setExpanded(True)
+        self._fill_day(day)
+        known = self._files.get(path)
+        if known is None or known[2] is None:
+            return False
+        self.tree.setCurrentItem(known[2])
+        return True
 
     def _selected(self, item, _previous):
         path = Path(item.data(0, _PATH)) if item else None
@@ -296,8 +373,7 @@ class ResultsPanel(QWidget):
         self.measurement = measurement
         self.metadata.setPlainText(describe(measurement))
         self.resubmit_button.setEnabled(True)
-        if first_load:
-            self._fill_choices()
+        self._fill_choices(keep_selection=not first_load)
         self.replot()
 
     def _reload_if_running(self):
@@ -306,7 +382,7 @@ class ResultsPanel(QWidget):
 
     # -- plotting ------------------------------------------------------------
 
-    def _fill_choices(self):
+    def _fill_choices(self, keep_selection=False):
         m = self.measurement
         scalars = [
             name
@@ -319,9 +395,16 @@ class ResultsPanel(QWidget):
             (self.x_choice, [*axes, _POINT_INDEX]),
             (self.series_choice, [_NONE, *axes, "repetition"]),
         ):
+            current = combo.currentText()
+            if keep_selection and options == [
+                combo.itemText(i) for i in range(combo.count())
+            ]:
+                continue
             combo.blockSignals(True)
             combo.clear()
             combo.addItems(options)
+            if keep_selection and current in options:
+                combo.setCurrentText(current)
             combo.blockSignals(False)
 
     def replot(self):
