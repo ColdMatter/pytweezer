@@ -13,6 +13,7 @@ pytweezer-device = "pytweezer.servers.device_server:main"
 pytweezer-logger = "pytweezer.servers.logger_server:main"
 pytweezer-experiment-manager = "pytweezer.servers.experiment_manager:main"
 pytweezer-kill-stale = "bin.kill_stale:main"
+pytweezer-db-backfill = "pytweezer.database.backfill:main"
 
 [tool.poetry.dependencies]
 python = "^3.11.4, <3.14"
