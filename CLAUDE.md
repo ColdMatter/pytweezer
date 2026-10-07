@@ -128,6 +128,7 @@ Load a skill when you need more than that:
 | Config, hosts, launching, pub/sub fabric, general orientation | `pytweezer-architecture` |
 | Device server/client, `get_device()`, composites, coordinators | `pytweezer-device-framework` |
 | GUI shell, tabs, panels, process tiles, teardown | `pytweezer-gui-internals` |
+| How a panel should look, read and behave (layout, styling, wording) | `pytweezer-gui-design` |
 | Adding a driver / applet / analysis / InfluxDB logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Running or screenshotting the GUI | `run-pytweezer` |

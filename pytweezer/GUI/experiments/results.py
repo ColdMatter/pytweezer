@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 
 from pytweezer.experiment.storage import data_root, load_measurement, read_header
 from pytweezer.experiment.task import TaskRequest
-from pytweezer.GUI.experiments.queue_view import status_icon
+from pytweezer.GUI.components import status_icon
 from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND
 from pytweezer.logging_utils import get_logger
 

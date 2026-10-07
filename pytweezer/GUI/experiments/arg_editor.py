@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDateTimeEdit,
-    QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -30,23 +29,10 @@ from PyQt6.QtWidgets import (
 
 from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
 from pytweezer.experiment.task import TaskRequest
+from pytweezer.GUI.components import CompactDoubleSpinBox, set_state
 
 _INT_LIMIT = 2**31 - 1
 _FLOAT_LIMIT = 1e15
-
-
-def _set_state(widget, state):
-    widget.setProperty("state", state)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)
-
-
-class CompactDoubleSpinBox(QDoubleSpinBox):
-    """Shows 1.5 rather than 1.500000; precision stays at ``decimals()``."""
-
-    def textFromValue(self, value):
-        text = f"{value:.{self.decimals()}f}"
-        return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 class ValueField(QWidget):
@@ -313,7 +299,7 @@ class ArgumentRow(QtCore.QObject):
             state = ""
         else:
             state = "modified"
-        _set_state(self.label, state)
+        set_state(self.label, state)
         self.changed.emit()
 
     def add_to(self, grid, row):
@@ -561,4 +547,4 @@ class ArgumentEditor(QWidget):
 
     def show_error(self, text):
         self.error.setText(text)
-        _set_state(self.error, "crashed" if text else "")
+        set_state(self.error, "crashed" if text else "")

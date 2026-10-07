@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pytweezer.GUI.experiments.queue_view import status_icon
+from pytweezer.GUI.components import status_icon
 
 _SCHEMA = QtCore.Qt.ItemDataRole.UserRole
 

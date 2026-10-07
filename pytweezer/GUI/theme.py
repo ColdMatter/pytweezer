@@ -236,8 +236,9 @@ QLabel#SimulationBanner {
     border-radius: 4px;
 }
 
-/* Experiments tab. Depth encodes role: a well (recessed) is where you read
-   and pick, the sheet (raised, accent edge) is where you edit. */
+/* Regions (pytweezer.GUI.components.Region). Depth encodes role: a well
+   (recessed) is where you read and pick, the sheet (raised, accent edge) is
+   where you edit. */
 QFrame#Region {
     border: 1px solid #2c2d35;
     border-radius: 8px;
@@ -292,6 +293,13 @@ QFrame#Region[kind="sheet"] QDateTimeEdit {
     border: 1px solid #44454f;
     border-radius: 4px;
     padding: 3px 6px;
+}
+QFrame#Region[kind="sheet"] QLineEdit:focus,
+QFrame#Region[kind="sheet"] QComboBox:focus,
+QFrame#Region[kind="sheet"] QSpinBox:focus,
+QFrame#Region[kind="sheet"] QDoubleSpinBox:focus,
+QFrame#Region[kind="sheet"] QDateTimeEdit:focus {
+    border-color: #5b8def;
 }
 QFrame#Region[kind="well"] QTreeWidget,
 QFrame#Region[kind="well"] QTableWidget {

@@ -19,11 +19,11 @@ from pytweezer.experiment.client import (
     submitter_name,
 )
 from pytweezer.experiment.task import TaskRequest
-from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, _set_state
+from pytweezer.GUI.components import Region, set_state
+from pytweezer.GUI.experiments.arg_editor import ArgumentEditor
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
 from pytweezer.GUI.experiments.feed import ExperimentFeed
 from pytweezer.GUI.experiments.queue_view import QueueView, queue_summary
-from pytweezer.GUI.experiments.region import Region
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.GUI.experiments")
@@ -117,7 +117,7 @@ class ExperimentsPanel(QWidget):
 
     def _show_status(self, text, state=""):
         self.status.setText(text)
-        _set_state(self.status, state)
+        set_state(self.status, state)
 
     def refresh_catalogue(self):
         reply = self._call("Listing experiments", self.client.call, "catalogue")

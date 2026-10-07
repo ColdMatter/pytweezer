@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pytweezer.GUI.theme import state_style
+from pytweezer.GUI.components import status_icon
 
 COLUMNS = [
     "RID",
@@ -43,23 +43,6 @@ _STATUS_STATE = {
 }
 
 _TASK = QtCore.Qt.ItemDataRole.UserRole
-_ICONS = {}
-
-
-def status_icon(state):
-    """A coloured dot for a theme state. Icons, unlike item text colours, are
-    not overridden by the theme's ``::item { color }`` rule."""
-    if state not in _ICONS:
-        pixmap = QtGui.QPixmap(12, 12)
-        pixmap.fill(QtCore.Qt.GlobalColor.transparent)
-        painter = QtGui.QPainter(pixmap)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QtGui.QColor(state_style(state)[0]))
-        painter.setPen(QtCore.Qt.PenStyle.NoPen)
-        painter.drawEllipse(1, 1, 10, 10)
-        painter.end()
-        _ICONS[state] = QtGui.QIcon(pixmap)
-    return _ICONS[state]
 
 
 class QueueView(QWidget):
