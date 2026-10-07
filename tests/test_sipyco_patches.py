@@ -82,6 +82,11 @@ def test_read_time_scales_linearly_not_quadratically():
             best = min(best, time.perf_counter() - start)
         return best
 
+    # Free one large block first: glibc then serves multi-MB buffers from the
+    # heap rather than fresh mmaps, so the ratio below measures the read loop
+    # and not page faults, whatever earlier tests left the allocator in.
+    warm_up = bytearray(24_000_000)
+    del warm_up
     small = elapsed(2_000_000)
     large = elapsed(8_000_000)
     # Linear would be ~4x. The stock quadratic loop lands near 16x or worse;
