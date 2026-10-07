@@ -148,6 +148,11 @@ QTabWidget::pane {
     border-top: 1px solid #33343d;
 }
 
+QTabBar {
+    qproperty-drawBase: 0;
+    background: transparent;
+}
+
 QTabBar::tab {
     background-color: #24252c;
     color: #9a9aa5;
