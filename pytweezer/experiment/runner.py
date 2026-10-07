@@ -29,6 +29,9 @@ class Progress:
     total: int
     point: Point | None = None
     scalars: dict[str, float] | None = None
+    #: Epoch seconds at which the point began and ended.
+    t_start: float | None = None
+    t_end: float | None = None
 
 
 #: Called after prepare() and after every point. Returns what to do next; it
@@ -111,7 +114,14 @@ def run_points(
                 experiment.run_point()
                 writer.end_point()
                 experiment.point = None
-                progress = Progress(point.index + 1, total, point, writer.point_scalars)
+                progress = Progress(
+                    point.index + 1,
+                    total,
+                    point,
+                    writer.point_scalars,
+                    writer.point_t_start,
+                    writer.point_t_end,
+                )
                 if stop_requested(control(progress)):
                     break
     except KeyboardInterrupt:

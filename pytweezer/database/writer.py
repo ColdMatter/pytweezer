@@ -93,8 +93,15 @@ def _coerce_fields(fields):
     return clean
 
 
+def _json_default(value):
+    # numpy scalars and arrays, as read back from h5 files
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    return str(value)
+
+
 def _json(value):
-    return json.dumps(value or {}, default=str)
+    return json.dumps(value or {}, default=_json_default)
 
 
 def _timestamp(value):

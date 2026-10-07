@@ -20,3 +20,39 @@ def qapp():
 
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+class RecordingDB:
+    """Stand-in for :class:`~pytweezer.database.writer.DBWriter` that records rows."""
+
+    def __init__(self):
+        self.runs = []
+        self.points = []
+        self.closed = False
+
+    def record_run(self, run):
+        self.runs.append(dict(run))
+
+    def record_point(self, rid, point_index, t_start, t_end, scan_values, scalars):
+        self.points.append(
+            {
+                "rid": rid,
+                "point_index": point_index,
+                "t_start": t_start,
+                "t_end": t_end,
+                "scan_values": scan_values,
+                "scalars": scalars,
+            }
+        )
+
+    def write(self, measurement, fields, tags=None, time=None):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def recording_db():
+    """A fresh :class:`RecordingDB`, so tests never reach a real database."""
+    return RecordingDB()

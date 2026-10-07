@@ -123,6 +123,20 @@ def test_control_sees_point_scalars_and_interrupt_status():
     writer.close()
 
 
+def test_control_sees_when_each_point_ran():
+    times = []
+
+    def control(progress: Progress):
+        times.append((progress.t_start, progress.t_end))
+        return Action.CONTINUE
+
+    *_, writer = run(control=control)
+    assert times[0] == (None, None)
+    for (t_start, t_end), stored in zip(times[1:], writer.file["points/t_end"]):
+        assert t_start <= t_end == stored
+    writer.close()
+
+
 def test_terminate_before_first_point():
     experiment, status, _, writer = run(control=lambda progress: Action.TERMINATE)
     assert status == TaskStatus.TERMINATED
