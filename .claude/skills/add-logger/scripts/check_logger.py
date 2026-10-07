@@ -1,9 +1,9 @@
 """Static check for a logger entry in CONFIG["Loggers"].
 
 Builds the logger the same way ``logger_server.py`` does in production, but
-forced into simulation and with InfluxDB replaced by a recording stand-in, so no
+forced into simulation and with the database replaced by a recording stand-in, so no
 hardware is opened and no points are written. Then it calls ``read()`` once and
-inspects what would have reached InfluxDB.
+inspects what would have reached the database.
 
 The failures it exists to catch are all silent at runtime:
 
@@ -12,7 +12,7 @@ The failures it exists to catch are all silent at runtime:
 * a missing/wrong ``"script"`` key, which ``ControlPanel`` indexes directly --
   it takes down the whole **Loggers** tab, not just this row
 * config keys the logger class never reads, so it silently runs on a default
-* field values InfluxDB cannot store: ``InfluxWriter`` drops every non-numeric
+* field values the database cannot store: ``DBWriter`` drops every non-numeric
   field without raising, so a string or array reading vanishes with no error
 * a ``read()`` return shape the base loop can't unpack
 
@@ -26,13 +26,21 @@ import inspect
 import os
 import sys
 
-from pytweezer.servers import logger_server
 from pytweezer.servers.configreader import ConfigReader, tweezerpath
+
+from pytweezer.servers import logger_server
 
 #: Keys the framework itself consumes; never reported as unread by the class.
 FRAMEWORK_KEYS = {
-    "active", "script", "logger", "host", "port", "interval", "simulate",
-    "tooltip", "description",
+    "active",
+    "script",
+    "logger",
+    "host",
+    "port",
+    "interval",
+    "simulate",
+    "tooltip",
+    "description",
 }
 
 problems = []
@@ -54,7 +62,7 @@ def ok(msg):
 
 
 class RecordingWriter:
-    """Stand-in for :class:`InfluxWriter` that records instead of connecting."""
+    """Stand-in for :class:`DBWriter` that records instead of connecting."""
 
     def __init__(self, *_args, **_kwargs):
         self.points = []
@@ -124,7 +132,8 @@ def check_unread_keys(conf, instance):
         return
 
     unread = [
-        key for key in conf
+        key
+        for key in conf
         if key not in FRAMEWORK_KEYS and f"{key!r}"[1:-1] not in source
     ]
     for key in unread:
@@ -138,8 +147,8 @@ def check_unread_keys(conf, instance):
 
 
 def check_points(instance, writer):
-    """Call read() once and validate what it would push to InfluxDB."""
-    from pytweezer.servers.influx_client import _coerce_fields
+    """Call read() once and validate what it would write to the database."""
+    from pytweezer.database.writer import _coerce_fields
 
     try:
         points = instance.read()
@@ -186,22 +195,18 @@ def check_points(instance, writer):
             problem(f"read()[{index}] measurement {measurement!r} is not a name")
         if not isinstance(fields, dict):
             malformed = True
-            problem(
-                f"read()[{index}] fields is {type(fields).__name__}, not a dict"
-            )
+            problem(f"read()[{index}] fields is {type(fields).__name__}, not a dict")
             continue
         if tags is not None and not isinstance(tags, dict):
-            problem(
-                f"read()[{index}] tags is {type(tags).__name__}, not a dict/None"
-            )
+            problem(f"read()[{index}] tags is {type(tags).__name__}, not a dict/None")
 
         kept = _coerce_fields(fields)
         dropped = sorted(set(fields) - set(kept))
         for key in dropped:
             problem(
-                f"field {key!r}={fields[key]!r} is not numeric - InfluxWriter "
+                f"field {key!r}={fields[key]!r} is not numeric - DBWriter "
                 f"drops it without raising, so this value never reaches "
-                f"InfluxDB"
+                f"the database"
             )
         if not kept:
             problem(
@@ -211,22 +216,22 @@ def check_points(instance, writer):
         elif not dropped:
             ok(
                 f"point {measurement!r}: fields "
-                f"{', '.join(sorted(kept))}"
-                + (f"; tags {tags}" if tags else "")
+                f"{', '.join(sorted(kept))}" + (f"; tags {tags}" if tags else "")
             )
 
     if malformed:
         return
 
     # Push them through the base loop the way run() would, to prove the
-    # unpacking works and to show exactly what lands in InfluxDB.
+    # unpacking works and to show exactly what lands in the database.
     try:
         instance._write_points(points)
     except Exception as exc:
-        problem(f"_write_points() failed on read()'s output: "
-                f"{type(exc).__name__}: {exc}")
+        problem(
+            f"_write_points() failed on read()'s output: {type(exc).__name__}: {exc}"
+        )
         return
-    ok(f"one cycle would write {len(writer.points)} point(s) to InfluxDB")
+    ok(f"one cycle would write {len(writer.points)} point(s) to the database")
 
 
 def check_logger(name):
@@ -244,13 +249,13 @@ def check_logger(name):
     if not conf.get("active", False):
         note("'active' is False - the tile will not auto-start with the GUI")
 
-    # Build in simulation with InfluxDB stubbed out: same code path as
+    # Build in simulation with the database stubbed out: same code path as
     # production, no hardware opened and no points written.
     from pytweezer.loggers import base as logger_base
 
     writer = RecordingWriter()
-    real_writer_cls = logger_base.InfluxWriter
-    logger_base.InfluxWriter = lambda *a, **k: writer
+    real_writer_cls = logger_base.DBWriter
+    logger_base.DBWriter = lambda *a, **k: writer
     try:
         sim_conf = dict(conf, simulate=True)
         try:
@@ -262,8 +267,10 @@ def check_logger(name):
                 f"would do at startup)"
             )
             return
-        ok(f"builds in simulation: {type(instance).__name__} "
-           f"(interval={instance.interval}s)")
+        ok(
+            f"builds in simulation: {type(instance).__name__} "
+            f"(interval={instance.interval}s)"
+        )
 
         check_unread_keys(conf, instance)
         check_points(instance, writer)
@@ -278,7 +285,7 @@ def check_logger(name):
             else:
                 ok("close() releases the source and the writer")
     finally:
-        logger_base.InfluxWriter = real_writer_cls
+        logger_base.DBWriter = real_writer_cls
 
     if len(problems) == before:
         print("  --> no problems found")
@@ -286,8 +293,9 @@ def check_logger(name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("name", nargs="?",
-                        help="logger name (key in CONFIG['Loggers'])")
+    parser.add_argument(
+        "name", nargs="?", help="logger name (key in CONFIG['Loggers'])"
+    )
     parser.add_argument("--all", action="store_true", help="check every logger")
     args = parser.parse_args()
 

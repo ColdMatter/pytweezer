@@ -27,14 +27,13 @@ SIMULATION_FORCED = (
 SIMULATING = SIMULATING or SIMULATION_FORCED
 SERVER_HOST = HOSTS[SERVER_PC] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
 
-# Self-hosted InfluxDB 2.x connection. Every value can be overridden by an
-# environment variable so the token need not be hardcoded in a real deployment;
-# the defaults let a fresh checkout "just work" against a local InfluxDB.
-INFLUXDB = {
-    "url": os.environ.get("INFLUXDB_URL", f"http://{SERVER_HOST}:8086"),
-    "token": os.environ.get("INFLUXDB_TOKEN", "pytweezer-token"),
-    "org": os.environ.get("INFLUXDB_ORG", "pytweezer"),
-    "bucket": os.environ.get("INFLUXDB_BUCKET", "devices"),
+# Postgres + TimescaleDB holding monitor readings and experiment runs. Set
+# PYTWEEZER_DB_DSN to keep a real password out of the repository.
+DATABASE = {
+    "dsn": os.environ.get(
+        "PYTWEEZER_DB_DSN",
+        f"postgresql://pytweezer:pytweezer@{SERVER_HOST}:5432/pytweezer",
+    ),
 }
 
 
@@ -197,10 +196,10 @@ CONFIG = {
             "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
         },
     },
-    # Background InfluxDB loggers. Each entry runs pytweezer/servers/logger_server.py,
+    # Background database loggers. Each entry runs pytweezer/servers/logger_server.py,
     # which builds the Logger subclass named by "logger" and polls it on "interval".
-    # This is opt-in: nothing is pushed to InfluxDB unless a logger (or explicit
-    # InfluxWriter/log() call) writes it.
+    # This is opt-in: nothing reaches the database unless a logger (or explicit
+    # DBWriter/log() call) writes it.
     "Loggers": {
         "NI ADC Logger": {
             "active": False,
