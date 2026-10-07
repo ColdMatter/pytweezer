@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPlainTextEdit,
     QPushButton,
@@ -28,7 +29,8 @@ from PyQt6.QtWidgets import (
 
 from pytweezer.experiment.storage import data_root, load_measurement, read_header
 from pytweezer.experiment.task import TaskRequest
-from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND, state_style
+from pytweezer.GUI.experiments.queue_view import status_icon
+from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.GUI.experiments.results")
@@ -100,10 +102,7 @@ def describe(measurement):
     ]
     scanned = {axis.argument for axis in measurement.scan.axes}
     for name, value in measurement.arguments.items():
-        schema = measurement.argument_schema.get(name, {})
-        scale = schema.get("scale") or 1.0
-        unit = schema.get("unit", "")
-        shown = f"{value / scale:g} {unit}" if schema.get("kind") == "number" else value
+        shown = _shown(measurement, name, value)
         lines.append(f"  {name} = {'(scanned)' if name in scanned else shown}")
     scan = measurement.scan
     lines += [
@@ -111,7 +110,16 @@ def describe(measurement):
         f"Scan: {scan.order}, {scan.repetitions} repetition(s) by {scan.repeat}",
     ]
     for axis in scan.axes:
-        lines.append(f"  {axis.model_dump_json()}")
+        if axis.kind == "linear":
+            lines.append(
+                f"  {axis.argument}: {_shown(measurement, axis.argument, axis.start)} to "
+                f"{_shown(measurement, axis.argument, axis.stop)} in {axis.n} steps"
+            )
+        else:
+            values = ", ".join(
+                _shown(measurement, axis.argument, v) for v in axis.values
+            )
+            lines.append(f"  {axis.argument}: {values}")
     lines += ["", "Results:"]
     for name, shape in measurement.result_shapes.items():
         unit = measurement.units.get(name, "")
@@ -121,6 +129,15 @@ def describe(measurement):
     if attrs.get("error"):
         lines += ["", attrs["error"]]
     return "\n".join(lines)
+
+
+def _shown(measurement, name, value):
+    """``value`` of argument ``name`` in its display unit."""
+    schema = measurement.argument_schema.get(name, {})
+    if schema.get("kind") != "number":
+        return str(value)
+    unit = schema.get("unit", "")
+    return f"{value / (schema.get('scale') or 1.0):g} {unit}".strip()
 
 
 class ResultsPanel(QWidget):
@@ -149,6 +166,9 @@ class ResultsPanel(QWidget):
         browser_layout.addLayout(top)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Measurement", "Status", "Label"])
+        self.tree.header().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.tree.itemExpanded.connect(self._fill_day)
         self.tree.currentItemChanged.connect(self._selected)
         browser_layout.addWidget(self.tree, 1)
@@ -240,7 +260,7 @@ class ResultsPanel(QWidget):
             )
             item.setData(0, _PATH, str(path))
             if status in ("failed", "crashed", "unreadable"):
-                item.setForeground(1, pg.mkColor(state_style("crashed")[0]))
+                item.setIcon(1, status_icon("crashed"))
             day_item.addChild(item)
 
     def select_path(self, path):
@@ -337,7 +357,11 @@ class ResultsPanel(QWidget):
         curves = aggregate(x[:n], y[:n], None if series is None else series[:n])
         for i, (value, (xs, means, sems, _counts)) in enumerate(curves.items()):
             colour = _CURVE_COLOURS[i % len(_CURVE_COLOURS)]
-            name = None if series is None else f"{series_name} = {value}"
+            name = (
+                None
+                if series is None
+                else f"{series_name} = {_shown(m, series_name, value)}"
+            )
             self.plot.plot(
                 xs, means, pen=colour, symbol="o", symbolBrush=colour, name=name
             )

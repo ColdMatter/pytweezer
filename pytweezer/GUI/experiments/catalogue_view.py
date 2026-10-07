@@ -1,6 +1,6 @@
 """Tree of the experiments the manager can run, grouped by module."""
 
-from PyQt6 import QtCore, QtGui
+from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pytweezer.GUI.theme import state_style
+from pytweezer.GUI.experiments.queue_view import status_icon
 
 _SCHEMA = QtCore.Qt.ItemDataRole.UserRole
 
@@ -51,10 +51,10 @@ class CatalogueView(QWidget):
             module_item = QTreeWidgetItem([name])
             module_item.setToolTip(0, module["module"])
             if module.get("error"):
-                module_item.setForeground(0, QtGui.QColor(state_style("crashed")[0]))
+                module_item.setIcon(0, status_icon("crashed"))
                 module_item.setToolTip(0, module["error"])
             elif module.get("warnings"):
-                module_item.setForeground(0, QtGui.QColor(state_style("starting")[0]))
+                module_item.setIcon(0, status_icon("starting"))
                 module_item.setToolTip(0, "\n".join(module["warnings"]))
             for schema in module.get("classes", []):
                 item = QTreeWidgetItem([schema["class_name"]])

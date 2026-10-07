@@ -41,6 +41,14 @@ def _set_state(widget, state):
     widget.style().polish(widget)
 
 
+class CompactDoubleSpinBox(QDoubleSpinBox):
+    """Shows 1.5 rather than 1.500000; precision stays at ``decimals()``."""
+
+    def textFromValue(self, value):
+        text = f"{value:.{self.decimals()}f}"
+        return text.rstrip("0").rstrip(".") if "." in text else text
+
+
 class ValueField(QWidget):
     """One argument's value in display units; :meth:`value` returns it in SI."""
 
@@ -55,7 +63,7 @@ class ValueField(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         if self.kind == "number":
-            widget = QDoubleSpinBox()
+            widget = CompactDoubleSpinBox()
             low, high = schema.get("min"), schema.get("max")
             widget.setRange(
                 -_FLOAT_LIMIT if low is None else low / self.scale,
