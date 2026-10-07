@@ -149,3 +149,24 @@ def test_backlog_beyond_max_pending_drops_the_oldest():
 
 def test_log_messages_hide_the_password():
     assert make_writer(FakeDatabase()).dsn_host == "postgresql://db:5432/x"
+
+
+def test_a_failed_schema_setup_is_retried_on_a_fresh_connection(monkeypatch):
+    from pytweezer.database import writer as writer_module
+
+    attempts = []
+
+    def flaky_schema(conn):
+        attempts.append(conn)
+        if len(attempts) == 1:
+            raise RuntimeError("permission denied")
+
+    monkeypatch.setattr(writer_module, "ensure_schema", flaky_schema)
+    db = FakeDatabase()
+    writer = make_writer(db)
+    writer.write("m", {"x": 1.0})
+    assert writer.flush(5)
+
+    assert attempts[0].closed and not attempts[1].closed
+    assert len(db.sent["readings"]) == 1
+    writer.close()

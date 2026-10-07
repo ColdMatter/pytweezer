@@ -293,9 +293,14 @@ class DBWriter:
     def _ensure_connected(self):
         if self._conn is not None and not self._conn.closed:
             return self._conn
-        self._conn = self._connect(self.dsn)
-        ensure_schema(self._conn)
-        return self._conn
+        conn = self._connect(self.dsn)
+        try:
+            ensure_schema(conn)
+        except Exception:
+            conn.close()
+            raise
+        self._conn = conn
+        return conn
 
     def _send(self, batch):
         by_table = {}
