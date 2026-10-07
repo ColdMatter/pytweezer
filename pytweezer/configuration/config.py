@@ -235,6 +235,22 @@ CONFIG = {
     },
 }
 
+# Added after the literal so its ports are allocated last: get_next_port() hands
+# out ports in declaration order, so an entry inside "Servers" would shift every
+# device's port.
+CONFIG["Servers"]["Experiment Manager"] = {
+    "active": False,
+    "script": "../pytweezer/servers/experiment_manager.py",
+    "host": SERVER_HOST,
+    "port": get_next_port(),
+    "pub_port": get_next_port(),
+    # Measurement files and the queue state; PYTWEEZER_DATA_DIR overrides it.
+    # None means <repo>/data.
+    "data_root": None,
+    # Seconds a worker keeps running without reaching the manager.
+    "orphan_timeout": 30.0,
+}
+
 
 def get_config():
     """Return the configuration dict.
