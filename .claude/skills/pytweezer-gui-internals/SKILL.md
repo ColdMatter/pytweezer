@@ -1,6 +1,6 @@
 ---
 name: pytweezer-gui-internals
-description: How the pytweezer PyQt5 shell is built — TabbedGUI's dock-based tabs, the ManagedRow/ControlPanel/DevicesPanel process tiles, the two different status mechanisms and why they differ, and the deliberate hard-exit teardown that the legacy BWidget/Properties stack makes necessary. Use when adding or editing a tab or panel in bin/gui.py or bin/managed_panel.py, touching pytweezer/GUI/pytweezerQt.py or device_status.py, debugging a GUI that hangs on exit or loses its window geometry, working out why a row shows the wrong Running/Stopped state, or changing how processes are started and stopped from the GUI. For building a live viewer window, use the add-applet skill instead.
+description: How the pytweezer PyQt6 shell is built — TabbedGUI's dock-based tabs, the ManagedRow/ControlPanel/DevicesPanel process tiles, the two different status mechanisms and why they differ, and the deliberate hard-exit teardown that the legacy BWidget/Properties stack makes necessary. Use when adding or editing a tab or panel in bin/gui.py or bin/managed_panel.py, touching pytweezer/GUI/pytweezerQt.py or device_status.py, debugging a GUI that hangs on exit or loses its window geometry, working out why a row shows the wrong Running/Stopped state, or changing how processes are started and stopped from the GUI. For building a live viewer window, use the add-applet skill instead.
 ---
 
 # GUI internals
@@ -8,7 +8,9 @@ description: How the pytweezer PyQt5 shell is built — TabbedGUI's dock-based t
 `pytweezer-server` and `pytweezer-client` are the same window built by
 `build_gui(server: bool)` in `bin/gui.py`, differing only in whether the
 Servers/Loggers tabs are controllable. Tabs: Servers, Devices, Loggers, Streams,
-Applets, Analysis, Properties.
+Applets, Analysis, Experiments, Results, Properties. Experiments and Results
+(`pytweezer/GUI/experiments/`) are covered by the `add-experiment` skill; they
+are built before the list so Results can hand "resubmit" to Experiments.
 
 Each panel is constructed through `_safe_panel`, so one panel that fails to
 build leaves a placeholder instead of killing the whole window.
@@ -122,7 +124,7 @@ Properties would start one PC's applets on every other PC.
 
 ## Running it headless
 
-PyQt5 widgets cannot construct without a display — set
+PyQt6 widgets cannot construct without a display — set
 `QT_QPA_PLATFORM=offscreen` for any non-interactive run. To actually see a change
 rendered, use the `run-pytweezer` skill's screenshot driver rather than launching
 the blocking GUI.

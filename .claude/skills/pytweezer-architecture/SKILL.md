@@ -12,7 +12,8 @@ fabric.
 ## One server, many clients
 
 There is a **single server PC** (`PH-BEAST`) running the long-lived shared
-processes — the ZMQ hubs, the stream loggers, Analysis Manager, Device Status —
+processes — the ZMQ hubs, the stream loggers, Analysis Manager, Device Status,
+the Experiment Manager —
 and **arbitrarily many client PCs**, each running whatever devices are plugged
 into it plus its own applets and GUI. Clients are not a fixed pair or a fixed
 list: a new lab PC is just another `HOSTS` entry with devices pointed at it.
@@ -30,7 +31,8 @@ the GUI that shows it was launched. The server GUI can start and stop only what
   flags at the top of the file (both `False` today → the real `PH-BEAST`; set
   either `True` to bind everything to localhost for dev/sim).
 - `CONFIG["Servers"]` — hubs (`Imagehub`/`Commandhub`/`Datahub`/`Propertyhub`/
-  `Messagehub`), the stream loggers, `Analysis Manager`, `Device Status`.
+  `Messagehub`), the stream loggers, `Analysis Manager`, `Device Status`,
+  `Experiment Manager` (queue + h5 measurement storage; see `add-experiment`).
 - `CONFIG["Devices"]` — one entry per physical device, each with its own `host`.
 - `CONFIG["Loggers"]` — InfluxDB loggers.
 - `CONFIG["GUI"]` — standalone GUI tools (StreamMonitor, Applet Launcher, …).
@@ -41,8 +43,13 @@ in `DEVICE_SERVER_SCRIPT` (`pytweezer/configuration/paths.py`) and spawn sites
 (`DevicesPanel`, `process_cleanup`) reference that constant rather than
 `params["script"]`.
 
-**Append new entries, never insert them.** Ports come from `get_next_port()` in
-declaration order, so inserting one renumbers every entry below it.
+**Never insert a port-owning entry above existing ones.** Ports come from
+`get_next_port()` in declaration order across the whole literal, so inserting
+one renumbers every entry below it — and since `Servers` is declared before
+`Devices`, even appending to `Servers` shifts every device port. A new server
+goes after the `CONFIG` literal (`CONFIG["Servers"]["X"] = {...}`, as the
+Experiment Manager does); `tests/test_experiment_manager.py` checks its ports
+come last.
 
 `get_config()` — defined next to `CONFIG` itself — is the accessor everything
 uses. Tests monkeypatch it **per importing module** to inject a fake config, so

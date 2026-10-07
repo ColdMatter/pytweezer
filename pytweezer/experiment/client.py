@@ -19,6 +19,7 @@ from typing import Any
 import zmq
 
 from pytweezer.configuration.config import get_config
+from pytweezer.experiment.arguments import coerce_arguments
 from pytweezer.experiment.scan import Scan
 from pytweezer.experiment.task import Task, TaskRequest
 
@@ -174,10 +175,14 @@ def submit(
     one defined in a notebook: use :func:`~pytweezer.experiment.run_local` for
     those) or a ``"module:ClassName"`` string.
     """
+    scan = scan or Scan()
     if isinstance(experiment, str):
         module, _, class_name = experiment.partition(":")
     else:
         module, class_name = experiment.__module__, experiment.__qualname__
+        # Fail here rather than when the task reaches the front of the queue.
+        coerce_arguments(experiment, args)
+        scan.axis_values(experiment)
     if module == "__main__" or "<locals>" in class_name or not class_name:
         raise ValueError(
             f"{experiment!r} can't be imported by the manager; define it in a module "
@@ -187,7 +192,7 @@ def submit(
         experiment=module,
         class_name=class_name,
         args=args,
-        scan=scan or Scan(),
+        scan=scan,
         priority=priority,
         label=label,
         due_time=due_time,

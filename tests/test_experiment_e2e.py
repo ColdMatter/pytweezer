@@ -204,3 +204,22 @@ def test_worker_survives_a_manager_restart(harness):
     task = harness.wait_until(rid, lambda t: t.status.finished)
     assert task.status == "completed"
     assert harness.measurement(task).n_done == 5
+
+
+def test_submit_checks_arguments_before_queueing():
+    from pytweezer.experiments.demo import RabiDemo
+
+    class Unreachable:
+        def submit(self, request):
+            raise AssertionError("should not be sent")
+
+    with pytest.raises(ValueError, match="no argument"):
+        submit(RabiDemo, client=Unreachable(), atom=3)
+    with pytest.raises(ValueError, match="below the minimum"):
+        submit(
+            RabiDemo,
+            Scan(axes=[ListAxis(argument="atoms", values=[0])]),
+            client=Unreachable(),
+        )
+    with pytest.raises(ValueError, match="run_local"):
+        submit(type("Local", (), {"__module__": "__main__"}), client=Unreachable())

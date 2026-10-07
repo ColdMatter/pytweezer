@@ -30,8 +30,8 @@ works from the GUI. :func:`get_device_async` is the lower-level ``asyncio``
 counterpart if you want to drive the servers with coroutines directly::
 
     async def main():
-        mm1 = await get_device_async("Rb MotMaster Server")
-        mm2 = await get_device_async("CaF MotMaster Server")
+        mm1 = await get_device_async("Rb MotMaster")
+        mm2 = await get_device_async("CaF MotMaster")
         try:
             await asyncio.gather(
                 mm1.start_motmaster_experiment(),
