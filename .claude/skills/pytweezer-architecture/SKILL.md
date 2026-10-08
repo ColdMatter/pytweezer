@@ -38,9 +38,10 @@ the GUI that shows it was launched. The server GUI can start and stop only what
   together. Clients and standalone device servers on lab PCs are unaffected.
   Because `pytweezer/__init__` imports `pytweezer.servers` (and so the config),
   nothing may import `pytweezer` before that variable is set.
-- `CONFIG["Servers"]` — hubs (`Imagehub`/`Commandhub`/`Datahub`/`Propertyhub`/
-  `Messagehub`), the stream loggers, `Analysis Manager`, `Device Status`,
-  `Experiment Manager` (queue + h5 measurement storage; see `add-experiment`).
+- `CONFIG["Servers"]` — hubs (`Imagehub`/`Commandhub`/`Datahub`/`Messagehub`),
+  the `Properties` server, the stream loggers, `Analysis Manager`,
+  `Device Status`, `Experiment Manager` (queue + h5 measurement storage; see
+  `add-experiment`).
 - `CONFIG["Devices"]` — one entry per physical device, each with its own `host`.
 - `CONFIG["Loggers"]` — database loggers (Postgres + TimescaleDB on the server
   PC; connection string in `DATABASE["dsn"]`).
@@ -96,15 +97,31 @@ wherever an operator launched it.
 - `pytweezer/servers/clients.py` — `GenericClient` and its subclasses
   `DataClient`, `ImageClient`, `CommandClient`: the publish/subscribe helpers
   used throughout drivers, servers, analyses and applets.
-- `pytweezer/servers/properties.py` — `Properties(name)`, a ZMQ pub/sub link to
-  the Propertyhub used as shared key-value state (applet catalogues, stream
-  subscriptions, per-viewer settings). It is **shared, always**: every `set()` is
-  broadcast to all clients and persisted centrally, with no local-only write, so
-  anything per-operator belongs in local `QSettings` instead. It also spawns
-  **non-daemon** threads that loop forever; see the `pytweezer-gui-internals`
-  skill for the shutdown consequences.
-- `pytweezer/servers/model_sync.py` exists but its `CONFIG["Servers"]` entry is
-  commented out — present-but-inactive, not dead code to delete.
+- `pytweezer/servers/properties.py` — `Properties(name)`, the shared key-value
+  tree (applet catalogues, stream subscriptions, per-viewer settings). It is
+  **shared, always**: every `set()` is sent to the Properties server and
+  broadcast to all clients, with no local-only write, so anything per-operator
+  belongs in local `QSettings` instead.
+
+## Shared state: sipyco `sync_struct`
+
+State that many processes must agree on is not sent over the hubs. One process
+owns it in a sipyco `Notifier` and serves it with `SyncServer`
+(`pytweezer/servers/sync.py`); every reader holds a `SyncMirror`, which gets the
+whole structure on connect and then each change, in order, on one TCP stream,
+and reconnects with a fresh snapshot. Both run sipyco's asyncio on a daemon
+thread, so they work from threaded and Qt code; mutate a notifier only through
+`SyncServer.call()` (or from an RPC method, which already runs on its loop).
+
+- **Properties** — `pytweezer/servers/property_server.py` owns the tree
+  (notifier `"properties"` on `port`, edits over `pc_rpc` on `rpc_port`) and
+  saves `configuration/properties/properties.json` atomically. Every
+  `Properties` in a process shares one mirror; reads are local, writes apply
+  locally then go to the server. While the server is unreachable, writes stay
+  local and are dropped, and the server's tree replaces them on reconnect. The
+  tree rules (addressing, option properties) are in `property_tree.py`.
+- **Experiment Manager** — publishes the queue and the running task's points as
+  notifier `"experiment"` on `sync_port`; see `add-experiment`.
 
 ## Logging
 
@@ -112,8 +129,8 @@ wherever an operator launched it.
 everywhere (not bare `logging.getLogger`) — it adds structured JSONL output
 under `logs/` (or `$PYTWEEZER_LOG_DIR`) alongside console output.
 
-Do not confuse the pub/sub stream loggers (`datalogger`/`imagelogger`/
-`propertylogger`, which archive ZMQ streams) with **database** metric logging
+Do not confuse the pub/sub stream loggers (`datalogger`/`imagelogger`, which
+record which streams are active) with **database** metric logging
 (`pytweezer.database`), which is entirely opt-in and separate. Streams are never
 auto-forwarded to the database. The Experiment Manager does write a `runs` row
 per run and a `points` row per scan point there, so readings can be joined to

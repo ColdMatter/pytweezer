@@ -68,7 +68,7 @@ pythonnet = "^3.0.5" # .NET integration
 # iso8601 = "^2.1.0"      # from pip section
 scikit-image = "^0.26.0"
 pyvisa-py = "^0.8.1"
-sipyco = { git = "https://github.com/m-labs/sipyco.git" }
+sipyco = { git = "https://github.com/m-labs/sipyco.git", rev = "ce454bb64257b1bcef3703f258aaf7fa4ee0c275" }
 pycaf = { git = "https://github.com/ColdMatter/pycaf", branch = "cafmot" }
 simple-pyspin = "^0.1.1"
 easypyspin = "^2.0.1"

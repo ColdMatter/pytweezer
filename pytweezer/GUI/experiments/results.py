@@ -1,13 +1,19 @@
 """The Results tab: browse measurement files, inspect them, quick-plot a result.
 
-Reads files directly from :func:`~pytweezer.experiment.storage.data_root`, so
-on a client PC set ``PYTWEEZER_DATA_DIR`` to the server's data share. The tree
-keeps itself up to date (every couple of seconds while the tab is visible):
-new measurements appear, and running ones update as they finish. Files are
-opened without locking, so the selected measurement can be watched while it
-runs.
+Reads files directly from :func:`~pytweezer.experiment.storage.data_root`,
+which on a client PC is the server's data share. With an
+:class:`~pytweezer.GUI.experiments.feed.ExperimentFeed` connected, a running
+measurement is plotted from the points the manager publishes rather than by
+re-reading its file (which HDF5 does not support while it is being written,
+least of all over a network share); its file is read once for its metadata,
+and again when the manager reports it finished. The tree updates whenever the
+queue changes, with a slow poll for files written outside the manager.
+
+Without a connected feed the tab polls the data root every couple of seconds
+while visible, re-reading a selected running measurement each time.
 """
 
+import time
 from pathlib import Path
 
 import numpy as np
@@ -27,8 +33,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pytweezer.experiment.storage import data_root, load_measurement, read_header
-from pytweezer.experiment.task import TaskRequest
+from pytweezer.experiment.storage import (
+    data_root,
+    load_measurement,
+    read_header,
+    read_planned_points,
+)
+from pytweezer.experiment.task import TaskRequest, TaskStatus
 from pytweezer.GUI.components import Region, status_icon
 from pytweezer.GUI.grafana import open_in_browser, run_url
 from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND
@@ -39,6 +50,8 @@ logger = get_logger("pytweezer.GUI.experiments.results")
 _PATH = QtCore.Qt.ItemDataRole.UserRole
 _FILLED = QtCore.Qt.ItemDataRole.UserRole + 1
 _POLL_MS = 2000
+#: With a connected feed, how often to look for files the manager didn't write.
+_FALLBACK_POLL_S = 30.0
 #: Statuses a file can still move on from; finished files are read once.
 _UNSETTLED = {"running", "unreadable", ""}
 _NONE = "(none)"
@@ -169,11 +182,18 @@ def _show_file(item, path, status, label):
 class ResultsPanel(QWidget):
     resubmit_requested = QtCore.pyqtSignal(object)
 
-    def __init__(self, root=None, parent=None):
+    def __init__(self, root=None, feed=None, parent=None):
         super().__init__(parent)
         self.root = Path(root) if root is not None else None
+        self.feed = feed
         self.measurement = None
         self.path = None
+        #: A file selected but not yet readable, retried on the poll.
+        self._wanted = None
+        #: The full /points table of a running measurement, for live plotting.
+        self._planned = None
+        self._task_statuses = None
+        self._last_refresh = 0.0
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 10)
         splitter = QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -192,10 +212,10 @@ class ResultsPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.itemExpanded.connect(self._fill_day)
         self.tree.currentItemChanged.connect(self._selected)
-        browser = Region("well", "Measurements", "newest first")
-        browser.header.addWidget(self.show_unfinished)
-        browser.body.addWidget(self.tree, 1)
-        splitter.addWidget(browser)
+        self.browser = Region("well", "Measurements", "newest first")
+        self.browser.header.addWidget(self.show_unfinished)
+        self.browser.body.addWidget(self.tree, 1)
+        splitter.addWidget(self.browser)
 
         self.metadata = QPlainTextEdit()
         self.metadata.setReadOnly(True)
@@ -268,6 +288,9 @@ class ResultsPanel(QWidget):
         self._poll = QtCore.QTimer(self)
         self._poll.timeout.connect(self._poll_tick)
         self._poll.start(_POLL_MS)
+        if feed is not None:
+            feed.queue_changed.connect(self._queue_changed)
+            feed.point_received.connect(self._point_received)
         QtCore.QTimer.singleShot(0, self.refresh)
 
     @property
@@ -276,10 +299,48 @@ class ResultsPanel(QWidget):
 
     # -- browsing ----------------------------------------------------------
 
+    @property
+    def live(self):
+        """Whether running measurements come from the feed instead of the file."""
+        return self.feed is not None and self.feed.connected
+
     def _poll_tick(self):
         # Hidden behind another tab: skip, the data root may be a network share.
+        if not self.isVisible():
+            return
+        if self.measurement is None and self._wanted is not None:
+            self.load(self._wanted)
+        if not self.live or time.monotonic() - self._last_refresh > _FALLBACK_POLL_S:
+            self.refresh()
+
+    def _queue_changed(self, snapshot):
+        tasks = [snapshot.get("running"), *snapshot.get("queue", [])]
+        tasks += snapshot.get("history", [])
+        statuses = {task["rid"]: task["status"] for task in tasks if task}
+        if statuses == self._task_statuses:
+            return
+        self._task_statuses = statuses
         if self.isVisible():
             self.refresh()
+        m = self.measurement
+        if m is not None and m.status == "running":
+            status = statuses.get(m.attrs["rid"])
+            if status is not None and TaskStatus(status).finished:
+                self.load(self.path)
+
+    def _point_received(self, point):
+        m = self.measurement
+        if m is not None and m.status == "running" and point["rid"] == m.attrs["rid"]:
+            self._show_progress()
+            self._fill_choices(keep_selection=True)
+            self.replot()
+
+    def _live_rows(self):
+        """The feed's points for the selected measurement, if it is running."""
+        m = self.measurement
+        if m is None or m.status != "running" or not self.live or not self._planned:
+            return None
+        return self.feed.points(m.attrs["rid"])
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -287,13 +348,23 @@ class ResultsPanel(QWidget):
 
     def refresh(self):
         """Bring the tree up to date with the files on disk, in place."""
+        self._last_refresh = time.monotonic()
+        root = self.data_root
         try:
-            days = sorted(
-                (p for p in self.data_root.glob("*/*/*") if p.is_dir()), reverse=True
-            )
+            days = sorted((p for p in root.glob("*/*/*") if p.is_dir()), reverse=True)
+            found = root.is_dir()
         except OSError:
-            logger.debug("Cannot list %s", self.data_root, exc_info=True)
+            logger.debug("Cannot list %s", root, exc_info=True)
+            days, found = [], False
+        if not found:
+            self.browser.set_hint(f"{root} not found")
+            self.browser.hint.setToolTip(
+                "On a PC other than the Experiment Manager's, set client_data_root "
+                "in CONFIG (or PYTWEEZER_DATA_DIR) to the data share"
+            )
             return
+        self.browser.set_hint("newest first")
+        self.browser.hint.setToolTip("")
         newest_was_open = self._newest_day_open()
         for day in days:
             item = self._day_item(day)
@@ -394,6 +465,7 @@ class ResultsPanel(QWidget):
         try:
             measurement = load_measurement(path, results=[])
         except (OSError, KeyError, ValueError) as error:
+            self._wanted = Path(path)
             self.metadata.setPlainText(f"Could not read {path}:\n{error}")
             self.detail_region.set_hint("unreadable")
             self.simulation_banner.setVisible(False)
@@ -402,14 +474,18 @@ class ResultsPanel(QWidget):
             self.grafana_button.setEnabled(False)
             return
         first_load = self.path != Path(path)
+        self._wanted = None
+        self._planned = None
+        if measurement.status == "running":
+            try:
+                self._planned = read_planned_points(path)
+            except (OSError, KeyError):
+                pass
         self.path = Path(path)
         self.measurement = measurement
         self.metadata.setPlainText(describe(measurement))
         attrs = measurement.attrs
-        self.detail_region.set_hint(
-            f"task {attrs['rid']}, {attrs['status']}, "
-            f"{attrs['n_done']}/{attrs['n_points']} points"
-        )
+        self._show_progress()
         self.simulation_banner.setVisible(bool(attrs.get("simulated")))
         self.resubmit_button.setEnabled(True)
         queued = attrs["rid"] >= 0
@@ -422,8 +498,18 @@ class ResultsPanel(QWidget):
         self._fill_choices(keep_selection=not first_load)
         self.replot()
 
+    def _show_progress(self):
+        attrs = self.measurement.attrs
+        rows = self._live_rows()
+        done = attrs["n_done"] if rows is None else max(len(rows), attrs["n_done"])
+        self.detail_region.set_hint(
+            f"task {attrs['rid']}, {attrs['status']}, {done}/{attrs['n_points']} points"
+        )
+
     def _reload_if_running(self):
-        if self.measurement is not None and self.measurement.status == "running":
+        # Live, the feed supplies a running measurement's points instead.
+        m = self.measurement
+        if m is not None and m.status == "running" and not self.live:
             self.load(self.path)
 
     # -- plotting ------------------------------------------------------------
@@ -435,6 +521,8 @@ class ResultsPanel(QWidget):
             for name, shape in m.result_shapes.items()
             if shape == () and m.result_kinds[name] in "biuf"
         ]
+        for row in self._live_rows() or []:
+            scalars += [name for name in row["scalars"] if name not in scalars]
         axes = [axis.argument for axis in m.scan.axes]
         for combo, options in (
             (self.y_choice, scalars),
@@ -462,16 +550,24 @@ class ResultsPanel(QWidget):
             if m is not None:
                 self.plot_message.setText("No scalar results to plot.")
             return
-        try:
-            y = load_measurement(self.path, results=[y_name]).results[y_name]
-            y = np.asarray(y, dtype=float)
-        except (OSError, ValueError, TypeError):
-            self.plot_message.setText(f"{y_name} is not numeric.")
-            return
+        rows = self._live_rows()
+        points = m.points
+        if rows is not None:
+            points = self._planned
+            y = np.full(len(points["index"]), np.nan)
+            for row in rows:
+                y[row["index"]] = row["scalars"].get(y_name, np.nan)
+        else:
+            try:
+                y = load_measurement(self.path, results=[y_name]).results[y_name]
+                y = np.asarray(y, dtype=float)
+            except (OSError, ValueError, TypeError):
+                self.plot_message.setText(f"{y_name} is not numeric.")
+                return
         x_name = self.x_choice.currentText()
-        x = m.points["index"] if x_name == _POINT_INDEX else m.points[x_name]
+        x = points["index"] if x_name == _POINT_INDEX else points[x_name]
         series_name = self.series_choice.currentText()
-        series = None if series_name in ("", _NONE) else m.points[series_name]
+        series = None if series_name in ("", _NONE) else points[series_name]
 
         categorical = x.dtype.kind not in "biuf"
         if categorical:

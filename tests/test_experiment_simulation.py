@@ -1,5 +1,7 @@
 """Simulation mode: in-process simulated devices and a separate data root."""
 
+import socket
+
 import pytest
 
 from pytweezer.experiment import Device, Experiment, run_local
@@ -118,7 +120,7 @@ def test_simulated_data_root_is_separate(monkeypatch, tmp_path):
 def test_manager_tells_workers_and_guis_it_is_simulating(
     monkeypatch, tmp_path, recording_db
 ):
-    conf = {"host": "127.0.0.1", "port": 1, "pub_port": 2, "simulate": True}
+    conf = {"host": "127.0.0.1", "port": 1, "sync_port": 2, "simulate": True}
     monkeypatch.setattr(
         em, "get_config", lambda: {"Servers": {"Experiment Manager": conf}}
     )
@@ -143,3 +145,23 @@ def test_manager_tells_workers_and_guis_it_is_simulating(
         {"command": "worker", "rid": 1, "token": "t", "event": "started"}
     )
     assert started["simulate"] is True
+
+
+def test_other_pcs_find_the_data_on_the_share(monkeypatch, tmp_path):
+    conf = {
+        "host": "10.0.0.9",
+        "data_root": str(tmp_path / "local"),
+        "client_data_root": str(tmp_path / "share"),
+    }
+    monkeypatch.setattr(
+        "pytweezer.configuration.config.get_config",
+        lambda: {"Servers": {"Experiment Manager": conf}},
+    )
+    monkeypatch.delenv("PYTWEEZER_DATA_DIR", raising=False)
+    assert data_root() == tmp_path / "share"
+    monkeypatch.setattr(
+        "pytweezer.configuration.config.HOSTS", {socket.gethostname(): "10.0.0.9"}
+    )
+    assert data_root() == tmp_path / "local"
+    monkeypatch.setenv("PYTWEEZER_DATA_DIR", str(tmp_path / "env"))
+    assert data_root() == tmp_path / "env"

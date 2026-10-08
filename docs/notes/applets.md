@@ -140,7 +140,7 @@ manager, closely analogous to `ProcessTile`/`DeviceManager` on the device side:
   of Properties: it lives in local `QSettings("pytweezer", <launcher name>)`
   under `"active_applets"` (a list of names), the same local store used for
   window geometry. Properties has no local-only write — every `set()` is
-  broadcast to all clients and persisted centrally by the propertylogger — so
+  broadcast to all clients and persisted centrally by the Properties server — so
   storing running-state there would make one PC's applets start on every other
   PC. A legacy `"active"` key in the shared entry is ignored and stripped.
 - **Launch model.** Starting an applet runs

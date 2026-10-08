@@ -13,7 +13,7 @@ Why offscreen + grab instead of ``pytweezer-server``:
     view-only (probes servers over TCP, spawns nothing), so it is the safe
     default. Pass ``server`` only if you accept those subprocess spawns.
 
-Panels that connect to the (usually unreachable) Propertyhub/Analysis Manager
+Panels that connect to the (usually unreachable) Properties server/Analysis Manager
 are wrapped in ``_safe_panel`` upstream, so they degrade to a placeholder label
 instead of aborting the window — the screenshot still succeeds offscreen.
 

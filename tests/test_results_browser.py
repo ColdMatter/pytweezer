@@ -1,8 +1,10 @@
 import h5py
 import numpy as np
 import pytest
+from PyQt6 import QtCore
 
 from pytweezer.experiment import Choice, Experiment, ListAxis, Number, Scan, run_local
+from pytweezer.GUI.experiments import results
 from pytweezer.GUI.experiments.results import ResultsPanel, aggregate, resubmission
 
 
@@ -213,3 +215,94 @@ def test_polling_skips_a_hidden_tab(qapp, tmp_path, monkeypatch):
     panel._poll_tick()
     assert calls == [1]
     panel.hide()
+
+
+class FakeFeed(QtCore.QObject):
+    queue_changed = QtCore.pyqtSignal(dict)
+    point_received = QtCore.pyqtSignal(dict)
+    connection_changed = QtCore.pyqtSignal(bool)
+
+    def __init__(self):
+        super().__init__()
+        self.connected = True
+        self.rows = {}
+
+    def points(self, rid):
+        return list(self.rows.get(rid, []))
+
+
+def running_file(root, rid=1):
+    path = make_file(root, rid)
+    with h5py.File(path, "r+") as f:
+        f.attrs.update(status="running", rid=rid, n_done=0)
+    return path
+
+
+def test_live_running_measurement_plots_from_the_feed(qapp, tmp_path, monkeypatch):
+    path = running_file(tmp_path)
+    feed = FakeFeed()
+    panel = ResultsPanel(root=tmp_path, feed=feed)
+    panel.show_unfinished.setChecked(True)
+    panel.refresh()
+    assert panel.select_path(path)
+    panel.x_choice.setCurrentText("point index")
+
+    reads = []
+    real_load = results.load_measurement
+    monkeypatch.setattr(
+        results,
+        "load_measurement",
+        lambda *a, **k: reads.append(a) or real_load(*a, **k),
+    )
+    feed.rows[1] = [
+        {"index": 0, "values": {}, "scalars": {"y": 10.0}},
+        {"index": 1, "values": {}, "scalars": {"y": 20.0, "extra": 1.0}},
+    ]
+    feed.point_received.emit({"rid": 1, **feed.rows[1][-1]})
+    assert reads == [], "a live measurement is not re-read"
+    (curve,) = panel.plot.listDataItems()
+    assert list(curve.yData) == [10.0, 20.0]
+    assert "extra" in [
+        panel.y_choice.itemText(i) for i in range(panel.y_choice.count())
+    ]
+    assert "2/12 points" in panel.detail_region.hint.text()
+
+    panel.refresh()
+    assert reads == [], "nor by the tree refresh"
+
+    with h5py.File(path, "r+") as f:
+        f.attrs.update(status="completed", n_done=12)
+    feed.queue_changed.emit(
+        {"running": None, "queue": [], "history": [{"rid": 1, "status": "completed"}]}
+    )
+    assert panel.measurement.status == "completed"
+    assert "12/12 points" in panel.detail_region.hint.text()
+
+
+def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeypatch):
+    feed = FakeFeed()
+    panel = ResultsPanel(root=tmp_path, feed=feed)
+    panel.show()
+    calls = []
+    real_refresh = panel.refresh
+    monkeypatch.setattr(panel, "refresh", lambda: calls.append(1) or real_refresh())
+    snapshot = {"running": {"rid": 2, "status": "running"}, "queue": [], "history": []}
+    feed.queue_changed.emit(snapshot)
+    feed.queue_changed.emit(snapshot)
+    assert calls == [1], "only a change of task status refreshes"
+
+    panel._poll_tick()
+    assert calls == [1], "live, the poll waits for the slow fallback"
+    feed.connected = False
+    panel._poll_tick()
+    assert calls == [1, 1]
+    panel.hide()
+
+
+def test_a_missing_data_root_says_so(qapp, tmp_path):
+    panel = ResultsPanel(root=tmp_path / "absent")
+    panel.refresh()
+    assert "not found" in panel.browser.hint.text()
+    (tmp_path / "absent").mkdir()
+    panel.refresh()
+    assert panel.browser.hint.text() == "newest first"

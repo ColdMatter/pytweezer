@@ -110,7 +110,7 @@ longer exists, so a plain `poetry run pytest tests/ -q` aborts at collection wit
   `config.HOSTS` logs `Host <name> not found in config. Defaulting to localhost`
   and shows no device Start/Stop toggles (it owns no devices) — harmless.
 - **Unreachable hubs don't abort the window.** Panels that connect to the
-  Propertyhub / Analysis Manager are wrapped in `_safe_panel`; when those are
+  Properties server / Analysis Manager are wrapped in `_safe_panel`; when those are
   down the tab becomes an "unavailable — see logs" placeholder and the rest of
   the window builds fine.
 

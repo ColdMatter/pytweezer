@@ -11,6 +11,7 @@ from pytweezer.experiment import ListAxis, Scan, load_measurement
 from pytweezer.experiment.catalogue import Catalogue
 from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
 from pytweezer.servers import experiment_manager as em
+from pytweezer.servers.sync import SyncMirror
 
 EXPERIMENT = textwrap.dedent(
     """
@@ -65,7 +66,7 @@ class Harness:
         self.conf = {
             "host": "127.0.0.1",
             "port": free_port(),
-            "pub_port": free_port(),
+            "sync_port": free_port(),
             "orphan_timeout": 5.0,
         }
         monkeypatch.setattr(
@@ -249,3 +250,31 @@ def test_simulating_manager_gives_workers_simulated_devices(harness):
     measurement = harness.measurement(task)
     assert measurement.attrs["simulated"] is True
     assert list(measurement.results["backend"]) == ["SimulatedMotMasterInterface"]
+
+
+def test_guis_see_the_queue_and_each_point_live(harness):
+    mirror = SyncMirror("127.0.0.1", harness.conf["sync_port"], em.NOTIFIER_NAME)
+    try:
+        assert mirror.wait_initialised(5)
+        rid = harness.submit(five_points())
+        wait(rid, client=harness.client, poll_s=0.1, timeout_s=30)
+
+        def finished(state):
+            history = state["history"]
+            return (
+                bool(history)
+                and history[0]["rid"] == rid
+                and (history[0]["status"] == "completed")
+            )
+
+        deadline = time.monotonic() + 5
+        while not mirror.read(finished) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        state = mirror.snapshot()
+        assert finished(state) and state["running"] is None
+        rows = state["points"]["rows"]
+        assert state["points"]["rid"] == rid
+        assert [row["values"]["step"] for row in rows] == [1, 2, 3, 4, 5]
+        assert [row["scalars"]["index"] for row in rows] == [0, 1, 2, 3, 4]
+    finally:
+        mirror.close()

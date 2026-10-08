@@ -52,7 +52,7 @@ logger = get_logger("pytweezer GUI")
 def _safe_panel(label, factory):
     """Build a panel, substituting a placeholder if construction raises.
 
-    Several panels connect to the Propertyhub / Analysis Manager on
+    Several panels connect to the Properties server / Analysis Manager on
     construction and raise if those aren't reachable. Isolating each build
     keeps one unreachable service from aborting the whole window.
     """
@@ -165,15 +165,22 @@ class TabbedGUI(QMainWindow):
 
 def build_gui(server: bool) -> TabbedGUI:
     from pytweezer.GUI.analysismanager import AnalysisManager
+    from pytweezer.GUI.experiments.feed import ExperimentFeed
     from pytweezer.GUI.experiments.panel import ExperimentsPanel
     from pytweezer.GUI.experiments.results import ResultsPanel
     from pytweezer.GUI.property_editor import PropEdit
 
     name = "Server" if server else "Client"
-    experiments = _safe_panel("Experiments", ExperimentsPanel)
+    # One live copy of the manager's state, shared by both experiment tabs.
+    try:
+        feed = ExperimentFeed()
+    except Exception:
+        logger.exception("Could not set up the Experiment Manager feed")
+        feed = None
+    experiments = _safe_panel("Experiments", lambda: ExperimentsPanel(feed=feed))
 
     def make_results():
-        results = ResultsPanel()
+        results = ResultsPanel(feed=feed)
         if isinstance(experiments, ExperimentsPanel):
             results.resubmit_requested.connect(experiments.load_request)
         return results

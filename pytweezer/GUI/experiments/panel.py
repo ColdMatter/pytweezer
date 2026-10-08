@@ -32,13 +32,16 @@ logger = get_logger("pytweezer.GUI.experiments")
 class ExperimentsPanel(QWidget):
     """Browse experiments, edit and submit them, and control the queue.
 
-    All state shown comes from the manager's PUB feed; requests go over a
-    short-timeout REQ client so a down manager never freezes the GUI for long.
+    All state shown comes from the manager's published state (an
+    :class:`ExperimentFeed`, which may be shared with other tabs); requests go
+    over a short-timeout REQ client so a down manager never freezes the GUI for
+    long.
     """
 
     def __init__(self, client=None, feed=None, parent=None):
         super().__init__(parent)
         self.client = client or ExperimentManagerClient(timeout_ms=1000, retries=0)
+        self._owns_feed = feed is None
         self.feed = feed or ExperimentFeed()
         self._catalogue_version = None
         # Unsubmitted edits per experiment, restored when switching back.
@@ -207,6 +210,7 @@ class ExperimentsPanel(QWidget):
         )
 
     def closeEvent(self, event):
-        self.feed.close()
+        if self._owns_feed:
+            self.feed.close()
         self.client.close()
         super().closeEvent(event)

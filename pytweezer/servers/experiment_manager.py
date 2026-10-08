@@ -1,9 +1,11 @@
 """The Experiment Manager: owns the experiment queue and runs one task at a time.
 
 A single-threaded loop serves REQ/REP commands (from GUIs, notebooks and the
-worker), starts each due task in a fresh worker subprocess
-(:mod:`pytweezer.experiment.worker`), and publishes the queue on its PUB port
-whenever it changes.
+worker) and starts each due task in a fresh worker subprocess
+(:mod:`pytweezer.experiment.worker`). Its state is published as the sipyco
+notifier ``"experiment"`` on ``sync_port`` (see :data:`NOTIFIER_NAME` for the
+layout), so every GUI holds a live copy of the queue and of the points the
+current task has measured so far.
 
 The queue state is saved after every change: on Windows the GUI stops this
 process with ``TerminateProcess``, so nothing can rely on a clean shutdown. A
@@ -24,12 +26,13 @@ from typing import Any
 import h5py
 import psutil
 import zmq
+from sipyco.sync_struct import Notifier
 
 from pytweezer.configuration.config import get_config
 from pytweezer.configuration.paths import tweezerpath
 from pytweezer.database.writer import DBWriter
 from pytweezer.experiment.catalogue import Catalogue
-from pytweezer.experiment.client import connect_host
+from pytweezer.experiment.client import NOTIFIER_NAME, connect_host
 from pytweezer.experiment.queue import (
     ExperimentQueue,
     QueueError,
@@ -46,9 +49,18 @@ from pytweezer.experiment.storage import (
 )
 from pytweezer.experiment.task import Action, TaskRequest, TaskStatus
 from pytweezer.logging_utils import get_daily_log_path, get_logger
+from pytweezer.servers.sync import SyncServer
 
 logger = get_logger("pytweezer.servers.experiment_manager")
 
+#: The published state (:data:`~pytweezer.experiment.client.NOTIFIER_NAME`)
+#: is laid out as::
+#:
+#:     {"started", "catalogue_version", "simulated",
+#:      "alive",                         # epoch s, at least every PUBLISH_INTERVAL_S
+#:      "running", "queue", "history",   # as ExperimentQueue.snapshot()
+#:      "points": {"rid": int | None,    # the task now (or last) running
+#:                 "rows": [{"index", "values", "scalars", "t_start", "t_end"}]}}
 PUBLISH_INTERVAL_S = 2.0
 CATALOGUE_RESCAN_S = 10.0
 _WORKER_COMMAND = [sys.executable, "-m", "pytweezer.experiment.worker"]
@@ -71,7 +83,6 @@ class ExperimentManager:
         self.simulate = bool(self.conf.get("simulate", False))
         host, port = self.conf["host"], self.conf["port"]
         self.rep_address = f"tcp://{host}:{port}"
-        self.pub_address = f"tcp://{host}:{self.conf['pub_port']}"
         self.worker_endpoint = f"tcp://{connect_host(host)}:{port}"
         self.log_dir = get_daily_log_path().parent / "experiments"
 
@@ -86,7 +97,6 @@ class ExperimentManager:
         self.process: psutil.Process | None = None
         self._abort_requested: int | None = None
         self._running = True
-        self._seq = 0
         # Bumped whenever the catalogue changes, so GUIs know to fetch it again.
         self._catalogue_version = 0
         self._dirty = True
@@ -94,15 +104,19 @@ class ExperimentManager:
         self._last_rescan = 0.0
         self.started = now().isoformat()
 
-        self.rep = self.pub = None
+        #: Without ``bind`` nothing is published and mutations apply directly.
+        self.notifier = Notifier(
+            {**self._snapshot(), "points": {"rid": None, "rows": []}}
+        )
+        self.rep = self.sync = None
         if bind:
             context = zmq.Context.instance()
             self.rep = context.socket(zmq.REP)
             self.rep.setsockopt(zmq.LINGER, 0)
             self.rep.bind(self.rep_address)
-            self.pub = context.socket(zmq.PUB)
-            self.pub.setsockopt(zmq.LINGER, 0)
-            self.pub.bind(self.pub_address)
+            self.sync = SyncServer(
+                {NOTIFIER_NAME: self.notifier}, host, self.conf["sync_port"]
+            )
 
         self._reconcile_worker()
         self._save()
@@ -128,7 +142,7 @@ class ExperimentManager:
             self.catalogue.close()
             self.db.close()
             self.rep.close(linger=0)
-            self.pub.close(linger=0)
+            self.sync.close()
 
     def stop(self) -> None:
         self._running = False
@@ -265,14 +279,15 @@ class ExperimentManager:
                     request.get("values", {}),
                     request.get("scalars", {}),
                 )
-                self._publish(
+                self._add_point(
+                    rid,
                     {
-                        "type": "experiment_point",
-                        "rid": rid,
                         "index": request["index"],
                         "values": request.get("values", {}),
                         "scalars": request.get("scalars", {}),
-                    }
+                        "t_start": request.get("t_start"),
+                        "t_end": request.get("t_end"),
+                    },
                 )
             self._dirty = True
         elif event == "heartbeat":
@@ -310,6 +325,7 @@ class ExperimentManager:
             create_time=self.process.create_time(),
         )
         self.queue.mark_started(task.rid, record, relpath.as_posix())
+        self._mutate(self.notifier.__setitem__, "points", {"rid": task.rid, "rows": []})
         self._record_run(task.rid)
         logger.info("Started task %s (worker pid %s)", task.rid, self.process.pid)
         self._changed()
@@ -452,22 +468,46 @@ class ExperimentManager:
 
     def _snapshot(self) -> dict[str, Any]:
         return {
-            "seq": self._seq,
             "started": self.started,
             "catalogue_version": self._catalogue_version,
             "simulated": self.simulate,
+            "alive": time.time(),
             **self.queue.snapshot(),
         }
 
     def _publish_queue(self) -> None:
-        self._seq += 1
         self._dirty = False
         self._last_publish = time.monotonic()
-        self._publish({"type": "experiment_queue", **self._snapshot()})
+        self._mutate(self._apply_snapshot, self._snapshot())
 
-    def _publish(self, message: dict[str, Any]) -> None:
-        if self.pub is not None:
-            self.pub.send_json(message)
+    def _apply_snapshot(self, snapshot: dict[str, Any]) -> None:
+        current = self.notifier.raw_view
+        for key, value in snapshot.items():
+            if current.get(key) != value:
+                self.notifier[key] = value
+
+    def _add_point(self, rid: int, row: dict[str, Any]) -> None:
+        def add():
+            if self.notifier.raw_view["points"]["rid"] != rid:
+                # A worker adopted after a manager restart.
+                self.notifier["points"] = {"rid": rid, "rows": []}
+            self.notifier["points"]["rows"].append(row)
+
+        self._mutate(add)
+
+    def _mutate(self, fn, *args) -> None:
+        """Run a notifier mutation where it is safe: on the publisher's loop."""
+        if self.sync is None:
+            fn(*args)
+            return
+        self.sync.call(fn, *args).add_done_callback(_log_failure)
+
+
+def _log_failure(future) -> None:
+    if not future.cancelled() and future.exception() is not None:
+        logger.error(
+            "Publishing the experiment state failed", exc_info=future.exception()
+        )
 
 
 def _alive(process: psutil.Process) -> bool:

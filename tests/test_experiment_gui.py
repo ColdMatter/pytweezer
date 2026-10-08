@@ -317,3 +317,60 @@ def test_panel_resubmit_selects_the_experiment(qapp):
     assert panel.editor.rows["mode"].value.value() == "b"
     panel.load_request(TaskRequest(experiment="gone", class_name="X"))
     assert "not in the catalogue" in panel.status.text()
+
+
+def test_real_feed_signals_queue_changes_and_points(qapp):
+    import time
+
+    from sipyco.sync_struct import Notifier
+
+    from pytweezer.GUI.experiments.feed import ExperimentFeed
+    from pytweezer.servers.sync import SyncServer
+
+    notifier = Notifier(
+        {
+            "alive": 0.0,
+            "running": None,
+            "queue": [],
+            "history": [],
+            "points": {"rid": 3, "rows": [{"index": 0, "scalars": {"n": 1.0}}]},
+        }
+    )
+    server = SyncServer({"experiment": notifier}, "127.0.0.1", 0)
+    feed = ExperimentFeed(address=("127.0.0.1", server.port), poll_interval_ms=20)
+    snapshots, points, connections = [], [], []
+    feed.queue_changed.connect(snapshots.append)
+    feed.point_received.connect(points.append)
+    feed.connection_changed.connect(connections.append)
+
+    def pump_until(condition):
+        deadline = time.monotonic() + 5
+        while not condition() and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.01)
+        return condition()
+
+    try:
+        assert pump_until(lambda: snapshots and connections == [True])
+        assert "points" not in snapshots[0]
+        assert feed.points(3) == [{"index": 0, "scalars": {"n": 1.0}}]
+        assert feed.points(4) == []
+
+        snapshots.clear()
+        server.call(notifier.__setitem__, "alive", 1.0).result()
+        server.call(
+            notifier["points"]["rows"].append, {"index": 1, "scalars": {"n": 2.0}}
+        ).result()
+        assert pump_until(lambda: points)
+        assert points == [{"rid": 3, "index": 1, "scalars": {"n": 2.0}}]
+        assert snapshots == [], "an alive bump alone is not a queue change"
+
+        server.call(notifier.__setitem__, "points", {"rid": 4, "rows": []}).result()
+        server.call(notifier["points"]["rows"].append, {"index": 0}).result()
+        server.call(notifier.__setitem__, "queue", [{"rid": 5}]).result()
+        assert pump_until(lambda: len(points) == 2 and snapshots)
+        assert points[1]["rid"] == 4
+        assert snapshots[-1]["queue"] == [{"rid": 5}]
+    finally:
+        feed.close()
+        server.close()
