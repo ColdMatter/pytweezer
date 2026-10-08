@@ -31,6 +31,10 @@ def ensure_schema(conn) -> bool:
         conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
         conn.execute(CORE_SQL)
     try:
+        if not _timescale_preloaded(conn):
+            raise RuntimeError(
+                "timescaledb is not in the server's shared_preload_libraries"
+            )
         with conn.transaction():
             conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
         with conn.transaction():
@@ -45,3 +49,13 @@ def ensure_schema(conn) -> bool:
             _warned_no_timescale = True
         return False
     return True
+
+
+def _timescale_preloaded(conn) -> bool:
+    # Without the preload, CREATE EXTENSION timescaledb is FATAL and drops the
+    # connection. shared_preload_libraries is superuser-only, but the loader's
+    # own settings are visible to any role exactly when it is preloaded.
+    row = conn.execute(
+        "SELECT 1 FROM pg_settings WHERE name = 'timescaledb.disable_load'"
+    ).fetchone()
+    return row is not None
