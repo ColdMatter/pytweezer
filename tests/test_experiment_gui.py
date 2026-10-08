@@ -653,6 +653,41 @@ def test_a_linear_scan_of_an_integer_parameter_must_give_whole_steps(qapp):
     assert editor.request().scan.axes[0].values == [1, 2, 7]
 
 
+def test_a_draft_keeps_a_non_whole_integer_scan_that_submit_rejects(qapp):
+    editor = sequenced_editor(qapp, Source(PARAMETERS))
+    editor.motmaster_boxes["rb"].choose("tDelay1")
+    row = editor.rows["rb.tDelay1"]
+    row.scan_button.setChecked(True)
+    row.scan.start.set_value(0)
+    row.scan.stop.set_value(5)
+    row.scan.steps.setValue(3)
+    with pytest.raises(ValueError, match="non-whole"):
+        editor.request()
+    assert editor.request(validate=False).scan.axes[0].argument == "rb.tDelay1"
+
+    submitted = []
+    editor.submit_requested.connect(submitted.append)
+    editor.submit_button.click()
+    assert submitted == [] and "non-whole" in editor.error.text()
+
+
+def test_panel_draft_survives_a_non_whole_integer_scan(qapp):
+    panel = ExperimentsPanel(client=FakeClient(), feed=FakeFeed())
+    editor = panel.editor
+    editor.fetcher.threaded = False
+    editor.set_parameter_source(Source(PARAMETERS))
+    editor.set_experiment(SEQUENCED)
+    panel._current_key = (SEQUENCED["module"], SEQUENCED["class_name"])
+    editor.motmaster_boxes["rb"].choose("tDelay1")
+    row = editor.rows["rb.tDelay1"]
+    row.scan_button.setChecked(True)
+    row.scan.start.set_value(0)
+    row.scan.stop.set_value(5)
+    row.scan.steps.setValue(3)
+    panel._save_draft()
+    assert panel._drafts[panel._current_key].scan.axes[0].argument == "rb.tDelay1"
+
+
 def test_a_declared_integer_may_still_scan_in_non_whole_steps(editor):
     editor.rows["shots"].scan_button.setChecked(True)
     editor.rows["shots"].scan.start.set_value(1)

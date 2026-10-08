@@ -165,7 +165,7 @@ class ExperimentsPanel(QWidget):
         if self._current_key is None:
             return
         try:
-            self._drafts[self._current_key] = self.editor.request()
+            self._drafts[self._current_key] = self.editor.request(validate=False)
         except ValueError:
             pass
 

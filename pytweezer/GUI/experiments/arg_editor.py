@@ -691,14 +691,20 @@ class ArgumentEditor(QWidget):
             repeat=self.repeat.currentText(),
         )
 
-    def request(self, submitter=""):
-        """The form as a :class:`TaskRequest`; raises ``ValueError`` if a field is invalid."""
+    def request(self, submitter="", validate=True):
+        """The form as a :class:`TaskRequest`; raises ``ValueError`` if a field is invalid.
+
+        With ``validate=False`` the checks that only matter for submitting
+        (whole values for integer script parameters) are skipped, so an
+        unfinished form can still be kept as a draft.
+        """
         if self.schema is None:
             raise ValueError("no experiment selected")
         due = None
         if self.start_at_enabled.isChecked():
             due = self.start_at.dateTime().toPyDateTime().astimezone()
-        self._check_integer_parameters()
+        if validate:
+            self._check_integer_parameters()
         return TaskRequest(
             experiment=self.schema["module"],
             class_name=self.schema["class_name"],
