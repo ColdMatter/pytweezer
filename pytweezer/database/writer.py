@@ -54,7 +54,15 @@ RUN_COLUMNS = (
     "simulated",
 )
 POINT_COLUMNS = ("rid", "point_index", "t_start", "t_end", "scan_values", "scalars")
-_JSON_COLUMNS = {"arguments", "scan", "scan_values", "scalars"}
+MEASUREMENT_COLUMNS = (
+    "measurement",
+    "logger",
+    "interval_s",
+    "limits",
+    "active",
+    "updated",
+)
+_JSON_COLUMNS = {"arguments", "scan", "scan_values", "scalars", "limits"}
 
 
 def _upsert(table, columns, key):
@@ -73,6 +81,7 @@ SQL = {
     "VALUES (%s, %s, %s, %s, %s::jsonb)",
     "runs": _upsert("runs", RUN_COLUMNS, ("rid",)),
     "points": _upsert("points", POINT_COLUMNS, ("rid", "point_index")),
+    "measurements": _upsert("measurements", MEASUREMENT_COLUMNS, ("measurement",)),
 }
 
 
@@ -200,6 +209,21 @@ class DBWriter:
             _json(scalars),
         )
         self._enqueue([("points", row)])
+
+    def record_measurement(self, measurement, logger, interval_s, limits, active):
+        """Queue an insert-or-update of one ``measurements`` row.
+
+        ``limits`` maps field to ``[low, high]``, either bound ``None``.
+        """
+        row = (
+            measurement,
+            logger,
+            float(interval_s),
+            _json(limits),
+            bool(active),
+            datetime.now(UTC),
+        )
+        self._enqueue([("measurements", row)])
 
     def flush(self, timeout=5.0):
         """Wait until every queued row is written; returns False on timeout."""

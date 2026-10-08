@@ -26,9 +26,12 @@ import inspect
 import os
 import sys
 
-from pytweezer.servers.configreader import ConfigReader, tweezerpath
+import pytweezer
+from pytweezer.configuration.config import get_config
 
 from pytweezer.servers import logger_server
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(pytweezer.__file__)))
 
 #: Keys the framework itself consumes; never reported as unread by the class.
 FRAMEWORK_KEYS = {
@@ -38,6 +41,7 @@ FRAMEWORK_KEYS = {
     "host",
     "port",
     "interval",
+    "limits",
     "simulate",
     "tooltip",
     "description",
@@ -66,10 +70,14 @@ class RecordingWriter:
 
     def __init__(self, *_args, **_kwargs):
         self.points = []
+        self.measurements = []
         self.closed = False
 
     def write(self, measurement, fields, tags=None, time=None):
         self.points.append((measurement, fields, tags))
+
+    def record_measurement(self, measurement, logger, interval_s, limits, active):
+        self.measurements.append((measurement, logger, interval_s, limits, active))
 
     def close(self):
         self.closed = True
@@ -85,7 +93,7 @@ def check_script_key(conf):
             "to build (expected '../pytweezer/servers/logger_server.py')"
         )
         return
-    resolved = os.path.normpath(os.path.join(tweezerpath, "bin", script))
+    resolved = os.path.normpath(os.path.join(REPO_ROOT, "bin", script))
     if not os.path.isfile(resolved):
         problem(f"'script' resolves to {resolved} which does not exist")
     elif os.path.basename(resolved) != "logger_server.py":
@@ -300,7 +308,7 @@ def main():
     args = parser.parse_args()
 
     if args.all:
-        names = list(ConfigReader.getConfiguration().get("Loggers", {}))
+        names = list(get_config().get("Loggers", {}))
     elif args.name:
         names = [args.name]
     else:

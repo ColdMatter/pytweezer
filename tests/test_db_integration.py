@@ -1,6 +1,6 @@
 """Against a real Postgres: set PYTWEEZER_TEST_DSN to a scratch database.
 
-Its readings, runs and points tables are emptied first. Skipped otherwise.
+Its tables are emptied first. Skipped otherwise.
 """
 
 import os
@@ -23,7 +23,7 @@ def conn():
     with psycopg.connect(DSN, autocommit=True) as conn:
         ensure_schema(conn)
         ensure_schema(conn)  # idempotent
-        conn.execute("TRUNCATE readings, runs, points")
+        conn.execute("TRUNCATE readings, runs, points, measurements")
         yield conn
 
 
@@ -61,6 +61,18 @@ def test_run_upsert_keeps_one_row(conn, writer):
 
     rows = conn.execute("SELECT status, arguments->>'a' FROM runs").fetchall()
     assert rows == [("completed", "2")]
+
+
+def test_measurement_limits_are_queryable_per_field(conn, writer):
+    writer.record_measurement("ni_adc", "NI ADC Logger", 1.0, {"ai0": [0, None]}, True)
+    writer.record_measurement("ni_adc", "NI ADC Logger", 1.0, {"ai0": [0, 5]}, False)
+    assert writer.flush(10)
+
+    rows = conn.execute(
+        "SELECT m.active, l.key, (l.value->>0)::float, (l.value->>1)::float "
+        "FROM measurements m, jsonb_each(m.limits) l"
+    ).fetchall()
+    assert rows == [(False, "ai0", 0.0, 5.0)]
 
 
 def test_backfilled_run_joins_with_readings(conn, writer, tmp_path, monkeypatch):

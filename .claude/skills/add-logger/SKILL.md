@@ -146,6 +146,13 @@ Then the config entry under `CONFIG["Loggers"]`:
   subprocess, not by probing a socket.
 - `active: True` auto-starts it with the server GUI; leave it `False` until the
   hardware is there. Remaining keys are yours, read through `self.conf`.
+- **`limits`** (optional), e.g. `{"pressure": [None, 1e-8]}`: per-field
+  `[low, high]`, either bound `None`. The base class validates it at startup and
+  writes it, with `interval`, to the `measurements` table. Grafana's *Reading out
+  of range* alert and the *Lab health* dashboard read it from there. The same
+  row drives the *Logger stale* alert, which fires once nothing has been written
+  for 10 intervals (at least 5 min). A clean stop clears it, so stopping a
+  logger from the GUI never alerts.
 
 The connection string lives in `DATABASE["dsn"]` (overridable with
 `PYTWEEZER_DB_DSN`); `DBWriter` reads it itself.
@@ -193,7 +200,7 @@ poetry run pytweezer-logger "Chamber Pressure Logger"
 ```
 
 Values land in the `readings` table; check them in Grafana's *pytweezer
-overview* dashboard (<http://localhost:3000> on the server PC) or in a notebook:
+overview* or *Lab health* dashboard (<http://localhost:3000> on the server PC) or in a notebook:
 
 ```python
 from pytweezer.database.analysis import readings

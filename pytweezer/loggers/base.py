@@ -37,8 +37,10 @@ class Logger:
         self.name = name
         self.conf = conf or {}
         self.interval = float(self.conf.get("interval", 1.0))
+        self.limits = _parse_limits(self.conf.get("limits", {}))
         self.writer = DBWriter()
         self._running = False
+        self._registered = set()
         self.setup()
 
     # ---- overridable hooks --------------------------------------------- #
@@ -68,7 +70,15 @@ class Logger:
                 tags = None
             else:
                 measurement, fields, tags = point
+            if measurement not in self._registered:
+                self._register(measurement, active=True)
+                self._registered.add(measurement)
             self.writer.write(measurement, fields, tags=tags, time=read_time)
+
+    def _register(self, measurement, active):
+        self.writer.record_measurement(
+            measurement, self.name, self.interval, self.limits, active
+        )
 
     def run(self):
         """Poll :meth:`read` every ``interval`` seconds and write the results.
@@ -113,4 +123,21 @@ class Logger:
 
     def close(self):
         """Release resources. Override to add teardown, but call ``super().close()``."""
+        for measurement in self._registered:
+            self._register(measurement, active=False)
         self.writer.close()
+
+
+def _parse_limits(limits):
+    """``{field: [low, high]}`` with float or ``None`` bounds; raises on anything else."""
+    parsed = {}
+    for field, bounds in limits.items():
+        try:
+            low, high = bounds
+            parsed[field] = [None if b is None else float(b) for b in (low, high)]
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"limits[{field!r}] must be [low, high] (either may be None), "
+                f"got {bounds!r}"
+            ) from None
+    return parsed

@@ -13,6 +13,8 @@ numeric -- so a logger that returns a string or an array loses that value with n
 anywhere. A test is the only place that mistake surfaces cheaply.
 """
 
+import pytest
+
 from pytweezer.database.writer import _coerce_fields
 from pytweezer.loggers import base as logger_base
 
@@ -22,10 +24,14 @@ class RecordingWriter:
 
     def __init__(self, *_args, **_kwargs):
         self.points = []
+        self.measurements = []
         self.closed = False
 
     def write(self, measurement, fields, tags=None, time=None):
         self.points.append((measurement, fields, tags, time))
+
+    def record_measurement(self, measurement, logger, interval_s, limits, active):
+        self.measurements.append((measurement, logger, interval_s, limits, active))
 
     def close(self):
         self.closed = True
@@ -132,6 +138,35 @@ def test_write_points_accepts_both_two_and_three_element_points():
     assert [p[0] for p in logger.writer.points] == ["a", "b"]
     assert logger.writer.points[0][2] is None
     assert logger.writer.points[1][2] == {"system": "CaF"}
+
+
+def test_each_measurement_is_registered_once_with_its_limits():
+    logger = build(
+        logger_base.Logger,
+        {"interval": 2.0, "limits": {"x": [0, 5], "y": [None, 1]}},
+        name="Probe",
+    )
+    logger._write_points([("a", {"x": 1.0}), ("b", {"y": 2.0})])
+    logger._write_points([("a", {"x": 1.0})])
+
+    assert logger.writer.measurements == [
+        ("a", "Probe", 2.0, {"x": [0.0, 5.0], "y": [None, 1.0]}, True),
+        ("b", "Probe", 2.0, {"x": [0.0, 5.0], "y": [None, 1.0]}, True),
+    ]
+
+
+def test_close_marks_registered_measurements_inactive():
+    logger = build(logger_base.Logger, {}, name="Probe")
+    logger._write_points([("a", {"x": 1.0})])
+    logger.close()
+
+    assert logger.writer.measurements[-1] == ("a", "Probe", 1.0, {}, False)
+    assert logger.writer.closed
+
+
+def test_malformed_limits_fail_at_startup():
+    with pytest.raises(ValueError, match="x"):
+        build(logger_base.Logger, {"limits": {"x": 5}})
 
 
 def test_one_read_cycle_shares_a_timestamp():
