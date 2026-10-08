@@ -36,6 +36,11 @@ DATABASE = {
     ),
 }
 
+# Grafana on the server PC, for the GUI's "Open in Grafana" buttons.
+GRAFANA = {
+    "url": os.environ.get("PYTWEEZER_GRAFANA_URL", f"http://{SERVER_HOST}:3000"),
+}
+
 
 CONFIG = {
     "Servers": {

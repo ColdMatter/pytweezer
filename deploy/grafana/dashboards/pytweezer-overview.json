@@ -15,6 +15,25 @@
   "templating": {
     "list": [
       {
+        "name": "system",
+        "label": "System",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "pytweezer"
+        },
+        "query": "SELECT DISTINCT tags->>'system' FROM readings WHERE $__timeFilter(time) AND tags ? 'system'",
+        "definition": "SELECT DISTINCT tags->>'system' FROM readings WHERE $__timeFilter(time) AND tags ? 'system'",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "current": {},
+        "options": [],
+        "hide": 0,
+        "allValue": "'__all'"
+      },
+      {
         "name": "measurement",
         "label": "Measurement",
         "type": "query",
@@ -22,8 +41,8 @@
           "type": "grafana-postgresql-datasource",
           "uid": "pytweezer"
         },
-        "query": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time)",
-        "definition": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time)",
+        "query": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time) AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[]))",
+        "definition": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time) AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[]))",
         "refresh": 2,
         "multi": false,
         "includeAll": false,
@@ -40,15 +59,16 @@
           "type": "grafana-postgresql-datasource",
           "uid": "pytweezer"
         },
-        "query": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement'",
-        "definition": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement'",
+        "query": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[]))",
+        "definition": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[]))",
         "refresh": 2,
         "multi": true,
         "includeAll": true,
         "sort": 1,
         "current": {},
         "options": [],
-        "hide": 0
+        "hide": 0,
+        "allValue": "'__all'"
       },
       {
         "name": "scalar",
@@ -119,7 +139,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(time, $__interval), field AS metric, avg(value) AS value FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND field IN ($field) GROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(time, $__interval), field AS metric, avg(value) AS value FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND (cardinality(ARRAY[$field]::text[]) = 0 OR '__all' = ANY(ARRAY[$field]::text[]) OR field = ANY(ARRAY[$field]::text[])) AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[])) GROUP BY 1, 2 ORDER BY 1"
         }
       ]
     },
@@ -184,9 +204,67 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT rid, class_name, label, status, t_start, t_end, points_done, points_total, h5_path FROM runs WHERE $__timeFilter(t_start) ORDER BY rid DESC"
+          "rawSql": "SELECT rid, class_name, label, status, t_start, t_end, points_done, points_total, h5_path, (extract(epoch FROM t_start - w.margin) * 1000)::bigint AS from_ms, (extract(epoch FROM coalesce(t_end, now()) + w.margin) * 1000)::bigint AS to_ms FROM runs CROSS JOIN LATERAL (SELECT greatest((coalesce(t_end, now()) - t_start) * 0.1, interval '30 seconds') AS margin) w WHERE $__timeFilter(t_start) ORDER BY rid DESC"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rid"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open run ${__data.fields.rid}",
+                    "url": "/d/pytweezer-run?var-rid=${__data.fields.rid}&from=${__data.fields.from_ms}&to=${__data.fields.to_ms}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "from_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "to_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "links": [
+    {
+      "title": "pytweezer",
+      "type": "dashboards",
+      "tags": [
+        "pytweezer"
+      ],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true
     }
   ]
 }

@@ -22,10 +22,14 @@ class RecordingWriter:
 
     def __init__(self, *_args, **_kwargs):
         self.points = []
+        self.measurements = []
         self.closed = False
 
     def write(self, measurement, fields, tags=None, time=None):
         self.points.append((measurement, fields, tags, time))
+
+    def record_measurement(self, measurement, logger, interval_s, limits, active):
+        self.measurements.append((measurement, logger, interval_s, limits, active))
 
     def close(self):
         self.closed = True

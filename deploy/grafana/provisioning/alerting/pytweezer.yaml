@@ -1,0 +1,99 @@
+# Grafana alert rules for pytweezer. Copy into <Grafana>\conf\provisioning\alerting\
+# on the server PC (see docs/notes/database.md).
+#
+# Both rules read the measurements table, which each logger fills from its
+# CONFIG["Loggers"] entry: "limits" for out-of-range, "interval" for staleness.
+# Each query returns one row per series: text columns become alert labels and
+# the single numeric column is the value the threshold tests.
+#
+# No contact point is provisioned: firing alerts show on Grafana's Alerting page
+# and the pytweezer lab health dashboard.
+
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pytweezer
+    folder: pytweezer
+    interval: 1m
+    rules:
+      - uid: pytweezer-out-of-range
+        title: Reading out of range
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: pytweezer
+            model:
+              refId: A
+              editorMode: code
+              format: table
+              rawQuery: true
+              # excess: how far the latest reading lies outside [low, high]; 0 inside
+              rawSql: >-
+                SELECT l.measurement, l.field,
+                coalesce(lim.b->>0, '-inf') AS low, coalesce(lim.b->>1, 'inf') AS high,
+                greatest((lim.b->>0)::float - l.value, l.value - (lim.b->>1)::float, 0) AS excess
+                FROM (SELECT DISTINCT ON (measurement, field) measurement, field, value
+                      FROM readings WHERE time > now() - interval '10 minutes'
+                      ORDER BY measurement, field, time DESC) l
+                JOIN measurements m USING (measurement)
+                CROSS JOIN LATERAL (SELECT m.limits -> l.field AS b) lim
+                WHERE m.active AND lim.b IS NOT NULL
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          source: pytweezer
+        annotations:
+          summary: >-
+            {{ $labels.measurement }}/{{ $labels.field }} is
+            {{ printf "%.3g" $values.A.Value }} outside [{{ $labels.low }}, {{ $labels.high }}]
+
+      - uid: pytweezer-logger-stale
+        title: Logger stale
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: pytweezer
+            model:
+              refId: A
+              editorMode: code
+              format: table
+              rawQuery: true
+              # overdue_s: seconds past the stale threshold (10 intervals, at least
+              # 5 min) since the last reading, or since the logger started if none
+              rawSql: >-
+                SELECT m.measurement, coalesce(m.logger, '') AS logger,
+                greatest(extract(epoch FROM now() - coalesce(last.time, m.updated))
+                         - greatest(300, 10 * m.interval_s), 0) AS overdue_s
+                FROM measurements m
+                LEFT JOIN LATERAL (SELECT max(time) AS time FROM readings r
+                                   WHERE r.measurement = m.measurement
+                                   AND r.time > now() - interval '7 days') last ON TRUE
+                WHERE m.active
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          source: pytweezer
+        annotations:
+          summary: >-
+            {{ $labels.logger }} has written nothing to {{ $labels.measurement }}
+            for longer than expected; is it still running?

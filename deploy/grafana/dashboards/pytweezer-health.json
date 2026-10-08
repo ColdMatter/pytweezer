@@ -1,0 +1,327 @@
+{
+  "uid": "pytweezer-health",
+  "title": "pytweezer lab health",
+  "tags": [
+    "pytweezer"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "pytweezer",
+      "type": "dashboards",
+      "tags": [
+        "pytweezer"
+      ],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Latest readings",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "pytweezer"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 14,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "pytweezer"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest AS (SELECT DISTINCT ON (measurement, field) measurement, field, time, value FROM readings WHERE time > now() - interval '1 day' ORDER BY measurement, field, time DESC) SELECT l.measurement, l.field, CASE WHEN m.measurement IS NOT NULL AND NOT m.active THEN 'stopped' WHEN now() - l.time > greatest(interval '5 minutes', coalesce(m.interval_s, 30) * 10 * interval '1 second') THEN 'stale' WHEN l.value < (b->>0)::float OR l.value > (b->>1)::float THEN 'out of range' ELSE 'ok' END AS state, l.value, (b->>0)::float AS low, (b->>1)::float AS high, l.time AS \"last reading\" FROM latest l LEFT JOIN measurements m USING (measurement) LEFT JOIN LATERAL (SELECT m.limits -> l.field AS b) lim ON TRUE ORDER BY 1, 2"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "state"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ok": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "out of range": {
+                        "color": "red",
+                        "index": 1
+                      },
+                      "stale": {
+                        "color": "orange",
+                        "index": 2
+                      },
+                      "stopped": {
+                        "color": "text",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "last reading"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "type": "alertlist",
+      "title": "Alerts",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "pytweezer"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 0,
+        "w": 10,
+        "h": 12
+      },
+      "targets": [],
+      "options": {
+        "viewMode": "list",
+        "groupMode": "default",
+        "groupBy": [],
+        "maxItems": 20,
+        "sortOrder": 1,
+        "dashboardAlerts": false,
+        "alertName": "",
+        "alertInstanceLabelFilter": "",
+        "showInstances": true,
+        "stateFilter": {
+          "firing": true,
+          "pending": true,
+          "noData": false,
+          "normal": false,
+          "error": true
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Loggers",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "pytweezer"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 14,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "pytweezer"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT m.measurement, CASE WHEN NOT m.active THEN 'stopped' WHEN coalesce(last.time, m.updated) < now() - greatest(interval '5 minutes', m.interval_s * 10 * interval '1 second') THEN 'stale' ELSE 'ok' END AS state, m.logger, m.interval_s AS \"interval (s)\", last.time AS \"last reading\" FROM measurements m LEFT JOIN LATERAL (SELECT max(time) AS time FROM readings r WHERE r.measurement = m.measurement AND r.time > now() - interval '7 days') last ON TRUE ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "state"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ok": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "out of range": {
+                        "color": "red",
+                        "index": 1
+                      },
+                      "stale": {
+                        "color": "orange",
+                        "index": 2
+                      },
+                      "stopped": {
+                        "color": "text",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "last reading"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Running",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "pytweezer"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 12,
+        "w": 10,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "pytweezer"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT rid, class_name AS experiment, points_done || ' / ' || points_total AS points, t_start AS started, label, (extract(epoch FROM t_start - w.margin) * 1000)::bigint AS from_ms, (extract(epoch FROM coalesce(t_end, now()) + w.margin) * 1000)::bigint AS to_ms FROM runs CROSS JOIN LATERAL (SELECT greatest((coalesce(t_end, now()) - t_start) * 0.1, interval '30 seconds') AS margin) w WHERE status = 'running' ORDER BY rid"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rid"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open run ${__data.fields.rid}",
+                    "url": "/d/pytweezer-run?var-rid=${__data.fields.rid}&from=${__data.fields.from_ms}&to=${__data.fields.to_ms}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "started"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "from_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "to_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

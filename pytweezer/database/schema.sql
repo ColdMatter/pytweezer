@@ -45,3 +45,16 @@ CREATE TABLE IF NOT EXISTS points (
     PRIMARY KEY (rid, point_index)
 );
 CREATE INDEX IF NOT EXISTS points_t_start_idx ON points (t_start);
+
+-- One row per measurement a logger writes, so Grafana's alert rules know the
+-- expected cadence and limits. limits is {"<field>": [low, high]}, either
+-- bound null. active is cleared when the logger stops cleanly, so only a
+-- crashed or hung logger counts as stale.
+CREATE TABLE IF NOT EXISTS measurements (
+    measurement text PRIMARY KEY,
+    logger      text,
+    interval_s  double precision,
+    limits      jsonb   NOT NULL DEFAULT '{}',
+    active      boolean NOT NULL DEFAULT false,
+    updated     timestamptz
+);

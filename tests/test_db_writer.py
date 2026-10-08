@@ -113,6 +113,22 @@ def test_record_point_converts_epoch_times():
     writer.close()
 
 
+def test_record_measurement_stores_limits_as_json():
+    db = FakeDatabase()
+    writer = make_writer(db)
+    writer.record_measurement(
+        "ni_adc", "NI ADC Logger", 1.0, {"ai0": [0.0, None]}, active=True
+    )
+    assert writer.flush(2)
+
+    (row,) = db.sent["measurements"]
+    assert row[:3] == ("ni_adc", "NI ADC Logger", 1.0)
+    assert json.loads(row[3]) == {"ai0": [0.0, None]}
+    assert row[4] is True
+    assert row[5].tzinfo is not None
+    writer.close()
+
+
 def test_write_does_not_wait_for_an_unreachable_database():
     writer = DBWriter("postgresql://u:p@127.0.0.1:1/none", batch_s=0.01)
     start = time.monotonic()
