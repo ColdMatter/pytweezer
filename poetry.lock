@@ -3970,7 +3970,7 @@ numpy = "*"
 [package.source]
 type = "git"
 url = "https://github.com/m-labs/sipyco.git"
-reference = "HEAD"
+reference = "ce454bb64257b1bcef3703f258aaf7fa4ee0c275"
 resolved_reference = "ce454bb64257b1bcef3703f258aaf7fa4ee0c275"
 
 [[package]]
@@ -4440,4 +4440,4 @@ pyzmq = "*"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11.4, <3.14"
-content-hash = "8edbce5b771954c8cc88ac60aa94c741a1d9e51cf4d72f8ea81436e88774ef6a"
+content-hash = "b5fc22a5651c53184a3717b99477aa5021c93d7c7c7ed65fe3a8c14931246fec"
