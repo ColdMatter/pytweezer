@@ -97,9 +97,13 @@ search box. Declared parameters are not searchable, Int32 ones need whole
 values, and unselected ones keep the script's defaults (not recorded in the
 file). `prepare()` sets script, iterations, save toggle and trigger mode on
 every task; repeats come from `Scan(repetitions=...)`, one stored point per
-shot. `run_sequences()` arms followers in trigger mode and starts them first,
-the master `follower_arm_delay` later; a follower still running
-`follower_timeout` after the master finishes fails the task. Camera APIs differ
+shot. `prepare()` puts followers in trigger mode; `run_sequences()` starts each
+follower in a thread, then the master `follower_arm_delay` later
+(`MotMasterExperiment` class attribute, default 0.5 s). A follower still running
+`follower_timeout` (a `MotMaster(...)` keyword, default 60 s) after the master
+finishes fails the task, and its device server stays blocked in the triggered
+`Go()` (Abort does not free it), so restart that device server or trigger it
+before the next task. Camera APIs differ
 between drivers — check the driver, not old notebooks.
 
 ## Running

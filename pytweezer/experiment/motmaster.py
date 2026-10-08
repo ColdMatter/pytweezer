@@ -122,6 +122,15 @@ class MotMasterExperiment(Experiment):
                 f"{cls.__name__} has {len(sequencers)} MOTMasters; exactly one "
                 f"must have master=True (found {len(masters)})"
             )
+        by_device: dict[str, str] = {}
+        for name, sequencer in sequencers.items():
+            if sequencer.device_name in by_device:
+                raise TypeError(
+                    f"{cls.__name__}: {by_device[sequencer.device_name]} and {name} "
+                    f"both use {sequencer.device_name!r}; a follower waiting for its "
+                    "trigger would block the master on the shared device server"
+                )
+            by_device[sequencer.device_name] = name
         cls._declared_targets()
 
     @classmethod
@@ -304,8 +313,10 @@ class MotMasterExperiment(Experiment):
                     (
                         attribute,
                         TimeoutError(
-                            f"{attribute} did not finish within {timeout} s; "
-                            "it may still be waiting for its trigger"
+                            f"{attribute} did not finish within {timeout} s; it may "
+                            "still be waiting for its trigger. Restart the "
+                            f"{self.motmasters()[attribute].device_name!r} device "
+                            "server (or trigger it) before the next task."
                         ),
                     )
                 )

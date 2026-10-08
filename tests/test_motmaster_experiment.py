@@ -41,6 +41,7 @@ class FakeSequencer:
         return dict(self.params)
 
     def start_motmaster_experiment(self, parameters=None):
+        self._note("start")
         time.sleep(self.go_delay)
         self._note("go", parameters)
         if self.fail_go:
@@ -141,10 +142,11 @@ def test_unknown_parameter_that_is_only_scanned_fails_before_any_sequence_runs(r
     assert goes(log, "rb") == []
 
 
-def test_non_numeric_script_parameters_pass_through_unconverted(rig):
+def test_a_dotted_value_for_a_non_numeric_script_parameter_is_sent_as_given(rig):
     log, _ = rig
     run_local(Single, **{"rb.label": 3})
-    assert goes(log, "rb")[0]["label"] == 3
+    label = goes(log, "rb")[0]["label"]
+    assert label == 3.0 and isinstance(label, float)
 
 
 def test_dotted_name_for_an_unknown_motmaster_is_rejected_at_submit():
@@ -161,13 +163,14 @@ def test_dotted_name_for_a_declared_parameter_is_rejected_at_submit():
         Scan(axes=[ListAxis(argument="rb.tPulse", values=[1e-6])]).points(Single)
 
 
-def test_master_is_untriggered_and_followers_arm_first(rig):
+def test_master_is_untriggered_and_followers_start_first(rig, monkeypatch):
     log, _ = rig
+    monkeypatch.setattr(MotMasterExperiment, "follower_arm_delay", 0.05)
     run_local(Pair, **{"caf.bTop": 0.7})
     assert ("rb", "triggered", False) in log
     assert ("caf", "triggered", True) in log
-    order = [event[0] for event in log if event[1] == "go"]
-    assert order == ["caf", "rb"] or order == ["rb", "caf"]
+    starts = [event[0] for event in log if event[1] == "start"]
+    assert starts == ["caf", "rb"]
     assert goes(log, "caf") == [{"bTop": 0.7}]
 
 
@@ -232,7 +235,9 @@ def test_follower_that_never_finishes_fails_after_its_timeout(rig):
     measurement = run_local(Pair)
     assert time.monotonic() - started < 0.9
     assert measurement.status == "failed"
-    assert "did not finish within 0.1 s" in measurement.attrs["error"]
+    error = measurement.attrs["error"]
+    assert "did not finish within 0.1 s" in error
+    assert "Restart the 'CaF MotMaster' device server" in error
 
 
 def test_declaration_rules_are_checked_at_class_definition():
@@ -261,6 +266,12 @@ def test_declaration_rules_are_checked_at_class_definition():
             a = MotMaster("Rb MotMaster", script="s")
             tPulse = MotMasterNumber(1.0)
             pulse = MotMasterNumber(1.0, parameter="tPulse")
+
+    with pytest.raises(TypeError, match="a and b both use 'Rb MotMaster'"):
+
+        class SharedDevice(MotMasterExperiment):
+            a = MotMaster("Rb MotMaster", script="s", master=True)
+            b = MotMaster("Rb MotMaster", script="t")
 
     with pytest.raises(TypeError, match="'nope'"):
 

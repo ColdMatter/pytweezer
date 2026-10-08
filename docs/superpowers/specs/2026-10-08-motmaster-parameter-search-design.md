@@ -114,8 +114,10 @@ accepts any method name.
 - Unknown MOTMaster attribute in a dotted name: fails at submit.
 - Follower failure: collected, re-raised after the master finishes.
 - Master fails before triggering: followers are joined with `follower_timeout`;
-  the task fails and the stuck follower is logged. Abort is the only way to free
-  it (no known way to cancel a triggered `Go()`).
+  the task fails and the stuck follower is logged. Abort kills the worker but
+  not the `Go()` call already in flight on the follower's device server, which
+  stays blocked until it is triggered; restart that device server (or trigger
+  it) before the next task, whose `prepare()` would otherwise hang on it.
 
 ## Tests
 
