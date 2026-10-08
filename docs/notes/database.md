@@ -76,20 +76,63 @@ versions its current Windows build supports before choosing the version.
    ```
 
 6. **Grafana**: install with the Windows installer (grafana.com). It runs as a
-   service on <http://localhost:3000>. Then:
-   1. Copy `deploy/grafana/provisioning/datasources/pytweezer.yaml` and
-      `deploy/grafana/provisioning/dashboards/pytweezer.yaml` into the matching
-      folders under `<Grafana>\conf\provisioning\`.
+   service on port 3000. Then:
+   1. Copy the three files under `deploy/grafana/provisioning/`
+      (`datasources\pytweezer.yaml`, `dashboards\pytweezer.yaml` and
+      `alerting\pytweezer.yaml`) into the matching folders under
+      `<Grafana>\conf\provisioning\`.
    2. In the dashboards file, set `path` to `deploy\grafana\dashboards` in this
-      PC's pytweezer checkout.
+      PC's pytweezer checkout, so a `git pull` updates the dashboards.
    3. Set a system environment variable `GRAFANA_DB_PASSWORD` to the `grafana`
       role's password.
-   4. Restart the Grafana service.
+   4. In `<Grafana>\conf\custom.ini`, set an admin password and let anyone on
+      the lab network view dashboards without logging in, so the GUI's
+      **Open in Grafana** buttons go straight to the run:
 
-   The *pytweezer overview* dashboard has three parts:
-   - a readings plot, with a dropdown for measurement and field;
-   - each run drawn as a shaded region with its rid and class;
-   - a plot of one per-point result over time, and a table of runs.
+      ```ini
+      [security]
+      admin_password = <admin password>
+
+      [auth.anonymous]
+      enabled = true
+      org_role = Viewer
+      ```
+
+      Anonymous viewing is only acceptable because Grafana is reachable from
+      the lab subnet alone. Don't expose port 3000 any wider.
+   5. Open the port to the lab subnet, then restart the Grafana service:
+
+      ```powershell
+      New-NetFirewallRule -DisplayName "Grafana (lab)" -Direction Inbound `
+        -Protocol TCP -LocalPort 3000 -RemoteAddress 10.59.3.0/24 -Action Allow
+      ```
+
+   The GUI expects Grafana at `http://<server PC>:3000`. If it lives
+   elsewhere, set `PYTWEEZER_GRAFANA_URL` on each lab PC.
+
+   Three dashboards, cross-linked at the top of each:
+   - **pytweezer overview**: readings by measurement and field, filtered by
+     the `system` tag (Rb/CaF). Each run is drawn as a shaded region. Below
+     are a per-point result over time and a table of runs whose rids link to
+     the run dashboard.
+   - **pytweezer run**: one run, chosen by rid. Shows its arguments and scan,
+     each numeric result against the scanned argument and against time, the
+     logger readings during the run, and its points. **Open in Grafana** in
+     the Experiments queue and the Results tab opens this dashboard on the
+     selected run.
+   - **pytweezer lab health**: the latest reading of every field against its
+     limits, each logger's state (ok, stale or stopped), the running runs
+     and the firing alerts.
+
+   Two alert rules, in the `pytweezer` folder, evaluate every minute:
+   - **Reading out of range**: a field's latest reading (within 10 min) has
+     been outside its `limits` for 1 min.
+   - **Logger stale**: a running logger has written nothing for 10 intervals
+     (at least 5 min).
+
+   No contact point is set up, so alerts only show on Grafana's Alerting page
+   and the lab health dashboard. To be notified, add a contact point (email,
+   Teams or Slack) in Grafana and route the `source=pytweezer` label to it.
 
 **Without TimescaleDB** the code still works: `readings` stays a plain,
 uncompressed table, and each process logs one warning when it connects.
@@ -150,6 +193,18 @@ The `add-logger` skill (`.claude/skills/add-logger/`) walks through the class,
 the `LOGGER_REGISTRY` factory in `pytweezer/servers/logger_server.py` and the
 `CONFIG["Loggers"]` entry. Start a logger from the GUI's **Loggers** tab, or
 standalone with `poetry run pytweezer-logger "NI ADC Logger"`.
+
+An entry may set per-field `limits`, either bound `None`:
+
+```python
+"limits": {"ai0": [0.0, 5.0], "ai1": [None, 3.0]},
+```
+
+The first time a logger writes a measurement, it upserts a row into the
+`measurements` table, holding the logger's name, its `interval`, these
+`limits` and `active = true`. A clean stop sets `active = false`. Grafana's
+alert rules and the lab health dashboard read this table, so a crashed or hung
+logger shows as stale, but one stopped from the GUI doesn't.
 
 ## 5. Experiment runs and points
 
