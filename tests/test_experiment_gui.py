@@ -1,5 +1,8 @@
 """Experiments tab widgets, offscreen, with a fake manager client and feed."""
 
+import threading
+import time
+
 import pytest
 from PyQt6 import QtCore
 
@@ -547,3 +550,135 @@ def test_the_panel_reads_simulated_sequencers_when_the_manager_simulates(qapp):
     )
     parameters = panel.editor.fetcher.source("Rb MotMaster", "RbTweezerBasic")
     assert "tDelay1" in parameters
+
+
+class SlowSource(Source):
+    """Fails the first ``failures`` calls, then waits for ``release`` before answering."""
+
+    def __init__(self, parameters, failures=0):
+        super().__init__(parameters)
+        self.failures = failures
+        self.release = threading.Event()
+
+    def __call__(self, device, script):
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("no route to host")
+        self.release.wait(5)
+        return super().__call__(device, script)
+
+
+def pump_until(qapp, condition):
+    deadline = time.monotonic() + 5
+    while not condition() and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    return condition()
+
+
+def test_rows_restored_before_the_fetch_are_retyped_from_the_script(qapp):
+    source = SlowSource(PARAMETERS)
+    editor = ArgumentEditor()
+    editor.set_parameter_source(source)
+    try:
+        editor.set_experiment(SEQUENCED)
+        axis = LinearAxis(argument="rb.tDelay1", start=0, stop=4, n=5)
+        editor.load_request(
+            TaskRequest(
+                experiment=SEQUENCED["module"],
+                class_name="Sequenced",
+                args={"rb.coil_current": 2},
+                scan=Scan(axes=[axis]),
+            )
+        )
+        assert editor.rows["rb.tDelay1"].schema["kind"] == "number"
+        assert editor.rows["rb.coil_current"].schema["kind"] == "integer"
+    finally:
+        source.release.set()
+    box = editor.motmaster_boxes["rb"]
+    assert pump_until(qapp, lambda: box.defaults)
+
+    delay, current = editor.rows["rb.tDelay1"], editor.rows["rb.coil_current"]
+    assert (delay.schema["kind"], delay.schema["default"]) == ("integer", 5)
+    assert (current.schema["kind"], current.schema["default"]) == ("number", 1.5)
+    assert delay.scanning and editor.request().scan.axes == [axis]
+    assert current.value.value() == 2.0
+    assert current.label.property("state") == "modified"
+    assert editor.request().args == {"pulse": 1e-6, "rb.coil_current": 2.0}
+
+
+def test_a_non_whole_value_for_an_integer_parameter_is_kept_and_reported(qapp):
+    source = SlowSource(PARAMETERS)
+    editor = ArgumentEditor()
+    editor.set_parameter_source(source)
+    try:
+        editor.set_experiment(SEQUENCED)
+        editor.load_request(
+            TaskRequest(
+                experiment=SEQUENCED["module"],
+                class_name="Sequenced",
+                scan=Scan(
+                    axes=[LinearAxis(argument="rb.tDelay1", start=0, stop=2.5, n=2)]
+                ),
+            )
+        )
+    finally:
+        source.release.set()
+    assert pump_until(qapp, lambda: editor.motmaster_boxes["rb"].defaults)
+    row = editor.rows["rb.tDelay1"]
+    assert row.schema["default"] == 5 and row.scan.stop.value() == 2.5
+    with pytest.raises(ValueError, match="rb.tDelay1 is an integer parameter"):
+        editor.request()
+
+
+def test_a_linear_scan_of_an_integer_parameter_must_give_whole_steps(qapp):
+    editor = sequenced_editor(qapp, Source(PARAMETERS))
+    editor.motmaster_boxes["rb"].choose("tDelay1")
+    row = editor.rows["rb.tDelay1"]
+    row.scan_button.setChecked(True)
+    row.scan.start.set_value(0)
+    row.scan.stop.set_value(5)
+    row.scan.steps.setValue(3)
+    message = "rb.tDelay1 is an integer parameter: 0 to 5 in 3 steps gives non-whole"
+    with pytest.raises(ValueError, match=message):
+        editor.request()
+    editor.submit_button.click()
+    assert "non-whole" in editor.error.text()
+
+    row.scan.stop.set_value(4)
+    row.scan.steps.setValue(5)
+    assert editor.request().scan.axes[0].raw_values() == [0, 1, 2, 3, 4]
+    row.scan.mode.setCurrentText("list")
+    row.scan.values.setText("1, 2, 7")
+    assert editor.request().scan.axes[0].values == [1, 2, 7]
+
+
+def test_a_declared_integer_may_still_scan_in_non_whole_steps(editor):
+    editor.rows["shots"].scan_button.setChecked(True)
+    editor.rows["shots"].scan.start.set_value(1)
+    editor.rows["shots"].scan.stop.set_value(2)
+    editor.rows["shots"].scan.steps.setValue(3)
+    assert editor.request().scan.axes[0].argument == "shots"
+
+
+def test_retry_shows_it_is_loading_again(qapp):
+    source = SlowSource(PARAMETERS, failures=1)
+    editor = sequenced_editor(qapp, source)
+    box = editor.motmaster_boxes["rb"]
+    assert box.status.property("state") == "crashed"
+    editor.fetcher.threaded = True
+    try:
+        box.retry.click()
+        assert "Loading" in box.status.text()
+        assert box.retry.isHidden() and box.status.property("state") == ""
+    finally:
+        source.release.set()
+    assert pump_until(qapp, lambda: box.defaults)
+    assert not box.search.isHidden()
+
+
+def test_a_row_for_an_unknown_parameter_needs_a_value(qapp):
+    editor = sequenced_editor(qapp, Source(error="no route to host"))
+    with pytest.raises(ValueError, match="rb.tDelay1"):
+        editor.add_motmaster_row("rb", "tDelay1")
+    assert "rb.tDelay1" not in editor.rows

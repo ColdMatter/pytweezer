@@ -556,12 +556,14 @@ class ArgumentEditor(QWidget):
                     attribute, name
                 )
             )
-            box.retry.clicked.connect(
-                lambda _=False, box=box: self.fetcher.request(box.device, box.script)
-            )
+            box.retry.clicked.connect(lambda _=False, box=box: self._retry(box))
             self.motmaster_boxes[attribute] = box
             self.arguments_layout.addWidget(box)
             self.fetcher.request(box.device, box.script)
+
+    def _retry(self, box):
+        box.set_loading()
+        self.fetcher.request(box.device, box.script)
 
     def add_motmaster_row(self, attribute, parameter, value=None):
         """Add (or return) the row for script parameter ``parameter`` of ``attribute``.
@@ -574,14 +576,28 @@ class ArgumentEditor(QWidget):
             return self.rows[name]
         box = self.motmaster_boxes[attribute]
         default = box.defaults.get(parameter, value)
+        if default is None:
+            raise ValueError(
+                f"{name}: script {box.script} has no known parameter "
+                f"{parameter!r}; give a value"
+            )
+        kind = "integer" if isinstance(default, int) else "number"
+        row = self._place_motmaster_row(box, name, kind, default, box.grid.rowCount())
+        self._searched[name] = (attribute, parameter)
+        if box.defaults and parameter not in box.defaults:
+            self._flag_missing(row, box.script)
+        self._update_count()
+        return row
+
+    def _place_motmaster_row(self, box, name, kind, default, grid_row):
+        parameter = name.partition(".")[2]
         schema = {
-            "kind": "integer" if isinstance(default, int) else "number",
+            "kind": kind,
             "default": default,
             "tooltip": f"{parameter} in script {box.script}",
             "group": box.title(),
         }
         row = ArgumentRow(name, schema, box)
-        grid_row = box.grid.rowCount()
         row.add_to(box.grid, grid_row)
         remove = QToolButton()
         remove.setText("×")
@@ -591,22 +607,54 @@ class ArgumentEditor(QWidget):
         row.remove_button = remove
         row.changed.connect(self._update_count)
         self.rows[name] = row
-        self._searched[name] = (attribute, parameter)
-        if box.defaults and parameter not in box.defaults:
-            self._flag_missing(row, box.script)
-        self._update_count()
         return row
 
     def remove_motmaster_row(self, name):
         row = self.rows.pop(name)
         attribute, _ = self._searched.pop(name)
-        grid = self.motmaster_boxes[attribute].grid
+        self._discard_row(row, self.motmaster_boxes[attribute].grid)
+        self._update_count()
+
+    @staticmethod
+    def _discard_row(row, grid):
         for widget in (row.label, row.stack, row.scan_button, row.remove_button):
             grid.removeWidget(widget)
             widget.hide()
             widget.deleteLater()
         row.deleteLater()
-        self._update_count()
+
+    def _retype_motmaster_row(self, name, default):
+        """Rebuild a row made before the script's parameters were known, keeping its edits."""
+        old = self.rows[name]
+        box = self.motmaster_boxes[self._searched[name][0]]
+        kind = "integer" if isinstance(default, int) else "number"
+        scan = old.scan
+        kept = [old.value.value(), scan.start.value(), scan.stop.value()]
+        try:
+            kept += parse_list(scan.values.text(), {"kind": "number"})
+        except ValueError:
+            pass
+        if kind == "integer" and not all(float(v).is_integer() for v in kept):
+            # An integer field would round them; request() reports them instead.
+            kind = "number"
+        if (kind, default) == (old.schema["kind"], old.schema["default"]):
+            return
+        grid_row = box.grid.getItemPosition(box.grid.indexOf(old.label))[0]
+        steps, mode, text = (
+            scan.steps.value(),
+            scan.mode.currentText(),
+            scan.values.text(),
+        )
+        self._discard_row(old, box.grid)
+        row = self._place_motmaster_row(box, name, kind, default, grid_row)
+        row.value.set_value(kept[0])
+        if old.scanning:
+            row.scan_button.setChecked(True)
+            row.scan.mode.setCurrentText(mode)
+            row.scan.start.set_value(kept[1])
+            row.scan.stop.set_value(kept[2])
+            row.scan.steps.setValue(steps)
+            row.scan.values.setText(text)
 
     def _flag_missing(self, row, script):
         row.label.setText(f"{row.name} (not in script)")
@@ -619,8 +667,12 @@ class ArgumentEditor(QWidget):
             if (box.device, box.script) != (device, script):
                 continue
             box.set_parameters(parameters)
-            for name, (owner, parameter) in self._searched.items():
-                if owner == attribute and parameter not in box.defaults:
+            for name, (owner, parameter) in list(self._searched.items()):
+                if owner != attribute:
+                    continue
+                if parameter in box.defaults:
+                    self._retype_motmaster_row(name, box.defaults[parameter])
+                else:
                     self._flag_missing(self.rows[name], script)
 
     def _parameters_failed(self, device, script, error):
@@ -646,6 +698,7 @@ class ArgumentEditor(QWidget):
         due = None
         if self.start_at_enabled.isChecked():
             due = self.start_at.dateTime().toPyDateTime().astimezone()
+        self._check_integer_parameters()
         return TaskRequest(
             experiment=self.schema["module"],
             class_name=self.schema["class_name"],
@@ -660,6 +713,31 @@ class ArgumentEditor(QWidget):
             label=self.label.text(),
             submitter=submitter,
         )
+
+    def _check_integer_parameters(self):
+        """Raise ``ValueError`` if a searched Int32 parameter would be sent a non-whole value."""
+        for name, (attribute, parameter) in self._searched.items():
+            row = self.rows[name]
+            script_default = self.motmaster_boxes[attribute].defaults.get(parameter)
+            if row.schema["kind"] != "integer" and not isinstance(script_default, int):
+                continue
+            if not row.scanning:
+                values = [row.value.value()]
+            else:
+                axis = row.scan.axis()
+                values = axis.raw_values()
+                if isinstance(axis, LinearAxis):
+                    if all(float(v).is_integer() for v in values):
+                        continue
+                    raise ValueError(
+                        f"{name} is an integer parameter: {axis.start:g} to "
+                        f"{axis.stop:g} in {axis.n} steps gives non-whole values"
+                    )
+            if not all(float(v).is_integer() for v in values):
+                raise ValueError(
+                    f"{name} is an integer parameter: "
+                    f"{format_list(values, row.schema)} is not whole"
+                )
 
     def _update_count(self):
         count = self.repetitions.value()

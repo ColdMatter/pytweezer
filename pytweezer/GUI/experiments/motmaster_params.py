@@ -115,7 +115,6 @@ class MotMasterBox(QGroupBox):
         self.defaults: dict[str, int | float] = {}
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self._show_status("Loading the script's parameters…")
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search for a script parameter to add")
         self.search.setFixedWidth(360)
@@ -139,6 +138,12 @@ class MotMasterBox(QGroupBox):
         layout = QVBoxLayout(self)
         layout.addLayout(top)
         layout.addLayout(self.grid)
+        self.set_loading()
+
+    def set_loading(self) -> None:
+        self.search.setVisible(False)
+        self.retry.setVisible(False)
+        self._show_status("Loading the script's parameters…")
 
     def set_parameters(self, parameters: dict[str, Any]) -> None:
         self.defaults = {name: v for name, v in parameters.items() if is_number(v)}
