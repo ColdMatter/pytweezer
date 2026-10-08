@@ -22,6 +22,7 @@ import numpy as np
 from rich.progress import track
 
 from pytweezer.servers.device_client import get_device
+from pytweezer.servers.simulated_device import simulate
 
 # NOTE: these imports will only work with the pythonnet package
 try:
@@ -275,6 +276,21 @@ class MotMasterInterface:
 
     def get_params_csdict(self):
         return self.motmaster.GetParameters()
+
+    def script_parameters(self, script: str) -> dict[str, Any]:
+        """Return ``{name: default}`` for ``script``, leaving the selected script unchanged.
+
+        Must not run during a sequence: it briefly changes MOTMaster's script path.
+        """
+        previous = self.script
+        self.set_motmaster_experiment(script)
+        try:
+            return self.get_params()
+        finally:
+            if previous is not None:
+                self.set_motmaster_experiment(previous)
+            else:
+                self.script = self.script_path = None
 
     def set_run_until_stopped(self, value: bool):
         self.motmaster.SetRunUntilStopped(value)
@@ -760,6 +776,45 @@ class MotMasterInterface:
                 "start_set_point": start_set_point,
             }
         return results
+
+
+SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
+    "RbTweezerBasic": {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5, "nShots": 1},
+    "CaFTweezerLoad": {"tLoad": 100, "bTop": 0.5, "tHold": 10e-3},
+}
+_SIMULATED_FALLBACK = {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5}
+
+
+@simulate(MotMasterInterface)
+class SimulatedMotMasterInterface:
+    """MOTMaster stand-in with canned script parameters that rejects what the real one would.
+
+    Scripts missing from :data:`SIMULATED_SCRIPT_PARAMETERS` get a fallback parameter set.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.script = None
+
+    def script_parameters(self, script: str) -> dict[str, Any]:
+        return dict(SIMULATED_SCRIPT_PARAMETERS.get(script, _SIMULATED_FALLBACK))
+
+    def set_motmaster_experiment(self, script: str):
+        self.script = script
+
+    def get_params(self) -> dict[str, Any]:
+        if self.script is None:
+            raise ValueError("MotMaster script not set")
+        return self.script_parameters(self.script)
+
+    def start_motmaster_experiment(self, parameters: dict | None = None):
+        known = self.get_params()
+        for name, value in (parameters or {}).items():
+            if name not in known:
+                raise KeyError(f"script {self.script!r} has no parameter {name!r}")
+            if isinstance(known[name], int) and type(value) is not int:
+                raise TypeError(
+                    f"{name!r} is an Int32 in script {self.script!r}; got {value!r}"
+                )
 
 
 def plot_auto_mot_results(results: dict[str, dict[str, Any]]):

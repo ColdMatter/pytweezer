@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pytweezer.drivers.motmaster import MotMasterInterface
+from pytweezer.drivers.motmaster import MotMasterInterface, SimulatedMotMasterInterface
 from pytweezer.experiment import Device, ListAxis, Scan, run_local
 from pytweezer.experiment.motmaster import (
     MotMasterExperiment,
@@ -127,3 +127,57 @@ def test_driver_raises_instead_of_printing():
     driver.script = "x"
     with pytest.raises(RuntimeError, match="Go failed"):
         driver.start_motmaster_experiment()
+
+
+class _FakeDotNet:
+    def __init__(self):
+        self.paths = []
+
+    def SetScriptPath(self, path):
+        self.paths.append(path)
+
+    def GetParameters(self):
+        return {"tDelay1": 5, "tPulse": 20e-6}
+
+
+def test_script_parameters_reads_a_script_and_restores_the_previous_one():
+    driver = _driver()
+    driver.motmaster = _FakeDotNet()
+    driver.set_motmaster_experiment("A")
+    assert driver.script_parameters("B") == {"tDelay1": 5, "tPulse": 20e-6}
+    assert driver.motmaster.paths == ["/scripts/A.cs", "/scripts/B.cs", "/scripts/A.cs"]
+    assert driver.script == "A"
+
+
+def test_script_parameters_leaves_no_script_selected_if_none_was():
+    driver = _driver()
+    driver.motmaster = _FakeDotNet()
+    driver.script_parameters("B")
+    assert driver.script is None and driver.script_path is None
+
+
+def test_simulated_sequencer_serves_and_validates_parameters():
+    simulated = SimulatedMotMasterInterface()
+    parameters = simulated.script_parameters("RbTweezerBasic")
+    assert type(parameters["tDelay1"]) is int and type(parameters["tPulse"]) is float
+    assert simulated.script_parameters("NotInTheTable") == simulated.script_parameters(
+        "AlsoNotInTheTable"
+    )
+    simulated.set_motmaster_experiment("RbTweezerBasic")
+    assert simulated.get_params() == parameters
+    simulated.start_motmaster_experiment({"tDelay1": 7})
+    with pytest.raises(KeyError, match="nope"):
+        simulated.start_motmaster_experiment({"nope": 1})
+    with pytest.raises(TypeError, match="tDelay1"):
+        simulated.start_motmaster_experiment({"tDelay1": 7.5})
+
+
+def test_config_wires_the_simulated_sequencer():
+    from pytweezer.experiment.simulation import SimulatedDevices
+
+    devices = SimulatedDevices()
+    try:
+        backend = devices.get("Rb MotMaster")
+        assert isinstance(backend, SimulatedMotMasterInterface)
+    finally:
+        devices.close()
