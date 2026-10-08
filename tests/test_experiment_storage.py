@@ -12,6 +12,7 @@ from pytweezer.experiment.storage import (
     data_root,
     highest_rid,
     measurement_relpath,
+    read_planned_points,
 )
 
 
@@ -64,6 +65,17 @@ def test_partial_file_is_readable_mid_run(tmp_path):
     assert list(measurement.results["y"]) == [1.5]
     assert measurement.units["y"] == "counts"
     assert list(measurement.points["x"]) == [1.0]
+    writer.close()
+
+
+def test_planned_points_are_readable_in_full_mid_run(tmp_path):
+    path = tmp_path / "m.h5"
+    _, points, writer = make_writer(path)
+    writer.begin_point(points[0])
+    writer.end_point()
+    planned = read_planned_points(path)
+    assert list(planned["x"]) == [1.0, 2.0, 3.0]
+    assert list(planned["index"]) == [0, 1, 2]
     writer.close()
 
 

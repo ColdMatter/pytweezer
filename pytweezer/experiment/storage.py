@@ -343,6 +343,16 @@ def read_header(path: Path | str) -> dict[str, Any]:
         return {key: _plain(value) for key, value in f.attrs.items()}
 
 
+def read_planned_points(path: Path | str) -> dict[str, np.ndarray]:
+    """Every column of ``/points`` for every planned point, not only those run.
+
+    These columns are written when the file is created, so this is safe to read
+    while the measurement runs.
+    """
+    with h5py.File(path, "r", locking=False) as f:
+        return {name: _decode(ds, ds[()]) for name, ds in f["points"].items()}
+
+
 def read_arguments(path: Path | str) -> dict[str, Any]:
     """The effective argument values only, without loading points or results."""
     with h5py.File(path, "r", locking=False) as f:
