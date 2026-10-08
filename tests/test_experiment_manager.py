@@ -20,12 +20,13 @@ def request(**kwargs):
 
 
 @pytest.fixture
-def make_manager(tmp_path):
+def make_manager(tmp_path, recording_db):
     def make():
         return em.ExperimentManager(
             root=tmp_path,
             catalogue=Catalogue(package="none", directory=tmp_path / "none"),
             bind=False,
+            db=recording_db,
         )
 
     return make
@@ -128,6 +129,55 @@ def test_worker_events_drive_the_task(make_manager, tmp_path):
     task = manager.queue.get(1)
     assert task.status == "completed" and task.points_done == 1
     assert manager.queue.state.worker is None
+
+
+def test_runs_and_points_reach_the_database(make_manager, tmp_path, recording_db):
+    manager = make_manager()
+    path = _running_task(manager, tmp_path)
+    with h5py.File(path, "r+") as f:
+        f.create_group("arguments").attrs.update(frequency=2.0, __schema__="{}")
+    manager._record_run(1)
+    base = {"command": "worker", "rid": 1, "token": "tok"}
+
+    manager.handle(
+        base
+        | {
+            "event": "point",
+            "done": 1,
+            "total": 3,
+            "index": 0,
+            "values": {"frequency": 2.0},
+            "scalars": {"counts": 5.0},
+            "t_start": 100.0,
+            "t_end": 101.0,
+        }
+    )
+    manager.handle(base | {"event": "point", "done": 0, "total": 3, "index": None})
+    manager.handle(base | {"event": "finished", "status": "completed"})
+
+    assert recording_db.points == [
+        {
+            "rid": 1,
+            "point_index": 0,
+            "t_start": 100.0,
+            "t_end": 101.0,
+            "scan_values": {"frequency": 2.0},
+            "scalars": {"counts": 5.0},
+        }
+    ]
+    started, finished = recording_db.runs
+    assert started["status"] == "running" and started["t_end"] is None
+    assert started["h5_path"] == "2026/01/01/000001_RabiDemo.h5"
+    assert finished["status"] == "completed" and finished["t_end"] is not None
+    assert finished["arguments"] == {"frequency": 2.0}
+    assert finished["simulated"] is manager.simulate
+
+
+def test_a_run_settled_on_restart_is_recorded(make_manager, tmp_path, recording_db):
+    manager = make_manager()
+    _running_task(manager, tmp_path, pid=2**22 + 12345)
+    make_manager()
+    assert recording_db.runs[-1]["status"] == "interrupted"
 
 
 def test_restart_with_dead_worker_marks_task_interrupted(make_manager, tmp_path):

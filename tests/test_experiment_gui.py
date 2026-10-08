@@ -13,6 +13,7 @@ from pytweezer.experiment import (
     Scan,
 )
 from pytweezer.experiment.task import TaskRequest
+from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
 from pytweezer.GUI.experiments.panel import ExperimentsPanel
 from pytweezer.GUI.experiments.queue_view import QueueView
@@ -224,6 +225,24 @@ def test_queue_view_rows_and_buttons(qapp):
     # selection survives a refresh
     view.set_snapshot({"running": None, "queue": [task(4, "queued")], "history": []})
     assert view.selected_task()["rid"] == 4
+
+
+def test_open_in_grafana_needs_a_started_queued_task(qapp, monkeypatch):
+    opened = []
+    monkeypatch.setattr(queue_view, "open_in_browser", opened.append)
+    view = QueueView()
+    view.set_snapshot(
+        {
+            "running": task(3, "running", t_start="2026-10-07T12:01:00+01:00"),
+            "queue": [task(4, "queued")],
+            "history": [],
+        }
+    )
+    view.table.selectRow(1)
+    assert not view.buttons["grafana"].isEnabled()
+    view.table.selectRow(0)
+    view.buttons["grafana"].click()
+    assert len(opened) == 1 and "var-rid=3" in opened[0]
 
 
 def test_abort_needs_confirmation(qapp):

@@ -80,6 +80,8 @@ class ManagerLink:
                 index=point.index if point else None,
                 values=point.values if point else {},
                 scalars=progress.scalars or {},
+                t_start=progress.t_start,
+                t_end=progress.t_end,
             )
         )
         while action == Action.PAUSE:

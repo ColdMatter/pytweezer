@@ -115,7 +115,9 @@ def test_simulated_data_root_is_separate(monkeypatch, tmp_path):
     assert data_root() == tmp_path / "share" / "simulated"
 
 
-def test_manager_tells_workers_and_guis_it_is_simulating(monkeypatch, tmp_path):
+def test_manager_tells_workers_and_guis_it_is_simulating(
+    monkeypatch, tmp_path, recording_db
+):
     conf = {"host": "127.0.0.1", "port": 1, "pub_port": 2, "simulate": True}
     monkeypatch.setattr(
         em, "get_config", lambda: {"Servers": {"Experiment Manager": conf}}
@@ -124,6 +126,7 @@ def test_manager_tells_workers_and_guis_it_is_simulating(monkeypatch, tmp_path):
         root=tmp_path,
         catalogue=Catalogue(package="none", directory=tmp_path / "none"),
         bind=False,
+        db=recording_db,
     )
     assert manager.handle({"command": "ping"})["simulated"] is True
     assert manager.handle({"command": "snapshot"})["snapshot"]["simulated"] is True

@@ -135,6 +135,8 @@ class MeasurementWriter:
         self._point: Point | None = None
         self._recorded_this_point: set[str] = set()
         self.point_scalars: dict[str, float] = {}
+        self.point_t_start: float | None = None
+        self.point_t_end: float | None = None
 
         f = self.file
         f.attrs.update({key: _attr_value(value) for key, value in header.items()})
@@ -182,11 +184,13 @@ class MeasurementWriter:
         self._point = point
         self._recorded_this_point = set()
         self.point_scalars = {}
-        self.file["points/t_start"][point.index] = datetime.now().timestamp()
+        self.point_t_start = datetime.now().timestamp()
+        self.file["points/t_start"][point.index] = self.point_t_start
 
     def end_point(self) -> None:
         point = self._point
-        self.file["points/t_end"][point.index] = datetime.now().timestamp()
+        self.point_t_end = datetime.now().timestamp()
+        self.file["points/t_end"][point.index] = self.point_t_end
         self.file.attrs["n_done"] = point.index + 1
         self._point = None
         self.file.flush()
@@ -337,6 +341,13 @@ def read_header(path: Path | str) -> dict[str, Any]:
     """Root attributes only, for listing files cheaply."""
     with h5py.File(path, "r", locking=False) as f:
         return {key: _plain(value) for key, value in f.attrs.items()}
+
+
+def read_arguments(path: Path | str) -> dict[str, Any]:
+    """The effective argument values only, without loading points or results."""
+    with h5py.File(path, "r", locking=False) as f:
+        attrs = f["arguments"].attrs
+        return {key: _plain(attrs[key]) for key in attrs if key != "__schema__"}
 
 
 def _read(f: h5py.File, path: Path | None, wanted: set[str] | None) -> Measurement:

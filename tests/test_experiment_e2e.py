@@ -53,7 +53,8 @@ def free_port():
 
 
 class Harness:
-    def __init__(self, tmp_path, monkeypatch):
+    def __init__(self, tmp_path, monkeypatch, db):
+        self.db = db
         package = tmp_path / "labexp"
         package.mkdir()
         (package / "__init__.py").write_text("")
@@ -85,6 +86,7 @@ class Harness:
             self.manager = em.ExperimentManager(
                 root=self.root,
                 catalogue=Catalogue(package="labexp", directory=self.package_dir),
+                db=self.db,
             )
             ready.set()
             self.manager.serve_forever()
@@ -114,8 +116,8 @@ class Harness:
 
 
 @pytest.fixture
-def harness(tmp_path, monkeypatch):
-    harness = Harness(tmp_path, monkeypatch)
+def harness(tmp_path, monkeypatch, recording_db):
+    harness = Harness(tmp_path, monkeypatch, recording_db)
     harness.start()
     yield harness
     running = harness.manager.queue.running
@@ -140,6 +142,12 @@ def test_tasks_run_in_order_and_write_measurements(harness):
     assert list(measurement.results["index"]) == [0, 1]
     history = harness.client.snapshot()["history"]
     assert [t["rid"] for t in history] == [second, first]
+
+    points = [p for p in harness.db.points if p["rid"] == second]
+    assert [p["point_index"] for p in points] == [0, 1]
+    assert list(measurement.points["t_end"]) == [p["t_end"] for p in points]
+    assert harness.db.runs[-1]["rid"] == second
+    assert harness.db.runs[-1]["status"] == "completed"
 
 
 def test_catalogue_lists_runnable_experiments(harness):

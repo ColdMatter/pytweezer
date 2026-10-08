@@ -1,0 +1,19 @@
+# Copy to <Grafana>\conf\provisioning\datasources\ on the server PC.
+# Grafana reads GRAFANA_DB_PASSWORD from its own environment (the read-only
+# "grafana" role's password; see docs/notes/database.md).
+apiVersion: 1
+
+datasources:
+  - name: pytweezer
+    uid: pytweezer
+    type: grafana-postgresql-datasource
+    url: localhost:5432
+    user: grafana
+    isDefault: true
+    jsonData:
+      database: pytweezer
+      sslmode: disable
+      postgresVersion: 1700
+      timescaledb: true
+    secureJsonData:
+      password: ${GRAFANA_DB_PASSWORD}

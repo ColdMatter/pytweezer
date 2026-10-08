@@ -4,7 +4,7 @@ This is the template for the intended Logger model — a Logger opens and owns i
 data source directly (real or virtual), rather than polling an existing device
 RPC server. Here the source is a National Instruments analog-input DAQ: the
 logger creates its own ``nidaqmx.Task``, reads the configured channels on each
-interval, and pushes the voltages to InfluxDB.
+interval, and writes the voltages to the database.
 
 Config entry shape (``CONFIG["Loggers"][name]``)::
 

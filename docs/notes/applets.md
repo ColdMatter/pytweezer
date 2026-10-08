@@ -187,4 +187,4 @@ and looked at without hubs, hardware, or a window appearing on screen.
   `ProcessTile`, not applets. The launcher is the tool; the applets are what it
   launches.
 - **Loggers** (`pytweezer/loggers/`) — those also consume streams/hardware but
-  write to InfluxDB rather than displaying; see `influx_logging.md`.
+  write to the database rather than displaying; see `database.md`.

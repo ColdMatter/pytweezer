@@ -1,4 +1,4 @@
-"""Background InfluxDB loggers.
+"""Background database loggers.
 
 ``Logger`` is the generic base; concrete subclasses (e.g.
 :class:`~pytweezer.loggers.ni_adc_logger.NIADCLogger`) each own their data source

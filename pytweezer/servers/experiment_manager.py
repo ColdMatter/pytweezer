@@ -27,6 +27,7 @@ import zmq
 
 from pytweezer.configuration.config import get_config
 from pytweezer.configuration.paths import tweezerpath
+from pytweezer.database.writer import DBWriter
 from pytweezer.experiment.catalogue import Catalogue
 from pytweezer.experiment.client import connect_host
 from pytweezer.experiment.queue import (
@@ -40,6 +41,7 @@ from pytweezer.experiment.storage import (
     data_root,
     highest_rid,
     measurement_relpath,
+    read_arguments,
     read_header,
 )
 from pytweezer.experiment.task import Action, TaskRequest, TaskStatus
@@ -60,6 +62,7 @@ class ExperimentManager:
         root: Path | str | None = None,
         catalogue: Catalogue | None = None,
         bind: bool = True,
+        db: DBWriter | None = None,
     ) -> None:
         self.conf = get_config()["Servers"][server_name]
         self.root = Path(root) if root is not None else data_root()
@@ -77,6 +80,8 @@ class ExperimentManager:
         state = self.queue.state
         state.next_rid = max(state.next_rid, highest_rid(self.root) + 1)
         self.catalogue = catalogue or Catalogue()
+        #: Receives a ``runs`` row per start/finish and a ``points`` row per point.
+        self.db = db if db is not None else DBWriter()
 
         self.process: psutil.Process | None = None
         self._abort_requested: int | None = None
@@ -121,6 +126,7 @@ class ExperimentManager:
         finally:
             # Deliberately leave a running worker alone: the next manager adopts it.
             self.catalogue.close()
+            self.db.close()
             self.rep.close(linger=0)
             self.pub.close(linger=0)
 
@@ -251,6 +257,14 @@ class ExperimentManager:
         if event == "point":
             self.queue.mark_progress(rid, int(request["done"]), int(request["total"]))
             if request.get("index") is not None:
+                self.db.record_point(
+                    rid,
+                    request["index"],
+                    request.get("t_start"),
+                    request.get("t_end"),
+                    request.get("values", {}),
+                    request.get("scalars", {}),
+                )
                 self._publish(
                     {
                         "type": "experiment_point",
@@ -296,6 +310,7 @@ class ExperimentManager:
             create_time=self.process.create_time(),
         )
         self.queue.mark_started(task.rid, record, relpath.as_posix())
+        self._record_run(task.rid)
         logger.info("Started task %s (worker pid %s)", task.rid, self.process.pid)
         self._changed()
 
@@ -384,10 +399,42 @@ class ExperimentManager:
 
     def _finish(self, rid: int, status: TaskStatus, error: str | None) -> None:
         self.queue.finish(rid, status, error)
+        self._record_run(rid)
         logger.info("Task %s %s", rid, status)
         if error:
             logger.warning("Task %s error: %s", rid, error.strip().splitlines()[-1])
         self._changed()
+
+    def _record_run(self, rid: int) -> None:
+        task = self.queue.get(rid)
+        arguments = task.args
+        path = self.root / task.h5_path if task.h5_path else None
+        if task.status.finished and path is not None and path.exists():
+            # The file holds the effective values, defaults included.
+            try:
+                arguments = read_arguments(path)
+            except (OSError, KeyError):
+                pass
+        self.db.record_run(
+            {
+                "rid": task.rid,
+                "experiment": task.experiment,
+                "class_name": task.class_name,
+                "label": task.label,
+                "submitter": task.submitter,
+                "arguments": arguments,
+                "scan": task.scan.model_dump(mode="json"),
+                "status": str(task.status),
+                "error": task.error,
+                "t_submit": task.t_submit,
+                "t_start": task.t_start,
+                "t_end": task.t_end,
+                "points_done": task.points_done,
+                "points_total": task.points_total,
+                "h5_path": task.h5_path,
+                "simulated": self.simulate,
+            }
+        )
 
     # -- state and publishing ------------------------------------------------
 

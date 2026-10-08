@@ -106,6 +106,25 @@ def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
     assert requests[0].args == {"gain": 3.0}
 
 
+def test_open_in_grafana_only_for_queued_runs(qapp, tmp_path, monkeypatch):
+    from pytweezer.GUI.experiments import results
+
+    opened = []
+    monkeypatch.setattr(results, "open_in_browser", opened.append)
+    local = make_file(tmp_path, rid=1)
+    queued = make_file(tmp_path, rid=2)
+    with h5py.File(queued, "a") as f:
+        f.attrs["rid"] = 12
+    panel = ResultsPanel(root=tmp_path)
+    panel.refresh()
+
+    panel.load(local)
+    assert not panel.grafana_button.isEnabled()
+    panel.load(queued)
+    panel.grafana_button.click()
+    assert len(opened) == 1 and "var-rid=12" in opened[0]
+
+
 def test_panel_reports_an_unreadable_file(qapp, tmp_path):
     bad = tmp_path / "2026" / "10" / "07" / "000009_Bad.h5"
     bad.parent.mkdir(parents=True)
