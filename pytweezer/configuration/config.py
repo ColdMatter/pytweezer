@@ -261,6 +261,9 @@ CONFIG["Servers"]["Experiment Manager"] = {
     # Measurement files and the queue state; PYTWEEZER_DATA_DIR overrides it.
     # None means <repo>/data.
     "data_root": None,
+    # The same directory as other PCs see it (e.g. a mapped network share), for
+    # their Results tab. None means they use data_root as well.
+    "client_data_root": None,
     # Seconds a worker keeps running without reaching the manager.
     "orphan_timeout": 30.0,
 }

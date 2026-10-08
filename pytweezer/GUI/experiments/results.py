@@ -212,10 +212,10 @@ class ResultsPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.itemExpanded.connect(self._fill_day)
         self.tree.currentItemChanged.connect(self._selected)
-        browser = Region("well", "Measurements", "newest first")
-        browser.header.addWidget(self.show_unfinished)
-        browser.body.addWidget(self.tree, 1)
-        splitter.addWidget(browser)
+        self.browser = Region("well", "Measurements", "newest first")
+        self.browser.header.addWidget(self.show_unfinished)
+        self.browser.body.addWidget(self.tree, 1)
+        splitter.addWidget(self.browser)
 
         self.metadata = QPlainTextEdit()
         self.metadata.setReadOnly(True)
@@ -349,13 +349,22 @@ class ResultsPanel(QWidget):
     def refresh(self):
         """Bring the tree up to date with the files on disk, in place."""
         self._last_refresh = time.monotonic()
+        root = self.data_root
         try:
-            days = sorted(
-                (p for p in self.data_root.glob("*/*/*") if p.is_dir()), reverse=True
-            )
+            days = sorted((p for p in root.glob("*/*/*") if p.is_dir()), reverse=True)
+            found = root.is_dir()
         except OSError:
-            logger.debug("Cannot list %s", self.data_root, exc_info=True)
+            logger.debug("Cannot list %s", root, exc_info=True)
+            days, found = [], False
+        if not found:
+            self.browser.set_hint(f"{root} not found")
+            self.browser.hint.setToolTip(
+                "On a PC other than the Experiment Manager's, set client_data_root "
+                "in CONFIG (or PYTWEEZER_DATA_DIR) to the data share"
+            )
             return
+        self.browser.set_hint("newest first")
+        self.browser.hint.setToolTip("")
         newest_was_open = self._newest_day_open()
         for day in days:
             item = self._day_item(day)

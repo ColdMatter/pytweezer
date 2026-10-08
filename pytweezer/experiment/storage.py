@@ -49,8 +49,9 @@ class RecordError(ValueError):
 def data_root() -> Path:
     """Root directory of the measurement files on this PC.
 
-    ``PYTWEEZER_DATA_DIR`` wins, so a client PC can point at the server's
-    share; otherwise the Experiment Manager's ``data_root`` from CONFIG. When
+    ``PYTWEEZER_DATA_DIR`` wins. Otherwise a PC other than the Experiment
+    Manager's uses ``client_data_root`` from CONFIG (the manager's data share,
+    as mounted here) if set, and the manager's own PC uses ``data_root``. When
     the manager is simulating, files go in a ``simulated/`` subdirectory, so
     simulated runs never mix with real data or use up its rids.
     """
@@ -58,8 +59,23 @@ def data_root() -> Path:
 
     conf = get_config().get("Servers", {}).get("Experiment Manager", {})
     env = os.environ.get("PYTWEEZER_DATA_DIR")
-    root = Path(env or conf.get("data_root") or Path(tweezerpath) / "data")
+    client_root = conf.get("client_data_root")
+    if env:
+        root = Path(env)
+    elif client_root and not _is_this_pc(conf.get("host")):
+        root = Path(client_root)
+    else:
+        root = Path(conf.get("data_root") or Path(tweezerpath) / "data")
     return root / "simulated" if conf.get("simulate") else root
+
+
+def _is_this_pc(host: str | None) -> bool:
+    from pytweezer.configuration.config import HOSTS
+
+    if host in (None, "localhost", "127.0.0.1", "*", "0.0.0.0"):
+        return True
+    addresses = {name.lower(): address for name, address in HOSTS.items()}
+    return addresses.get(socket.gethostname().lower()) == host
 
 
 def measurement_relpath(rid: int, class_name: str, when: datetime) -> Path:

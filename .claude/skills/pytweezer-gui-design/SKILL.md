@@ -69,7 +69,7 @@ Shade *rows* by lifecycle (the active item tinted, finished ones recessed) so
 the eye finds what matters. Never encode state by colour alone.
 
 **6. Live, not Refresh.** If the user has to press Refresh, the panel is lying
-until they do. Follow the server's PUB feed (`ExperimentFeed`,
+until they do. Follow the server's published state (`ExperimentFeed`,
 `DeviceStatusClient`) or poll on a `QTimer`, and:
 - update in place: keep selection, expansion, scroll position and combo-box
   choices; don't `clear()` and rebuild;

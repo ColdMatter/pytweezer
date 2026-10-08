@@ -97,8 +97,10 @@ not old notebooks.
 ## Running
 
 From the GUI: **Experiments** tab → pick the class → edit, toggle "Scan" per
-argument → Submit. **Results** tab lists files as they appear (it polls the data root every 2 s while visible; no refresh button) and quick-plots a scalar
-against a scan axis; "Resubmit" reloads its arguments.
+argument → Submit. **Results** tab lists files as they appear (no refresh
+button) and quick-plots a scalar against a scan axis; "Resubmit" reloads its
+arguments. A running measurement plots live from the manager's published points,
+not by re-reading its file; see "The manager and its workers".
 
 From a notebook or script:
 
@@ -135,9 +137,10 @@ commit/dirty. Groups: `/arguments` (effective values; `__schema__` attr),
 planned points in execution order; only the first `n_done` ran. Files are
 never overwritten (mode `"x"`) and readable mid-run (`locking=False`).
 
-`data_root` = `$PYTWEEZER_DATA_DIR`, else `CONFIG["Servers"]["Experiment
-Manager"]["data_root"]`, else `<repo>/data`. On client PCs point the env var at
-the server's share. The queue state lives in `{data_root}/queue_state.json`.
+`data_root` = `$PYTWEEZER_DATA_DIR`; else, on a PC other than the manager's,
+`CONFIG["Servers"]["Experiment Manager"]["client_data_root"]` (the manager's
+data share as mounted there) if set; else that entry's `data_root`; else
+`<repo>/data`. The queue state lives in `{data_root}/queue_state.json`.
 
 The manager also writes each run into the database (`pytweezer.database`): a
 `runs` row on start and finish, and a `points` row per point, holding its times,
@@ -149,8 +152,21 @@ it. `pytweezer-db-backfill` loads files the database missed. See
 
 ## The manager and its workers
 
-Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP+PUB
-loop), `pytweezer/experiment/{queue,worker,catalogue,introspect,client}.py`.
+Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
+`pytweezer/experiment/{queue,worker,catalogue,introspect,client}.py`.
+
+- **Published state:** the manager serves sipyco notifier `"experiment"` on
+  `sync_port` (layout in the module): the queue snapshot (`running`, `queue`,
+  `history`, `catalogue_version`, `simulated`, `alive`) and `points`, every
+  point the current (or last) task has measured, with its scanned values and
+  0-d numeric results. Only changes are sent; a GUI connecting late gets it all.
+  `GUI/experiments/feed.py`'s `ExperimentFeed` is the Qt side (one per GUI,
+  shared by the Experiments and Results tabs): `queue_changed`,
+  `point_received`, `connection_changed` and `points(rid)`. The Results tab
+  reads a running file once for metadata and the planned `/points` table
+  (`read_planned_points`), plots from the feed, and reloads the file when the
+  task finishes; HDF5 cannot safely be re-read while it is written. Without a
+  connected feed it falls back to polling the files.
 
 - One task runs at a time; order is priority (high first), then rid; a
   `due_time` holds a task back.

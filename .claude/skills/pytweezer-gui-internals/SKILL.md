@@ -1,6 +1,6 @@
 ---
 name: pytweezer-gui-internals
-description: How the pytweezer PyQt6 shell is built — TabbedGUI's dock-based tabs, the ManagedRow/ControlPanel/DevicesPanel process tiles, the two different status mechanisms and why they differ, and the deliberate hard-exit teardown that the legacy BWidget/Properties stack makes necessary. Use when adding or editing a tab or panel in bin/gui.py or bin/managed_panel.py, touching pytweezer/GUI/pytweezerQt.py or device_status.py, debugging a GUI that hangs on exit or loses its window geometry, working out why a row shows the wrong Running/Stopped state, or changing how processes are started and stopped from the GUI. For building a live viewer window, use the add-applet skill instead.
+description: How the pytweezer PyQt6 shell is built — TabbedGUI's dock-based tabs, the ManagedRow/ControlPanel/DevicesPanel process tiles, the two different status mechanisms and why they differ, and the deliberate hard-exit teardown. Use when adding or editing a tab or panel in bin/gui.py or bin/managed_panel.py, touching pytweezer/GUI/pytweezerQt.py or device_status.py, debugging a GUI that hangs on exit or loses its window geometry, working out why a row shows the wrong Running/Stopped state, or changing how processes are started and stopped from the GUI. For building a live viewer window, use the add-applet skill instead.
 ---
 
 # GUI internals
@@ -19,17 +19,17 @@ build leaves a placeholder instead of killing the whole window.
 
 `pytweezer/GUI/pytweezerQt.py` holds the legacy base classes `BWidget`/`BFrame`/
 `BMainWindow`, each of which constructs a `Properties(name)` connection to the
-Propertyhub. `Properties` spawns **non-daemon** `event_monitor` threads that loop
-forever, so any process using it hangs at interpreter shutdown.
+Properties server; with the server down, that waits a few seconds before
+falling back to the saved file.
 
-`TabbedGUI` therefore does **not** inherit `BMainWindow` — which also keeps
-startup fast and independent of the hubs being up. Two consequences that look
-like bugs and are not:
+`TabbedGUI` therefore does **not** inherit `BMainWindow`, which keeps startup
+fast and independent of the servers being up. Two consequences that look like
+bugs and are not:
 
 - `_run()` calls `logging.shutdown(); os._exit(0)` immediately after the Qt event
-  loop ends, to bypass those lingering threads. By then every panel's
-  `closeEvent` has already terminated its children, so the hard exit is safe. Do
-  not "fix" this into a normal return.
+  loop ends, so no lingering thread or ZMQ socket in any panel can hang
+  shutdown. By then every panel's `closeEvent` has already terminated its
+  children, so the hard exit is safe. Do not "fix" this into a normal return.
 - Because the exit is hard, `closeEvent` must call `settings.sync()` explicitly
   after saving geometry and dock state, or `QSettings`' deferred write never
   reaches disk.

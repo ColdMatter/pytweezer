@@ -297,3 +297,12 @@ def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeyp
     panel._poll_tick()
     assert calls == [1, 1]
     panel.hide()
+
+
+def test_a_missing_data_root_says_so(qapp, tmp_path):
+    panel = ResultsPanel(root=tmp_path / "absent")
+    panel.refresh()
+    assert "not found" in panel.browser.hint.text()
+    (tmp_path / "absent").mkdir()
+    panel.refresh()
+    assert panel.browser.hint.text() == "newest first"
