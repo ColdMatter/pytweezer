@@ -8,8 +8,11 @@ from pytweezer.experiment import (
     Device,
     Experiment,
     Integer,
+    ListAxis,
     Number,
+    Scan,
     Text,
+    run_local,
 )
 from pytweezer.experiment.arguments import coerce_arguments
 
@@ -136,3 +139,39 @@ def test_device_is_resolved_lazily_once_and_closed(monkeypatch):
     experiment.close_devices()
     assert all(client.closed for client in opened)
     assert "camera" not in experiment.__dict__
+
+
+class Dotted(Experiment):
+    base = Number(1.0)
+
+    @classmethod
+    def extra_argument(cls, name):
+        if name.startswith("x."):
+            argument = Number(0.0)
+            argument.name = name
+            return argument
+        return None
+
+    def run_point(self):
+        self.record("seen", self.__dict__["x.a"])
+
+
+def test_hook_names_coerce_and_unknown_names_still_fail():
+    assert coerce_arguments(Dotted, {"x.a": 3})["x.a"] == 3.0
+    with pytest.raises(ValueError, match="no argument"):
+        coerce_arguments(Dotted, {"y.a": 3})
+
+
+def test_hook_names_can_be_scanned_and_are_stored():
+    scan = Scan(axes=[ListAxis(argument="x.a", values=[1, 2])])
+    measurement = run_local(Dotted, scan, **{"x.b": 5})
+    assert measurement.status == "completed", measurement.attrs["error"]
+    assert list(measurement.points["x.a"]) == [1.0, 2.0]
+    assert list(measurement.results["seen"]) == [1.0, 2.0]
+    assert measurement.arguments["x.b"] == 5.0
+
+
+def test_scanning_an_unknown_name_still_fails():
+    scan = Scan(axes=[ListAxis(argument="y.a", values=[1])])
+    with pytest.raises(ValueError, match="no argument 'y.a'"):
+        scan.points(Dotted)

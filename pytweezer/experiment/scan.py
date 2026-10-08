@@ -76,13 +76,14 @@ class Scan(BaseModel):
     def axis_values(self, experiment_cls: type) -> dict[str, list[Any]]:
         """Return ``{argument: coerced values}`` for each axis, validated against ``experiment_cls``."""
         declared = collect(experiment_cls, Argument)
+        extra_argument = getattr(experiment_cls, "extra_argument", lambda name: None)
         resolved = {}
         for axis in self.axes:
-            if axis.argument not in declared:
+            argument = declared.get(axis.argument) or extra_argument(axis.argument)
+            if argument is None:
                 raise ValueError(
                     f"{experiment_cls.__name__} has no argument {axis.argument!r} to scan"
                 )
-            argument = declared[axis.argument]
             raw = axis.raw_values()
             if isinstance(argument, Integer) and isinstance(axis, LinearAxis):
                 raw = [round(value) for value in raw]

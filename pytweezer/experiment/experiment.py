@@ -41,8 +41,9 @@ class Experiment:
     point: Point | None = None
 
     def __init__(self, args: dict[str, Any] | None = None) -> None:
+        self._extra_names: list[str] = []
         for name, value in coerce_arguments(type(self), args or {}).items():
-            setattr(self, name, value)
+            self.set_argument(name, value)
         self._clients: list[Any] = []
         self._shared_clients: dict[str, Any] = {}
         self._recorder: Any = None
@@ -71,8 +72,19 @@ class Experiment:
             "devices": {name: dev.to_schema() for name, dev in cls.devices().items()},
         }
 
+    @classmethod
+    def extra_argument(cls, name: str) -> Argument | None:
+        """Return the argument for ``name`` if it is not declared but is valid, else ``None``."""
+        return None
+
+    def set_argument(self, name: str, value: Any) -> None:
+        setattr(self, name, value)
+        if name not in self.arguments() and name not in self._extra_names:
+            self._extra_names.append(name)
+
     def argument_values(self) -> dict[str, Any]:
-        return {name: getattr(self, name) for name in self.arguments()}
+        names = [*self.arguments(), *self._extra_names]
+        return {name: getattr(self, name) for name in names}
 
     def prepare(self) -> None:
         """Called once before the first point."""

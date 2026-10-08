@@ -66,12 +66,21 @@ def open_writer(
             **header,
         },
         argument_values=experiment.argument_values(),
-        argument_schema=experiment_cls.schema()["arguments"],
+        argument_schema=_argument_schema(experiment_cls, experiment, scan),
         scan=scan,
         points=points,
         sources=_sources(experiment_cls),
     )
     return experiment, points, writer
+
+
+def _argument_schema(experiment_cls: type, experiment: Experiment, scan: Scan) -> dict:
+    schema = experiment_cls.schema()["arguments"]
+    for name in [*experiment._extra_names, *(axis.argument for axis in scan.axes)]:
+        argument = experiment_cls.extra_argument(name) if name not in schema else None
+        if argument is not None:
+            schema[name] = argument.to_schema()
+    return schema
 
 
 def _sources(experiment_cls: type) -> dict[str, str]:
@@ -109,7 +118,7 @@ def run_points(
             for point in points:
                 experiment.point = point
                 for name, value in point.values.items():
-                    setattr(experiment, name, value)
+                    experiment.set_argument(name, value)
                 writer.begin_point(point)
                 experiment.run_point()
                 writer.end_point()

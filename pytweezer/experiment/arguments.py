@@ -228,15 +228,25 @@ def collect(cls: type, kind: type) -> dict[str, Any]:
 
 
 def coerce_arguments(cls: type, values: dict[str, Any]) -> dict[str, Any]:
-    """Return every argument of ``cls`` with ``values`` applied over the defaults."""
+    """Return every argument of ``cls`` with ``values`` applied over the defaults.
+
+    Names ``cls`` does not declare are looked up with ``cls.extra_argument``;
+    those that resolve are coerced and included.
+    """
     declared = collect(cls, Argument)
-    unknown = set(values) - set(declared)
+    extra_argument = getattr(cls, "extra_argument", lambda name: None)
+    extras = {name: extra_argument(name) for name in values if name not in declared}
+    unknown = [name for name, argument in extras.items() if argument is None]
     if unknown:
         raise ValueError(
             f"{cls.__name__} has no argument(s) {sorted(unknown)}; "
             f"known: {sorted(declared)}"
         )
-    return {
+    coerced = {
         name: argument.coerce(values[name]) if name in values else argument.default
         for name, argument in declared.items()
     }
+    coerced.update(
+        {name: argument.coerce(values[name]) for name, argument in extras.items()}
+    )
+    return coerced
