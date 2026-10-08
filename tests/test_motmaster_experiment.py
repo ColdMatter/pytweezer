@@ -1,10 +1,13 @@
+import time
 from pathlib import Path
 
 import pytest
 
 from pytweezer.drivers.motmaster import MotMasterInterface, SimulatedMotMasterInterface
-from pytweezer.experiment import Device, ListAxis, Scan, run_local
+from pytweezer.experiment import ListAxis, Scan, run_local
+from pytweezer.experiment.arguments import coerce_arguments
 from pytweezer.experiment.motmaster import (
+    MotMaster,
     MotMasterExperiment,
     MotMasterInteger,
     MotMasterNumber,
@@ -12,94 +15,232 @@ from pytweezer.experiment.motmaster import (
 
 
 class FakeSequencer:
-    def __init__(self):
-        self.calls = []
-        self.fail_go = False
+    def __init__(self, log, name, params, *, fail_go=False, go_delay=0.0):
+        self.log, self.name, self.params = log, name, params
+        self.fail_go, self.go_delay = fail_go, go_delay
 
-    def __getattr__(self, name):
-        def call(*args):
-            self.calls.append((name, *args))
-            if name == "start_motmaster_experiment" and self.fail_go:
-                raise RuntimeError("MOTMaster refused")
-            if name == "get_params":
-                return {"tDelay1": 5, "other": 1.0}
-            return None
+    def _note(self, *event):
+        self.log.append((self.name, *event))
 
-        return call
+    def set_motmaster_experiment(self, script):
+        self._note("script", script)
+
+    def set_run_until_stopped(self, value):
+        self._note("run_until_stopped", value)
+
+    def set_iterations(self, value):
+        self._note("iterations", value)
+
+    def set_save_toggle(self, value):
+        self._note("save", value)
+
+    def set_trigger_mode(self, value):
+        self._note("triggered", value)
+
+    def get_params(self):
+        return dict(self.params)
+
+    def start_motmaster_experiment(self, parameters=None):
+        time.sleep(self.go_delay)
+        self._note("go", parameters)
+        if self.fail_go:
+            raise RuntimeError(f"{self.name} refused")
 
     def close_rpc(self):
-        self.calls.append(("close_rpc",))
+        pass
 
 
 @pytest.fixture
-def sequencer(monkeypatch):
-    fake = FakeSequencer()
-    monkeypatch.setattr(
-        "pytweezer.experiment.experiment._get_device", lambda name, timeout: fake
-    )
-    return fake
-
-
-class Tof(MotMasterExperiment):
-    sequencer = Device("Rb MotMaster")
-    motmaster_script = "RbTweezerBasic"
-    motmaster_triggered = True
-
-    tof = MotMasterInteger(100, parameter="tDelay1")
-    current = MotMasterNumber(1.5, unit="A")
-
-
-def test_parameters_are_forwarded_with_their_declared_types(sequencer):
-    measurement = run_local(
-        Tof, Scan(axes=[ListAxis(argument="tof", values=[10, 20])]), current=2
-    )
-    assert measurement.status == "completed", measurement.attrs["error"]
-    names = [call[0] for call in sequencer.calls]
-    assert names[:5] == [
-        "set_motmaster_experiment",
-        "set_run_until_stopped",
-        "set_iterations",
-        "set_save_toggle",
-        "set_trigger_mode",
-    ]
-    runs = [
-        call[1] for call in sequencer.calls if call[0] == "start_motmaster_experiment"
-    ]
-    assert runs == [{"tDelay1": 10, "current": 2.0}, {"tDelay1": 20, "current": 2.0}]
-    assert all(
-        type(run["tDelay1"]) is int and type(run["current"]) is float for run in runs
-    )
-    assert measurement.constants["motmaster_script"] == "RbTweezerBasic"
-    assert measurement.constants["motmaster_script_defaults"] == {
-        "tDelay1": 5,
-        "other": 1.0,
+def rig(monkeypatch):
+    log = []
+    fakes = {
+        "Rb MotMaster": FakeSequencer(
+            log, "rb", {"tDelay1": 5, "tPulse": 20e-6, "label": "x"}
+        ),
+        "CaF MotMaster": FakeSequencer(log, "caf", {"tLoad": 100, "bTop": 0.5}),
     }
-    assert names[-1] == "close_rpc"
+    monkeypatch.setattr(
+        "pytweezer.experiment.experiment._get_device", lambda name, timeout: fakes[name]
+    )
+    monkeypatch.setattr(MotMasterExperiment, "follower_arm_delay", 0.0)
+    return log, fakes
 
 
-def test_schema_marks_motmaster_parameters():
-    arguments = Tof.schema()["arguments"]
-    assert arguments["tof"]["group"] == "MOTMaster"
-    assert arguments["tof"]["motmaster_parameter"] == "tDelay1"
-    assert arguments["current"]["motmaster_parameter"] == "current"
+def goes(log, name):
+    return [event[2] for event in log if event[0] == name and event[1] == "go"]
 
 
-def test_sequence_failure_fails_the_task(sequencer):
-    sequencer.fail_go = True
-    measurement = run_local(Tof)
+class Single(MotMasterExperiment):
+    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic")
+    tof = MotMasterInteger(100, parameter="tDelay1")
+    pulse = MotMasterNumber(1e-6, parameter="tPulse")
+
+
+class Pair(MotMasterExperiment):
+    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
+    caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad", follower_timeout=0.1)
+    tof = MotMasterInteger(100, device="rb", parameter="tDelay1")
+
+
+def test_declared_and_searched_parameters_are_sent_typed(rig):
+    log, _ = rig
+    scan = Scan(axes=[ListAxis(argument="rb.tDelay1", values=[1, 2])])
+    measurement = run_local(Single, scan, **{"rb.tPulse": 3e-5})
+    assert measurement.status == "completed", measurement.attrs["error"]
+    runs = goes(log, "rb")
+    assert [run["tDelay1"] for run in runs] == [1, 2]
+    assert all(
+        type(run["tDelay1"]) is int and type(run["tPulse"]) is float for run in runs
+    )
+    assert runs[0]["tPulse"] == 3e-5
+    assert list(measurement.points["rb.tDelay1"]) == [1, 2]
+    assert measurement.arguments["rb.tPulse"] == 3e-5
+
+
+def test_parameters_not_chosen_are_not_sent(rig):
+    log, _ = rig
+    run_local(Pair)
+    assert goes(log, "caf") == [{}]
+    assert goes(log, "rb") == [{"tDelay1": 100}]
+
+
+def test_script_defaults_are_not_recorded(rig):
+    measurement = run_local(Single)
+    assert not any("default" in name for name in measurement.constants)
+
+
+def test_non_whole_value_for_an_int32_parameter_fails_the_point(rig):
+    measurement = run_local(Single, **{"rb.tDelay1": 1.5})
     assert measurement.status == "failed"
-    assert "MOTMaster refused" in measurement.attrs["error"]
+    assert "tDelay1" in measurement.attrs["error"]
+    assert "whole number" in measurement.attrs["error"]
 
 
-def test_missing_declarations_are_reported(sequencer):
-    class NoScript(MotMasterExperiment):
-        sequencer = Device("Rb MotMaster")
+def test_unknown_parameter_fails_prepare_with_a_suggestion(rig):
+    log, _ = rig
+    measurement = run_local(Single, **{"rb.tDelayy": 1})
+    assert measurement.status == "failed"
+    assert "tDelayy" in measurement.attrs["error"]
+    assert "tDelay1" in measurement.attrs["error"]
+    assert goes(log, "rb") == []
 
-    class NoDevice(MotMasterExperiment):
-        motmaster_script = "x"
 
-    assert "motmaster_script" in run_local(NoScript).attrs["error"]
-    assert "sequencer = Device" in run_local(NoDevice).attrs["error"]
+def test_unknown_parameter_that_is_only_scanned_fails_before_any_sequence_runs(rig):
+    log, _ = rig
+    scan = Scan(axes=[ListAxis(argument="rb.tDelayy", values=[1, 2])])
+    measurement = run_local(Single, scan)
+    assert measurement.status == "failed"
+    assert "has no parameter 'tDelayy'" in measurement.attrs["error"]
+    assert goes(log, "rb") == []
+
+
+def test_non_numeric_script_parameters_pass_through_unconverted(rig):
+    log, _ = rig
+    run_local(Single, **{"rb.label": 3})
+    assert goes(log, "rb")[0]["label"] == 3
+
+
+def test_dotted_name_for_an_unknown_motmaster_is_rejected_at_submit():
+    with pytest.raises(ValueError, match="no argument"):
+        coerce_arguments(Single, {"xx.tDelay1": 1})
+    with pytest.raises(ValueError, match="no argument"):
+        coerce_arguments(Single, {"rb.": 1})
+
+
+def test_master_is_untriggered_and_followers_arm_first(rig):
+    log, _ = rig
+    run_local(Pair, **{"caf.bTop": 0.7})
+    assert ("rb", "triggered", False) in log
+    assert ("caf", "triggered", True) in log
+    order = [event[0] for event in log if event[1] == "go"]
+    assert order == ["caf", "rb"] or order == ["rb", "caf"]
+    assert goes(log, "caf") == [{"bTop": 0.7}]
+
+
+def test_follower_client_is_opened_once_per_task(rig, monkeypatch):
+    _, fakes = rig
+    opened = []
+
+    def get_device(name, timeout):
+        opened.append(name)
+        return fakes[name]
+
+    monkeypatch.setattr("pytweezer.experiment.experiment._get_device", get_device)
+    scan = Scan(axes=[ListAxis(argument="tof", values=[1, 2, 3])])
+    measurement = run_local(Pair, scan)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    assert opened.count("CaF MotMaster") == 2
+
+
+def test_master_failure_fails_the_task(rig):
+    _, fakes = rig
+    fakes["Rb MotMaster"].fail_go = True
+    measurement = run_local(Pair)
+    assert measurement.status == "failed"
+    assert "rb refused" in measurement.attrs["error"]
+
+
+def test_follower_failure_fails_the_task(rig):
+    _, fakes = rig
+    fakes["CaF MotMaster"].fail_go = True
+    measurement = run_local(Pair)
+    assert measurement.status == "failed"
+    assert "caf refused" in measurement.attrs["error"]
+
+
+def test_follower_that_never_finishes_fails_after_its_timeout(rig):
+    _, fakes = rig
+    fakes["CaF MotMaster"].go_delay = 1.0
+    started = time.monotonic()
+    measurement = run_local(Pair)
+    assert time.monotonic() - started < 0.9
+    assert measurement.status == "failed"
+    assert "did not finish within 0.1 s" in measurement.attrs["error"]
+
+
+def test_declaration_rules_are_checked_at_class_definition():
+    with pytest.raises(TypeError, match="exactly one"):
+
+        class TwoMasters(MotMasterExperiment):
+            a = MotMaster("Rb MotMaster", script="s", master=True)
+            b = MotMaster("CaF MotMaster", script="s", master=True)
+
+    with pytest.raises(TypeError, match="exactly one"):
+
+        class NoMaster(MotMasterExperiment):
+            a = MotMaster("Rb MotMaster", script="s")
+            b = MotMaster("CaF MotMaster", script="s")
+
+    with pytest.raises(TypeError, match="device="):
+
+        class Ambiguous(MotMasterExperiment):
+            a = MotMaster("Rb MotMaster", script="s", master=True)
+            b = MotMaster("CaF MotMaster", script="s")
+            x = MotMasterNumber(1.0)
+
+    with pytest.raises(TypeError, match="'nope'"):
+
+        class UnknownDevice(MotMasterExperiment):
+            a = MotMaster("Rb MotMaster", script="s")
+            x = MotMasterNumber(1.0, device="nope")
+
+
+def test_experiment_without_a_motmaster_fails_when_run():
+    class Bare(MotMasterExperiment):
+        pass
+
+    measurement = run_local(Bare)
+    assert measurement.status == "failed"
+    assert "MotMaster" in measurement.attrs["error"]
+
+
+def test_schema_describes_the_sequencers_and_parameters():
+    schema = Pair.schema()
+    assert schema["devices"]["caf"]["motmaster"]["script"] == "CaFTweezerLoad"
+    assert schema["devices"]["rb"]["motmaster"]["master"] is True
+    assert schema["arguments"]["tof"]["motmaster_device"] == "rb"
+    assert schema["arguments"]["tof"]["motmaster_parameter"] == "tDelay1"
+    assert Single.master_name() == "rb"
 
 
 class _RaisingDotNet:
