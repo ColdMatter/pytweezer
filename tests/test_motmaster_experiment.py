@@ -366,3 +366,25 @@ def test_config_wires_the_simulated_sequencer():
         assert isinstance(backend, SimulatedMotMasterInterface)
     finally:
         devices.close()
+
+
+def test_simulated_end_to_end_with_searched_parameters():
+    from pytweezer.experiments.motmaster_arguments_test import MotMasterArgumentsTest
+
+    scan = Scan(axes=[ListAxis(argument="rb.tDelay1", values=[10, 20])])
+    measurement = run_local(
+        MotMasterArgumentsTest, scan, simulate=True, **{"rb.coil_current": 2.0}
+    )
+    assert measurement.status == "completed", measurement.attrs["error"]
+    assert list(measurement.points["rb.tDelay1"]) == [10, 20]
+    assert list(measurement.results["sent_tDelay1"]) == [10, 20]
+    assert list(measurement.results["sent_coil_current"]) == [2.0, 2.0]
+    assert list(measurement.results["sent_tPulse"]) == [20e-6, 20e-6]
+    assert measurement.arguments["rb.coil_current"] == 2.0
+
+
+def test_declared_parameter_of_the_test_experiment_is_not_searchable():
+    from pytweezer.experiments.motmaster_arguments_test import MotMasterArgumentsTest
+
+    with pytest.raises(ValueError, match="no argument"):
+        coerce_arguments(MotMasterArgumentsTest, {"rb.tPulse": 3e-5})

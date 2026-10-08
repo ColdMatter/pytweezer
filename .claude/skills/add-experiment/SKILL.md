@@ -69,6 +69,7 @@ Rules that matter:
 ```python
 from pytweezer.experiment import Device
 from pytweezer.experiment.motmaster import (
+    MotMaster,
     MotMasterExperiment,
     MotMasterInteger,
     MotMasterNumber,
@@ -76,29 +77,37 @@ from pytweezer.experiment.motmaster import (
 
 
 class Tof(MotMasterExperiment):
-    sequencer = Device("Rb MotMaster")
-    motmaster_script = "RbTweezerBasic"
-    tof = MotMasterInteger(100, parameter="tDelay1")  # script parameter name
-    coil_current = MotMasterNumber(1.5, unit="A")
+    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
+    caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad")
+    tof = MotMasterInteger(100, device="rb", parameter="tDelay1")  # always shown
     camera = Device("Rb ThorCam")
 
     def run_point(self):
         self.camera.start_acquisition()
-        self.run_sequence()  # blocks until Go() returns
+        self.run_sequences()  # blocks until every Go() returns
         self.record("image", self.camera.acquire_n_frames(1)[0])
 ```
 
-`MotMasterInteger` vs `MotMasterNumber` must match the script's parameter type
-(.NET `Int32` vs `Double`). `prepare()` sets script, iterations, save toggle and
-trigger mode on every task; repeats come from `Scan(repetitions=...)`, one
-stored point per shot. Camera APIs differ between drivers — check the driver,
-not old notebooks.
+`master=True` goes on exactly one `MotMaster` of several (a lone one is the
+master). `MotMasterInteger` vs `MotMasterNumber` must match the script's
+parameter type (.NET `Int32` vs `Double`). Any other script parameter is set by
+dotted name, `submit(Tof, **{"rb.tPulse": 3e-5})` or scanned with
+`ListAxis(argument="rb.tPulse", ...)`; the Experiments form adds these from its
+search box. Declared parameters are not searchable, Int32 ones need whole
+values, and unselected ones keep the script's defaults (not recorded in the
+file). `prepare()` sets script, iterations, save toggle and trigger mode on
+every task; repeats come from `Scan(repetitions=...)`, one stored point per
+shot. `run_sequences()` arms followers in trigger mode and starts them first,
+the master `follower_arm_delay` later; a follower still running
+`follower_timeout` after the master finishes fails the task. Camera APIs differ
+between drivers — check the driver, not old notebooks.
 
 ## Running
 
 From the GUI: **Experiments** tab → pick the class → edit, toggle "Scan" per
-argument → Submit. **Results** tab lists files as they appear (no refresh
-button) and quick-plots a scalar against a scan axis; "Resubmit" reloads its
+argument → Submit; MOTMaster parameters beyond the declared ones are added from
+the search box. **Results** tab lists files as they appear (no refresh button)
+and quick-plots a scalar against a scan axis; "Resubmit" reloads its
 arguments. A running measurement plots live from the manager's published points,
 not by re-reading its file; see "The manager and its workers".
 
