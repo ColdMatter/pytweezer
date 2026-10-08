@@ -23,6 +23,7 @@ from pytweezer.GUI.components import Region, set_state
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
 from pytweezer.GUI.experiments.feed import ExperimentFeed
+from pytweezer.GUI.experiments.motmaster_params import DeviceParameterSource
 from pytweezer.GUI.experiments.queue_view import QueueView, queue_summary
 from pytweezer.logging_utils import get_logger
 
@@ -47,6 +48,7 @@ class ExperimentsPanel(QWidget):
         # Unsubmitted edits per experiment, restored when switching back.
         self._drafts = {}
         self._current_key = None
+        self._simulated = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 10)
@@ -67,6 +69,7 @@ class ExperimentsPanel(QWidget):
         catalogue_region.body.addWidget(self.catalogue, 1)
 
         self.editor = ArgumentEditor()
+        self.editor.set_parameter_source(DeviceParameterSource(lambda: self._simulated))
         editor_scroll = QScrollArea()
         editor_scroll.setObjectName("EditorScroll")
         editor_scroll.setWidgetResizable(True)
@@ -130,6 +133,7 @@ class ExperimentsPanel(QWidget):
         self.catalogue.set_modules(reply["modules"])
 
     def _queue_changed(self, snapshot):
+        self._simulated = bool(snapshot.get("simulated"))
         self.simulation_banner.setVisible(bool(snapshot.get("simulated")))
         self.queue_view.set_snapshot(snapshot)
         self.queue_region.set_hint(queue_summary(snapshot))

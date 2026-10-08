@@ -30,6 +30,11 @@ from PyQt6.QtWidgets import (
 from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.components import CompactDoubleSpinBox, set_state
+from pytweezer.GUI.experiments.motmaster_params import (
+    DeviceParameterSource,
+    MotMasterBox,
+    ParameterFetcher,
+)
 
 _INT_LIMIT = 2**31 - 1
 _FLOAT_LIMIT = 1e15
@@ -318,6 +323,11 @@ class ArgumentEditor(QWidget):
         super().__init__(parent)
         self.schema = None
         self.rows = {}
+        self.fetcher = ParameterFetcher(DeviceParameterSource())
+        self.fetcher.fetched.connect(self._parameters_fetched)
+        self.fetcher.failed.connect(self._parameters_failed)
+        self.motmaster_boxes = {}
+        self._searched = {}
         self.setObjectName("ArgumentEditor")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 0, 4, 0)
@@ -462,13 +472,16 @@ class ArgumentEditor(QWidget):
                 argument_row.changed.connect(self._update_count)
                 self.rows[name] = argument_row
             self.arguments_layout.addWidget(box)
-        if not self.rows:
+        self._add_motmaster_boxes(schema)
+        if not self.rows and not self.motmaster_boxes:
             self.arguments_layout.addWidget(QLabel("No arguments."))
         self.error.clear()
         self._set_enabled(True)
         self._update_count()
 
     def reset_to_defaults(self):
+        for name in list(self._searched):
+            self.remove_motmaster_row(name)
         for row in self.rows.values():
             row.scan_button.setChecked(False)
             row.value.set_value(row.schema["default"])
@@ -479,6 +492,21 @@ class ArgumentEditor(QWidget):
     def load_request(self, request):
         """Fill the form from ``request``; arguments the experiment no longer has are ignored."""
         self.reset_to_defaults()
+        for name in [*request.args, *(axis.argument for axis in request.scan.axes)]:
+            attribute, _, parameter = name.partition(".")
+            box = self.motmaster_boxes.get(attribute)
+            if parameter and box and parameter not in box.declared:
+                first_scanned = next(
+                    (
+                        axis.raw_values()[0]
+                        for axis in request.scan.axes
+                        if axis.argument == name
+                    ),
+                    0,
+                )
+                self.add_motmaster_row(
+                    attribute, parameter, request.args.get(name, first_scanned)
+                )
         for name, value in request.args.items():
             if name in self.rows:
                 try:
@@ -495,6 +523,110 @@ class ArgumentEditor(QWidget):
         self.repeat.setCurrentText(request.scan.repeat)
         self.priority.setValue(request.priority)
         self.label.setText(request.label)
+
+    # -- MOTMaster script parameters -------------------------------------
+
+    def set_parameter_source(self, source):
+        self.fetcher.source = source
+
+    def _add_motmaster_boxes(self, schema):
+        self.motmaster_boxes = {}
+        self._searched = {}
+        sequencers = {
+            attribute: device
+            for attribute, device in schema.get("devices", {}).items()
+            if device.get("motmaster") is not None
+        }
+        declared = {attribute: set() for attribute in sequencers}
+        for argument in schema["arguments"].values():
+            if "motmaster_parameter" in argument and sequencers:
+                attribute = argument["motmaster_device"] or next(iter(sequencers))
+                declared.setdefault(attribute, set()).add(
+                    argument["motmaster_parameter"]
+                )
+        for attribute, device in sequencers.items():
+            box = MotMasterBox(
+                attribute,
+                device["device"],
+                device["motmaster"]["script"],
+                declared=declared[attribute],
+            )
+            box.parameter_chosen.connect(
+                lambda name, attribute=attribute: self.add_motmaster_row(
+                    attribute, name
+                )
+            )
+            box.retry.clicked.connect(
+                lambda _=False, box=box: self.fetcher.request(box.device, box.script)
+            )
+            self.motmaster_boxes[attribute] = box
+            self.arguments_layout.addWidget(box)
+            self.fetcher.request(box.device, box.script)
+
+    def add_motmaster_row(self, attribute, parameter, value=None):
+        """Add (or return) the row for script parameter ``parameter`` of ``attribute``.
+
+        The row takes its type and default from the script; ``value`` stands in
+        when the script's parameters are unknown or lack ``parameter``.
+        """
+        name = f"{attribute}.{parameter}"
+        if name in self.rows:
+            return self.rows[name]
+        box = self.motmaster_boxes[attribute]
+        default = box.defaults.get(parameter, value)
+        schema = {
+            "kind": "integer" if isinstance(default, int) else "number",
+            "default": default,
+            "tooltip": f"{parameter} in script {box.script}",
+            "group": box.title(),
+        }
+        row = ArgumentRow(name, schema, box)
+        grid_row = box.grid.rowCount()
+        row.add_to(box.grid, grid_row)
+        remove = QToolButton()
+        remove.setText("×")
+        remove.setToolTip("Remove: the script's own value is used")
+        remove.clicked.connect(lambda: self.remove_motmaster_row(name))
+        box.grid.addWidget(remove, grid_row, 3)
+        row.remove_button = remove
+        row.changed.connect(self._update_count)
+        self.rows[name] = row
+        self._searched[name] = (attribute, parameter)
+        if box.defaults and parameter not in box.defaults:
+            self._flag_missing(row, box.script)
+        self._update_count()
+        return row
+
+    def remove_motmaster_row(self, name):
+        row = self.rows.pop(name)
+        attribute, _ = self._searched.pop(name)
+        grid = self.motmaster_boxes[attribute].grid
+        for widget in (row.label, row.stack, row.scan_button, row.remove_button):
+            grid.removeWidget(widget)
+            widget.hide()
+            widget.deleteLater()
+        row.deleteLater()
+        self._update_count()
+
+    def _flag_missing(self, row, script):
+        row.label.setText(f"{row.name} (not in script)")
+        row.label.setToolTip(
+            f"{row.name}: not in script {script}; remove it or the task will fail"
+        )
+
+    def _parameters_fetched(self, device, script, parameters):
+        for attribute, box in self.motmaster_boxes.items():
+            if (box.device, box.script) != (device, script):
+                continue
+            box.set_parameters(parameters)
+            for name, (owner, parameter) in self._searched.items():
+                if owner == attribute and parameter not in box.defaults:
+                    self._flag_missing(self.rows[name], script)
+
+    def _parameters_failed(self, device, script, error):
+        for box in self.motmaster_boxes.values():
+            if (box.device, box.script) == (device, script):
+                box.set_error(error)
 
     # -- reading ---------------------------------------------------------
 

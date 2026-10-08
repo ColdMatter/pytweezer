@@ -12,9 +12,18 @@ from pytweezer.experiment import (
     Number,
     Scan,
 )
+from pytweezer.experiment.motmaster import (
+    MotMaster,
+    MotMasterExperiment,
+    MotMasterNumber,
+)
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
+from pytweezer.GUI.experiments.motmaster_params import (
+    DeviceParameterSource,
+    ParameterFetcher,
+)
 from pytweezer.GUI.experiments.panel import ExperimentsPanel
 from pytweezer.GUI.experiments.queue_view import QueueView
 
@@ -374,3 +383,167 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
     finally:
         feed.close()
         server.close()
+
+
+class Sequenced(MotMasterExperiment):
+    """A MOTMaster experiment."""
+
+    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic")
+    pulse = MotMasterNumber(1e-6, parameter="tPulse")
+
+
+SEQUENCED = Sequenced.schema()
+PARAMETERS = {
+    "tDelay1": 5,
+    "tPulse": 20e-6,
+    "coil_current": 1.5,
+    "label": "x",
+    "enabled": True,
+}
+
+
+class Source:
+    def __init__(self, parameters=None, error=None):
+        self.parameters, self.error, self.calls = parameters, error, []
+
+    def __call__(self, device, script):
+        self.calls.append((device, script))
+        if self.error:
+            raise RuntimeError(self.error)
+        return dict(self.parameters)
+
+
+def sequenced_editor(qapp, source):
+    editor = ArgumentEditor()
+    editor.fetcher.threaded = False
+    editor.set_parameter_source(source)
+    editor.set_experiment(SEQUENCED)
+    return editor
+
+
+def offered(box):
+    return box.completer.model().stringList()
+
+
+def test_motmaster_parameters_are_hidden_until_chosen(qapp):
+    editor = sequenced_editor(qapp, Source(PARAMETERS))
+    box = editor.motmaster_boxes["rb"]
+    assert box.defaults == {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5}
+    assert set(editor.rows) == {"pulse"}
+    assert "rb.tDelay1" not in editor.request().args
+
+
+def test_declared_parameters_are_not_offered(qapp):
+    editor = sequenced_editor(qapp, Source(PARAMETERS))
+    box = editor.motmaster_boxes["rb"]
+    assert offered(box) == ["tDelay1 · int · 5", "coil_current · float · 1.5"]
+    box.choose("tPulse")
+    assert "rb.tPulse" not in editor.rows
+
+
+def test_choosing_a_parameter_adds_a_typed_row_and_only_that_row_is_sent(qapp):
+    from PyQt6.QtTest import QTest
+
+    editor = sequenced_editor(qapp, Source(PARAMETERS))
+    editor.show()
+    box = editor.motmaster_boxes["rb"]
+    QTest.keyClicks(box.search, "del")
+    assert box.completer.completionCount() == 1
+    QTest.keyClick(box.completer.popup(), QtCore.Qt.Key.Key_Down)
+    QTest.keyClick(box.completer.popup(), QtCore.Qt.Key.Key_Return)
+    editor.close()
+    assert box.search.text() == ""
+    row = editor.rows["rb.tDelay1"]
+    assert row.schema["kind"] == "integer" and row.value.value() == 5
+    assert editor.request().args["rb.tDelay1"] == 5
+    assert "rb.coil_current" not in editor.request().args
+
+
+def test_a_searched_parameter_can_be_scanned_and_removed(qapp):
+    editor = sequenced_editor(qapp, Source(PARAMETERS))
+    editor.motmaster_boxes["rb"].choose("coil_current")
+    row = editor.rows["rb.coil_current"]
+    assert row.schema["kind"] == "number" and row.value.value() == 1.5
+    row.scan_button.setChecked(True)
+    assert [axis.argument for axis in editor.request().scan.axes] == ["rb.coil_current"]
+    row.remove_button.click()
+    assert "rb.coil_current" not in editor.rows
+    assert editor.request().scan.axes == []
+    assert editor.point_count.text() == "1 point"
+
+
+def test_resetting_the_form_removes_searched_rows(qapp):
+    editor = sequenced_editor(qapp, Source(PARAMETERS))
+    editor.motmaster_boxes["rb"].choose("tDelay1")
+    editor.reset_to_defaults()
+    assert "rb.tDelay1" not in editor.rows
+
+
+def test_load_request_restores_searched_rows_and_flags_missing_ones(qapp):
+    editor = sequenced_editor(qapp, Source(PARAMETERS))
+    request = TaskRequest(
+        experiment=SEQUENCED["module"],
+        class_name="Sequenced",
+        args={"rb.tDelay1": 9, "rb.gone": 1.5},
+        scan=Scan(axes=[LinearAxis(argument="rb.coil_current", start=0, stop=2, n=3)]),
+    )
+    editor.load_request(request)
+    assert editor.rows["rb.tDelay1"].value.value() == 9
+    assert editor.rows["rb.coil_current"].scanning
+    assert "not in script" in editor.rows["rb.gone"].label.toolTip()
+    assert "not in script" not in editor.rows["rb.tDelay1"].label.toolTip()
+    assert editor.request().args == {"pulse": 1e-6, "rb.tDelay1": 9, "rb.gone": 1.5}
+
+
+def test_an_unreachable_device_shows_the_error_and_a_retry(qapp):
+    source = Source(error="no route to host")
+    editor = sequenced_editor(qapp, source)
+    box = editor.motmaster_boxes["rb"]
+    assert "no route to host" in box.status.text()
+    assert not box.retry.isHidden()
+    source.error, source.parameters = None, PARAMETERS
+    box.retry.click()
+    assert box.retry.isHidden() and "tDelay1" in box.defaults
+    assert editor.request().args == {"pulse": 1e-6}
+
+
+def test_parameters_are_fetched_once_per_script(qapp):
+    source = Source(PARAMETERS)
+    editor = sequenced_editor(qapp, source)
+    editor.set_experiment(SEQUENCED)
+    assert source.calls == [("Rb MotMaster", "RbTweezerBasic")]
+    assert editor.motmaster_boxes["rb"].defaults
+
+
+def test_a_threaded_fetch_is_delivered_on_the_gui_thread(qapp):
+    import threading
+    import time
+
+    fetcher = ParameterFetcher(Source(PARAMETERS))
+    delivered = []
+    fetcher.fetched.connect(
+        lambda *args: delivered.append((args, threading.current_thread()))
+    )
+    fetcher.request("Rb MotMaster", "RbTweezerBasic")
+    deadline = time.monotonic() + 5
+    while not delivered and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert delivered[0][0] == ("Rb MotMaster", "RbTweezerBasic", PARAMETERS)
+    assert delivered[0][1] is threading.main_thread()
+
+
+def test_the_device_source_can_read_the_simulated_sequencer():
+    source = DeviceParameterSource(simulated=lambda: True)
+    parameters = source("Rb MotMaster", "RbTweezerBasic")
+    assert "tDelay1" in parameters
+
+
+def test_the_panel_reads_simulated_sequencers_when_the_manager_simulates(qapp):
+    feed = FakeFeed()
+    panel = ExperimentsPanel(client=FakeClient(), feed=feed)
+    feed.queue_changed.emit(
+        {"running": None, "queue": [], "history": [], "simulated": True}
+    )
+    parameters = panel.editor.fetcher.source("Rb MotMaster", "RbTweezerBasic")
+    assert "tDelay1" in parameters
