@@ -41,8 +41,8 @@
           "type": "grafana-postgresql-datasource",
           "uid": "pytweezer"
         },
-        "query": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time) AND ('__all' IN ($system) OR tags->>'system' IN ($system))",
-        "definition": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time) AND ('__all' IN ($system) OR tags->>'system' IN ($system))",
+        "query": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time) AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[]))",
+        "definition": "SELECT DISTINCT measurement FROM readings WHERE $__timeFilter(time) AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[]))",
         "refresh": 2,
         "multi": false,
         "includeAll": false,
@@ -59,15 +59,16 @@
           "type": "grafana-postgresql-datasource",
           "uid": "pytweezer"
         },
-        "query": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND ('__all' IN ($system) OR tags->>'system' IN ($system))",
-        "definition": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND ('__all' IN ($system) OR tags->>'system' IN ($system))",
+        "query": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[]))",
+        "definition": "SELECT DISTINCT field FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[]))",
         "refresh": 2,
         "multi": true,
         "includeAll": true,
         "sort": 1,
         "current": {},
         "options": [],
-        "hide": 0
+        "hide": 0,
+        "allValue": "'__all'"
       },
       {
         "name": "scalar",
@@ -138,7 +139,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(time, $__interval), field AS metric, avg(value) AS value FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND field IN ($field) AND ('__all' IN ($system) OR tags->>'system' IN ($system)) GROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(time, $__interval), field AS metric, avg(value) AS value FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND (cardinality(ARRAY[$field]::text[]) = 0 OR '__all' = ANY(ARRAY[$field]::text[]) OR field = ANY(ARRAY[$field]::text[])) AND (cardinality(ARRAY[$system]::text[]) = 0 OR '__all' = ANY(ARRAY[$system]::text[]) OR tags->>'system' = ANY(ARRAY[$system]::text[])) GROUP BY 1, 2 ORDER BY 1"
         }
       ]
     },

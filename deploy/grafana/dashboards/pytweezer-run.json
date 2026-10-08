@@ -114,7 +114,8 @@
         "sort": 1,
         "current": {},
         "options": [],
-        "hide": 0
+        "hide": 0,
+        "allValue": "'__all'"
       }
     ]
   },
@@ -359,7 +360,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(time, $__interval), field AS metric, avg(value) AS value FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND field IN ($field) GROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(time, $__interval), field AS metric, avg(value) AS value FROM readings WHERE $__timeFilter(time) AND measurement = '$measurement' AND (cardinality(ARRAY[$field]::text[]) = 0 OR '__all' = ANY(ARRAY[$field]::text[]) OR field = ANY(ARRAY[$field]::text[])) GROUP BY 1, 2 ORDER BY 1"
         }
       ]
     },

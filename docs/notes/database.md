@@ -139,6 +139,37 @@ uncompressed table, and each process logs one warning when it connects.
 **When simulating**, the default connection string points at `127.0.0.1`.
 Without a local Postgres, writes are dropped after one warning.
 
+### A local stack for simulation (Linux)
+
+`pytweezer-server` on any PC but PH-BEAST simulates. Every process it starts
+then expects Postgres on `127.0.0.1:5432` (user and password `pytweezer`) and
+Grafana on `127.0.0.1:3000`. To get the database, dashboards and **Open in
+Grafana** working while simulating, run both locally on those ports. None of
+this needs root; everything lives in one directory, e.g.
+`~/.local/share/pytweezer-dev`:
+
+1. **Postgres + TimescaleDB**: install `postgresql=17` and `cmake` from
+   conda-forge into that directory with
+   [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html).
+   conda-forge has no TimescaleDB, so build the latest release from source
+   against that Postgres:
+   `./bootstrap -DREGRESS_CHECKS=OFF -DTAP_CHECKS=OFF -DPG_CONFIG=<env>/bin/pg_config`,
+   then `make install` in `build/`.
+2. **Cluster**: `initdb` with `--auth=scram-sha-256`. In `postgresql.conf` set
+   `listen_addresses = 'localhost'` and `shared_preload_libraries = 'timescaledb'`.
+   Then create the `pytweezer` role (password `pytweezer`), the database and the
+   `grafana` role as in step 3 above.
+3. **Grafana**: unpack the Linux tarball. Give it a `grafana.ini` with
+   `http_addr = 127.0.0.1` and anonymous Viewer access, and provision it as in
+   step 6, with the dashboards `path` pointing at your checkout.
+4. **Services**: run `postgres -D <data dir>` and `grafana server
+   --homepath=<grafana> --config=<grafana.ini>` as systemd user services, so
+   they start at login. Pass `GRAFANA_DB_PASSWORD` to Grafana through an
+   `EnvironmentFile`.
+
+Simulated runs then go to this local database, and their files to
+`data/simulated/`, so they never mix with real ones.
+
 ## 2. Connection config
 
 `DATABASE["dsn"]` in `pytweezer/configuration/config.py` is the only
