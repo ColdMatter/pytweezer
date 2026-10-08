@@ -281,7 +281,7 @@ The ergonomic path is `run_parallel` (in `pytweezer/parallel.py`): it runs
 zero-argument callables in one thread each and returns their results in order.
 Because every device is its own server process, a `get_device` call is just a
 blocking socket round-trip whose `recv` releases the GIL, so the threads overlap
-for real — no `async`/`await`, and it works from the PyQt5 GUI (which has no
+for real — no `async`/`await`, and it works from the PyQt6 GUI (which has no
 `qasync`). `after(delay, call)` staggers one call's start to win the
 arm-before-trigger race:
 
@@ -317,7 +317,7 @@ whose RPC methods are coroutines. Connect several and drive them with
 `asyncio.gather` so the calls are issued together instead of one waiting on the
 other's reply. No server-side change is needed — each device already runs its own
 `simple_server_loop`, so the concurrency only needed solving on the client. Fine
-to call from scripts/notebooks; the GUI is PyQt5 with no `qasync` integration, so
+to call from scripts/notebooks; the GUI is PyQt6 with no `qasync` integration, so
 calling from GUI code would need a worker thread. See
 `async_device_comms_notes.md` (repo root) for the fuller investigation (including
 why `AsyncioClient` still awaits each reply — the win is running calls to

@@ -296,8 +296,8 @@ def main():
 
     install_fakes()
 
-    from PyQt5.QtCore import Qt, QTimer
-    from PyQt5.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt, QTimer
+    from PyQt6.QtWidgets import QApplication
     from pytweezer.GUI.theme import apply_theme
 
     module = load_module(args.script)

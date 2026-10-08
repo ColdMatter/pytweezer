@@ -171,7 +171,7 @@ daemon threads. One failing call re-raises its own exception; several raise an
 `get_device_async` is the lower-level alternative, returning an `AsyncioClient`
 whose methods are coroutines. It is **not** fire-and-forget — it still awaits
 every reply; the win is `asyncio.gather` issuing calls to *different* servers
-before awaiting either. Fine from scripts and notebooks; the PyQt5 GUI has no
+before awaiting either. Fine from scripts and notebooks; the PyQt6 GUI has no
 `qasync`, so GUI code would need a worker thread.
 
 ## Verifying a change
