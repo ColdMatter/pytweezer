@@ -254,7 +254,8 @@ CONFIG["Servers"]["Experiment Manager"] = {
     "script": "../pytweezer/servers/experiment_manager.py",
     "host": SERVER_HOST,
     "port": get_next_port(),
-    "pub_port": get_next_port(),
+    # Publishes the queue and the running task's points (sipyco sync_struct).
+    "sync_port": get_next_port(),
     # Experiments get in-process simulated devices; data goes to <data_root>/simulated.
     "simulate": SIMULATING,
     # Measurement files and the queue state; PYTWEEZER_DATA_DIR overrides it.

@@ -34,14 +34,14 @@ def make_manager(tmp_path, recording_db):
 
 def test_config_entry_is_allocated_after_every_other_port():
     manager_ports = {
-        CONFIG["Servers"]["Experiment Manager"][key] for key in ("port", "pub_port")
+        CONFIG["Servers"]["Experiment Manager"][key] for key in ("port", "sync_port")
     }
     other_ports = {
         entry[key]
         for category in ("Servers", "Devices")
         for name, entry in CONFIG[category].items()
         if name != "Experiment Manager"
-        for key in ("port", "pub_port", "sub_port")
+        for key in ("port", "pub_port", "sub_port", "rpc_port")
         if key in entry
     }
     assert min(manager_ports) > max(other_ports)
@@ -210,3 +210,32 @@ def test_restart_does_not_adopt_a_reused_pid(make_manager, tmp_path):
     manager = make_manager()
     _running_task(manager, tmp_path, pid=me.pid, create_time=me.create_time() - 100)
     assert make_manager().queue.get(1).status == "interrupted"
+
+
+def test_published_state_follows_the_queue_and_points(make_manager, tmp_path):
+    manager = make_manager()
+    _running_task(manager, tmp_path)
+    base = {"command": "worker", "rid": 1, "token": "tok"}
+    state = manager.notifier.raw_view
+
+    manager.handle(
+        base
+        | {
+            "event": "point",
+            "done": 1,
+            "total": 2,
+            "index": 0,
+            "values": {"frequency": 2.0},
+            "scalars": {"counts": 5.0},
+        }
+    )
+    manager.tick()
+    assert state["running"]["rid"] == 1 and state["running"]["points_done"] == 1
+    assert state["points"]["rid"] == 1
+    assert [row["scalars"] for row in state["points"]["rows"]] == [{"counts": 5.0}]
+
+    manager.handle(base | {"event": "finished", "status": "completed"})
+    manager.tick()
+    assert state["running"] is None
+    assert state["history"][0]["rid"] == 1
+    assert state["points"]["rid"] == 1, "rows outlive the task until the next starts"

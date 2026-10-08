@@ -118,7 +118,7 @@ def test_simulated_data_root_is_separate(monkeypatch, tmp_path):
 def test_manager_tells_workers_and_guis_it_is_simulating(
     monkeypatch, tmp_path, recording_db
 ):
-    conf = {"host": "127.0.0.1", "port": 1, "pub_port": 2, "simulate": True}
+    conf = {"host": "127.0.0.1", "port": 1, "sync_port": 2, "simulate": True}
     monkeypatch.setattr(
         em, "get_config", lambda: {"Servers": {"Experiment Manager": conf}}
     )

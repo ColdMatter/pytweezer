@@ -50,9 +50,14 @@ def rep_endpoint(server_name: str = SERVER_NAME) -> str:
     return f"tcp://{connect_host(conf['host'])}:{conf['port']}"
 
 
-def pub_endpoint(server_name: str = SERVER_NAME) -> str:
+#: The manager's published state; layout in :mod:`~pytweezer.servers.experiment_manager`.
+NOTIFIER_NAME = "experiment"
+
+
+def sync_address(server_name: str = SERVER_NAME) -> tuple[str, int]:
+    """``(host, port)`` where the manager publishes its state (sipyco sync_struct)."""
     conf = manager_conf(server_name)
-    return f"tcp://{connect_host(conf['host'])}:{conf['pub_port']}"
+    return connect_host(conf["host"]), conf["sync_port"]
 
 
 class ReqClient:
