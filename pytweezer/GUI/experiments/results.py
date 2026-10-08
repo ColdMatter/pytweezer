@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
 from pytweezer.experiment.storage import data_root, load_measurement, read_header
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.components import Region, status_icon
+from pytweezer.GUI.grafana import open_in_browser, run_url
 from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND
 from pytweezer.logging_utils import get_logger
 
@@ -209,11 +210,15 @@ class ResultsPanel(QWidget):
         )
         self.resubmit_button.clicked.connect(self._resubmit)
         self.resubmit_button.setEnabled(False)
+        self.grafana_button = QPushButton("Open in Grafana")
+        self.grafana_button.clicked.connect(self._open_in_grafana)
+        self.grafana_button.setEnabled(False)
         self.detail_region = Region("well", "Measurement", "")
         self.detail_region.header.insertWidget(2, self.simulation_banner)
         self.detail_region.body.addWidget(self.metadata, 1)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
+        buttons.addWidget(self.grafana_button)
         buttons.addWidget(self.resubmit_button)
         self.detail_region.body.addLayout(buttons)
 
@@ -394,6 +399,7 @@ class ResultsPanel(QWidget):
             self.simulation_banner.setVisible(False)
             self.measurement = None
             self.resubmit_button.setEnabled(False)
+            self.grafana_button.setEnabled(False)
             return
         first_load = self.path != Path(path)
         self.path = Path(path)
@@ -406,6 +412,13 @@ class ResultsPanel(QWidget):
         )
         self.simulation_banner.setVisible(bool(attrs.get("simulated")))
         self.resubmit_button.setEnabled(True)
+        queued = attrs["rid"] >= 0
+        self.grafana_button.setEnabled(queued)
+        self.grafana_button.setToolTip(
+            "Show this run's results and the readings during it in Grafana"
+            if queued
+            else "Run with run_local(), so it was never recorded in the database"
+        )
         self._fill_choices(keep_selection=not first_load)
         self.replot()
 
@@ -493,6 +506,10 @@ class ResultsPanel(QWidget):
             "bottom", x_name, units=None if categorical else x_unit or None
         )
         self.plot.setLabel("left", y_name, units=m.units.get(y_name) or None)
+
+    def _open_in_grafana(self):
+        attrs = self.measurement.attrs
+        open_in_browser(run_url(attrs["rid"], attrs["t_start"], attrs["t_end"]))
 
     def _resubmit(self):
         if self.measurement is not None:

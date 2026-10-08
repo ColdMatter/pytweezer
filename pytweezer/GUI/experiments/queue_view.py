@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from pytweezer.GUI.components import status_icon
+from pytweezer.GUI.grafana import open_in_browser, run_url
 
 COLUMNS = [
     "RID",
@@ -81,7 +82,7 @@ class QueueView(QWidget):
             [("pause", "Pause"), ("resume", "Resume"), ("terminate", "Terminate")],
             [("hold", "Hold"), ("release", "Release"), ("raise", "Priority +"),
              ("lower", "Priority −")],
-            [("edit", "Edit as new")],
+            [("edit", "Edit as new"), ("grafana", "Open in Grafana")],
             None,
             [("abort", "Abort"), ("delete", "Delete")],
         ]  # fmt: skip
@@ -107,6 +108,9 @@ class QueueView(QWidget):
         )
         self.buttons["delete"].setToolTip("Remove a waiting task from the queue")
         self.buttons["edit"].setToolTip("Copy this task's settings into the editor")
+        self.buttons["grafana"].setToolTip(
+            "Show this task's results and the readings during it in Grafana"
+        )
         layout.addLayout(buttons)
         self._update_buttons()
 
@@ -159,6 +163,7 @@ class QueueView(QWidget):
             "raise": status in ("queued", "held", "running", "paused"),
             "lower": status in ("queued", "held", "running", "paused"),
             "edit": task is not None,
+            "grafana": task is not None and bool(task.get("t_start")),
         }
         for command, button in self.buttons.items():
             button.setEnabled(bool(allowed[command]))
@@ -170,6 +175,8 @@ class QueueView(QWidget):
         rid = task["rid"]
         if command == "edit":
             self.edit_requested.emit(task)
+        elif command == "grafana":
+            open_in_browser(run_url(rid, task["t_start"], task.get("t_end")))
         elif command in ("raise", "lower"):
             step = 1 if command == "raise" else -1
             self.action_requested.emit(
