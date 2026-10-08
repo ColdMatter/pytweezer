@@ -13,6 +13,7 @@ SERVER_PC = "PH-BEAST"
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
+
 SIMULATING = False  # set to True to run in simulation mode (no real devices, no real cameras, etc.)
 LOCAL = False
 
@@ -78,12 +79,13 @@ CONFIG = {
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
-        "Propertyhub": {
+        # The shared properties tree: "port" publishes it, "rpc_port" takes edits.
+        "Properties": {
             "active": True,
+            "script": "../pytweezer/servers/property_server.py",
             "host": SERVER_HOST,
-            "pub_port": get_next_port(),
-            "sub_port": get_next_port(),
-            "script": "../pytweezer/servers/xsub_xpub.py",
+            "port": get_next_port(),
+            "rpc_port": get_next_port(),
         },
         "Messagehub": {
             "active": True,
@@ -92,12 +94,6 @@ CONFIG = {
             "sub_port": get_next_port(),
             "stream_name": "Global Messages",
             "script": "../pytweezer/servers/xsub_xpub.py",
-        },
-        "Propertylogger": {
-            "active": True,
-            "script": "../pytweezer/servers/propertylogger.py",
-            "host": SERVER_HOST,
-            "port": get_next_port(),
         },
         "Datalogger": {
             "active": True,

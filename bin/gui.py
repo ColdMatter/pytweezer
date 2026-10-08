@@ -52,7 +52,7 @@ logger = get_logger("pytweezer GUI")
 def _safe_panel(label, factory):
     """Build a panel, substituting a placeholder if construction raises.
 
-    Several panels connect to the Propertyhub / Analysis Manager on
+    Several panels connect to the Properties server / Analysis Manager on
     construction and raise if those aren't reachable. Isolating each build
     keeps one unreachable service from aborting the whole window.
     """

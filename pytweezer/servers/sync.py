@@ -142,8 +142,9 @@ class SyncMirror:
         host: Server address.
         port: Server notifier port.
         notifier_name: Which notifier to mirror.
-        on_mod: Called on the loop thread with each applied mod (including the
-            ``"init"`` that a (re)connect delivers), while the data lock is held.
+        on_mod: Called as ``on_mod(mod, data)`` on the loop thread after each
+            mod is applied (including the ``"init"`` that a (re)connect
+            delivers), while the data lock is held.
         keep_mods: Queue every mod for :meth:`drain`, for consumers that poll.
     """
 
@@ -152,7 +153,7 @@ class SyncMirror:
         host: str,
         port: int,
         notifier_name: str,
-        on_mod: Callable[[dict], None] | None = None,
+        on_mod: Callable[[dict, Any], None] | None = None,
         keep_mods: bool = False,
     ):
         self.host = host
@@ -180,7 +181,11 @@ class SyncMirror:
         return self._initialised.wait(timeout)
 
     def read(self, fn: Callable[[Any], Any]) -> Any:
-        """``fn(data)`` under the data lock; ``fn`` must not keep references."""
+        """``fn(data)`` under the data lock.
+
+        ``fn`` may edit the data, but only locally: the next snapshot replaces
+        it. It must not keep references to it.
+        """
         with self._lock:
             return fn(self._data)
 
@@ -257,7 +262,7 @@ class SyncMirror:
                 self._mods.append(mod)
             if self._on_mod is not None:
                 try:
-                    self._on_mod(mod)
+                    self._on_mod(mod, self._data)
                 except Exception:
                     logger.exception("on_mod callback failed")
         if mod["action"] == "init":

@@ -135,7 +135,7 @@ def test_mirror_waits_for_a_server_that_starts_later():
 def test_on_mod_sees_every_mod(served):
     server, notifier, mirror = served
     seen = []
-    m = mirror(on_mod=seen.append)
+    m = mirror(on_mod=lambda mod, data: seen.append(mod))
     server.call(notifier["values"].__setitem__, "k", 1).result()
     assert until(lambda: len(seen) == 2)
     assert seen[0]["action"] == "init"
