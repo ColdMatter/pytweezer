@@ -309,8 +309,8 @@ class MotMasterExperiment(Experiment):
                         ),
                     )
                 )
-        # A timed-out follower may still append to errors, so work on a copy.
-        failures = sorted(list(errors), key=lambda entry: entry[0] != master)
+        # A timed-out follower may still append to errors; sorted() works on a copy.
+        failures = sorted(errors, key=lambda entry: entry[0] != master)
         if failures:
             for attribute, error in failures[1:]:
                 logger.error("MOTMaster %s also failed: %r", attribute, error)
