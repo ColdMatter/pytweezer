@@ -122,8 +122,7 @@ class MotMasterExperiment(Experiment):
                 f"{cls.__name__} has {len(sequencers)} MOTMasters; exactly one "
                 f"must have master=True (found {len(masters)})"
             )
-        for name, argument in cls.motmaster_arguments().items():
-            cls._parameter_device(name, argument)
+        cls._declared_targets()
 
     @classmethod
     def motmasters(cls) -> dict[str, MotMaster]:
@@ -163,9 +162,25 @@ class MotMasterExperiment(Experiment):
         return argument.device
 
     @classmethod
+    def _declared_targets(cls) -> dict[tuple[str, str], str]:
+        """``{(MotMaster attribute, script parameter): declared argument name}``."""
+        targets: dict[tuple[str, str], str] = {}
+        for name, argument in cls.motmaster_arguments().items():
+            target = (cls._parameter_device(name, argument), argument.motmaster_name)
+            if target in targets:
+                raise TypeError(
+                    f"{cls.__name__}.{targets[target]} and {cls.__name__}.{name} "
+                    f"both set {target[0]}.{target[1]}"
+                )
+            targets[target] = name
+        return targets
+
+    @classmethod
     def extra_argument(cls, name: str) -> Argument | None:
         attribute, dot, parameter = name.partition(".")
         if not dot or not parameter or attribute not in cls.motmasters():
+            return None
+        if (attribute, parameter) in cls._declared_targets():
             return None
         argument = _MotMasterOverride(0.0, group=f"MOTMaster: {attribute}")
         argument.name = name
@@ -258,14 +273,15 @@ class MotMasterExperiment(Experiment):
             except Exception as error:
                 errors.append((attribute, error))
 
-        followers: dict[str, threading.Thread] = {}
-        for attribute, motmaster in self.motmasters().items():
-            if attribute == master:
-                continue
+        follower_names = [name for name in self.motmasters() if name != master]
+        for attribute in follower_names:
             if attribute not in self._follower_clients:
+                motmaster = self.motmasters()[attribute]
                 self._follower_clients[attribute] = self.device(
                     motmaster.device_name, fresh=True, timeout=motmaster.timeout
                 )
+        followers: dict[str, threading.Thread] = {}
+        for attribute in follower_names:
             thread = threading.Thread(
                 target=go,
                 args=(attribute, self._follower_clients[attribute]),
@@ -293,11 +309,12 @@ class MotMasterExperiment(Experiment):
                         ),
                     )
                 )
-        if errors:
-            errors.sort(key=lambda entry: entry[0] != master)
-            for attribute, error in errors[1:]:
+        # A timed-out follower may still append to errors, so work on a copy.
+        failures = sorted(list(errors), key=lambda entry: entry[0] != master)
+        if failures:
+            for attribute, error in failures[1:]:
                 logger.error("MOTMaster %s also failed: %r", attribute, error)
-            raise errors[0][1]
+            raise failures[0][1]
 
     def run_point(self) -> None:
         self.run_sequences()

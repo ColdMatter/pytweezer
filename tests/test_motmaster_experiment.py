@@ -55,9 +55,12 @@ def rig(monkeypatch):
     log = []
     fakes = {
         "Rb MotMaster": FakeSequencer(
-            log, "rb", {"tDelay1": 5, "tPulse": 20e-6, "label": "x"}
+            log,
+            "rb",
+            {"tDelay1": 5, "tPulse": 20e-6, "nShots": 1, "bField": 0.5, "label": "x"},
         ),
         "CaF MotMaster": FakeSequencer(log, "caf", {"tLoad": 100, "bTop": 0.5}),
+        "K MotMaster": FakeSequencer(log, "k", {}),
     }
     monkeypatch.setattr(
         "pytweezer.experiment.experiment._get_device", lambda name, timeout: fakes[name]
@@ -84,17 +87,21 @@ class Pair(MotMasterExperiment):
 
 def test_declared_and_searched_parameters_are_sent_typed(rig):
     log, _ = rig
-    scan = Scan(axes=[ListAxis(argument="rb.tDelay1", values=[1, 2])])
-    measurement = run_local(Single, scan, **{"rb.tPulse": 3e-5})
+    scan = Scan(axes=[ListAxis(argument="rb.nShots", values=[1, 2])])
+    measurement = run_local(Single, scan, **{"rb.bField": 3})
     assert measurement.status == "completed", measurement.attrs["error"]
     runs = goes(log, "rb")
-    assert [run["tDelay1"] for run in runs] == [1, 2]
+    assert [run["nShots"] for run in runs] == [1, 2]
     assert all(
-        type(run["tDelay1"]) is int and type(run["tPulse"]) is float for run in runs
+        type(run["nShots"]) is int
+        and type(run["tDelay1"]) is int
+        and type(run["bField"]) is float
+        and type(run["tPulse"]) is float
+        for run in runs
     )
-    assert runs[0]["tPulse"] == 3e-5
-    assert list(measurement.points["rb.tDelay1"]) == [1, 2]
-    assert measurement.arguments["rb.tPulse"] == 3e-5
+    assert runs[0] == {"tDelay1": 100, "tPulse": 1e-6, "nShots": 1, "bField": 3.0}
+    assert list(measurement.points["rb.nShots"]) == [1, 2]
+    assert measurement.arguments["rb.bField"] == 3.0
 
 
 def test_parameters_not_chosen_are_not_sent(rig):
@@ -110,9 +117,9 @@ def test_script_defaults_are_not_recorded(rig):
 
 
 def test_non_whole_value_for_an_int32_parameter_fails_the_point(rig):
-    measurement = run_local(Single, **{"rb.tDelay1": 1.5})
+    measurement = run_local(Single, **{"rb.nShots": 1.5})
     assert measurement.status == "failed"
-    assert "tDelay1" in measurement.attrs["error"]
+    assert "nShots" in measurement.attrs["error"]
     assert "whole number" in measurement.attrs["error"]
 
 
@@ -147,6 +154,13 @@ def test_dotted_name_for_an_unknown_motmaster_is_rejected_at_submit():
         coerce_arguments(Single, {"rb.": 1})
 
 
+def test_dotted_name_for_a_declared_parameter_is_rejected_at_submit():
+    with pytest.raises(ValueError, match="no argument"):
+        coerce_arguments(Single, {"rb.tDelay1": 1})
+    with pytest.raises(ValueError, match="no argument"):
+        Scan(axes=[ListAxis(argument="rb.tPulse", values=[1e-6])]).points(Single)
+
+
 def test_master_is_untriggered_and_followers_arm_first(rig):
     log, _ = rig
     run_local(Pair, **{"caf.bTop": 0.7})
@@ -170,6 +184,29 @@ def test_follower_client_is_opened_once_per_task(rig, monkeypatch):
     measurement = run_local(Pair, scan)
     assert measurement.status == "completed", measurement.attrs["error"]
     assert opened.count("CaF MotMaster") == 2
+
+
+class Trio(MotMasterExperiment):
+    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
+    caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad")
+    k = MotMaster("K MotMaster", script="KTweezer")
+
+
+def test_failure_opening_a_follower_client_starts_no_follower(rig, monkeypatch):
+    log, fakes = rig
+    opened = []
+
+    def get_device(name, timeout):
+        opened.append(name)
+        if opened.count(name) > 1 and name == "K MotMaster":
+            raise ConnectionError("k unreachable")
+        return fakes[name]
+
+    monkeypatch.setattr("pytweezer.experiment.experiment._get_device", get_device)
+    measurement = run_local(Trio)
+    assert measurement.status == "failed"
+    assert "k unreachable" in measurement.attrs["error"]
+    assert goes(log, "caf") == []
 
 
 def test_master_failure_fails_the_task(rig):
@@ -217,6 +254,13 @@ def test_declaration_rules_are_checked_at_class_definition():
             a = MotMaster("Rb MotMaster", script="s", master=True)
             b = MotMaster("CaF MotMaster", script="s")
             x = MotMasterNumber(1.0)
+
+    with pytest.raises(TypeError, match="Twice.tPulse and Twice.pulse"):
+
+        class Twice(MotMasterExperiment):
+            a = MotMaster("Rb MotMaster", script="s")
+            tPulse = MotMasterNumber(1.0)
+            pulse = MotMasterNumber(1.0, parameter="tPulse")
 
     with pytest.raises(TypeError, match="'nope'"):
 
