@@ -272,8 +272,9 @@ def save_recipe(
 ) -> None:
     """Save these settings as recipe ``name``, shared with every PC.
 
-    With a class, every argument is stored (defaults included), so a later
-    change of default does not change what the recipe runs.
+    Every argument is stored (defaults included) except those the scan sweeps,
+    so a later change of default does not change what the recipe runs. An
+    existing name is refused unless ``overwrite`` is true.
     """
     scan = scan or Scan()
     module, class_name = _resolve(experiment, scan, args)
@@ -340,6 +341,7 @@ def delete_recipe(
     *,
     client: ExperimentManagerClient | None = None,
 ) -> None:
+    """Delete recipe ``name`` of ``experiment`` for every PC."""
     module, class_name = _resolve(experiment)
     (client or ExperimentManagerClient()).delete_recipe(module, class_name, name)
 

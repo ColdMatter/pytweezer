@@ -138,7 +138,8 @@ m = run_local(LoadingCurve, scan)  # in-process, no queue, in memory
 `submit` needs a class importable by the manager — **not one defined in a
 notebook**; use `run_local` for those (pass `path=` to keep a file).
 `ExperimentManagerClient` has `pause/resume/terminate/abort/hold/release/
-delete/set_priority/snapshot/history/catalogue`.
+delete/set_priority/snapshot/history/catalogue/recipes/save_recipe/
+delete_recipe/submit_recipe`.
 
 ## Recipes
 
@@ -154,10 +155,12 @@ from pytweezer.experiment.client import delete_recipe, recipes, save_recipe, sub
 
 save_recipe(LoadingCurve, "nightly", scan, shots=2, label="nightly check")
 rid = submit_recipe(LoadingCurve, "nightly", shots=3)  # overrides fixed arguments
+save_recipe(LoadingCurve, "nightly", shots=4, overwrite=True)  # a taken name is refused
 recipes(LoadingCurve); delete_recipe(LoadingCurve, "nightly")
 ```
 
-A recipe stores every argument value, not just changed ones. Submitting a
+A recipe stores every argument value, not just changed ones, except those its
+scan sweeps. Submitting a
 recipe that uses an argument the experiment no longer declares is refused with
 the names; load it into the form, check it and save it again. An override may
 not fix an argument the recipe scans. MOTMaster `attribute.parameter` names are
