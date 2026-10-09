@@ -790,3 +790,35 @@ def test_the_recipe_menu_submits_or_deletes(qapp):
             action.trigger()
     assert [a[0] for a in actions] == ["submit", "delete"]
     assert actions[0][1]["name"] == "check"
+
+
+def test_save_as_recipe_emits_the_validated_form(editor):
+    saved = []
+    editor.save_recipe_requested.connect(saved.append)
+    editor.rows["shots"].value.widget.setValue(6)
+    editor.save_recipe_button.click()
+    [request] = saved
+    assert request.args["shots"] == 6 and request.class_name == "Demo"
+
+
+def test_an_invalid_form_cannot_be_saved_as_a_recipe(editor):
+    saved = []
+    editor.save_recipe_requested.connect(saved.append)
+    editor.rows["shots"].scan_button.setChecked(True)
+    editor.rows["shots"].scan.mode.setCurrentText("list")
+    editor.rows["shots"].scan.values.setText("1, 0")
+    editor.save_recipe_button.click()
+    assert saved == []
+    assert "outside the allowed range" in editor.error.text()
+
+
+def test_the_recipe_name_shows_until_the_form_is_reset(editor):
+    editor.set_recipe_name("MOT check")
+    assert editor.recipe_name == "MOT check"
+    assert "MOT check" in editor.recipe_label.text()
+    assert not editor.recipe_label.isHidden()
+    editor.defaults_button.click()
+    assert editor.recipe_name == "" and editor.recipe_label.isHidden()
+    editor.set_recipe_name("again")
+    editor.set_experiment(SCHEMA)
+    assert editor.recipe_name == ""

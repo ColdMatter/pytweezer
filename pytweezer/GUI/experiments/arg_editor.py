@@ -318,10 +318,12 @@ class ArgumentEditor(QWidget):
 
     submit_requested = QtCore.pyqtSignal(object)
     last_requested = QtCore.pyqtSignal(str, str)
+    save_recipe_requested = QtCore.pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.schema = None
+        self.recipe_name = ""
         self.rows = {}
         self.fetcher = ParameterFetcher(DeviceParameterSource())
         self.fetcher.fetched.connect(self._parameters_fetched)
@@ -339,6 +341,10 @@ class ArgumentEditor(QWidget):
         self.module = QLabel()
         self.module.setProperty("role", "regionHint")
         title_row.addWidget(self.title)
+        self.recipe_label = QLabel()
+        self.recipe_label.setProperty("role", "regionHint")
+        self.recipe_label.setVisible(False)
+        title_row.addWidget(self.recipe_label)
         title_row.addStretch(1)
         title_row.addWidget(self.module)
         self.doc = QLabel()
@@ -419,12 +425,22 @@ class ArgumentEditor(QWidget):
                 )
             )
         )
+        self.save_recipe_button = QPushButton("Save as recipe…")
+        self.save_recipe_button.setToolTip(
+            "Keep these settings under a name, shared with every PC"
+        )
+        self.save_recipe_button.clicked.connect(
+            lambda: self._emit_request(self.save_recipe_requested)
+        )
         self.submit_button = QPushButton("Submit")
         self.submit_button.setObjectName("PrimaryButton")
         self.submit_button.setDefault(True)
-        self.submit_button.clicked.connect(self._submit)
+        self.submit_button.clicked.connect(
+            lambda: self._emit_request(self.submit_requested)
+        )
         buttons.addWidget(self.defaults_button)
         buttons.addWidget(self.last_button)
+        buttons.addWidget(self.save_recipe_button)
         buttons.addStretch(1)
         buttons.addWidget(self.point_count)
         buttons.addWidget(self.submit_button)
@@ -437,13 +453,19 @@ class ArgumentEditor(QWidget):
         self._set_enabled(False)
 
     def _set_enabled(self, enabled):
-        for widget in (self.defaults_button, self.last_button, self.submit_button):
+        for widget in (
+            self.defaults_button,
+            self.last_button,
+            self.save_recipe_button,
+            self.submit_button,
+        ):
             widget.setEnabled(enabled)
 
     # -- building --------------------------------------------------------
 
     def set_experiment(self, schema):
         self.schema = schema
+        self.set_recipe_name("")
         self.title.setText(schema["class_name"])
         self.module.setText(schema["module"])
         self.doc.setText(schema.get("doc", ""))
@@ -480,6 +502,7 @@ class ArgumentEditor(QWidget):
         self._update_count()
 
     def reset_to_defaults(self):
+        self.set_recipe_name("")
         for name in list(self._searched):
             self.remove_motmaster_row(name)
         for row in self.rows.values():
@@ -752,14 +775,20 @@ class ArgumentEditor(QWidget):
                 count *= row.scan.n_values()
         self.point_count.setText(f"{count} point{'' if count == 1 else 's'}")
 
-    def _submit(self):
+    def _emit_request(self, signal):
         try:
             request = self.request()
         except ValueError as error:
             self.show_error(str(error))
             return
         self.error.clear()
-        self.submit_requested.emit(request)
+        signal.emit(request)
+
+    def set_recipe_name(self, name):
+        """Name the recipe the form was loaded from; empty when it wasn't."""
+        self.recipe_name = name
+        self.recipe_label.setText(f"from recipe “{name}”" if name else "")
+        self.recipe_label.setVisible(bool(name))
 
     def show_error(self, text):
         self.error.setText(text)
