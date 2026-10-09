@@ -140,6 +140,29 @@ notebook**; use `run_local` for those (pass `path=` to keep a file).
 `ExperimentManagerClient` has `pause/resume/terminate/abort/hold/release/
 delete/set_priority/snapshot/history/catalogue`.
 
+## Recipes
+
+A recipe is a named, saved form — arguments, scan, priority and label — kept by
+the Experiment Manager in `{data_root}/recipes.json`, so every PC sees the same
+ones. In the **Experiments** tab recipes sit under their experiment in the
+tree: click one to load it into the form (the header names it), **Save as
+recipe…** stores the form (asks before replacing a name), right-click → *Submit
+now* queues it unchanged, *Delete…* removes it for everyone.
+
+```python
+from pytweezer.experiment.client import delete_recipe, recipes, save_recipe, submit_recipe
+
+save_recipe(LoadingCurve, "nightly", scan, shots=2, label="nightly check")
+rid = submit_recipe(LoadingCurve, "nightly", shots=3)  # overrides fixed arguments
+recipes(LoadingCurve); delete_recipe(LoadingCurve, "nightly")
+```
+
+A recipe stores every argument value, not just changed ones. Submitting a
+recipe that uses an argument the experiment no longer declares is refused with
+the names; load it into the form, check it and save it again. An override may
+not fix an argument the recipe scans. MOTMaster `attribute.parameter` names are
+checked when the task runs, as for any submission.
+
 ## Files
 
 `{data_root}/YYYY/MM/DD/{rid:06d}_{Class}.h5`. Root attrs: rid, experiment,

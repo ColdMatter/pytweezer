@@ -15,6 +15,7 @@ from pytweezer.experiment import (
     Number,
     Scan,
 )
+from pytweezer.experiment.client import ManagerError
 from pytweezer.experiment.motmaster import (
     MotMaster,
     MotMasterExperiment,
@@ -60,11 +61,24 @@ class FakeClient:
     def __init__(self):
         self.calls = []
         self.last = None
+        self.recipes = []
+        self.recipes_version = 0
+        self.errors = {}
 
     def call(self, command, **fields):
         self.calls.append((command, fields))
+        if command in self.errors:
+            raise ManagerError(self.errors[command])
         if command == "catalogue":
             return {"ok": True, "modules": MODULES, "version": 1}
+        if command == "recipes":
+            return {
+                "ok": True,
+                "recipes": self.recipes,
+                "version": self.recipes_version,
+            }
+        if command == "submit_recipe":
+            return {"ok": True, "rid": 13}
         return {"ok": True}
 
     def submit(self, request):
@@ -822,3 +836,113 @@ def test_the_recipe_name_shows_until_the_form_is_reset(editor):
     editor.set_recipe_name("again")
     editor.set_experiment(SCHEMA)
     assert editor.recipe_name == ""
+
+
+def recipe_panel(qapp, *recipes):
+    client, feed = FakeClient(), FakeFeed()
+    client.recipes = list(recipes)
+    panel = ExperimentsPanel(client=client, feed=feed)
+    panel.refresh_catalogue()
+    return panel, client, feed
+
+
+def commands(client, name):
+    return [fields for command, fields in client.calls if command == name]
+
+
+def test_panel_lists_recipes_and_refetches_when_they_change(qapp):
+    panel, client, feed = recipe_panel(qapp, recipe_dict("a"))
+    assert [r["name"] for r in panel.catalogue.recipes] == ["a"]
+    fetches = len(commands(client, "recipes"))
+    snapshot = {"running": None, "queue": [], "history": [], "recipes_version": 0}
+    feed.queue_changed.emit(snapshot)
+    assert len(commands(client, "recipes")) == fetches
+    client.recipes = [recipe_dict("a"), recipe_dict("b")]
+    feed.queue_changed.emit({**snapshot, "recipes_version": 1})
+    assert [r["name"] for r in panel.catalogue.recipes] == ["a", "b"]
+
+
+def test_selecting_a_recipe_fills_the_form_and_names_it(qapp):
+    panel, client, _feed = recipe_panel(
+        qapp, recipe_dict("check", args={"shots": 5, "mode": "b"}, label="nightly")
+    )
+    assert panel.catalogue.select_recipe(SCHEMA["module"], "Demo", "check")
+    assert panel.editor.schema["class_name"] == "Demo"
+    assert panel.editor.rows["shots"].value.value() == 5
+    assert panel.editor.rows["mode"].value.value() == "b"
+    assert panel.editor.label.text() == "nightly"
+    assert panel.editor.recipe_name == "check"
+
+
+def test_a_recipe_list_refresh_does_not_reload_the_form(qapp):
+    panel, client, feed = recipe_panel(qapp, recipe_dict("check", args={"shots": 5}))
+    panel.catalogue.select_recipe(SCHEMA["module"], "Demo", "check")
+    panel.editor.rows["shots"].value.widget.setValue(8)
+    client.recipes = [recipe_dict("check", args={"shots": 5}), recipe_dict("new")]
+    feed.queue_changed.emit(
+        {"running": None, "queue": [], "history": [], "recipes_version": 1}
+    )
+    assert panel.editor.rows["shots"].value.value() == 8
+    assert panel.catalogue.tree.currentItem().text(0) == "check"
+
+
+def test_save_as_recipe_asks_for_a_name_and_confirms_a_replacement(qapp):
+    panel, client, _feed = recipe_panel(qapp, recipe_dict("check"))
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    asked, confirmed = [], []
+    panel.ask_recipe_name = lambda default: asked.append(default) or " new one "
+    panel.confirm = lambda title, question: confirmed.append(question) or True
+    panel.editor.rows["shots"].value.widget.setValue(4)
+    panel.editor.save_recipe_button.click()
+    [fields] = commands(client, "save_recipe")
+    assert fields["recipe"]["name"] == "new one" and not fields["overwrite"]
+    assert fields["recipe"]["args"]["shots"] == 4
+    assert "@" in fields["recipe"]["submitter"]
+    assert confirmed == [] and asked == [""]
+    assert panel.editor.recipe_name == "new one"
+    assert "Saved recipe 'new one'" in panel.status.text()
+
+    panel.ask_recipe_name = lambda default: "check"
+    panel.confirm = lambda title, question: False
+    panel.editor.save_recipe_button.click()
+    assert len(commands(client, "save_recipe")) == 1
+    panel.confirm = lambda title, question: True
+    panel.editor.save_recipe_button.click()
+    assert commands(client, "save_recipe")[-1]["overwrite"] is True
+
+    panel.ask_recipe_name = lambda default: "  "
+    panel.editor.save_recipe_button.click()
+    assert len(commands(client, "save_recipe")) == 2
+
+
+def test_submit_now_queues_the_recipe_or_shows_why_not(qapp):
+    recipe = recipe_dict("check")
+    panel, client, _feed = recipe_panel(qapp, recipe)
+    panel.catalogue.recipe_action_requested.emit("submit", recipe)
+    [fields] = commands(client, "submit_recipe")
+    assert (fields["experiment"], fields["class_name"], fields["name"]) == (
+        SCHEMA["module"],
+        "Demo",
+        "check",
+    )
+    assert "@" in fields["submitter"]
+    assert "Queued task 13 from recipe 'check'" in panel.status.text()
+
+    client.errors["submit_recipe"] = "Demo no longer has argument(s) ['old']"
+    panel.catalogue.recipe_action_requested.emit("submit", recipe)
+    assert "no longer has argument(s) ['old']" in panel.status.text()
+    assert panel.status.property("state") == "crashed"
+
+
+def test_deleting_a_recipe_needs_confirmation(qapp):
+    recipe = recipe_dict("check")
+    panel, client, _feed = recipe_panel(qapp, recipe)
+    panel.confirm = lambda title, question: False
+    panel.catalogue.recipe_action_requested.emit("delete", recipe)
+    assert commands(client, "delete_recipe") == []
+    panel.confirm = lambda title, question: True
+    panel.catalogue.recipe_action_requested.emit("delete", recipe)
+    assert commands(client, "delete_recipe") == [
+        {"experiment": SCHEMA["module"], "class_name": "Demo", "name": "check"}
+    ]
+    assert "Deleted recipe 'check'" in panel.status.text()

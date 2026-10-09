@@ -5,7 +5,9 @@ from PyQt6.QtWidgets import (
     QDockWidget,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QMessageBox,
     QScrollArea,
     QSplitter,
     QVBoxLayout,
@@ -18,6 +20,7 @@ from pytweezer.experiment.client import (
     ManagerUnavailable,
     submitter_name,
 )
+from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.components import Region, set_state
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor
@@ -45,6 +48,7 @@ class ExperimentsPanel(QWidget):
         self._owns_feed = feed is None
         self.feed = feed or ExperimentFeed()
         self._catalogue_version = None
+        self._recipes_version = None
         # Unsubmitted edits per experiment, restored when switching back.
         self._drafts = {}
         self._current_key = None
@@ -100,6 +104,9 @@ class ExperimentsPanel(QWidget):
         self.catalogue.refresh_requested.connect(self.refresh_catalogue)
         self.editor.submit_requested.connect(self._submit)
         self.editor.last_requested.connect(self._load_last)
+        self.catalogue.recipe_selected.connect(self._recipe_selected)
+        self.catalogue.recipe_action_requested.connect(self._recipe_action)
+        self.editor.save_recipe_requested.connect(self._save_recipe)
         self.queue_view.action_requested.connect(self._action)
         self.queue_view.edit_requested.connect(
             lambda task: self.load_request(TaskRequest.model_validate(task))
@@ -131,6 +138,14 @@ class ExperimentsPanel(QWidget):
             return
         self._catalogue_version = reply.get("version")
         self.catalogue.set_modules(reply["modules"])
+        self.refresh_recipes()
+
+    def refresh_recipes(self):
+        reply = self._call("Listing recipes", self.client.call, "recipes")
+        if reply is None:
+            return
+        self._recipes_version = reply.get("version")
+        self.catalogue.set_recipes(reply["recipes"])
 
     def _queue_changed(self, snapshot):
         self._simulated = bool(snapshot.get("simulated"))
@@ -140,6 +155,9 @@ class ExperimentsPanel(QWidget):
         version = snapshot.get("catalogue_version")
         if version is not None and version != self._catalogue_version:
             self.refresh_catalogue()
+        recipes_version = snapshot.get("recipes_version")
+        if recipes_version is not None and recipes_version != self._recipes_version:
+            self.refresh_recipes()
 
     def _connection_changed(self, connected):
         if connected:
@@ -207,6 +225,88 @@ class ExperimentsPanel(QWidget):
         if rid is not None:
             self._drafts.pop((request.experiment, request.class_name), None)
             self._show_status(f"Queued task {rid}")
+
+    # -- recipes -------------------------------------------------------------
+
+    def _recipe_selected(self, recipe):
+        key = (recipe["experiment"], recipe["class_name"])
+        schema = self.catalogue.schema_for(*key)
+        if schema is None:
+            return
+        if key != self._current_key:
+            self._save_draft()
+            self._current_key = key
+            self.editor.set_experiment(schema)
+        self.editor.load_request(Recipe.model_validate(recipe))
+        self.editor.set_recipe_name(recipe["name"])
+
+    def _save_recipe(self, request):
+        name = self.ask_recipe_name(self.editor.recipe_name).strip()
+        if not name:
+            return
+        exists = any(
+            (r["experiment"], r["class_name"], r["name"])
+            == (request.experiment, request.class_name, name)
+            for r in self.catalogue.recipes
+        )
+        if exists and not self.confirm(
+            "Replace recipe", f"Replace the saved recipe '{name}' for every PC?"
+        ):
+            return
+        recipe = Recipe(
+            **request.model_dump(exclude={"submitter"}),
+            name=name,
+            submitter=submitter_name(),
+        )
+        reply = self._call(
+            f"Saving recipe '{name}'",
+            self.client.call,
+            "save_recipe",
+            recipe=recipe.model_dump(mode="json"),
+            overwrite=exists,
+        )
+        if reply is None:
+            return
+        self.editor.set_recipe_name(name)
+        self._show_status(f"Saved recipe '{name}'")
+        self.refresh_recipes()
+
+    def _recipe_action(self, action, recipe):
+        name = recipe["name"]
+        fields = {key: recipe[key] for key in ("experiment", "class_name", "name")}
+        if action == "submit":
+            reply = self._call(
+                f"Submitting recipe '{name}'",
+                self.client.call,
+                "submit_recipe",
+                submitter=submitter_name(),
+                **fields,
+            )
+            if reply is not None:
+                self._show_status(f"Queued task {reply['rid']} from recipe '{name}'")
+        elif action == "delete":
+            if not self.confirm(
+                "Delete recipe",
+                f"Delete the saved recipe '{name}' for {recipe['class_name']}? "
+                "It is removed for every PC.",
+            ):
+                return
+            reply = self._call(
+                f"Deleting recipe '{name}'", self.client.call, "delete_recipe", **fields
+            )
+            if reply is not None:
+                self._show_status(f"Deleted recipe '{name}'")
+                self.refresh_recipes()
+
+    def ask_recipe_name(self, default):
+        name, ok = QInputDialog.getText(
+            self, "Save as recipe", "Recipe name (shared with every PC):", text=default
+        )
+        return name if ok else ""
+
+    def confirm(self, title, question):
+        answer = QMessageBox.question(self, title, question)
+        return answer == QMessageBox.StandardButton.Yes
 
     def _action(self, command, fields):
         self._call(
