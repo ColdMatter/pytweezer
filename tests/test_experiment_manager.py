@@ -8,8 +8,12 @@ import pytest
 
 from pytweezer.configuration.config import CONFIG
 from pytweezer.experiment.catalogue import Catalogue
+from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.experiment.queue import WorkerRecord
+from pytweezer.experiment.recipes import Recipe
+from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
 from pytweezer.experiment.task import TaskRequest
+from pytweezer.experiments.demo import RabiDemo
 from pytweezer.servers import experiment_manager as em
 
 
@@ -239,3 +243,203 @@ def test_published_state_follows_the_queue_and_points(make_manager, tmp_path):
     assert state["running"] is None
     assert state["history"][0]["rid"] == 1
     assert state["points"]["rid"] == 1, "rows outlive the task until the next starts"
+
+
+class StaticCatalogue:
+    """A catalogue whose entries are given, never read from files."""
+
+    def __init__(self, entries):
+        self._entries = entries
+        self.busy = False
+
+    def refresh(self):
+        return False
+
+    def poll(self):
+        return False
+
+    def entries(self):
+        return self._entries
+
+    def close(self):
+        pass
+
+
+class Sequenced(MotMasterExperiment):
+    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic")
+
+    def run_point(self):
+        pass
+
+
+def entry(cls):
+    return {
+        "module": cls.__module__,
+        "classes": [cls.schema()],
+        "warnings": [],
+        "error": None,
+    }
+
+
+BROKEN = {
+    "module": "pytweezer.experiments.broken",
+    "classes": [],
+    "warnings": [],
+    "error": "Traceback (most recent call last):\n  ...\nSyntaxError: invalid syntax\n",
+}
+DEMO = "pytweezer.experiments.demo"
+
+
+@pytest.fixture
+def recipe_manager(tmp_path, recording_db):
+    def make():
+        return em.ExperimentManager(
+            root=tmp_path,
+            catalogue=StaticCatalogue([entry(RabiDemo), entry(Sequenced), BROKEN]),
+            bind=False,
+            db=recording_db,
+        )
+
+    return make
+
+
+def recipe(**kwargs):
+    fields = {"experiment": DEMO, "class_name": "RabiDemo", "name": "check", **kwargs}
+    return Recipe(**fields).model_dump(mode="json")
+
+
+def save(manager, **kwargs):
+    reply = manager.handle({"command": "save_recipe", "recipe": recipe(**kwargs)})
+    assert reply == {"ok": True}
+
+
+def submit_recipe(manager, **fields):
+    return manager.handle(
+        {
+            "command": "submit_recipe",
+            "experiment": DEMO,
+            "class_name": "RabiDemo",
+            "name": "check",
+            **fields,
+        }
+    )
+
+
+def test_recipes_are_saved_published_and_survive_a_restart(recipe_manager, tmp_path):
+    manager = recipe_manager()
+    version = manager._snapshot()["recipes_version"]
+    save(manager, args={"atoms": 50})
+    assert manager._snapshot()["recipes_version"] == version + 1
+    assert (tmp_path / "recipes.json").exists()
+    [saved] = recipe_manager().handle({"command": "recipes"})["recipes"]
+    assert saved["name"] == "check" and saved["args"] == {"atoms": 50}
+
+
+def test_saving_over_a_recipe_needs_overwrite(recipe_manager):
+    manager = recipe_manager()
+    save(manager)
+    reply = manager.handle({"command": "save_recipe", "recipe": recipe(label="new")})
+    assert not reply["ok"] and "already exists" in reply["error"]
+    reply = manager.handle(
+        {"command": "save_recipe", "recipe": recipe(label="new"), "overwrite": True}
+    )
+    assert reply["ok"]
+    [saved] = manager.handle({"command": "recipes"})["recipes"]
+    assert saved["label"] == "new"
+
+
+def test_recipes_are_listed_per_experiment_and_deleted(recipe_manager):
+    manager = recipe_manager()
+    save(manager)
+    save(manager, experiment=Sequenced.__module__, class_name="Sequenced", name="seq")
+    listed = manager.handle(
+        {"command": "recipes", "experiment": DEMO, "class_name": "RabiDemo"}
+    )["recipes"]
+    assert [r["name"] for r in listed] == ["check"]
+    version = manager._snapshot()["recipes_version"]
+    delete = {
+        "command": "delete_recipe",
+        "experiment": DEMO,
+        "class_name": "RabiDemo",
+        "name": "check",
+    }
+    assert manager.handle(delete) == {"ok": True}
+    assert manager._snapshot()["recipes_version"] == version + 1
+    assert [r["name"] for r in manager.handle({"command": "recipes"})["recipes"]] == [
+        "seq"
+    ]
+    reply = manager.handle(delete)
+    assert not reply["ok"] and "no recipe 'check'" in reply["error"]
+
+
+def test_a_recipe_is_queued_with_its_settings_and_overrides(recipe_manager):
+    manager = recipe_manager()
+    scan = Scan(axes=[LinearAxis(argument="pulse_time", start=0, stop=1e-5, n=3)])
+    save(manager, args={"atoms": 50, "rabi_frequency": 1e3}, scan=scan, priority=2)
+    reply = submit_recipe(
+        manager, args={"atoms": 7}, label="override", submitter="me@pc"
+    )
+    assert reply == {"ok": True, "rid": 1}
+    task = manager.queue.get(1)
+    assert task.args == {"atoms": 7, "rabi_frequency": 1e3}
+    assert [axis.argument for axis in task.scan.axes] == ["pulse_time"]
+    assert (task.priority, task.label, task.submitter) == (2, "override", "me@pc")
+    assert task.due_time is None
+
+
+def test_a_recipe_using_a_removed_argument_is_refused(recipe_manager):
+    manager = recipe_manager()
+    save(manager, args={"atoms": 5, "old_knob": 1})
+    reply = submit_recipe(manager)
+    assert not reply["ok"]
+    assert "no longer has" in reply["error"] and "old_knob" in reply["error"]
+    save(
+        manager, name="scanned", scan=Scan(axes=[ListAxis(argument="old", values=[1])])
+    )
+    reply = submit_recipe(manager, name="scanned")
+    assert not reply["ok"] and "'old'" in reply["error"]
+    assert manager.queue.ordered() == []
+
+
+def test_an_override_must_name_an_argument_and_not_a_scanned_one(recipe_manager):
+    manager = recipe_manager()
+    save(manager, scan=Scan(axes=[ListAxis(argument="atoms", values=[1, 2])]))
+    reply = submit_recipe(manager, args={"atom": 3})
+    assert not reply["ok"]
+    assert "has no argument" in reply["error"] and "'atom'" in reply["error"]
+    assert "no longer" not in reply["error"]
+    reply = submit_recipe(manager, args={"atoms": 3})
+    assert not reply["ok"] and "scans" in reply["error"]
+    assert manager.queue.ordered() == []
+
+
+def test_motmaster_script_parameters_are_left_to_the_run(recipe_manager):
+    manager = recipe_manager()
+    fields = {"experiment": Sequenced.__module__, "class_name": "Sequenced"}
+    save(manager, name="seq", args={"rb.tPulse": 2e-6}, **fields)
+    reply = manager.handle({"command": "submit_recipe", "name": "seq", **fields})
+    assert reply["ok"]
+    save(manager, name="bad", args={"cs.tPulse": 1}, **fields)
+    reply = manager.handle({"command": "submit_recipe", "name": "bad", **fields})
+    assert not reply["ok"] and "cs.tPulse" in reply["error"]
+
+
+def test_a_recipe_for_a_missing_experiment_is_refused(recipe_manager):
+    manager = recipe_manager()
+    fields = {"experiment": "pytweezer.experiments.gone", "class_name": "Gone"}
+    save(manager, **fields)
+    reply = manager.handle({"command": "submit_recipe", "name": "check", **fields})
+    assert not reply["ok"] and "not in the catalogue" in reply["error"]
+    manager.catalogue.busy = True
+    reply = manager.handle({"command": "submit_recipe", "name": "check", **fields})
+    assert not reply["ok"] and "try again" in reply["error"]
+
+
+def test_a_recipe_for_a_module_that_fails_to_import_says_why(recipe_manager):
+    manager = recipe_manager()
+    fields = {"experiment": BROKEN["module"], "class_name": "Anything"}
+    save(manager, **fields)
+    reply = manager.handle({"command": "submit_recipe", "name": "check", **fields})
+    assert not reply["ok"]
+    assert "fails to import" in reply["error"]
+    assert "SyntaxError: invalid syntax" in reply["error"]

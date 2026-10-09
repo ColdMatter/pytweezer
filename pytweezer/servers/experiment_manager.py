@@ -40,6 +40,13 @@ from pytweezer.experiment.queue import (
     WorkerRecord,
     now,
 )
+from pytweezer.experiment.recipes import (
+    Recipe,
+    RecipeBook,
+    RecipeError,
+    RecipeStore,
+    unknown_arguments,
+)
 from pytweezer.experiment.storage import (
     data_root,
     highest_rid,
@@ -56,7 +63,7 @@ logger = get_logger("pytweezer.servers.experiment_manager")
 #: The published state (:data:`~pytweezer.experiment.client.NOTIFIER_NAME`)
 #: is laid out as::
 #:
-#:     {"started", "catalogue_version", "simulated",
+#:     {"started", "catalogue_version", "recipes_version", "simulated",
 #:      "alive",                         # epoch s, at least every PUBLISH_INTERVAL_S
 #:      "running", "queue", "history",   # as ExperimentQueue.snapshot()
 #:      "points": {"rid": int | None,    # the task now (or last) running
@@ -88,6 +95,8 @@ class ExperimentManager:
 
         self.store = QueueStore(self.root / "queue_state.json")
         self.queue = ExperimentQueue(self.store.load())
+        self.recipe_store = RecipeStore(self.root / "recipes.json")
+        self.recipes = RecipeBook(self.recipe_store.load())
         state = self.queue.state
         state.next_rid = max(state.next_rid, highest_rid(self.root) + 1)
         self.catalogue = catalogue or Catalogue()
@@ -99,6 +108,7 @@ class ExperimentManager:
         self._running = True
         # Bumped whenever the catalogue changes, so GUIs know to fetch it again.
         self._catalogue_version = 0
+        self._recipes_version = 0
         self._dirty = True
         self._last_publish = 0.0
         self._last_rescan = 0.0
@@ -206,6 +216,77 @@ class ExperimentManager:
         logger.info("Queued task %s: %s.%s", task.rid, task.experiment, task.class_name)
         self._changed()
         return {"rid": task.rid}
+
+    def _cmd_recipes(self, request):
+        recipes = self.recipes.find(
+            request.get("experiment"), request.get("class_name")
+        )
+        return {
+            "recipes": [recipe.model_dump(mode="json") for recipe in recipes],
+            "version": self._recipes_version,
+        }
+
+    def _cmd_save_recipe(self, request):
+        recipe = self.recipes.save(
+            Recipe.model_validate(request["recipe"]),
+            overwrite=bool(request.get("overwrite")),
+        )
+        logger.info(
+            "Saved recipe %r for %s.%s",
+            recipe.name,
+            recipe.experiment,
+            recipe.class_name,
+        )
+        self._recipes_changed()
+
+    def _cmd_delete_recipe(self, request):
+        self.recipes.delete(
+            request["experiment"], request["class_name"], request["name"]
+        )
+        self._recipes_changed()
+
+    def _cmd_submit_recipe(self, request):
+        recipe = self.recipes.get(
+            request["experiment"], request["class_name"], request["name"]
+        )
+        overrides = request.get("args") or {}
+        task_request = recipe.replay(
+            overrides,
+            priority=request.get("priority"),
+            label=request.get("label"),
+            submitter=request.get("submitter", ""),
+        )
+        unknown = unknown_arguments(
+            task_request, self._schema(recipe.experiment, recipe.class_name)
+        )
+        if bad_overrides := [name for name in unknown if name in overrides]:
+            raise RecipeError(f"{recipe.class_name} has no argument(s) {bad_overrides}")
+        if unknown:
+            raise RecipeError(
+                f"{recipe.class_name} no longer has argument(s) {unknown}; load "
+                f"recipe {recipe.name!r} into the form, check it and save it again"
+            )
+        task = self.queue.submit(task_request)
+        logger.info("Queued task %s from recipe %r", task.rid, recipe.name)
+        self._changed()
+        return {"rid": task.rid}
+
+    def _schema(self, module: str, class_name: str) -> dict[str, Any]:
+        for entry in self.catalogue.entries():
+            if entry["module"] != module:
+                continue
+            if entry.get("error"):
+                reason = entry["error"].strip().splitlines()[-1]
+                raise RecipeError(f"{module} fails to import: {reason}")
+            for schema in entry["classes"]:
+                if schema["class_name"] == class_name:
+                    return schema
+        if self.catalogue.busy:
+            raise RecipeError(
+                f"{module}.{class_name} is not in the catalogue yet; the manager "
+                "is still reading the experiments, so try again shortly"
+            )
+        raise RecipeError(f"{module}.{class_name} is not in the catalogue")
 
     def _cmd_set_priority(self, request):
         self.queue.set_priority(int(request["rid"]), int(request["priority"]))
@@ -463,6 +544,11 @@ class ExperimentManager:
         self._save()
         self._dirty = True
 
+    def _recipes_changed(self) -> None:
+        self.recipe_store.save(self.recipes.state)
+        self._recipes_version += 1
+        self._dirty = True
+
     def _save(self) -> None:
         self.store.save(self.queue.state)
 
@@ -470,6 +556,7 @@ class ExperimentManager:
         return {
             "started": self.started,
             "catalogue_version": self._catalogue_version,
+            "recipes_version": self._recipes_version,
             "simulated": self.simulate,
             "alive": time.time(),
             **self.queue.snapshot(),
