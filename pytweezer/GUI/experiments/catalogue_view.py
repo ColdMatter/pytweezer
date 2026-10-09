@@ -17,6 +17,10 @@ from pytweezer.GUI.components import status_icon
 
 _SCHEMA = QtCore.Qt.ItemDataRole.UserRole
 _RECIPE = QtCore.Qt.ItemDataRole.UserRole + 1
+_PRESS_EVENTS = (
+    QtCore.QEvent.Type.MouseButtonPress,
+    QtCore.QEvent.Type.MouseButtonDblClick,
+)
 
 
 class CatalogueView(QWidget):
@@ -44,6 +48,9 @@ class CatalogueView(QWidget):
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.currentItemChanged.connect(self._current_changed)
+        self.tree.itemClicked.connect(self._item_clicked)
+        self.tree.viewport().installEventFilter(self)
+        self._current_at_press = None
         self.tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.tree, 1)
@@ -150,6 +157,18 @@ class CatalogueView(QWidget):
         elif schema := item.data(0, _SCHEMA):
             self.experiment_selected.emit(schema)
 
+    def eventFilter(self, watched, event):
+        if watched is self.tree.viewport() and event.type() in _PRESS_EVENTS:
+            if event.button() == QtCore.Qt.MouseButton.RightButton:
+                return True
+            self._current_at_press = self.tree.currentItem()
+        return super().eventFilter(watched, event)
+
+    def _item_clicked(self, item):
+        recipe = item.data(0, _RECIPE)
+        if recipe and item is self._current_at_press:
+            self.recipe_selected.emit(recipe)
+
     def recipe_menu(self, recipe):
         menu = QMenu(self)
         submit = menu.addAction("Submit now")
@@ -207,5 +226,9 @@ def _recipe_item(recipe):
     tooltip = f"Recipe saved by {recipe.get('submitter') or 'unknown'} on {saved}"
     if recipe.get("label"):
         tooltip += f"\nLabel: {recipe['label']}"
-    item.setToolTip(0, tooltip + "\nRight-click to submit it as it is")
+    item.setToolTip(
+        0,
+        tooltip
+        + "\nClick to load it into the form; right-click to submit or delete it",
+    )
     return item

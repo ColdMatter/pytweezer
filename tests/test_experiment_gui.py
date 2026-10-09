@@ -5,6 +5,7 @@ import time
 
 import pytest
 from PyQt6 import QtCore
+from PyQt6.QtTest import QTest
 
 from pytweezer.experiment import (
     Choice,
@@ -946,3 +947,89 @@ def test_deleting_a_recipe_needs_confirmation(qapp):
         {"experiment": SCHEMA["module"], "class_name": "Demo", "name": "check"}
     ]
     assert "Deleted recipe 'check'" in panel.status.text()
+
+
+def laid_out_recipe_panel(qapp, *recipes):
+    panel, client, feed = recipe_panel(qapp, *recipes)
+    panel.resize(600, 800)
+    panel.show()
+    qapp.processEvents()
+    return panel, client, feed
+
+
+def click_item(panel, item, button):
+    tree = panel.catalogue.tree
+    QTest.mouseClick(tree.viewport(), button, pos=tree.visualItemRect(item).center())
+
+
+def recipe_item_of(panel):
+    return demo_item(panel.catalogue).child(0)
+
+
+def test_a_right_click_on_a_recipe_leaves_the_form_alone(qapp):
+    panel, _client, _feed = laid_out_recipe_panel(
+        qapp, recipe_dict("check", args={"shots": 5})
+    )
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    panel.editor.rows["shots"].value.widget.setValue(8)
+    demo = panel.catalogue.tree.currentItem()
+    click_item(panel, recipe_item_of(panel), QtCore.Qt.MouseButton.RightButton)
+    assert panel.editor.rows["shots"].value.value() == 8
+    assert panel.editor.recipe_name == ""
+    assert panel.catalogue.tree.currentItem() is demo
+
+
+def test_a_right_click_on_an_experiment_does_not_switch_to_it(qapp):
+    panel, _client, _feed = laid_out_recipe_panel(
+        qapp, recipe_dict("check", args={"shots": 5})
+    )
+    panel.catalogue.select_recipe(SCHEMA["module"], "Demo", "check")
+    panel.editor.rows["shots"].value.widget.setValue(8)
+    recipe_item = panel.catalogue.tree.currentItem()
+    click_item(panel, demo_item(panel.catalogue), QtCore.Qt.MouseButton.RightButton)
+    assert panel.editor.rows["shots"].value.value() == 8
+    assert panel.editor.recipe_name == "check"
+    assert panel.catalogue.tree.currentItem() is recipe_item
+
+
+def test_a_left_click_on_the_current_recipe_reloads_it(qapp):
+    panel, _client, _feed = laid_out_recipe_panel(
+        qapp, recipe_dict("check", args={"shots": 5})
+    )
+    panel.catalogue.select_recipe(SCHEMA["module"], "Demo", "check")
+    panel.editor.rows["shots"].value.widget.setValue(8)
+    click_item(panel, recipe_item_of(panel), QtCore.Qt.MouseButton.LeftButton)
+    assert panel.editor.rows["shots"].value.value() == 5
+    assert panel.editor.recipe_name == "check"
+
+
+def test_a_left_click_on_a_new_recipe_loads_it_once(qapp):
+    view = CatalogueView()
+    view.set_modules(MODULES)
+    view.set_recipes([recipe_dict("a"), recipe_dict("b")])
+    view.resize(400, 400)
+    view.show()
+    qapp.processEvents()
+    selected = []
+    view.recipe_selected.connect(selected.append)
+    item = demo_item(view).child(1)
+    QTest.mouseClick(
+        view.tree.viewport(),
+        QtCore.Qt.MouseButton.LeftButton,
+        pos=view.tree.visualItemRect(item).center(),
+    )
+    assert [r["name"] for r in selected] == ["b"]
+
+
+def test_the_recipe_tooltip_names_every_menu_action(qapp):
+    view = CatalogueView()
+    view.set_modules(MODULES)
+    view.set_recipes([recipe_dict("a")])
+    tooltip = demo_item(view).child(0).toolTip(0)
+    assert "Click to load it" in tooltip and "submit or delete" in tooltip
+
+
+def test_loading_a_plain_request_clears_the_recipe_name(editor):
+    editor.set_recipe_name("x")
+    editor.load_request(TaskRequest(experiment=SCHEMA["module"], class_name="Demo"))
+    assert editor.recipe_name == ""
