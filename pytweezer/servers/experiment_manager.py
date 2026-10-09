@@ -228,7 +228,7 @@ class ExperimentManager:
 
     def _cmd_save_recipe(self, request):
         recipe = self.recipes.save(
-            Recipe.model_validate(request["recipe"]),
+            self._with_default_arguments(Recipe.model_validate(request["recipe"])),
             overwrite=bool(request.get("overwrite")),
         )
         logger.info(
@@ -238,6 +238,23 @@ class ExperimentManager:
             recipe.class_name,
         )
         self._recipes_changed()
+
+    def _with_default_arguments(self, recipe: Recipe) -> Recipe:
+        """``recipe`` with every unscanned declared argument given, defaults filled in.
+
+        A recipe whose experiment the catalogue cannot describe is kept as given.
+        """
+        try:
+            schema = self._schema(recipe.experiment, recipe.class_name)
+        except RecipeError:
+            return recipe
+        scanned = {axis.argument for axis in recipe.scan.axes}
+        defaults = {
+            name: argument["default"]
+            for name, argument in schema["arguments"].items()
+            if name not in scanned
+        }
+        return recipe.model_copy(update={"args": {**defaults, **recipe.args}})
 
     def _cmd_delete_recipe(self, request):
         self.recipes.delete(

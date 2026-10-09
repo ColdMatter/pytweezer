@@ -341,7 +341,37 @@ def test_recipes_are_saved_published_and_survive_a_restart(recipe_manager, tmp_p
     assert manager._snapshot()["recipes_version"] == version + 1
     assert (tmp_path / "recipes.json").exists()
     [saved] = recipe_manager().handle({"command": "recipes"})["recipes"]
-    assert saved["name"] == "check" and saved["args"] == {"atoms": 50}
+    assert saved["name"] == "check" and saved["args"]["atoms"] == 50
+
+
+def test_a_saved_recipe_stores_every_argument_except_the_scanned_ones(
+    recipe_manager,
+):
+    manager = recipe_manager()
+    scan = Scan(axes=[LinearAxis(argument="pulse_time", start=0, stop=1e-5, n=3)])
+    save(manager, args={"atoms": 50}, scan=scan.model_dump(mode="json"))
+    [saved] = manager.handle({"command": "recipes"})["recipes"]
+    declared = RabiDemo.schema()["arguments"]
+    assert saved["args"] == {
+        "atoms": 50,
+        "rabi_frequency": declared["rabi_frequency"]["default"],
+        "point_delay": declared["point_delay"]["default"],
+    }
+
+
+def test_a_recipe_for_an_unknown_experiment_is_saved_as_given(recipe_manager):
+    manager = recipe_manager()
+    save(manager, class_name="Gone", args={"x": 1})
+    [saved] = manager.handle({"command": "recipes"})["recipes"]
+    assert saved["args"] == {"x": 1}
+
+
+def test_a_recipe_saved_while_the_catalogue_is_busy_is_saved_as_given(recipe_manager):
+    manager = recipe_manager()
+    manager.catalogue.busy = True
+    save(manager, class_name="Gone", args={"x": 1})
+    [saved] = manager.handle({"command": "recipes"})["recipes"]
+    assert saved["args"] == {"x": 1}
 
 
 def test_saving_over_a_recipe_needs_overwrite(recipe_manager):
@@ -390,7 +420,7 @@ def test_a_recipe_is_queued_with_its_settings_and_overrides(recipe_manager):
     )
     assert reply == {"ok": True, "rid": 1}
     task = manager.queue.get(1)
-    assert task.args == {"atoms": 7, "rabi_frequency": 1e3}
+    assert task.args == {"atoms": 7, "rabi_frequency": 1e3, "point_delay": 0.2}
     assert [axis.argument for axis in task.scan.axes] == ["pulse_time"]
     assert (task.priority, task.label, task.submitter) == (2, "override", "me@pc")
     assert task.due_time is None
@@ -493,7 +523,17 @@ def test_notebook_recipes_round_trip(recipe_manager):
     save_recipe(RabiDemo, "check", client=client, overwrite=True, atoms=1)
     assert recipes(client=client)[0].args["atoms"] == 1
 
+    save_recipe(f"{DEMO}:RabiDemo", "string", client=client, atoms=5)
+    string_form = next(r for r in recipes(client=client) if r.name == "string")
+    assert string_form.args == {
+        "pulse_time": 10e-6,
+        "rabi_frequency": 50e3,
+        "atoms": 5,
+        "point_delay": 0.2,
+    }
+
     delete_recipe(f"{DEMO}:RabiDemo", "check", client=client)
+    delete_recipe(f"{DEMO}:RabiDemo", "string", client=client)
     assert recipes(client=client) == []
 
 
