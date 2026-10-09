@@ -49,10 +49,11 @@ class Recipe(TaskRequest):
 
 - `save(recipe, overwrite=False)` raises `RecipeError` if the key exists and
   `overwrite` is false.
-- `get(experiment, class_name, name)` raises `KeyError` naming the recipe if
-  missing.
+- `get(experiment, class_name, name)` raises `RecipeError` naming the recipe
+  if missing. `RecipeError` is a `ValueError`, so the manager returns it as a
+  refusal.
 - `delete(experiment, class_name, name)`.
-- `list(experiment=None, class_name=None)`, sorted by experiment, class, name.
+- `find(experiment=None, class_name=None)`, sorted by experiment, class, name.
 
 `RecipeState` (`schema_version`, `recipes: list[Recipe]`) is persisted by
 `RecipeStore` to `recipes.json` in the manager's data directory, next to
