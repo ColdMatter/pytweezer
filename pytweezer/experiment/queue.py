@@ -233,26 +233,30 @@ class ExperimentQueue:
         return task
 
 
-class QueueStore:
-    """Persists a :class:`QueueState` as JSON, replacing the file atomically."""
+class ModelStore:
+    """Persists one pydantic model as JSON, replacing the file atomically.
+
+    Subclasses set :attr:`model`. An unreadable file is moved aside and an
+    empty model returned, so a corrupt file never stops the manager starting.
+    """
+
+    model: type[BaseModel]
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
 
-    def load(self) -> QueueState:
+    def load(self) -> BaseModel:
         try:
-            return QueueState.model_validate_json(self.path.read_text())
+            return self.model.model_validate_json(self.path.read_text())
         except FileNotFoundError:
-            return QueueState()
+            return self.model()
         except (ValidationError, json.JSONDecodeError, OSError):
             aside = self.path.with_suffix(f".unreadable-{int(time.time())}.json")
-            logger.exception(
-                "Queue state %s is unreadable; moved to %s", self.path, aside
-            )
+            logger.exception("%s is unreadable; moved to %s", self.path, aside)
             self.path.replace(aside)
-            return QueueState()
+            return self.model()
 
-    def save(self, state: QueueState) -> None:
+    def save(self, state: BaseModel) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(state.model_dump_json(indent=1))
@@ -266,3 +270,9 @@ class QueueStore:
                 if attempt == 19:
                     raise
                 time.sleep(0.05)
+
+
+class QueueStore(ModelStore):
+    """Persists a :class:`QueueState`."""
+
+    model = QueueState
