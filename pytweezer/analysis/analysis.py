@@ -1,79 +1,187 @@
-import datetime
-import os
-import re
-import shutil
-from time import sleep
-from typing import Any
-from zipfile import ZipFile
-
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.constants as cn
 from matplotlib import patches
-from PIL import Image
-from rich.progress import track
+from scipy import integrate
 from scipy.ndimage import center_of_mass, gaussian_filter, label, white_tophat
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, linear_sum_assignment
+from scipy.spatial.distance import cdist
 from scipy.special import erf
 from scipy.stats import norm
 from sklearn.mixture import GaussianMixture
 
-cloudpath = "C:\\Users\\tweez\\OneDrive - Imperial College London\\"
-tweezer_img_source_dir = (
-    "C:\\Users\\tweez\\OneDrive - Imperial College London\\caftweezers\\HamCamImages\\"
-)
-root = cloudpath + "caftweezers\\mot_master_data"
-remote_path = "C:\\Users\\cafmot\\OneDrive - Imperial College London (1)\\Desktop\\MOTCamSave\\ThorCam Images\\"
-RbMassAMU = 86.909184
+from pytweezer.experiment.experiment_parameter_manager import ExpParameterManager
+
+####################################################################################################
+
+# Fundamental Constants
+motcam_mm_per_px = 1e3 / 194902.8581  # mm / px
+hamcam_px_per_um = 2.0714285714285716
+hamcam_um_per_px = 1 / hamcam_px_per_um
 
 
-def cool_vco_to_detuning(vco):
-    return (vco - 4.55) * 12.26
+MRb = 1.44316e-25  # kg
+kB = 1.380649e-23  # J/K
+c = 299792458
+e0 = 8.854e-12
+e = 1.6e-19
+me = 9.109e-31
+hbar = 1.05e-34
+
+# D2 Line
+wD2 = 2 * np.pi * 384.230484e12
+muD2 = 2.069e-29
+gammaD2 = 2 * np.pi * 6.065 * 1e6
+
+# D1 Line
+wD1 = 2 * np.pi * 377.107463e12
+muD1 = 1.46e-29
+gammaD1 = 2 * np.pi * 5.746 * 1e6
+
+# System Parameters
+wavelen = 852e-9  # m
+w = 2 * np.pi * c / (wavelen)
+
+####################################################################################################
+
+exp_params = ExpParameterManager()
+cool_vco_resonance = exp_params.get_parameter("cool_vco_resonance")
 
 
-def detuning_to_cool_vco(detuning):
-    return detuning / 12.26 + 4.55
+def rotate_coordinates(x, y, angle_deg, center_x=0, center_y=0):
+    angle_rad = np.radians(angle_deg)
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+
+    # Shift to origin
+    x_shifted = x - center_x
+    y_shifted = y - center_y
+
+    # Rotate
+    x_rotated = x_shifted * cos_a - y_shifted * sin_a
+    y_rotated = x_shifted * sin_a + y_shifted * cos_a
+
+    # Shift back
+    x_final = x_rotated + center_x
+    y_final = y_rotated + center_y
+
+    return x_final, y_final
 
 
-def atoi(text):
-    return int(text) if text.isdigit() else text
+def pair_coordinates(x_pos, y_pos, u_pos, v_pos):
+    # Convert the inputs into 2D numpy arrays of coordinates
+    # shape will be (N, 2)
+    pts1 = np.column_stack((x_pos, y_pos))
+    pts2 = np.column_stack((u_pos, v_pos))
+
+    # Calculate the distance matrix between all points in pts1 and pts2
+    # distance_matrix[i, j] is the distance between pts1[i] and pts2[j]
+    distance_matrix = cdist(pts1, pts2)
+
+    # Use the Hungarian algorithm to find the optimal 1-to-1 matching.
+    row_indices, col_indices = linear_sum_assignment(distance_matrix)
+
+    # Reorder the u and v arrays based on the optimal matching
+    u_pos_sorted = np.array(u_pos)[col_indices]
+    v_pos_sorted = np.array(v_pos)[col_indices]
+
+    return u_pos_sorted, v_pos_sorted
 
 
-def natural_keys(text):
-    return [atoi(c) for c in re.split(r"(\d+)", text)]
+def set_array_centre(grid_positions_img):
+    exp_params = ExpParameterManager()
+    y0 = np.mean([pos[0] for pos in grid_positions_img.values()])
+    x0 = np.mean([pos[1] for pos in grid_positions_img.values()])
+    exp_params.set_parameter("x_centre", x0)
+    exp_params.set_parameter("y_centre", y0)
+    exp_params.save_parameters()
+    return x0, y0
 
 
-def EllipticalGaussian2D(pos, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
-    x, y = pos
-    xo = float(xo)
-    yo = float(yo)
-    a = (np.cos(theta) ** 2) / (2 * sigma_x**2) + (np.sin(theta) ** 2) / (
-        2 * sigma_y**2
+def index_grid_positions(grid_positions, x_n, y_n):
+    exp_params = ExpParameterManager()
+    y_img = np.array([pos[0] for pos in grid_positions.values()])
+    x_img = np.array([pos[1] for pos in grid_positions.values()])
+    y_0 = exp_params.get_parameter("y_centre")
+    x_0 = exp_params.get_parameter("x_centre")
+    y_pos = (y_img - y_0) * hamcam_um_per_px
+    x_pos = (x_img - x_0) * -hamcam_um_per_px
+    x_n_rot, y_n_rot = rotate_coordinates(x_n, y_n, angle_deg=-2.5)
+    x_pos_sorted, y_pos_sorted = pair_coordinates(x_n_rot, y_n_rot, x_pos, y_pos)
+    x_img_sorted = (x_pos_sorted * -hamcam_px_per_um + x_0).astype("int64")
+    y_img_sorted = (y_pos_sorted * hamcam_px_per_um + y_0).astype("int64")
+    grid_positions_sorted = dict(enumerate(zip(y_img_sorted, x_img_sorted)))
+    return grid_positions_sorted
+
+
+def convert_vco_detuning(vco_array):
+    detuning_array = (vco_array - cool_vco_resonance) * 12.24  # Convert to MHz
+    return detuning_array
+
+
+def gaussian2D(x, y, A, x0, y0, sx, sy, theta, offset):
+    x_rot = (x - x0) * np.cos(theta) + (y - y0) * np.sin(theta)
+    y_rot = -(x - x0) * np.sin(theta) + (y - y0) * np.cos(theta)
+    return A * np.exp(-((x_rot**2 / (2 * sx**2)) + (y_rot**2 / (2 * sy**2)))) + offset
+
+
+def fit_gaussian(img):
+    x = np.arange(img.shape[1])
+    y = np.arange(img.shape[0])
+    x, y = np.meshgrid(x, y)
+    com_y, com_x = center_of_mass(img)
+    p0 = (
+        img.max() - img.min(),
+        com_x,
+        com_y,
+        70,
+        70,
+        0,
+        img.min(),
+    )  # Initial guess for parameters
+    popt, pcov = curve_fit(
+        lambda xy, A, x0, y0, sx, sy, theta, offset: gaussian2D(
+            xy[0], xy[1], A, x0, y0, sx, sy, theta, offset
+        ).ravel(),
+        (x.ravel(), y.ravel()),
+        img.ravel(),
+        p0=p0,
     )
-    b = -(np.sin(2 * theta)) / (4 * sigma_x**2) + (np.sin(2 * theta)) / (4 * sigma_y**2)
-    c = (np.sin(theta) ** 2) / (2 * sigma_x**2) + (np.cos(theta) ** 2) / (
-        2 * sigma_y**2
-    )
-    gaussian = offset + amplitude * np.exp(
-        -(a * ((x - xo) ** 2) + 2 * b * (x - xo) * (y - yo) + c * ((y - yo) ** 2))
-    )
-    return gaussian.ravel()
+    A_fit, x0_fit, y0_fit, sx_fit, sy_fit, theta_fit, offset_fit = popt
+    (
+        A_fit_err,
+        x0_fit_err,
+        y0_fit_err,
+        sx_fit_err,
+        sy_fit_err,
+        theta_fit_err,
+        offset_fit_err,
+    ) = np.sqrt(np.diag(pcov))
+    sx_fit, sy_fit = sorted([abs(sx_fit), abs(sy_fit)], reverse=True)
+    return {
+        "A": A_fit,
+        "x0": x0_fit,
+        "y0": y0_fit,
+        "sx": abs(sx_fit),
+        "sy": abs(sy_fit),
+        "theta": theta_fit,
+        "offset": offset_fit,
+        "A_err": A_fit_err,
+        "x0_err": x0_fit_err,
+        "y0_err": y0_fit_err,
+        "sx_err": sx_fit_err,
+        "sy_err": sy_fit_err,
+        "theta_err": theta_fit_err,
+        "offset_err": offset_fit_err,
+    }
 
 
-def gaussian2D(pos, amplitude, xo, yo, sigma_x, sigma_y, offset):
-    x, y = pos
-    xo = float(xo)
-    yo = float(yo)
-    gaussian = offset + amplitude * np.exp(
-        -(((x - xo) ** 2) / (2 * sigma_x**2) + ((y - yo) ** 2) / (2 * sigma_y**2))
-    )
-    return gaussian.ravel()
-
-
-def spot_sharpness(img):
-    pixels = img.ravel()
-    M = np.sum(pixels) ** 2 / np.sum(np.square(pixels))
-    return M
+def get_total_counts(img, x, y, window_size):
+    half_window = window_size // 2
+    x_min = max(x - half_window, 0)
+    x_max = min(x + half_window + 1, img.shape[1])
+    y_min = max(y - half_window, 0)
+    y_max = min(y + half_window + 1, img.shape[0])
+    return np.sum(img[y_min:y_max, x_min:x_max])
 
 
 def detect_bright_points(image_array, threshold=200):
@@ -115,7 +223,7 @@ def sort_into_grid(centers, grid_shape=(2, 2)):
         return grid_positions, num_row, num_col
 
 
-def detect_trap_sites(img_array, grid_shape, detection_step=100):
+def detect_trap_sites_grid(img_array, grid_shape, detection_step=100):
     print("Looking for trap sites...")
     detection_threshold = img_array.max()
     while 1:
@@ -133,20 +241,219 @@ def detect_trap_sites(img_array, grid_shape, detection_step=100):
             return grid_positions, detection_threshold
 
 
-# Sum pixel values in a 5x5 region around each detected center
-def sum_pixel_values(image_array, grid_positions, grid_shape, window_size=10):
-    half_size = window_size // 2
-    pixel_sums = np.zeros(grid_shape, dtype=int)  # Create empty 2D array
+def detect_trap_sites(img_array, atom_number, detection_step=100):
+    print("Looking for trap sites...")
+    detection_threshold = img_array.max()
+    while 1:
+        if detection_threshold < 1:
+            print("Could not detect.")
+            break
 
-    for (i, j), (y, x) in grid_positions.items():
+        centers = detect_bright_points(img_array, threshold=detection_threshold)
+        if len(centers) != atom_number:
+            detection_threshold -= detection_step
+        else:
+            print(f"{len(centers)} Atoms Detected.")
+            break
+    grid_positions = {}
+    for i in range(len(centers)):
+        grid_positions[i] = tuple(centers[i])
+    return grid_positions, detection_threshold
+
+
+def sum_pixel_values(image_array, grid_positions, window_size=10):
+    half_size = window_size // 2
+    pixel_sums = np.zeros(len(grid_positions), dtype=int)  # Create empty 2D array
+
+    for (i), (y, x) in grid_positions.items():
         # Extract 5x5 region and sum pixel values
         region = image_array[
             max(y - half_size, 0) : min(y + half_size + 1, image_array.shape[0]),
             max(x - half_size, 0) : min(x + half_size + 1, image_array.shape[1]),
         ]
-        pixel_sums[i, j] = np.sum(region)
-
+        pixel_sums[i] = np.sum(region)
     return pixel_sums
+
+
+def extract_crops(images, grid_positions, window_size=9):
+    """Window around every site in every frame: (n_frames, n_sites, w, w), keys."""
+    images = np.asarray(images, dtype=np.float32)
+    if images.ndim == 2:
+        images = images[None]
+    keys = sorted(grid_positions)
+    half = window_size // 2
+    rows = np.array([grid_positions[k][0] for k in keys])
+    cols = np.array([grid_positions[k][1] for k in keys])
+    offsets = np.arange(-half, half + 1)
+    row_index = rows[:, None, None] + offsets[None, :, None]
+    col_index = cols[:, None, None] + offsets[None, None, :]
+
+    height, width = images.shape[1:]
+    if (
+        row_index.min() < 0
+        or col_index.min() < 0
+        or row_index.max() >= height
+        or col_index.max() >= width
+    ):
+        raise ValueError(
+            f"window_size={window_size} runs off the {height}x{width} frame."
+        )
+    return images[:, row_index, col_index], keys
+
+
+def split_threshold(values, max_iter=50):
+    """Two-means split of a bimodal distribution."""
+    cut = np.median(values)
+    for _ in range(max_iter):
+        low, high = values[values <= cut], values[values > cut]
+        if low.size == 0 or high.size == 0:
+            break
+        new_cut = 0.5 * (low.mean() + high.mean())
+        if np.isclose(new_cut, cut):
+            break
+        cut = new_cut
+    return float(cut)
+
+
+def build_psf_templates(images, grid_positions, window_size=9, min_samples=10):
+    """Per-site PSF template: mean occupied crop minus mean empty crop, sum-normalised.
+
+    Occupancy is called per site, so a dim site is not dragged below an array-wide
+    cut. Sites with too few frames either way fall back to the mean template.
+    """
+    crops, keys = extract_crops(images, grid_positions, window_size)
+    box_scores = crops.sum(axis=(2, 3))
+
+    templates, counts = {}, {}
+    for index, site in enumerate(keys):
+        scores = box_scores[:, index]
+        occupied = scores > split_threshold(scores)
+        counts[site] = (int(occupied.sum()), int((~occupied).sum()))
+        if min(counts[site]) < min_samples:
+            templates[site] = None
+            continue
+        psf = np.clip(
+            crops[occupied, index].mean(axis=0) - crops[~occupied, index].mean(axis=0),
+            0,
+            None,
+        )
+        templates[site] = (
+            (psf / psf.sum()).astype(np.float32) if psf.sum() > 0 else None
+        )
+
+    usable = [t for t in templates.values() if t is not None]
+    if not usable:
+        raise ValueError(f"No site had {min_samples} clear frames out of {len(crops)}.")
+    fallback = np.mean(usable, axis=0)
+    fallback = (fallback / fallback.sum()).astype(np.float32)
+    missing = [s for s, t in templates.items() if t is None]
+    if missing:
+        print(f"{len(missing)} site(s) used the mean template: {missing}")
+    return {s: (fallback if t is None else t) for s, t in templates.items()}
+
+
+class SiteScorer:
+    """Per-site photon rates on a fixed grid.
+
+    ``method="box"``  top-hat, then sum each site's window - the original.
+    ``method="psf"``  weight each window by that site's template. Weights are
+    mean-subtracted, so flat background scores zero and no top-hat is needed.
+    """
+
+    def __init__(
+        self,
+        grid_positions,
+        method="box",
+        window_size=None,
+        templates=None,
+        feature_size=10,
+        threshold=None,
+    ):
+        if method not in ("box", "psf"):
+            raise ValueError(f"method must be 'box' or 'psf', got {method!r}")
+        if method == "psf" and not templates:
+            raise ValueError("method='psf' needs templates; see build_psf_templates.")
+
+        self.method = method
+        self.grid_positions = dict(grid_positions)
+        self.templates = templates
+        self.feature_size = feature_size
+        self.threshold = threshold
+        self.keys = sorted(self.grid_positions)
+
+        if window_size is None:
+            window_size = (
+                next(iter(templates.values())).shape[0] if method == "psf" else 5
+            )
+        self.window_size = int(window_size)
+
+        half = self.window_size // 2
+        offsets = np.arange(-half, half + 1)
+        rows = np.array([self.grid_positions[k][0] for k in self.keys])
+        cols = np.array([self.grid_positions[k][1] for k in self.keys])
+        self._rows = rows[:, None, None] + offsets[None, :, None]
+        self._cols = cols[:, None, None] + offsets[None, None, :]
+
+        # Cached: the hot path should not re-read these per frame.
+        exp_params = ExpParameterManager()
+        self._offset = exp_params.get_parameter("conversion_offset")
+        self._factor = exp_params.get_parameter("conversion_factor")
+
+        if method == "psf":
+            stack = np.stack([templates[k] for k in self.keys]).astype(np.float32)
+            weights = stack - stack.mean(axis=(1, 2), keepdims=True)
+            self._weights = (
+                weights / np.einsum("swh,swh->s", weights, stack)[:, None, None]
+            )
+
+    @property
+    def name(self):
+        return "PSF" if self.method == "psf" else "box sum"
+
+    @classmethod
+    def from_images(
+        cls, images, grid_positions, window_size=9, min_samples=10, **kwargs
+    ):
+        """Build PSF templates from a stack, then a scorer that uses them."""
+        templates = build_psf_templates(
+            images, grid_positions, window_size, min_samples
+        )
+        return cls(
+            grid_positions,
+            method="psf",
+            window_size=window_size,
+            templates=templates,
+            **kwargs,
+        )
+
+    def site_scores(self, image):
+        """One photon rate per site, in ``self.keys`` order."""
+        if self.method == "box":
+            if self.feature_size:
+                image = white_tophat(image, size=self.feature_size)
+            counts = np.asarray(image, dtype=np.float32)[self._rows, self._cols].sum(
+                axis=(1, 2)
+            )
+        else:
+            crops = np.asarray(image, dtype=np.float32)[self._rows, self._cols]
+            counts = np.einsum("swh,swh->s", crops, self._weights)
+        return (counts - self._offset) * self._factor / 0.7
+
+    def score_stack(self, images):
+        return np.stack([self.site_scores(image) for image in images])
+
+    def occupancy(self, image, threshold=None):
+        """Flat boolean mask in trap order, for the rearrangement coordinator.
+
+        ``threshold`` is in photons - takes ``threshold_1`` from
+        :func:`get_array_loading_statistics` directly.
+        """
+        cut = self.threshold if threshold is None else threshold
+        if cut is None:
+            raise ValueError(
+                f"{self.name} scorer has no threshold; calibrate it first."
+            )
+        return self.site_scores(image) > cut
 
 
 # Function to visualize results with cropping and zooming
@@ -209,10 +516,10 @@ def visualize_results(
 
     # Draw 5x5 squares and labels
     half_size = window_size // 2
-    for (i, j), (y, x) in grid_positions.items():
+    for (i), (y, x) in grid_positions.items():
         # Draw grid label
         if index_labels:
-            ax[1].text(x + 5, y, f"({i},{j})", color="white", fontsize=6, weight="bold")
+            ax[1].text(x + 5, y, f"({i})", color="white", fontsize=6, weight="bold")
 
         # Draw a 5x5 square centered on (x, y)
         rect0 = patches.Rectangle(
@@ -262,96 +569,6 @@ def detect_loading_threshold(counts):
     return threshold, [mu_bg, var_bg, weight_bg], [mu_sig, var_sig, weight_sig]
 
 
-def detect_trap_sites_general(img_array, atom_number, detection_step=100):
-    print("Looking for trap sites...")
-    detection_threshold = img_array.max()
-    while 1:
-        if detection_threshold < 1:
-            print("Could not detect.")
-            break
-
-        centers = detect_bright_points(img_array, threshold=detection_threshold)
-        if len(centers) != atom_number:
-            detection_threshold -= detection_step
-        else:
-            print(f"{len(centers)} Atoms Detected.")
-            break
-    grid_positions = {}
-    for i in range(len(centers)):
-        grid_positions[i] = tuple(centers[i])
-    return grid_positions, detection_threshold
-
-
-def visualize_array_detection(
-    image_array, grid_positions, margin=50, window_size=5, threshold=150, vmaxfactor=0.8
-):
-    # Get bounding box around detected points
-    y_vals, x_vals = zip(*grid_positions.values())  # Extract y and x coordinates
-    min_y, max_y = min(y_vals), max(y_vals)
-    min_x, max_x = min(x_vals), max(x_vals)
-
-    # Define crop boundaries with a margin of 50 pixels
-    y1 = max(min_y - margin, 0)
-    y2 = min(max_y + margin, image_array.shape[0])
-    x1 = max(min_x - margin, 0)
-    x2 = min(max_x + margin, image_array.shape[1])
-
-    # Crop the image
-    cropped_image = image_array[y1:y2, x1:x2]
-    cropped_bin_image = cropped_image > threshold
-
-    # Adjust positions of grid labels for cropped view
-    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
-    ax[0].imshow(
-        cropped_image,
-        cmap="gray",
-        extent=[x1, x2, y2, y1],
-        vmax=vmaxfactor * cropped_image.max(),
-    )  # Use extent to maintain coordinates
-    ax[1].imshow(cropped_bin_image, cmap="viridis", extent=[x1, x2, y2, y1])
-
-    # Draw 5x5 squares and labels
-    half_size = window_size // 2
-    for (i), (y, x) in grid_positions.items():
-        # Draw grid label
-        ax[0].text(x + 5, y, f"({i})", color="white", fontsize=12, weight="bold")
-
-        # Draw a 5x5 square centered on (x, y)
-        rect0 = patches.Rectangle(
-            (x - half_size, y - half_size),
-            window_size,
-            window_size,
-            linewidth=1,
-            edgecolor="red",
-            facecolor="none",
-        )
-        rect1 = patches.Rectangle(
-            (x - half_size, y - half_size),
-            window_size,
-            window_size,
-            linewidth=1,
-            edgecolor="red",
-            facecolor="none",
-        )
-        ax[0].add_patch(rect0)
-        ax[1].add_patch(rect1)
-    plt.show()
-
-
-def sum_pixel_values_general(image_array, grid_positions, window_size=10):
-    half_size = window_size // 2
-    pixel_sums = np.zeros(len(grid_positions), dtype=int)  # Create empty 2D array
-
-    for (i), (y, x) in grid_positions.items():
-        # Extract 5x5 region and sum pixel values
-        region = image_array[
-            max(y - half_size, 0) : min(y + half_size + 1, image_array.shape[0]),
-            max(x - half_size, 0) : min(x + half_size + 1, image_array.shape[1]),
-        ]
-        pixel_sums[i] = np.sum(region)
-    return pixel_sums
-
-
 def maxwell_boltzmann_cdf(P, Amp, Pc, P_offset):
     """
     Fits the loading probability curve assuming a thermal ensemble.
@@ -399,1047 +616,616 @@ def morphological_tophat_high_pass(image, feature_size):
     return white_tophat(image, size=feature_size)
 
 
-########################################################################################################################################################################################
-
-
-class TweezerExperimentAnalysis:
-    def __init__(self, year="26", month="01Jan", day="00"):
-        self.dirPath = root + f"\\{year}\\{month}\\{day}"
-        self.fileNameString = f"Tweezer{day}{month[2:]}{year[2:]}00"
+def extract_cloud_temperature(images, tau_list, show_plots=True):
+    x0_list, y0_list, sx_list, sy_list = [], [], [], []
+    x0_err_list, y0_err_list, sx_err_list, sy_err_list = [], [], [], []
+    for it, img in enumerate(images):
+        gaussian_params = fit_gaussian(img)
+        amp, centre_x, centre_y, sx, sy = (
+            gaussian_params["A"],
+            int(gaussian_params["x0"]),
+            int(gaussian_params["y0"]),
+            gaussian_params["sx"],
+            gaussian_params["sy"],
+        )
+        amp_err, centre_x_err, centre_y_err, sx_err, sy_err = (
+            gaussian_params["A_err"],
+            gaussian_params["x0_err"],
+            gaussian_params["y0_err"],
+            gaussian_params["sx_err"],
+            gaussian_params["sy_err"],
+        )
         print(
-            f"---- {day}/{month}/20{year} Tweezer Experiment Analysis Initialised ----"
+            f"Iteration {str(it + 1).zfill(2)}/{len(tau_list)}  |  TOF: {tau_list[it] / 100:.6g} ms  |  Amplitude: {amp:.6g} ± {amp_err:.6g}  |  Centre: ({centre_x} ± {centre_x_err:.6g}, {centre_y} ± {centre_y_err:.6g})  |  Widths: (sx: {sx:.6g} ± {sx_err:.6g}, sy: {sy:.6g} ± {sy_err:.6g})"
         )
+        x0_list.append(centre_x)
+        y0_list.append(centre_y)
+        sx_list.append(sx)
+        sy_list.append(sy)
+        x0_err_list.append(centre_x_err)
+        y0_err_list.append(centre_y_err)
+        sx_err_list.append(sx_err)
+        sy_err_list.append(sy_err)
 
-    def get_next_zipno(self):
-        zip_numbers = [int(f[17:-4]) for f in os.listdir(self.dirPath)]
-        lastZip = zip_numbers[-1]
-        startZip = lastZip + 1
-        print(f"Initial zip no: {startZip}")
-        return startZip
+    tau_list_ms = tau_list * 1 / 100
+    sx_array = np.array(sx_list) * motcam_mm_per_px
+    sy_array = np.array(sy_list) * motcam_mm_per_px
+    x0_array = np.array(x0_list) * motcam_mm_per_px
 
-    def read_images_from_zip(self, zipNo, close: bool = True) -> np.ndarray:
-        zipFileName = f"{self.dirPath}//{self.fileNameString}_{str(zipNo).zfill(3)}.zip"
-        archive = ZipFile(zipFileName)
-        images = []
-        filenames = archive.namelist()
-        filenames.sort(key=natural_keys)
-        for filename in filenames:
-            if filename[-3:] == "tif":
-                with archive.open(filename) as image_file:
-                    images.append(np.array(Image.open(image_file), dtype=float))
-        if close:
-            archive.close()
-        return np.array(images)
+    sx_err_array = np.array(sx_err_list) * motcam_mm_per_px
+    sy_err_array = np.array(sy_err_list) * motcam_mm_per_px
+    x0_err_array = np.array(x0_err_list) * motcam_mm_per_px
 
-    def read_parameters_from_zip(self, zipNo, close: bool = True) -> dict[str, Any]:
-        zipFileName = f"{self.dirPath}//{self.fileNameString}_{str(zipNo).zfill(3)}.zip"
-        archive = ZipFile(zipFileName)
-        parameters = {}
-        for filename in archive.namelist():
-            if filename[-14:] == "parameters.txt":
-                with archive.open(filename) as parameter_file:
-                    script_parameters = parameter_file.readlines()
-                    for line in script_parameters:
-                        name, value, _ = line.split(b"\t")
-                        parameters[name.decode("utf-8")] = float(value)
-            elif filename[-18:] == "hardwareReport.txt":
-                with archive.open(filename) as hardware_file:
-                    hardware_parameters = hardware_file.readlines()
-                    for line in hardware_parameters:
-                        name, value, _ = line.split(b"\t")
-                        if value.isdigit():
-                            parameters[name.decode("utf-8")] = float(value)
-        if close:
-            archive.close()
-        return parameters
+    lin_fit = lambda x, m, c: m * x + c
+    px, pcovx = curve_fit(lin_fit, tau_list_ms**2, sx_array**2)
+    py, pcovy = curve_fit(lin_fit, tau_list_ms**2, sy_array**2)
+    t2_fit = np.linspace(0, tau_list_ms[-1] ** 2, 100)
+    sx2_fit = lin_fit(t2_fit, *px)
+    sy2_fit = lin_fit(t2_fit, *py)
+    mx = px[0]  # slope for sx^2 vs tau^2
+    my = py[0]  # slope for sy^2 vs tau^2
+    Tx = mx * MRb / kB * 1e6
+    Ty = my * MRb / kB * 1e6
+    mx_err = np.sqrt(np.diag(pcovx))[0]
+    my_err = np.sqrt(np.diag(pcovy))[0]
+    Tx_err = mx_err * MRb / kB * 1e6
+    Ty_err = my_err * MRb / kB * 1e6
 
-    def getTemperature(
-        self,
-        startZipNo,
-        endZipNo,
-        bgZipNo,
-        variable="TOF",
-        show_images=False,
-        incl_init_velocity=False,
-    ):
-        x0, x0_err, y0, y0_err = [], [], [], []
-        sx, sx_err, sy, sy_err = [], [], [], []
-        t = []
-        M = (0.50 / 0.65) * 3.45 * 1e-6  # pixel -> metre conversion factor
+    free_fall = lambda t, a, x0: 1 / 2 * a * t**2 + x0
+    param1, pcov1 = curve_fit(free_fall, tau_list_ms, x0_array)
+    t_fit = np.linspace(0, tau_list_ms[-1], 100)
+    x0_fit = free_fall(t_fit, *param1)
+    a = param1[0]  # acceleration in pixels/ms²
+    a_err = np.sqrt(np.diag(pcov1))[0]
 
-        for zipNo in range(startZipNo, endZipNo + 1):
-            imgs, params_dict = (
-                self.read_images_from_zip(zipNo),
-                self.read_parameters_from_zip(zipNo),
-            )
-            bg_img = self.read_images_from_zip(bgZipNo)
-            bg_subtracted = imgs.mean(axis=0) - bg_img.mean(axis=0)
-            x = np.arange(0, bg_subtracted.shape[1])
-            y = np.arange(0, bg_subtracted.shape[0])
-            x, y = np.meshgrid(x, y)
+    if show_plots:
+        # Plot sx_array, sy_array, x0_array all three side by side with respect to tau_list_ms
+        plt.figure(figsize=(10, 3))
+        plt.subplot(1, 3, 1)
+        plt.errorbar(
+            tau_list_ms**2, sx_array**2, yerr=sx_err_array**2, fmt="o", color="C0"
+        )
+        plt.plot(t2_fit, sx2_fit, color="red", label=f"Tx = {Tx:.2f} ± {Tx_err:.2f} μK")
+        plt.legend()
+        plt.xlabel("τ² (ms²)")
+        plt.ylabel("σx² (mm²)")
+        plt.title("σx² vs τ²")
 
-            # Fit gaussian to cloud
-            com_y, com_x = center_of_mass(bg_subtracted)
-            p0 = [
-                bg_subtracted.ravel().max() - bg_subtracted.ravel().min(),
-                com_x,
-                com_y,
-                70,
-                70,
-                bg_subtracted.ravel().min(),
-            ]
-            params, pcov = curve_fit(gaussian2D, (x, y), bg_subtracted.ravel(), p0)
-            perr = np.sqrt(np.diag(pcov))
+        plt.subplot(1, 3, 2)
+        plt.errorbar(
+            tau_list_ms**2, sy_array**2, yerr=sy_err_array**2, fmt="o", color="C0"
+        )
+        plt.plot(t2_fit, sy2_fit, color="red", label=f"Ty = {Ty:.2f} ± {Ty_err:.2f} μK")
+        plt.legend()
+        plt.xlabel("τ² (ms²)")
+        plt.ylabel("σy² (mm²)")
+        plt.title("σy² vs τ²")
 
-            if show_images:
-                plt.figure()
-                plt.imshow(bg_subtracted)
-                plt.scatter(params[1], params[2], marker="+", color="white", alpha=0.5)
+        plt.subplot(1, 3, 3)
+        plt.errorbar(tau_list_ms, x0_array, yerr=x0_err_array, fmt="o", color="C0")
+        plt.plot(
+            t_fit,
+            x0_fit,
+            color="red",
+            label=f"a = {a / (9.81 / 1000):.2f} ± {a_err / (9.81 / 1000):.2f} g",
+        )
+        plt.legend()
+        plt.xlabel("τ (ms)")
+        plt.ylabel("x0 (mm)")
+        plt.title("x0 vs τ")
 
-            # Convert cloud positions and uncertainties to metres
-            x0.append(params[1] * M)
-            y0.append(params[2] * M)
-            x0_err.append(perr[1] * M)
-            y0_err.append(perr[2] * M)
-
-            # Convert cloud sigma widths and uncertainties to metres
-            sx.append(min(params[3], params[4]) * M)
-            sy.append(max(params[3], params[4]) * M)
-
-            sx_err.append(perr[np.where(params == min(params[3], params[4]))[0]] * M)
-            sy_err.append(perr[np.where(params == max(params[3], params[4]))[0]] * M)
-
-            t.append(params_dict[variable] * 1e-5)  # TOF variable convert to seconds
-            print(
-                f"A = {round(params[0], 2)},  x0 = {round(params[1], 2)},  y0 = {round(params[2], 2)},  dx = {round(params[3], 2)},  dy = {round(params[4], 2)}"
-            )
-
-        sx2 = np.array(sx) ** 2  # Squared width m^2 units
-        sy2 = np.array(sy) ** 2  # Squared width m^2 units
-        x0 = np.array(x0)
-        y0 = np.array(y0)
-        t = np.array(t)  # Time in s units
-        t2 = t**2  # Squared time s^2 units
-
-        # Fitting a straight line to the cloud expansion - slope units m^2 / s^2
-        lin = lambda x, m, c: m * x + c
-        popt_x, cov_x = curve_fit(lin, t2, sx2)
-        popt_y, cov_y = curve_fit(lin, t2, sy2)
-        perr_lin_x = np.sqrt(np.diag(cov_x))
-        perr_lin_y = np.sqrt(np.diag(cov_y))
-
-        # Calculating temperatures - units of uK
-        Tx = round(popt_x[0] * (RbMassAMU * cn.u / cn.k) * 1e6, 2)
-        Tx_err = round(perr_lin_x[0] * (RbMassAMU * cn.u / cn.k) * 1e6, 2)
-        Ty = round(popt_y[0] * (RbMassAMU * cn.u / cn.k) * 1e6, 2)
-        Ty_err = round(perr_lin_y[0] * (RbMassAMU * cn.u / cn.k) * 1e6, 2)
-
-        # Fitting a parabola to the cloud freefall - accel units m / s^2, init velocity units m / s^-1, init pos units m
-        if incl_init_velocity:
-            grav = lambda tau, a, b, c: 0.5 * a * tau**2 + b * tau + c
-        else:
-            grav = lambda tau, a, c: 0.5 * a * tau**2 + c
-        post_y, covs_y = curve_fit(grav, t, y0, p0=[9.81, 0.0, y0[0]])
-        post_x, covs_x = curve_fit(grav, t, x0)
-        if incl_init_velocity:
-            vy = post_y[1]
-        else:
-            vy = 0
-
-        # Graphing
-        fig, ax = plt.subplots(1, 4, figsize=(12, 3))
         plt.tight_layout()
-        tt = np.linspace(min(t), max(t), 100)
-        tt2 = tt**2
+        plt.show()
 
-        ax[0].errorbar(
-            t2 * 1e6,
-            sx2 * 1e6,
-            yerr=np.array(sx_err).flatten() ** 2 * 1e6,
-            fmt="o",
-            color="C0",
-            ecolor="C0",
+    return {
+        "Tx": Tx,
+        "Tx_err": Tx_err,
+        "Ty": Ty,
+        "Ty_err": Ty_err,
+        "a": a,
+        "a_err": a_err,
+    }
+
+
+def tweezer_show_bg_subtracted(
+    images, backgrounds, cmap="gray", show=True, vmaxfactor=0.8, show_grid=True
+):
+    images = np.array(images)
+    backgrounds = np.array(backgrounds)
+    bg_sub_img = images - backgrounds.mean(axis=0)
+    img_average = bg_sub_img.mean(axis=0)
+    vmin = img_average.min()
+    vmax = vmaxfactor * img_average.max()
+    if show:
+        plt.imshow(img_average, cmap=cmap, vmin=vmin, vmax=vmax)
+        plt.colorbar()
+        if not show_grid:
+            plt.grid()
+    return img_average
+
+
+def convert_photons_to_counts(photons):
+    exp_params = ExpParameterManager()
+    conversion_factor = exp_params.get_parameter("conversion_factor")
+    conversion_offset = exp_params.get_parameter("conversion_offset")
+    counts_array = photons * 0.7 / conversion_factor + conversion_offset
+    return counts_array
+
+
+def convert_counts_to_photons(counts):
+    exp_params = ExpParameterManager()
+    conversion_factor = exp_params.get_parameter("conversion_factor")
+    conversion_offset = exp_params.get_parameter("conversion_offset")
+    photons_array = (counts - conversion_offset) * conversion_factor / 0.7
+    return photons_array
+
+
+def get_array_loading_statistics_grid(
+    images,
+    grid_positions,
+    grid_shape,
+    threshold=1.0,
+    window_size=5,
+    binning=20,
+    show_histogram=True,
+    threshold_detection=True,
+    verbose=True,
+    method="box",
+    scorer=None,
+    psf_window=9,
+):
+    """Loading statistics per site, scored by box sum or PSF matched filter.
+
+    ``method="box"`` expects top-hat filtered ``images``; ``method="psf"`` builds a
+    template per site and takes the raw frames. Pass ``scorer`` to reuse templates
+    built elsewhere.
+    """
+    n_row, n_col = grid_shape
+    exp_params = ExpParameterManager()
+    conversion_factor = exp_params.get_parameter("conversion_factor")
+    conversion_offset = exp_params.get_parameter("conversion_offset")
+
+    if scorer is None and method == "psf":
+        scorer = SiteScorer.from_images(
+            images, grid_positions, grid_shape, window_size=psf_window
         )
-        ax[0].plot(tt2 * 1e6, lin(tt2, *popt_x) * 1e6, color="C0")
-        ax[0].set_xlabel("$t^{2}$ (ms$^{2}$)")
-        ax[0].set_ylabel(r"$\sigma^{2}$ (mm$^{2}$)")
-        ax[0].set_title(f"$T_x$ = {Tx} uK, Error = {Tx_err} uK")
 
-        ax[1].errorbar(
-            t2 * 1e6,
-            sy2 * 1e6,
-            yerr=np.array(sy_err).flatten() ** 2 * 1e6,
-            fmt="o",
-            color="C3",
-            ecolor="C3",
-        )
-        ax[1].plot(tt2 * 1e6, lin(tt2, *popt_y) * 1e6, color="C3")
-        ax[1].set_xlabel("$t^{2}$ (ms$^{2}$)")
-        ax[1].set_ylabel(r"$\sigma^{2}$ (mm$^{2}$)")
-        ax[1].set_title(f"$T_y$ = {Ty} uK, Error = {Ty_err} uK")
-
-        ax[2].errorbar(
-            t * 1e3,
-            x0 * 1e3,
-            yerr=np.array(x0_err).flatten() * 1e3,
-            fmt="o",
-            color="C0",
-            ecolor="C0",
-        )
-        ax[2].plot(tt * 1e3, grav(tt, *post_x) * 1e3, color="C0")
-        ax[2].set_xlabel("$t$ (ms)")
-        ax[2].set_ylabel("$x_0$ (mm)")
-        ax[2].set_title(f"$a_x$ = {round(post_x[0] / 9.81, 2)} g")
-
-        ax[3].errorbar(
-            t * 1e3,
-            y0 * 1e3,
-            yerr=np.array(y0_err).flatten() * 1e3,
-            fmt="o",
-            color="C3",
-            ecolor="C3",
-        )
-        ax[3].plot(tt * 1e3, grav(tt, *post_y) * 1e3, color="C3")
-        ax[3].set_xlabel("$t$ (ms)")
-        ax[3].set_ylabel("$y_0$ (mm)")
-        ax[3].set_title(f"$a_y$ = {round(post_y[0] / 9.81, 2)} g")
-
-        return Tx, Tx_err, Ty, Ty_err, post_x[0] / 9.81, post_y[0] / 9.81, vy
-
-    def getPos(self, startZipNo, endZipNo, bgZipNo, variable="TOF"):
-        pos_x, pos_y = [], []
-        sigma_x, sigma_y = [], []
-        t = []
-        M = (0.65 / 0.50) * 6.45 * 1e-6
-
-        for zipNo in range(startZipNo, endZipNo + 1):
-            imgs, params_dict = (
-                self.read_images_from_zip(zipNo),
-                self.read_parameters_from_zip(zipNo),
-            )
-            bg_img = self.read_images_from_zip(bgZipNo)
-
-            bg_subtracted = imgs.mean(axis=0) - bg_img.mean(axis=0)
-            x = np.arange(0, bg_subtracted.shape[1])
-            y = np.arange(0, bg_subtracted.shape[0])
-            x, y = np.meshgrid(x, y)
-            p0 = [
-                bg_subtracted.ravel().max() - bg_subtracted.ravel().min(),
-                500,
-                700,
-                100,
-                100,
-                0,
-                bg_subtracted.ravel().min(),
+    # Extract photon counts for each image and each trap site
+    if scorer is not None:
+        photon_array = scorer.score_stack(images)  # SiteScorer already returns photons
+    else:
+        raw_counts = np.array(
+            [
+                sum_pixel_values(
+                    image, grid_positions, grid_shape, window_size=window_size
+                )
+                for image in images
             ]
-            x = x.ravel()
-            y = y.ravel()
-            params, pcov = curve_fit(gaussian2D, (x, y), bg_subtracted.ravel(), p0)
+        )
+        photon_array = (raw_counts - conversion_offset) * conversion_factor / 0.7
+    tot_photon_array = photon_array.flatten()
 
-            fitGaussian = gaussian2D((x, y), *params).reshape(bg_subtracted.shape)
-            plt.figure()
-            plt.imshow(bg_subtracted)
-            plt.contour(
-                fitGaussian,
-                levels=[0.4 * params[0], 0.6 * params[0], 0.8 * params[0]],
-                colors=["white"],
-                alpha=0.5,
+    # Threshold detection and fidelity calculation
+    threshold_detection_success = False
+    if threshold_detection:
+        try:
+            threshold, bg_params, sig_params = detect_loading_threshold(
+                tot_photon_array
             )
-            plt.scatter(params[1], params[2], marker="+", color="white", alpha=0.5)
-
-            # Multiply positions and sigmas by the imaging magnification factor M
-            pos_x.append(params[1] * M)
-            pos_y.append(params[2] * M)
-            sigma_x.append(params[3] * M)
-            sigma_y.append(params[4] * M)
-            t.append(params_dict[variable])
-            print(params)
-
-        sigma_x = np.array(sigma_x) ** 2
-        sigma_y = np.array(sigma_y) ** 2
-        t_pos = np.array(t) * 1e-5  # Multiply times to convert units to s
-        t = (np.array(t) * 1e-5) ** 2  # Square times for expansion fitting
-
-        lin = lambda x, m, c: m * x + c
-        popt_x, cov_x = curve_fit(lin, t, sigma_x)
-        popt_y, cov_y = curve_fit(lin, t, sigma_y)
-
-        # grav = lambda x, a, b, c: 0.5*a*x**2 + b*x + c
-        def grav(tau, a, b, c):
-            return 0.5 * a * tau**2 + c + b * tau  # + b*tau
-
-        post_y, covs_y = curve_fit(
-            grav, t_pos, pos_y
-        )  # Use the y position to calc freefall accel.
-
-        fig, ax = plt.subplots(1, 2, figsize=(12, 3))
-        ax[0].scatter(t_pos, pos_x)
-        # ax[1].plot(t_pos, grav(t_pos, *post_y))
-        ax[0].set_xlabel("$t$ (s)")
-        ax[0].set_ylabel("$x_0$ (m)")
-        ax[0].set_title("Pos x")
-
-        ax[1].scatter(t_pos, pos_y)
-        # ax[2].plot(t_pos, grav(t_pos, *post_y))
-        ax[1].set_xlabel("$t$ (s)")
-        ax[1].set_ylabel("$y_0$ (m)")
-        ax[1].set_title("Pos y")
-
-        return t_pos, pos_x, pos_y
-
-    def get_cloud_width(self, startZipNo, endZipNo, bgZipNo, variable="TOF"):
-        pos_x, pos_y = [], []
-        sigma_x, sigma_y = [], []
-        x_err, y_err = [], []
-        t = []
-        M = 0.96 * (0.50 / 0.65) * 3.45 * 1e-6
-
-        for zipNo in range(startZipNo, endZipNo + 1):
-            imgs, params_dict = (
-                self.read_images_from_zip(zipNo),
-                self.read_parameters_from_zip(zipNo),
+            mu_bg, var_bg, weight_bg = bg_params
+            mu_sig, var_sig, weight_sig = sig_params
+            prob_false_negative = norm.cdf(
+                threshold, loc=mu_sig, scale=np.sqrt(var_sig)
             )
-            bg_img = self.read_images_from_zip(bgZipNo)
-            bg_subtracted = imgs.mean(axis=0) - bg_img.mean(axis=0)
-
-            x = np.arange(0, bg_subtracted.shape[1])
-            y = np.arange(0, bg_subtracted.shape[0])
-            x, y = np.meshgrid(x, y)
-
-            # com_y, com_x = center_of_mass(bg_subtracted)
-            # p0 = [bg_subtracted.ravel().max() - bg_subtracted.ravel().min(), com_x, com_y, 100, 100, 0, bg_subtracted.ravel().min()]
-            # params, pcov = curve_fit(gaussian2D, (x_flat, y_flat), bg_subtracted.ravel(), p0)
-            # perr = np.sqrt(np.diag(pcov))
-            # fitGaussian = gaussian2D((x, y), *params).reshape(bg_subtracted.shape)
-
-            com_y, com_x = center_of_mass(bg_subtracted)
-            p0 = [
-                bg_subtracted.ravel().max() - bg_subtracted.ravel().min(),
-                com_x,
-                com_y,
-                70,
-                70,
-                0,
-                bg_subtracted.ravel().min(),
-            ]
-            params, pcov = curve_fit(gaussian2D, (x, y), bg_subtracted.ravel(), p0)
-            perr = np.sqrt(np.diag(pcov))
-
-            plt.figure()
-            plt.imshow(bg_subtracted)
-            # plt.contour(fitGaussian, levels=[0.4 * params[0], 0.6 * params[0], 0.8 * params[0]], colors=['white'], alpha=0.5)
-            plt.scatter(params[1], params[2], marker="+", color="white", alpha=0.5)
-
-            pos_x.append(params[1] * M)
-            pos_y.append(params[2] * M)
-            x_err.append(perr[1] * M)
-            y_err.append(perr[2] * M)
-            sigma_x.append(min(params[3] * M, params[4] * M))
-            sigma_y.append(max(params[3] * M, params[4] * M))
-            t.append(params_dict[variable])
+            prob_false_positive = 1.0 - norm.cdf(
+                threshold, loc=mu_bg, scale=np.sqrt(var_bg)
+            )
+            total_error = (weight_bg * prob_false_positive) + (
+                weight_sig * prob_false_negative
+            )
+            fidelity = 1.0 - total_error
+            threshold_detection_success = True
+        except Exception as e:
             print(
-                f"A = {round(params[0], 4)},  x0 = {round(params[1], 4)},  y0 = {round(params[2], 4)},  dx = {round(params[3], 4)},  dy = {round(params[4], 4)}"
+                f"Threshold detection failed: {e}. Trying default threshold of {threshold:.2f} kHz."
             )
-
-        sigma_x = np.array(sigma_x) ** 2
-        sigma_y = np.array(sigma_y) ** 2
-        x_err = np.array(x_err) ** 2
-        y_err = np.array(y_err) ** 2
-
-        t = np.array(t)
-
-        fig, ax = plt.subplots(1, 2, figsize=(12, 4))
-        ax[0].errorbar(t, sigma_x * 1e6, x_err * 1e6, fmt="ob", label="Horizontal")
-        ax[0].set_xlabel(variable)
-        ax[0].set_ylabel(r"$\sigma^{2}_x$ (m$^{2}$)")
-
-        ax[1].errorbar(t, sigma_y * 1e6, y_err * 1e6, fmt="or", label="Vertical")
-        ax[1].set_xlabel(variable)
-        ax[1].set_ylabel(r"$\sigma^{2}_y$ (m$^{2}$)")
-
-        return sigma_x, x_err, sigma_y, y_err
-
-    def get_cloud_size(self, startZipNo, endZipNo, bgZipNo, variable="TOF"):
-        pos_x, pos_y = [], []
-        sigma_x, sigma_y = [], []
-        t = []
-        M = 0.96 * (0.50 / 0.65) * 3.45 * 1e-6
-
-        for zipNo in range(startZipNo, endZipNo + 1):
-            imgs, params_dict = (
-                self.read_images_from_zip(zipNo),
-                self.read_parameters_from_zip(zipNo),
-            )
-            bg_img = self.read_images_from_zip(bgZipNo)
-            bg_subtracted = imgs.mean(axis=0) - bg_img.mean(axis=0)
-            x = np.arange(0, bg_subtracted.shape[1])
-            y = np.arange(0, bg_subtracted.shape[0])
-            x, y = np.meshgrid(x, y)
-            p0 = [
-                bg_subtracted.ravel().max() - bg_subtracted.ravel().min(),
-                600,
-                600,
-                100,
-                100,
-                0,
-                bg_subtracted.ravel().min(),
-            ]
-            params, pcov = curve_fit(gaussian2D, (x, y), bg_subtracted.ravel(), p0)
-            fitGaussian = gaussian2D((x, y), *params).reshape(bg_subtracted.shape)
-            plt.figure()
-            plt.imshow(bg_subtracted)
-            plt.contour(
-                fitGaussian,
-                levels=[0.4 * params[0], 0.6 * params[0], 0.8 * params[0]],
-                colors=["white"],
-                alpha=0.5,
-            )
-            plt.scatter(params[1], params[2], marker="+", color="white", alpha=0.5)
-
-            # Multiply positions and sigmas by the imaging magnification factor M
-            pos_x.append(params[1] * M)
-            pos_y.append(params[2] * M)
-            sigma_x.append(params[3] * M)
-            sigma_y.append(params[4] * M)
-            t.append(params_dict[variable])
-            # print(params)
-
-        sigma_x = np.array(sigma_x) ** 2
-        sigma_y = np.array(sigma_y) ** 2
-
-        return t, sigma_x, sigma_y
-
-    def get_cloud_size_den(self, startZipNo, endZipNo, bgZipNo, variable="TOF"):
-        pos_x, pos_y = [], []
-        sigma_x, sigma_y = [], []
-        t = []
-        M = (0.65 / 0.50) * 6.45 * 1e-6
-
-        for zipNo in range(startZipNo, endZipNo + 1):
-            imgs, params_dict = (
-                self.read_images_from_zip(zipNo),
-                self.read_parameters_from_zip(zipNo),
-            )
-            bg_img = self.read_images_from_zip(bgZipNo)
-            bg_subtracted = imgs.mean(axis=0) - bg_img.mean(axis=0)
-            x = np.arange(0, bg_subtracted.shape[1])
-            y = np.arange(0, bg_subtracted.shape[0])
-            x, y = np.meshgrid(x, y)
-            p0 = [
-                bg_subtracted.ravel().max() - bg_subtracted.ravel().min(),
-                600,
-                600,
-                100,
-                100,
-                0,
-                bg_subtracted.ravel().min(),
-            ]
-            params, pcov = curve_fit(gaussian2D, (x, y), bg_subtracted.ravel(), p0)
-            fitGaussian = gaussian2D((x, y), *params).reshape(bg_subtracted.shape)
-            plt.figure()
-            plt.imshow(bg_subtracted)
-            plt.contour(
-                fitGaussian,
-                levels=[0.4 * params[0], 0.6 * params[0], 0.8 * params[0]],
-                colors=["white"],
-                alpha=0.5,
-            )
-            plt.scatter(params[1], params[2], marker="+", color="white", alpha=0.5)
-
-            # Multiply positions and sigmas by the imaging magnification factor M
-            pos_x.append(params[1] * M)
-            pos_y.append(params[2] * M)
-            sigma_x.append(min(params[3] * M, params[4] * M))
-            sigma_y.append(max(params[3] * M, params[4] * M))
-            t.append(params_dict[variable])
-            # print(params)
-
-        sigma_x = (np.array(sigma_x) * 100 * np.sqrt(2 * 3.14)) ** 2
-        sigma_y = (np.array(sigma_y) * 100 * np.sqrt(2 * 3.14)) ** 2
-        return t, sigma_x, sigma_y
-
-    def get_fluorescence_atom_no(
-        self,
-        file_start,
-        file_end,
-        bg_fileno,
-        parameter_name,
-        crop,
-        to_crop=False,
-        show_images=True,
-    ):
-        crop_x1, crop_x2, crop_y1, crop_y2 = crop
-        n_container = []
-        n_err_container = []
-        t = []
-        CamRate = 10.5
-        for fileno in range(file_start, file_end + 1):
-            images, parameters_dict = (
-                self.read_images_from_zip(fileno),
-                self.read_parameters_from_zip(fileno),
-            )
-            bg = self.read_images_from_zip(bg_fileno)
-
-            im = images - bg.mean(axis=0)
-            if to_crop:
-                im = im[:, crop_x1:crop_x2, crop_y1:crop_y2]
-            n = im.sum(axis=(1, 2))
-            mean = n.mean()
-            err = n.std() / np.sqrt(im.shape[0])
-            n_container.append(mean)
-            n_err_container.append(err)
-            t.append(parameters_dict[parameter_name])
-            if show_images:
-                fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-                ax.imshow(im.mean(axis=0), cmap="coolwarm")
-        n_container = np.array(n_container) * CamRate
-        n_err_container = np.array(n_err_container) * CamRate
-        t = np.array(t)
-        return t, n_container, n_err_container
-
-    def get_temp_v_parameter(
-        self, startZip, endZip, bgZip, no_zips_per_datapoint, parameter="tMolCool"
-    ):
-        total_zips = len(range(startZip, endZip + 1))
-        no_datapoints = total_zips / no_zips_per_datapoint
-        Tx, Txe, Ty, Tye, P, Gx, Gy, Vy, N, Ne = [], [], [], [], [], [], [], [], [], []
-        for i in range(int(no_datapoints)):
-            tx, txe, ty, tye, gx, gy, vy = self.getTemperature(
-                startZip + i * no_zips_per_datapoint,
-                startZip + (i + 1) * no_zips_per_datapoint - 1,
-                bgZip,
-                variable="tImgTOF",
-            )
-            _, n, ne = self.get_fluorescence_atom_no(
-                startZip + i * no_zips_per_datapoint,
-                startZip + i * no_zips_per_datapoint,
-                bgZip,
-                parameter,
-                [0, -1, 0, -1],
-                to_crop=False,
-                show_images=False,
-            )
-            p = self.read_parameters_from_zip(startZip + i * no_zips_per_datapoint)[
-                parameter
-            ]
-
-            Tx.append(tx)
-            Txe.append(txe)
-            Ty.append(ty)
-            Tye.append(tye)
-            P.append(p)
-            Gx.append(gx)
-            Gy.append(gy)
-            Vy.append(vy)
-            N.append(n)
-            Ne.append(ne)
-
-        return Tx, Txe, Ty, Tye, P, Gx, Gy, Vy, N, Ne
-
-    def get_cloud_density(
-        self,
-        file_start,
-        file_end,
-        bg_fileno,
-        parameter_name,
-        crop,
-        to_crop=False,
-        show_images=True,
-    ):
-        t, n_container, n_err_container = self.get_fl_n(
-            file_start,
-            file_end,
-            bg_fileno,
-            parameter_name,
-            crop,
-            to_crop=False,
-            show_images=False,
-        )
-        t, sigma_x, sigma_y = self.get_cloud_size_den(
-            file_start, file_end, bg_fileno, variable=parameter_name
-        )
-
-        return (
-            t,
-            n_container / (sigma_x * np.sqrt(sigma_y)),
-            n_err_container / (sigma_x * np.sqrt(sigma_y)),
-        )
-
-    def get_tweezer_images(self):
-        def extract_number(filename):
-            # Finds the digits immediately preceding the extension
-            match = re.search(r"(\d+)\.[^.]+$", filename)
-            return int(match.group(1)) if match else 0
-
-        images_list = [
-            f for f in os.listdir(tweezer_img_source_dir) if f.endswith(".tif")
-        ]
-        images_list = sorted(images_list, key=extract_number)
-        images = []
-        for img_file in images_list:
-            img_path = tweezer_img_source_dir + img_file
-            img = Image.open(img_path)
-            img_array = np.array(img)
-            images.append(img_array)
-        print("Images loaded from tweezer image directory.")
-        return images
-
-    def clear_tweezer_images(self):
-        images_list = [
-            f for f in os.listdir(tweezer_img_source_dir) if f.endswith(".tif")
-        ]
-        for img_file in images_list:
-            os.remove(tweezer_img_source_dir + img_file)
-        print("Tweezer image directory cleared.")
-
-    def tweezer_inject(self, zipNo):
-        images_list = [
-            f for f in os.listdir(tweezer_img_source_dir) if f.endswith(".tif")
-        ]
-        zipPathIMG = (
-            self.dirPath
-            + "\\"
-            + self.fileNameString
-            + "_"
-            + str(zipNo).zfill(3)
-            + ".zip"
-        )
-        for img_name in images_list:
-            image_path = tweezer_img_source_dir + img_name
-            archive = ZipFile(zipPathIMG, "a")
-            archive.write(image_path, os.path.basename(image_path))
-            archive.close()
-            sleep(0.1)
-            os.remove(image_path)
-
-    def tweezer_inject_double(self, zipNo):
-        images_list = [
-            f for f in os.listdir(tweezer_img_source_dir) if f.endswith(".tif")
-        ]
-        zipPathIMG = (
-            self.dirPath
-            + "\\"
-            + self.fileNameString
-            + "_"
-            + str(zipNo).zfill(3)
-            + ".zip"
-        )
-        zipPathBG = (
-            self.dirPath
-            + "\\"
-            + self.fileNameString
-            + "_"
-            + str(zipNo + 1).zfill(3)
-            + ".zip"
-        )
-        shutil.copyfile(zipPathIMG, zipPathBG)
-        for img_name in images_list:
-            image_no = int(img_name[15:-4])
-            image_path = tweezer_img_source_dir + img_name
-            if image_no % 2 == 0:
-                archive = ZipFile(zipPathBG, "a")
-                archive.write(image_path, os.path.basename(image_path))
-                archive.close()
-            else:
-                archive = ZipFile(zipPathIMG, "a")
-                archive.write(image_path, os.path.basename(image_path))
-                archive.close()
-            sleep(0.1)
-            os.remove(image_path)
-
-    def tweezer_show_bg_subtracted(
-        self,
-        images,
-        backgrounds,
-        reg=(0, -1, 0, -1),
-        cmap="gray",
-        show=True,
-        vmaxfactor=0.8,
-        show_grid=True,
-    ):
-        images = np.array(images)
-        backgrounds = np.array(backgrounds)
-        bg_sub_img = images - backgrounds.mean(axis=0)
-        img_average = bg_sub_img.mean(axis=0)
-        trap_average = img_average[reg[0] : reg[1], reg[2] : reg[3]]
-        vmin = img_average.min()
-        vmax = vmaxfactor * img_average.max()
-        if show:
-            fig, ax = plt.subplots(1, 2, figsize=(10, 20))
-            ax[0].imshow(img_average, cmap=cmap, vmin=vmin, vmax=vmax)
-            ax[1].imshow(trap_average, cmap=cmap, vmin=vmin, vmax=vmax)
-            if not show_grid:
-                ax[0].grid()
-                ax[1].grid()
-        return img_average
-
-    def tweezer_show(
-        self,
-        images,
-        reg=(25, 31, 22, 28),
-        cmap="coolwarm",
-        show=True,
-        vmaxfactor=0.8,
-        show_grid=True,
-    ):
-        img_average = images.mean(axis=0)
-        trap_average = img_average[reg[0] : reg[1], reg[2] : reg[3]]
-        vmin = img_average.min()
-        vmax = vmaxfactor * img_average.max()
-        if show:
-            fig, ax = plt.subplots(1, 2, figsize=(10, 20))
-            ax[0].imshow(img_average, cmap=cmap, vmin=vmin, vmax=vmax)
-            ax[1].imshow(trap_average, cmap=cmap, vmin=vmin, vmax=vmax)
-            if not show_grid:
-                ax[0].grid()
-                ax[1].grid()
-        return img_average
-
-    def get_array_loading_statistics(
-        self,
-        images,
-        grid_positions,
-        grid_shape,
-        threshold=6.85,
-        window_size=5,
-        binning=20,
-        show_histogram=True,
-        threshold_detection=True,
-        verbose=True,
-    ):
-        n_row, n_col = grid_shape
-        a500 = 0.00483372
-        b500 = 1828.38
-
-        photon_rates, count_rates = [], []
-        for image in images:
-            counts = sum_pixel_values(
-                image, grid_positions, grid_shape, window_size=window_size
-            )
-            electrons = (counts - b500) * a500
-            photons = electrons / 0.7
-            photon_rate = (photons / 80e-3) / 1000
-            photon_rates.append(photon_rate)
-            count_rates.append(photon_rate * 0.7)
-
-        photon_rates = np.array(photon_rates)
-        tot_photon_rates = photon_rates.flatten()
-
-        if threshold_detection:
             try:
-                threshold, bg_params, sig_params = detect_loading_threshold(
-                    tot_photon_rates
-                )
-                mu_bg, var_bg, weight_bg = bg_params
-                mu_sig, var_sig, weight_sig = sig_params
-                prob_false_negative = norm.cdf(
-                    threshold, loc=mu_sig, scale=np.sqrt(var_sig)
-                )
-                prob_false_positive = 1.0 - norm.cdf(
-                    threshold, loc=mu_bg, scale=np.sqrt(var_bg)
-                )
-                total_error = (weight_bg * prob_false_positive) + (
-                    weight_sig * prob_false_negative
-                )
-                fidelity = 1.0 - total_error
-            except Exception:
-                mu_bg = tot_photon_rates[tot_photon_rates < threshold].mean()
-                mu_sig = tot_photon_rates[tot_photon_rates >= threshold].mean()
-                var_bg = tot_photon_rates[tot_photon_rates < threshold].var()
-                var_sig = tot_photon_rates[tot_photon_rates >= threshold].var()
+                mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
+                mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
+                var_bg = tot_photon_array[tot_photon_array < threshold].var()
+                var_sig = tot_photon_array[tot_photon_array >= threshold].var()
                 fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (
                     1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg))
                 )
-
-        else:
-            mu_bg = tot_photon_rates[tot_photon_rates < threshold].mean()
-            mu_sig = tot_photon_rates[tot_photon_rates >= threshold].mean()
-            var_bg = tot_photon_rates[tot_photon_rates < threshold].var()
-            var_sig = tot_photon_rates[tot_photon_rates >= threshold].var()
+            except Exception as e:
+                print(
+                    f"Fallback threshold calculation failed: {e}. Setting fidelity to 0."
+                )
+                fidelity = np.nan
+    else:
+        try:
+            mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
+            mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
+            var_bg = tot_photon_array[tot_photon_array < threshold].var()
+            var_sig = tot_photon_array[tot_photon_array >= threshold].var()
             fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (
                 1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg))
             )
+        except Exception as e:
+            print(f"Fallback threshold calculation failed: {e}. Setting fidelity to 0.")
+            fidelity = np.nan
 
-        atom_counter = (photon_rates > threshold).astype(int).sum(axis=0)
-        loading_probabilities = atom_counter / len(images)
+    # Atom counting and loading probabilities
+    atom_counter = (photon_array > threshold).astype(int).sum(axis=0)
+    loading_probabilities = atom_counter / len(images)
 
-        if show_histogram:
-            fig, ax = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True)
-
-            for n in range(n_row):
-                for m in range(n_col):
-                    ax[0].hist(
-                        photon_rates[:, n, m],
-                        bins=40,
-                        density=True,
-                        alpha=0.6,
-                        range=(min(tot_photon_rates), max(tot_photon_rates)),
+    if show_histogram:
+        fig, ax = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True)
+        for n in range(n_row):
+            for m in range(n_col):
+                ax[0].hist(
+                    photon_array[:, n, m],
+                    bins=40,
+                    density=True,
+                    alpha=0.6,
+                    range=(min(tot_photon_array), max(tot_photon_array)),
+                )
+                ax[0].set_xlabel("Photons")
+                ax[0].set_ylabel("Probability Density")
+                if verbose:
+                    print(
+                        f"Trap ({n}, {m}) Loading Probability : {loading_probabilities[n, m] * 100:.2f} %"
                     )
-                    ax[0].set_xlabel("Photon Rate / kHz")
-                    ax[0].set_ylabel("Probability Density")
-                    if verbose:
-                        print(
-                            f"Trap ({n}, {m}) Loading Probability : {loading_probabilities[n, m] * 100:.2f} %"
-                        )
-
-            if threshold_detection:
-                x_fit = np.linspace(min(tot_photon_rates), max(tot_photon_rates), 1000)
-                pdf_bg = weight_bg * norm.pdf(x_fit, mu_bg, np.sqrt(var_bg))
-                pdf_sig = weight_sig * norm.pdf(x_fit, mu_sig, np.sqrt(var_sig))
-                ax[1].plot(
-                    x_fit,
-                    pdf_bg + pdf_sig,
-                    "k-",
-                    lw=2,
-                )
-                ax[1].plot(
-                    x_fit,
-                    pdf_bg,
-                    "b--",
-                    lw=2,
-                    label=rf"Background Fit ($\mu$={mu_bg:.1f})",
-                )
-                ax[1].plot(
-                    x_fit,
-                    pdf_sig,
-                    "r--",
-                    lw=2,
-                    label=rf"Signal Fit ($\mu$={mu_sig:.1f})",
-                )
-
-            ax[1].hist(
-                tot_photon_rates,
-                bins=binning,
-                density=True,
-                alpha=0.5,
-                color="gray",
-                edgecolor="black",
-                label="Raw Data",
-            )
-            ax[1].axvline(
-                x=threshold,
-                color="green",
-                linestyle="--",
+        if threshold_detection and threshold_detection_success:
+            x_fit = np.linspace(min(tot_photon_array), max(tot_photon_array), 1000)
+            pdf_bg = weight_bg * norm.pdf(x_fit, mu_bg, np.sqrt(var_bg))
+            pdf_sig = weight_sig * norm.pdf(x_fit, mu_sig, np.sqrt(var_sig))
+            ax[1].plot(
+                x_fit,
+                pdf_bg + pdf_sig,
+                "k-",
                 lw=2,
-                label=f"Threshold ({threshold:.1f} kHz)",
             )
-            ax[1].set_xlabel("Photon Rate / kHz")
-            ax[1].set_ylabel("Probability Density")
-            ax[1].legend()
+            ax[1].plot(
+                x_fit, pdf_bg, "b--", lw=2, label=rf"Background Fit ($\mu$={mu_bg:.1f})"
+            )
+            ax[1].plot(
+                x_fit, pdf_sig, "r--", lw=2, label=rf"Signal Fit ($\mu$={mu_sig:.1f})"
+            )
+        ax[1].hist(
+            tot_photon_array,
+            bins=binning,
+            density=True,
+            alpha=0.5,
+            color="gray",
+            edgecolor="black",
+            label="Raw Data",
+        )
+        ax[1].axvline(
+            x=threshold,
+            color="green",
+            linestyle="--",
+            lw=2,
+            label=f"Threshold ({threshold:.1f})",
+        )
+        ax[1].set_xlabel("Photons")
+        ax[1].set_ylabel("Probability Density")
+        ax[1].legend()
+        cax = ax[2].matshow(loading_probabilities, cmap="viridis", vmin=0.3)
+        fig.colorbar(cax, ax=ax[2])
 
-            cax = ax[2].matshow(loading_probabilities, cmap="viridis", vmin=0.3)
-            fig.colorbar(cax, ax=ax[2])
-
-        if verbose:
-            print(rf"\Detected Loading Threshold: {threshold:.2f} kHz")
-            print(
-                f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean() * 100:.2f} %"
-            )
-            print(
-                f"Mean Loading Probability: {loading_probabilities.mean() * 100:.2f} %"
-            )
+    if verbose:
+        print(f"Detected Loading Threshold: {threshold:.2f} photons")
+        print(
+            f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean() * 100:.2f} %"
+        )
+        print(f"Mean Loading Probability: {loading_probabilities.mean() * 100:.2f} %")
+        if not np.isnan(fidelity):
             print(f"Detection Fidelity: {fidelity * 100:.2f} %")
             print(
-                f"Mean Background Photon Rate: {mu_bg:.2f} kHz, Variance: {var_bg:.2f} (kHz)^2"
+                f"Mean Background Photon Count: {mu_bg:.2f} photons, Variance: {var_bg:.2f} photons^2"
             )
             print(
-                f"Mean Signal Photon Rate: {mu_sig:.2f} kHz, Variance: {var_sig:.2f} (kHz)^2"
+                f"Mean Signal Photon Count: {mu_sig:.2f} photons, Variance: {var_sig:.2f} photons^2"
             )
 
-        return photon_rates, loading_probabilities, threshold, fidelity
+    return photon_array, loading_probabilities, threshold, fidelity
 
-    def get_array_loading_probability_general(
-        self, images, grid_positions, threshold=6.85, window_size=5, binning=20
-    ):
-        a500 = 0.00483372
-        b500 = 1828.38
-        photon_rates, count_rates, atom_counter = [], [], np.zeros(len(grid_positions))
-        for image in images:
-            counts = sum_pixel_values_general(
-                image, grid_positions, window_size=window_size
+
+def get_array_loading_statistics(
+    images,
+    grid_positions,
+    threshold=1.0,
+    window_size=5,
+    binning=20,
+    show_histogram=True,
+    threshold_detection=True,
+    verbose=True,
+    method="box",
+    scorer=None,
+    psf_window=9,
+    show_site_labels=False,
+):
+    """Loading statistics per site, scored by box sum or PSF matched filter.
+
+    ``method="box"`` expects top-hat filtered ``images``; ``method="psf"`` builds a
+    template per site and takes the raw frames. Pass ``scorer`` to reuse templates
+    built elsewhere.
+    """
+    exp_params = ExpParameterManager()
+    conversion_factor = exp_params.get_parameter("conversion_factor")
+    conversion_offset = exp_params.get_parameter("conversion_offset")
+
+    if scorer is None and method == "psf":
+        scorer = SiteScorer.from_images(images, grid_positions, window_size=psf_window)
+
+    # Extract photon counts for each image and each trap site
+    if scorer is not None:
+        photon_array = scorer.score_stack(images)  # SiteScorer already returns photons
+    else:
+        raw_counts = np.array(
+            [
+                sum_pixel_values(image, grid_positions, window_size=window_size)
+                for image in images
+            ]
+        )
+        photon_array = (raw_counts - conversion_offset) * conversion_factor / 0.7
+    tot_photon_array = photon_array.flatten()
+
+    # Threshold detection and fidelity calculation
+    threshold_detection_success = False
+    if threshold_detection:
+        try:
+            threshold, bg_params, sig_params = detect_loading_threshold(
+                tot_photon_array
             )
-            electrons = (counts - b500) * a500
-            photons = electrons / 0.7
-            photon_rate = (photons / 80e-3) / 1000
-            photon_rates.append(photon_rate)
-        if threshold == 0:
-            threshold = detect_loading_threshold(photon_rates)
-        for image in images:
-            counts = sum_pixel_values_general(
-                image, grid_positions, window_size=window_size
+            mu_bg, var_bg, weight_bg = bg_params
+            mu_sig, var_sig, weight_sig = sig_params
+            prob_false_negative = norm.cdf(
+                threshold, loc=mu_sig, scale=np.sqrt(var_sig)
             )
-            electrons = (counts - b500) * a500
-            photons = electrons / 0.7
-            photon_rate = (photons / 80e-3) / 1000
-            atoms = np.zeros_like(photon_rate)
-            atoms[photon_rate > threshold] = 1
-            photon_rates.append(photon_rate)
-            count_rates.append(photon_rate * 0.7)
-            atom_counter += atoms
-        loading_probabilities = atom_counter / len(images)
-        fig, ax = plt.subplots(1, 3, figsize=(21, 5))
+            prob_false_positive = 1.0 - norm.cdf(
+                threshold, loc=mu_bg, scale=np.sqrt(var_bg)
+            )
+            total_error = (weight_bg * prob_false_positive) + (
+                weight_sig * prob_false_negative
+            )
+            fidelity = 1.0 - total_error
+            threshold_detection_success = True
+        except Exception as e:
+            print(
+                f"Threshold detection failed: {e}. Trying default threshold of {threshold:.2f} kHz."
+            )
+            try:
+                mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
+                mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
+                var_bg = tot_photon_array[tot_photon_array < threshold].var()
+                var_sig = tot_photon_array[tot_photon_array >= threshold].var()
+                fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (
+                    1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg))
+                )
+            except Exception as e:
+                print(
+                    f"Fallback threshold calculation failed: {e}. Setting fidelity to 0."
+                )
+                fidelity = np.nan
+    else:
+        try:
+            mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
+            mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
+            var_bg = tot_photon_array[tot_photon_array < threshold].var()
+            var_sig = tot_photon_array[tot_photon_array >= threshold].var()
+            fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (
+                1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg))
+            )
+        except Exception as e:
+            print(f"Fallback threshold calculation failed: {e}. Setting fidelity to 0.")
+            fidelity = np.nan
+
+    # Atom counting and loading probabilities
+    atom_counter = (photon_array > threshold).astype(int).sum(axis=0)
+    loading_probabilities = atom_counter / len(images)
+
+    if show_histogram:
+        fig, ax = plt.subplots(1, 3, figsize=(17, 5), constrained_layout=True)
         for i in range(len(grid_positions)):
-            ax[0].hist(np.array(photon_rates)[:, i], bins=binning, alpha=0.6)
-            ax[0].set_xlabel("Photon Rate / kHz")
-            ax[0].set_ylabel("Measurements")
+            ax[0].hist(
+                photon_array[:, i],
+                bins=40,
+                density=True,
+                alpha=0.6,
+                range=(min(tot_photon_array), max(tot_photon_array)),
+            )
+            ax[0].set_xlabel("Photons")
+            ax[0].set_ylabel("Probability Density")
+            if verbose:
+                print(
+                    f"Trap ({i}) Loading Probability : {loading_probabilities[i] * 100:.2f} %"
+                )
+        if threshold_detection and threshold_detection_success:
+            x_fit = np.linspace(min(tot_photon_array), max(tot_photon_array), 1000)
+            pdf_bg = weight_bg * norm.pdf(x_fit, mu_bg, np.sqrt(var_bg))
+            pdf_sig = weight_sig * norm.pdf(x_fit, mu_sig, np.sqrt(var_sig))
+            ax[1].plot(
+                x_fit,
+                pdf_bg + pdf_sig,
+                "k-",
+                lw=2,
+            )
+            ax[1].plot(
+                x_fit, pdf_bg, "b--", lw=2, label=rf"Background Fit ($\mu$={mu_bg:.1f})"
+            )
+            ax[1].plot(
+                x_fit, pdf_sig, "r--", lw=2, label=rf"Signal Fit ($\mu$={mu_sig:.1f})"
+            )
+        ax[1].hist(
+            tot_photon_array,
+            bins=binning,
+            density=True,
+            alpha=0.5,
+            color="gray",
+            edgecolor="black",
+            label="Raw Data",
+        )
+        ax[1].axvline(
+            x=threshold,
+            color="green",
+            linestyle="--",
+            lw=2,
+            label=f"Threshold ({threshold:.1f})",
+        )
+        ax[1].set_xlabel("Photons")
+        ax[1].set_ylabel("Probability Density")
+        ax[1].legend()
+        X, Y = np.array(list(grid_positions.values())).T
+        ax[2].scatter(Y, X, c=loading_probabilities, cmap="viridis", s=200)
+        ax[2].invert_yaxis()
+        if show_site_labels:
+            for i, (x, y) in enumerate(zip(X, Y)):
+                ax[2].text(
+                    y, x, str(i), color="white", fontsize=8, ha="center", va="center"
+                )
+        cbar = plt.colorbar(ax[2].collections[0], ax=ax[2])
+        cbar.set_label("Loading Probability")
+
+    if verbose:
+        print(f"Detected Loading Threshold: {threshold:.2f} photons")
+        print(
+            f"Std dev of Loading Probabilities: {np.std(loading_probabilities) / loading_probabilities.mean() * 100:.2f} %"
+        )
+        print(f"Mean Loading Probability: {loading_probabilities.mean() * 100:.2f} %")
+        if not np.isnan(fidelity):
+            print(f"Detection Fidelity: {fidelity * 100:.2f} %")
             print(
-                f"Trap ({i}) Loading Probability : {loading_probabilities[i] * 100} %"
+                f"Mean Background Photon Count: {mu_bg:.2f} photons, Variance: {var_bg:.2f} photons^2"
             )
-        ax[1].hist(np.array(photon_rates).ravel(), bins=binning, alpha=0.6)
-        ax[1].set_xlabel("Photon Rate / kHz")
-        ax[1].set_ylabel("Measurements")
-        ax[2].bar(grid_positions.keys(), loading_probabilities)
-        ax[2].set_xlabel("Trap Site")
-        ax[2].set_ylabel("Loading Probability")
-        print(f"Overall Loading Probability = {loading_probabilities.mean() * 100} %")
-        return photon_rates, loading_probabilities
-
-    def extract_survival_probabilities(
-        self,
-        startZip,
-        num_datapoints,
-        grid_positions,
-        grid_shape=(8, 8),
-        trap_size=3,
-        loading_threshold=6,
-    ):
-        individual_survival_prob_list = []
-        survival_prob_list = []
-        survival_prob_err_list = []
-
-        for zipNo in track(np.arange(startZip, startZip + 2 * num_datapoints, 2)):
-            photon_rates_1, _, threshold_1 = self.get_array_loading_probability(
-                zipNo,
-                grid_positions,
-                grid_shape,
-                threshold=loading_threshold,
-                window_size=trap_size,
-                binning=20,
-                show_histogram=False,
-            )
-            photon_rates_2, _, threshold_2 = self.get_array_loading_probability(
-                zipNo + 1,
-                grid_positions,
-                grid_shape,
-                threshold=threshold_1,
-                window_size=trap_size,
-                binning=20,
-                show_histogram=False,
+            print(
+                f"Mean Signal Photon Count: {mu_sig:.2f} photons, Variance: {var_sig:.2f} photons^2"
             )
 
-            photon_rates_1 = np.array(photon_rates_1)
-            photon_rates_2 = np.array(photon_rates_2)
+    return photon_array, loading_probabilities, threshold, fidelity
 
-            survival_probabilities = np.zeros((grid_shape[0], grid_shape[1]))
 
-            for i, j in np.ndindex(grid_shape[0], grid_shape[1]):
-                trap_photon_rates_1 = photon_rates_1[:, i, j]
-                trap_photon_rates_2 = photon_rates_2[:, i, j]
-
-                trap_photon_rates_2_postselected = trap_photon_rates_2[
-                    trap_photon_rates_1 > threshold_1
-                ]
-                if len(trap_photon_rates_2_postselected) != 0:
-                    survival_probabilities[i, j] = len(
-                        trap_photon_rates_2_postselected[
-                            trap_photon_rates_2_postselected > threshold_2
-                        ]
-                    ) / len(trap_photon_rates_2_postselected)
-                else:
-                    survival_probabilities[i, j] = np.nan
-
-            survival_probabilities = survival_probabilities.ravel()
-            individual_survival_prob_list.append(survival_probabilities)
-            survival_prob_list.append(survival_probabilities.mean())
-            survival_prob_err_list.append(survival_probabilities.std())
-
-        return survival_prob_list, survival_prob_err_list, individual_survival_prob_list
-
-    def array_baseline_measurement(
-        self, images, backgrounds, grid_shape=(8, 8), trap_size=3, detection_step=100
-    ):
-        img_array = self.tweezer_show_bg_subtracted(
-            images,
-            backgrounds,
-            reg=[0, -1, 0, -1],
-            show=False,
-            vmaxfactor=0.6,
-            cmap="gray",
-            show_grid=False,
-        )
-        grid_positions, detection_threshold = detect_trap_sites(
-            img_array, grid_shape, detection_step=detection_step
-        )
-        visualize_results(
-            img_array,
+def extract_survival_probability(
+    imgs1, imgs2, grid_positions, threshold="auto", window_size=5
+):
+    if threshold == "auto":
+        pr_1, eta_1, thresh_1, fidelity_1 = get_array_loading_statistics(
+            imgs1,
             grid_positions,
-            margin=20,
-            window_size=trap_size,
-            threshold=detection_threshold,
+            threshold_detection=True,
+            window_size=window_size,
+            binning=60,
+            show_histogram=False,
+            verbose=False,
         )
-        photon_rates, loading_probabilities, threshold = (
-            self.get_array_loading_probability(
-                images,
-                grid_positions,
-                grid_shape,
-                threshold=0,
-                window_size=trap_size,
-                binning=20,
-            )
+        pr_2, eta_2, thresh_2, fidelity_2 = get_array_loading_statistics(
+            imgs2,
+            grid_positions,
+            threshold_detection=True,
+            window_size=window_size,
+            binning=60,
+            show_histogram=False,
+            verbose=False,
         )
-        cvar = np.std(loading_probabilities) / loading_probabilities.mean()
-        print(f"Loading Threshold = {threshold:.6f} kHz")
-        print(f"Standard Deviation = {cvar * 100} %")
-        print(f"Average Loading Prob = {loading_probabilities.mean() * 100} %")
-        return grid_positions, photon_rates, loading_probabilities, threshold
+    else:
+        pr_1, eta_1, thresh_1, fidelity_1 = get_array_loading_statistics(
+            imgs1,
+            grid_positions,
+            threshold_detection=False,
+            threshold=threshold,
+            window_size=window_size,
+            binning=60,
+            show_histogram=False,
+            verbose=False,
+        )
+        pr_2, eta_2, thresh_2, fidelity_2 = get_array_loading_statistics(
+            imgs2,
+            grid_positions,
+            threshold_detection=False,
+            threshold=threshold,
+            window_size=window_size,
+            binning=60,
+            show_histogram=False,
+            verbose=False,
+        )
+    survival_fractions = []
+    for i in range(pr_1.shape[0]):
+        pr_mat_1 = pr_1[i]
+        pr_mat_2 = pr_2[i]
 
-    def array_loading_threshold_measurement(
-        self,
-        zipNo,
-        powers,
-        datapoints,
-        grid_positions,
-        grid_shape,
-        threshold,
-        trap_size=3,
-    ):
-        ld_probs = []
-        ld_probs_err = []
-        for z in np.arange(zipNo, zipNo + datapoints):
-            photon_rates, ld_prob, _ = self.get_array_loading_probability(
-                z,
-                grid_positions,
-                grid_shape,
-                threshold=threshold,
-                window_size=trap_size,
-                show_histogram=False,
-            )
-            N = np.array(photon_rates).size
+        pr_mat_1_binary = (pr_mat_1 > thresh_1).astype(int)
+        pr_mat_2_binary = (pr_mat_2 > thresh_2).astype(int)
+        survival_matrix = pr_mat_1_binary * pr_mat_2_binary
 
-            p = ld_prob.mean()
-            ld_probs.append(p)
-            ld_probs_err.append(np.sqrt(p * (1 - p) / N))
+        init_occupation = pr_mat_1_binary.sum()
+        survival_count = survival_matrix.sum()
+        survival_fraction = (
+            survival_count / init_occupation if init_occupation > 0 else 0
+        )
+        survival_fractions.append(survival_fraction)
 
-        p0 = [0.55, 0.5, 0.2]
+    survival_probability = np.mean(survival_fractions)
+    return survival_probability
 
-        # Bounds: Amp [0, 1], Pc > 0, P_offset usually >= 0
-        bounds = ([0, 0, 0], [1.0, 5.0, 1.0])
+
+def recapture_prob_fit(tarray, T, a, b):
+    exp_params = ExpParameterManager()
+    P = exp_params.get_parameter("mean_tweezer_power_mW") * 1e-3
+    wr = exp_params.get_parameter("radial_trap_freq_kHz") * 1e3 * 2 * np.pi
+
+    C = 1 / (2 * c * e0) * muD2**2 / hbar * (1 / (wD2 - w) + 1 / (wD2 + w)) + 1 / (
+        2 * c * e0
+    ) * muD1**2 / hbar * (
+        1 / (wD1 - w) + 1 / (wD1 + w)
+    )  # This is the combined polarizability term U0 / I0
+    U0 = np.sqrt(C * P * MRb * wr**2 / (2 * np.pi))
+    w0 = np.sqrt(4 * U0 / (MRb * wr**2))
+
+    probs = []
+    for t in tarray:
+        escape_v_ineq = lambda ve, t: (
+            0.5 * MRb * ve**2 - U0 * np.exp(-2 * ve**2 * t**2 / w0**2)
+        )
+        maxwell_p = lambda v, T: (
+            (MRb * v) / (kB * T) * np.exp(-MRb * v**2 / (2 * kB * T))
+        )
+        xx = np.linspace(0, 1, 100000)
+        y = escape_v_ineq(xx, t)
+        ve = xx[np.argmin(np.abs(y))]
+        prob = integrate.quad(maxwell_p, 0, ve, args=(T))[0]
+        probs.append(prob)
+    return a * np.array(probs) + b
+
+
+def extract_temperature(dropTimeList, survival_prob_list, plot=True):
+    dropt = dropTimeList * 10 * 1e-6
+    survival_prob_list = np.array(survival_prob_list)
+    survival_prob_list = survival_prob_list[~np.isnan(survival_prob_list)]
+    dropt = dropt[~np.isnan(survival_prob_list)]
+    try:
         params, pcov = curve_fit(
-            maxwell_boltzmann_cdf, powers, ld_probs, p0=p0, bounds=bounds
+            recapture_prob_fit, dropt, survival_prob_list, p0=[50e-6, 1.5, 0.1]
         )
-
-        xx = np.linspace(0, powers.max(), 1000)
-        yy = maxwell_boltzmann_cdf(xx, *params)
-
-        power_thresh = params[1] + params[2]
-
-        plt.errorbar(
-            powers, np.array(ld_probs), yerr=np.array(ld_probs_err), fmt="o", color="C0"
+        temperature = params[0] * 1e6
+    except:
+        temperature = 100
+    if plot:
+        xfit = np.linspace(dropt.min(), dropt.max(), 100)
+        yfit = recapture_prob_fit(xfit, temperature * 1e-6, params[1], params[2])
+        plt.figure()
+        plt.plot(dropt * 1e6, survival_prob_list, "o", label="Data", color="blue")
+        plt.plot(
+            xfit * 1e6,
+            yfit,
+            "-",
+            color="red",
+            label=f"Temperature = {temperature:.2f} uK",
         )
-        plt.plot(xx, yy, label=f"Loading Threshold = {power_thresh:.4f}")
+        plt.grid()
+        plt.xlabel("Drop Time (us)")
+        plt.ylabel("Survival Probability")
         plt.legend()
-        plt.xlabel("Tweezer Power")
-        plt.ylabel("Loading Probability")
+        plt.show()
 
-    def test_update(self):
-        print(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    return temperature
