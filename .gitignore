@@ -56,3 +56,8 @@ docs/api/
 
 # measurement files written by the Experiment Manager (default data root)
 /data/
+
+# generated figures; GUI icons stay trackable
+*.png
+*.pdf
+!pytweezer/GUI/icons/*.png

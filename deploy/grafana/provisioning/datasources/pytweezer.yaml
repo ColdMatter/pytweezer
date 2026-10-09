@@ -13,7 +13,7 @@ datasources:
     jsonData:
       database: pytweezer
       sslmode: disable
-      postgresVersion: 1700
+      postgresVersion: 1800
       timescaledb: true
     secureJsonData:
       password: ${GRAFANA_DB_PASSWORD}
