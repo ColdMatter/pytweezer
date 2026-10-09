@@ -20,9 +20,11 @@ from pytweezer.experiment.motmaster import (
     MotMasterExperiment,
     MotMasterNumber,
 )
+from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
+from pytweezer.GUI.experiments.catalogue_view import CatalogueView
 from pytweezer.GUI.experiments.motmaster_params import (
     DeviceParameterSource,
     ParameterFetcher,
@@ -717,3 +719,74 @@ def test_a_row_for_an_unknown_parameter_needs_a_value(qapp):
     with pytest.raises(ValueError, match="rb.tDelay1"):
         editor.add_motmaster_row("rb", "tDelay1")
     assert "rb.tDelay1" not in editor.rows
+
+
+def recipe_dict(name="check", **kwargs):
+    return Recipe(
+        experiment=SCHEMA["module"],
+        class_name="Demo",
+        name=name,
+        submitter="me@pc",
+        **kwargs,
+    ).model_dump(mode="json")
+
+
+def demo_item(view):
+    for i in range(view.tree.topLevelItemCount()):
+        module_item = view.tree.topLevelItem(i)
+        for j in range(module_item.childCount()):
+            if module_item.child(j).text(0) == "Demo":
+                return module_item.child(j)
+    raise AssertionError("Demo not in the tree")
+
+
+def test_recipes_appear_under_their_experiment_and_filter(qapp):
+    view = CatalogueView()
+    view.set_modules(MODULES)
+    view.set_recipes([recipe_dict("MOT check", args={"shots": 5})])
+    demo = demo_item(view)
+    assert demo.childCount() == 1
+    recipe_item = demo.child(0)
+    assert recipe_item.text(0) == "MOT check"
+    assert recipe_item.font(0).italic()
+
+    view.filter.setText("mot ch")
+    assert not recipe_item.isHidden() and not demo.isHidden()
+    view.filter.setText("Demo")
+    assert not recipe_item.isHidden()
+    view.filter.setText("nothing like it")
+    assert recipe_item.isHidden() and demo.isHidden()
+
+
+def test_selecting_a_recipe_emits_it_and_a_refresh_keeps_it_quietly(qapp):
+    view = CatalogueView()
+    view.set_modules(MODULES)
+    view.set_recipes([recipe_dict("a"), recipe_dict("b")])
+    selected, experiments = [], []
+    view.recipe_selected.connect(selected.append)
+    view.experiment_selected.connect(experiments.append)
+    assert view.select_recipe(SCHEMA["module"], "Demo", "b")
+    assert [r["name"] for r in selected] == ["b"] and experiments == []
+    assert view.selected_key() == (SCHEMA["module"], "Demo")
+
+    view.set_recipes([recipe_dict("a"), recipe_dict("b"), recipe_dict("c")])
+    view.set_modules(MODULES)
+    assert len(selected) == 1 and experiments == []
+    assert view.tree.currentItem().text(0) == "b"
+
+
+def test_the_recipe_menu_submits_or_deletes(qapp):
+    view = CatalogueView()
+    view.set_modules(MODULES)
+    recipe = recipe_dict()
+    view.set_recipes([recipe])
+    actions = []
+    view.recipe_action_requested.connect(lambda *args: actions.append(args))
+    menu = view.recipe_menu(recipe)
+    labels = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert labels == ["Submit now", "Delete…"]
+    for action in menu.actions():
+        if not action.isSeparator():
+            action.trigger()
+    assert [a[0] for a in actions] == ["submit", "delete"]
+    assert actions[0][1]["name"] == "check"

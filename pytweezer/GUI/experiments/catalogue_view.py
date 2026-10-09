@@ -1,12 +1,14 @@
-"""Tree of the experiments the manager can run, grouped by module."""
+"""Tree of the experiments the manager can run, grouped by module, with their recipes."""
 
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
+    QMenu,
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
+    QTreeWidgetItemIterator,
     QVBoxLayout,
     QWidget,
 )
@@ -14,21 +16,25 @@ from PyQt6.QtWidgets import (
 from pytweezer.GUI.components import status_icon
 
 _SCHEMA = QtCore.Qt.ItemDataRole.UserRole
+_RECIPE = QtCore.Qt.ItemDataRole.UserRole + 1
 
 
 class CatalogueView(QWidget):
     experiment_selected = QtCore.pyqtSignal(dict)
+    recipe_selected = QtCore.pyqtSignal(dict)
+    recipe_action_requested = QtCore.pyqtSignal(str, dict)
     refresh_requested = QtCore.pyqtSignal()
 
     def __init__(self, package="pytweezer.experiments", parent=None):
         super().__init__(parent)
         self.package = package
         self.modules = []
+        self.recipes = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         top = QHBoxLayout()
         self.filter = QLineEdit()
-        self.filter.setPlaceholderText("Filter experiments")
+        self.filter.setPlaceholderText("Filter experiments and recipes")
         self.filter.textChanged.connect(self._apply_filter)
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self.refresh_requested)
@@ -38,15 +44,29 @@ class CatalogueView(QWidget):
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.currentItemChanged.connect(self._current_changed)
+        self.tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.tree, 1)
 
     def set_modules(self, modules):
-        selected = self.selected_key()
         self.modules = modules
+        self._rebuild()
+
+    def set_recipes(self, recipes):
+        self.recipes = recipes
+        self._rebuild()
+
+    def _rebuild(self):
+        selected = self._selection()
+        by_class = {}
+        for recipe in self.recipes:
+            by_class.setdefault(
+                (recipe["experiment"], recipe["class_name"]), []
+            ).append(recipe)
         self.tree.blockSignals(True)
         self.tree.clear()
         reselect = None
-        for module in modules:
+        for module in self.modules:
             name = module["module"].removeprefix(self.package + ".")
             module_item = QTreeWidgetItem([name])
             module_item.setToolTip(0, module["module"])
@@ -63,6 +83,11 @@ class CatalogueView(QWidget):
                 module_item.addChild(item)
                 if _key(schema) == selected:
                     reselect = item
+                for recipe in by_class.get(_key(schema), []):
+                    recipe_item = _recipe_item(recipe)
+                    item.addChild(recipe_item)
+                    if _recipe_key(recipe) == selected:
+                        reselect = recipe_item
             self.tree.addTopLevelItem(module_item)
         self.tree.expandAll()
         self._apply_filter(self.filter.text())
@@ -88,29 +113,99 @@ class CatalogueView(QWidget):
                     return True
         return False
 
+    def select_recipe(self, module, class_name, name):
+        wanted = (module, class_name, name)
+        iterator = QTreeWidgetItemIterator(self.tree)
+        while item := iterator.value():
+            recipe = item.data(0, _RECIPE)
+            if recipe and _recipe_key(recipe) == wanted:
+                self.tree.setCurrentItem(item)
+                return True
+            iterator += 1
+        return False
+
     def selected_key(self):
         item = self.tree.currentItem()
-        schema = item.data(0, _SCHEMA) if item else None
+        if item is None:
+            return None
+        if recipe := item.data(0, _RECIPE):
+            return (recipe["experiment"], recipe["class_name"])
+        schema = item.data(0, _SCHEMA)
+        return _key(schema) if schema else None
+
+    def _selection(self):
+        item = self.tree.currentItem()
+        if item is None:
+            return None
+        if recipe := item.data(0, _RECIPE):
+            return _recipe_key(recipe)
+        schema = item.data(0, _SCHEMA)
         return _key(schema) if schema else None
 
     def _current_changed(self, item, _previous):
-        schema = item.data(0, _SCHEMA) if item else None
-        if schema:
+        if item is None:
+            return
+        if recipe := item.data(0, _RECIPE):
+            self.recipe_selected.emit(recipe)
+        elif schema := item.data(0, _SCHEMA):
             self.experiment_selected.emit(schema)
+
+    def recipe_menu(self, recipe):
+        menu = QMenu(self)
+        submit = menu.addAction("Submit now")
+        submit.triggered.connect(
+            lambda: self.recipe_action_requested.emit("submit", recipe)
+        )
+        menu.addSeparator()
+        delete = menu.addAction("Delete…")
+        delete.triggered.connect(
+            lambda: self.recipe_action_requested.emit("delete", recipe)
+        )
+        return menu
+
+    def _context_menu(self, position):
+        item = self.tree.itemAt(position)
+        recipe = item.data(0, _RECIPE) if item else None
+        if recipe:
+            self.recipe_menu(recipe).exec(self.tree.viewport().mapToGlobal(position))
 
     def _apply_filter(self, text):
         text = text.lower()
         for i in range(self.tree.topLevelItemCount()):
             module_item = self.tree.topLevelItem(i)
             module_match = text in module_item.text(0).lower()
-            any_child = False
+            any_class = False
             for j in range(module_item.childCount()):
-                child = module_item.child(j)
-                visible = module_match or text in child.text(0).lower()
-                child.setHidden(not visible)
-                any_child |= visible
-            module_item.setHidden(not (module_match or any_child))
+                class_item = module_item.child(j)
+                class_match = module_match or text in class_item.text(0).lower()
+                any_recipe = False
+                for k in range(class_item.childCount()):
+                    recipe_item = class_item.child(k)
+                    visible = class_match or text in recipe_item.text(0).lower()
+                    recipe_item.setHidden(not visible)
+                    any_recipe |= visible
+                class_item.setHidden(not (class_match or any_recipe))
+                any_class |= class_match or any_recipe
+            module_item.setHidden(not (module_match or any_class))
 
 
 def _key(schema):
     return (schema["module"], schema["class_name"])
+
+
+def _recipe_key(recipe):
+    return (recipe["experiment"], recipe["class_name"], recipe["name"])
+
+
+def _recipe_item(recipe):
+    item = QTreeWidgetItem([recipe["name"]])
+    item.setData(0, _RECIPE, recipe)
+    font = item.font(0)
+    font.setItalic(True)
+    item.setFont(0, font)
+    saved = recipe.get("saved_at", "")[:16].replace("T", " ")
+    tooltip = f"Recipe saved by {recipe.get('submitter') or 'unknown'} on {saved}"
+    if recipe.get("label"):
+        tooltip += f"\nLabel: {recipe['label']}"
+    item.setToolTip(0, tooltip + "\nRight-click to submit it as it is")
+    return item
