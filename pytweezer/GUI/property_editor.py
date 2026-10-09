@@ -449,13 +449,6 @@ class PropEdit(BWidget):
             # print('Deleting ',keys)
             self.props.delete(keys)
 
-    def closeEvent(self, event):
-        print("event...")
-        g = self.geometry()
-        self.props.set("Geometry", g.getRect())
-
-        super().closeEvent(event)
-
 
 class PropSelector(BWidget):
     def __init__(self, name, props, subtree="/", parent=None):
