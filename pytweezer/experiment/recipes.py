@@ -2,10 +2,13 @@
 
 A recipe is a :class:`~pytweezer.experiment.task.TaskRequest` with a name.
 :class:`RecipeBook` holds the rules for saving, finding and deleting them;
-:class:`RecipeStore` persists the book as JSON.
+:class:`RecipeStore` persists the book as JSON. :meth:`Recipe.replay` turns a
+recipe into a request, and :func:`unknown_arguments` checks a request against
+an experiment's schema.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -34,6 +37,32 @@ class Recipe(TaskRequest):
     @property
     def recipe_key(self) -> tuple[str, str, str]:
         return (self.experiment, self.class_name, self.name)
+
+    def replay(
+        self,
+        args: dict[str, Any] | None = None,
+        *,
+        priority: int | None = None,
+        label: str | None = None,
+        submitter: str = "",
+    ) -> TaskRequest:
+        """A request to run this recipe, ``args`` replacing its fixed arguments."""
+        args = args or {}
+        scanned = sorted(set(args) & {axis.argument for axis in self.scan.axes})
+        if scanned:
+            raise RecipeError(
+                f"recipe {self.name!r} scans {scanned}; an override can't fix "
+                "a scanned argument"
+            )
+        return TaskRequest(
+            experiment=self.experiment,
+            class_name=self.class_name,
+            args={**self.args, **args},
+            scan=self.scan,
+            priority=self.priority if priority is None else priority,
+            label=self.label if label is None else label,
+            submitter=submitter,
+        )
 
 
 class RecipeState(BaseModel):
@@ -90,3 +119,25 @@ class RecipeStore(ModelStore):
     """Persists a :class:`RecipeState`."""
 
     model = RecipeState
+
+
+def unknown_arguments(request: TaskRequest, schema: dict[str, Any]) -> list[str]:
+    """Argument names ``request`` uses that the experiment ``schema`` doesn't declare.
+
+    ``attribute.parameter`` names on a declared MOTMaster are left out: they
+    name script parameters, which only the device can check.
+    """
+    motmasters = {
+        attribute
+        for attribute, device in schema.get("devices", {}).items()
+        if device.get("motmaster") is not None
+    }
+
+    def known(name: str) -> bool:
+        attribute, dot, parameter = name.partition(".")
+        if dot and parameter and attribute in motmasters:
+            return True
+        return name in schema["arguments"]
+
+    names = {*request.args, *(axis.argument for axis in request.scan.axes)}
+    return sorted(name for name in names if not known(name))

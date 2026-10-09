@@ -1,4 +1,4 @@
-"""Recipes as plain data: the book's rules and the store."""
+"""Recipes as plain data: the book's rules, the store, and replaying one."""
 
 from datetime import datetime
 
@@ -12,8 +12,11 @@ from pytweezer.experiment.recipes import (
     RecipeError,
     RecipeState,
     RecipeStore,
+    unknown_arguments,
 )
-from pytweezer.experiment.scan import LinearAxis, Scan
+from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
+from pytweezer.experiment.task import TaskRequest
+from pytweezer.experiments.demo import RabiDemo
 
 DEMO = "pytweezer.experiments.demo"
 
@@ -94,3 +97,57 @@ def test_store_round_trip_and_unreadable_file(tmp_path):
     assert store.load() == RecipeState()
     assert not path.exists()
     assert len(list(tmp_path.glob("recipes.unreadable-*.json"))) == 1
+
+
+def test_replay_applies_overrides_and_keeps_the_rest():
+    saved = recipe(
+        args={"atoms": 5, "rabi_frequency": 1e3},
+        scan=Scan(axes=[ListAxis(argument="pulse_time", values=[1e-6, 2e-6])]),
+        priority=3,
+        label="nightly",
+        submitter="saver@pc",
+    )
+    request = saved.replay({"atoms": 9}, submitter="me@pc")
+    assert type(request) is TaskRequest
+    assert request.args == {"atoms": 9, "rabi_frequency": 1e3}
+    assert request.scan == saved.scan
+    assert (request.priority, request.label, request.submitter) == (
+        3,
+        "nightly",
+        "me@pc",
+    )
+    assert saved.args["atoms"] == 5
+    plain = saved.replay(priority=0, label="")
+    assert (plain.priority, plain.label) == (0, "")
+
+
+def test_replay_refuses_to_override_a_scanned_argument():
+    saved = recipe(scan=Scan(axes=[ListAxis(argument="pulse_time", values=[1e-6])]))
+    with pytest.raises(RecipeError, match=r"scans \['pulse_time'\]"):
+        saved.replay({"pulse_time": 2e-6})
+
+
+def test_unknown_arguments_lists_fixed_and_scanned_names_the_experiment_lacks():
+    request = TaskRequest(
+        experiment=DEMO,
+        class_name="RabiDemo",
+        args={"atoms": 1, "old": 2},
+        scan=Scan(axes=[ListAxis(argument="gone", values=[1])]),
+    )
+    assert unknown_arguments(request, RabiDemo.schema()) == ["gone", "old"]
+
+
+def test_unknown_arguments_leaves_motmaster_script_parameters_to_the_run():
+    schema = {
+        "arguments": {},
+        "devices": {
+            "rb": {"device": "Rb MotMaster", "timeout": None, "motmaster": {}},
+            "cam": {"device": "Cam", "timeout": None},
+        },
+    }
+    request = TaskRequest(
+        experiment="m",
+        class_name="C",
+        args={"rb.tPulse": 1, "cam.exposure": 2, "rb": 3, "rb.": 4},
+    )
+    assert unknown_arguments(request, schema) == ["cam.exposure", "rb", "rb."]
