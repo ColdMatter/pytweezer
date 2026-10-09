@@ -15,18 +15,25 @@ Roles in the composite's ``"devices"`` block:
   coordinator constructs SLM-only and :meth:`initialise` raises, but the phase
   sequence generation and upload path is fully usable. Benchmarks that only
   time frame delivery run this way.
+* ``phasemask_generator`` — an ``OptimisationBasedPhasemaskGeneratorGPU``.
+  Optional: if absent, :meth:`initialise` builds one from :data:`DEFAULT_PHASEMASK`
+  overridden by ``conf["phasemask"]``.
 
 Lifecycle over RPC (all synchronous; each stalls the server for its duration, per
 the coordinator contract):
 
-* :meth:`initialise` — build the GPU phasemask generator, configure the camera,
-  precompute the initial array. Takes the two trap parameter sets (``data1``/
+* :meth:`initialise` — precompute the initial array on the GPU and set the
+  occupancy detection parameters. The caller configures the camera. Takes the two trap parameter sets (``data1``/
   ``data2``, shape ``(4, N)``: w, phi, x, y).
 * :meth:`arm_rearrangement` — grab an image, extract the occupancy mask, then
   generate the interpolated phase sequence
   (``OptimisationBasedPhasemaskGeneratorGPU.iter_rearrangement_sequence``) and
-  upload it to the SLM concurrently, then grab a reset image. Returns the
-  before/after images.
+  upload it to the SLM concurrently, then grab the follow-up image(s). Returns the
+  before/after images and a timings dict.
+* :meth:`arm_rearrangement_timings` — as above, with per-stage timings and the
+  atom pairing record.
+* :meth:`arm_rearrangement_preload_trigger` — preload the sequence into the SLM's
+  on-board memory and clock it out with hardware triggers from an Arduino pulser.
 * :meth:`test` / :meth:`status` / :meth:`shutdown`.
 
 Generation and upload are pipelined: the GPU loop pushes each finished frame onto a
@@ -38,12 +45,6 @@ synthesis of frame *n+1* overlaps the upload of frame *n*. The queue depth
 and :meth:`status` works on any machine; :meth:`initialise`/:meth:`arm_rearrangement`
 raise a clear error where the GPU stack is absent.
 
-The remaining timing optimisation — preloading frames into the SLM's on-board memory
-and clocking them out with a hardware trigger (``preload_sequence`` /
-``start_auto_increment``) instead of per-frame software writes — is not wired up:
-:meth:`arm_rearrangement` still plays the sequence software-timed through
-``run_sequence``, and nothing yet arms the SLM's external trigger or clocks the
-frames.
 """
 
 import queue
@@ -52,6 +53,7 @@ import time
 
 import numpy as np
 
+from pytweezer.analysis import analysis as an
 from pytweezer.coordinators.base import Coordinator
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.slm import SLM
@@ -67,8 +69,9 @@ except Exception:  # pragma: no cover - depends on the machine's GPU stack
     cp = None
     _HAS_CUPY = False
 
-#: Set ``False`` to force the numpy occupancy path instead of the C++ extension.
-USE_SUM_CPP = True
+
+#: Set ``True`` to use the C++ extensions; the numpy path is the validated default.
+USE_SUM_CPP = False
 
 _sum_cpp_module = None
 _sum_cpp_loaded = False
@@ -79,63 +82,15 @@ _morph_cpp_loaded = False
 #: How many generated frames may queue ahead of the SLM before the GPU loop blocks.
 UPLOAD_QUEUE_DEPTH = 5
 
-
-def _pinned_like(frame):
-    """Page-locked host array matching for a frame to be copied from the GPU.
-
-    Falls back to ordinary memory if the pinned allocation fails, since pinning is
-    a throughput optimisation and not for correctness - should be faster than pageable.
-    """
-    shape = tuple(frame.shape)
-    dtype = np.dtype(frame.dtype)
-    count = int(np.prod(shape))
-    try:
-        mem = cp.cuda.alloc_pinned_memory(count * dtype.itemsize)
-        return np.frombuffer(mem, dtype, count).reshape(shape)
-    except Exception:
-        LOGGER.debug("Pinned allocation failed; using pageable memory.", exc_info=True)
-        return np.empty(shape, dtype)
-
-
-def _morph_cpp():
-    global _morph_cpp_module, _morph_cpp_loaded
-    if not USE_SUM_CPP:
-        return None
-    if not _morph_cpp_loaded:
-        _morph_cpp_loaded = True
-        try:
-            from pytweezer.cpp import morph_tophat_cpp
-
-            _morph_cpp_module = morph_tophat_cpp
-        except Exception:  # pragma: no cover
-            # pragme no cover stops coverage.py complaining about failing imports here on machine
-            # without the C++ extension built. The extension is optional, so this is not a test failure.
-            LOGGER.debug(
-                "morph_tophat_cpp unavailable; using numpy.",
-                exc_info=True,
-            )
-            _morph_cpp_module = None
-    return _morph_cpp_module
-
-
-def _sum_cpp():
-    global _sum_cpp_module, _sum_cpp_loaded
-    if not USE_SUM_CPP:
-        return None
-    if not _sum_cpp_loaded:
-        _sum_cpp_loaded = True
-        try:
-            from pytweezer.cpp import sum_pixel_values_cpp
-
-            _sum_cpp_module = sum_pixel_values_cpp
-        except Exception:  # pragma: no cover
-            LOGGER.debug(
-                "sum_pixel_values_cpp unavailable; using numpy.",
-                exc_info=True,
-            )
-            _sum_cpp_module = None
-    return _sum_cpp_module
-
+#: Minimum interval between successive ``update_mask`` calls on the display path,
+#: in seconds. ``Write_image``/``ImageWriteComplete`` acknowledge the transfer into
+#: the board's memory, NOT a panel flip, so without this the pipeline happily
+#: writes faster than the liquid crystal can refresh and each frame overwrites the
+#: one still being displayed — the atoms then see fewer, larger jumps than ``d0``
+#: asks for. Override per instance with ``conf["panel_period_s"]``; set to 0.0 to
+#: disable pacing entirely. Only the display path needs this: preload+trigger
+#: writes to frame memory and is clocked by the Arduino.
+PANEL_PERIOD_S = 0.70e-3
 
 #: Default phasemask-generator geometry (the lab's Rb SLM); overridable via config.
 DEFAULT_PHASEMASK = {
@@ -159,8 +114,85 @@ DEFAULT_PHASEMASK = {
     },
 }
 
-#: Default camera ROI (x0, y0, width, height) if ``initialise`` isn't given one.
-DEFAULT_ROI = [50, 70, 384, 384]
+#: Slack left for the spin tail in :func:`_wait_until`. Must exceed the Windows
+#: timer quantum (~0.5 ms), or ``time.sleep`` rounds straight past the deadline,
+#: but stay below :data:`PANEL_PERIOD_S`, or nothing ever sleeps. At a 0.70 ms
+#: period a 0.10 ms margin overshoots to 1.00 ms; 0.60 ms lands on 0.7006 ms.
+SLEEP_MARGIN_S = 0.60e-3
+
+
+def _wait_until(deadline):
+    """Block until ``deadline`` (a ``time.perf_counter()`` value).
+
+    Sleeps the bulk and spins only the last :data:`SLEEP_MARGIN_S`. ``time.sleep``
+    releases the GIL, so the generation thread keeps running for most of the wait,
+    while the spin covers the tail where the OS timer is too coarse to land on.
+    Measured at a 0.70 ms period: mean 0.7006 ms, 3.4 us sd, asleep ~74% of the wait.
+    """
+    remaining = deadline - time.perf_counter()
+    if remaining > SLEEP_MARGIN_S:
+        time.sleep(remaining - SLEEP_MARGIN_S)
+    while time.perf_counter() < deadline:
+        pass
+
+
+def _pinned_like(frame):
+    """Page-locked host array matching for a frame to be copied from the GPU.
+
+    Falls back to ordinary memory if the pinned allocation fails, since pinning is
+    a throughput optimisation and not for correctness - should be faster than pageable.
+    """
+    shape = tuple(frame.shape)
+    dtype = np.dtype(frame.dtype)
+    count = int(np.prod(shape))
+    try:
+        mem = cp.cuda.alloc_pinned_memory(count * dtype.itemsize)
+        return np.frombuffer(mem, dtype, count).reshape(shape)
+    except Exception:
+        LOGGER.debug("Pinned allocation failed; using pageable memory.", exc_info=True)
+        return np.empty(shape, dtype)
+
+
+def _steady_median(values):
+
+    tail = values[1:] if len(values) > 1 else values
+    return float(np.median(tail)) if tail else float("nan")
+
+
+def _morph_cpp():
+    global _morph_cpp_module, _morph_cpp_loaded
+    if not USE_SUM_CPP:
+        return None
+    if not _morph_cpp_loaded:
+        _morph_cpp_loaded = True
+        try:
+            from pytweezer.cpp import morph_tophat_cpp
+
+            _morph_cpp_module = morph_tophat_cpp
+        except Exception:  # pragma: no cover
+            # pragme no cover stops coverage.py complaining about failing imports here on machine
+            # without the C++ extension built. The extension is optional, so this is not a test failure.
+            LOGGER.debug("morph_tophat_cpp unavailable; using numpy.", exc_info=True)
+            _morph_cpp_module = None
+    return _morph_cpp_module
+
+
+def _sum_cpp():
+    global _sum_cpp_module, _sum_cpp_loaded
+    if not USE_SUM_CPP:
+        return None
+    if not _sum_cpp_loaded:
+        _sum_cpp_loaded = True
+        try:
+            from pytweezer.cpp import sum_pixel_values_cpp
+
+            _sum_cpp_module = sum_pixel_values_cpp
+        except Exception:  # pragma: no cover
+            LOGGER.debug(
+                "sum_pixel_values_cpp unavailable; using numpy.", exc_info=True
+            )
+            _sum_cpp_module = None
+    return _sum_cpp_module
 
 
 class Rearrangement(Coordinator):
@@ -168,13 +200,17 @@ class Rearrangement(Coordinator):
 
     camera_role = "camera"
     slm_role = "slm"
+    pm_gen_role = "phasemask_generator"
 
     def __init__(self, targets, conf):
         super().__init__(targets, conf)
         self.camera: ImagEMX2Camera | None = self.targets.get(self.camera_role)
         self.slm: SLM = self.require_role(self.slm_role)
-
+        self.pm_gen = self.targets.get(self.pm_gen_role)
         self.phasemask_kwargs = {**DEFAULT_PHASEMASK, **(conf.get("phasemask") or {})}
+
+        #: Enforced minimum interval between panel writes; see :data:`PANEL_PERIOD_S`.
+        self.panel_period_s = float(conf.get("panel_period_s", PANEL_PERIOD_S))
 
         self._initialised = False
         self._state = None  # populated by initialise()
@@ -237,58 +273,46 @@ class Rearrangement(Coordinator):
         self,
         data1: np.ndarray,
         data2: np.ndarray,
-        array_shape1,
-        array_shape2,
         d0: float,
         fps: float,
         threshold: float,
         grid_positions,
-        roi=None,
-        profile: str = "minimum_jerk",
+        window_size: int = 5,
+        feature_size: int = 10,
+        profile: str = "linear",
+        detector=None,
+        num_images: int = 1,
     ) -> None:
-        """Build the phasemask generator, configure the camera, precompute masks.
 
-        ``data1``/``data2`` are ``(4, N)`` arrays of trap parameters (w, phi, x, y)
-        for the initial and target arrays. Everything GPU-side is kept on the device
-        between here and :meth:`arm_rearrangement`.
-
-        ``profile`` picks the transport trajectory used by every subsequent
-        :meth:`arm_rearrangement`: ``"minimum_jerk"`` (smoother on the atoms) or
-        ``"linear"``, which needs 1.875x fewer frames for the same ``d0`` and so
-        completes the move in proportionally less time.
-        """
         self._require_gpu()
         self._require_camera()
-        from pytweezer import phasemask as pm
+        self.camera.timeout = 2
+        if self.pm_gen is None:
+            from pytweezer import phasemask as pm
 
-        roi = list(roi) if roi is not None else list(DEFAULT_ROI)
+            self.pm_gen = pm.OptimisationBasedPhasemaskGeneratorGPU(
+                **self.phasemask_kwargs
+            )
+            LOGGER.info("Phasemask generator initialised.")
 
-        PM = pm.OptimisationBasedPhasemaskGeneratorGPU(**self.phasemask_kwargs)
-        LOGGER.info("Phasemask generator initialised.")
-
-        # Camera setup (ImagEM-X2 specific; simulated backend stubs these).
-        x0, y0, width, height = roi
-        self.camera.setup_acquisition("snap", 1)
-        self.camera.set_trigger_source("ext")
-        self.camera.set_external_exposure_mode()
-        self.camera.enable_em_gain(True)
-        self.camera.enable_direct_em_gain(True)
-        self.camera.set_sensitivity(1200)
-        self.camera.set_roi(x0, width, y0, height)
-        LOGGER.info("Camera configured for rearrangement (roi=%s).", roi)
-
-        w1, phi1, x1, y1 = cp.asarray(np.asarray(data1))
-        w2, phi2, x2, y2 = cp.asarray(np.asarray(data2))
-        terms1 = (w1, phi1, x1, y1, array_shape1)
-        terms2 = (w2, phi2, x2, y2, array_shape2)
+        # cp.asarray takes host or device arrays: a no-op for the cupy terms that
+        # come straight out of superposition_optimization, a host->device copy for
+        # numpy ones. np.asarray cannot sit in front of it - it is not dispatchable
+        # under NEP-18, so a cupy input falls through to __array__ and raises.
+        w1, phi1, x1, y1 = cp.asarray(data1)
+        w2, phi2, x2, y2 = cp.asarray(data2)
+        terms1 = (w1, phi1, x1, y1)
+        terms2 = (w2, phi2, x2, y2)
 
         # The initial array to load onto the SLM before each rearrangement.
-        pm_array_init = PM.generate_phasemask(list(terms1))
-        pm_init = PM.superimpose([pm_array_init, PM.fresnel, PM.blaze, PM.zernike])
-        pm_init_uint8 = PM.transform_phase_8bit(pm_init).get()
+        pm_array_init = self.pm_gen.generate_phasemask(list(terms1))
+        pm_init = self.pm_gen.superimpose(
+            [pm_array_init, self.pm_gen.fresnel, self.pm_gen.blaze, self.pm_gen.zernike]
+        )
+        pm_init_uint8 = self.pm_gen.transform_phase_8bit(pm_init).get()
 
         self._state = {
-            "PM": PM,
+            "PM": self.pm_gen,
             "terms1": terms1,
             "terms2": terms2,
             "pm_init_uint8": pm_init_uint8,
@@ -296,59 +320,70 @@ class Rearrangement(Coordinator):
             "fps": fps,
             "threshold": threshold,
             "grid_positions": grid_positions,
-            "roi": roi,
+            "window_size": window_size,
+            "feature_size": feature_size,
             "profile": profile,
+            "detector": detector,
+            "num_images": num_images,
         }
         self._initialised = True
+        if detector is not None:
+            LOGGER.info(
+                "Occupancy via %s detector (window %s, threshold %.1f).",
+                detector.name,
+                detector.window_size,
+                detector.threshold,
+            )
         LOGGER.info("Rearrangement node initialised.")
 
     # ------------------------------------------------------------------ #
     # Arm / run one rearrangement
     # ------------------------------------------------------------------ #
 
-    def _extract_occupancy(self, image, array_shape, threshold):
-        """Threshold per-site pixel sums into a flat boolean occupancy mask.
+    def _extract_occupancy(self, image, threshold):
 
-        Uses the compiled ``sum_pixel_values`` when it is available and the image is
-        ``uint16`` (the dtype the extension is built for), else the numpy version.
-        """
-        from pytweezer.analysis import analysis as an
+        detector = self._state.get("detector")
+        if detector is not None:
+            return detector.occupancy(image)
+
+        grid_positions = self._state["grid_positions"]
+        window_size = self._state["window_size"]
+        feature_size = self._state["feature_size"]
 
         cpp_morph = _morph_cpp()
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
-            img = cpp_morph.Morphological_top_hat_cpp(image, feature_size=10)
-            LOGGER.debug("Using C++ morphological top-hat for occupancy extraction.")
+            img = cpp_morph.tophat(
+                np.ascontiguousarray(image, dtype=np.uint16), feature_size=feature_size
+            )
         else:
-            img = an.morphological_tophat_high_pass(image, feature_size=10)
-            grid_positions = self._state["grid_positions"]
+            img = an.morphological_tophat_high_pass(image, feature_size=feature_size)
 
-        cpp_sum = _sum_cpp()
-        if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
-            pixel_sums = cpp_sum.sum_pixel_values(
-                img, grid_positions, array_shape, window_size=3
-            )
-            LOGGER.debug("Using C++ pixel-sum for occupancy extraction.")
-        else:
-            pixel_sums = an.sum_pixel_values(
-                img, grid_positions, array_shape, window_size=3
-            )
-        return np.fliplr(pixel_sums).flatten() > threshold
+        # cpp_sum = _sum_cpp()
+        # if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
+        #    pixel_sums = cpp_sum.sum_pixel_values(
+        #        img, grid_positions, array_shape, window_size=window_size
+        #    )
+        # else:
+        pixel_sums = an.sum_pixel_values(img, grid_positions, window_size=window_size)
+        return pixel_sums > threshold
 
     def _play_sequence_pipelined(self, frames):
-        """Upload each frame to the SLM as it is produced; return the frame count.
-
-        ``frames`` is an iterator of ``cupy`` (or numpy) uint8 masks. A writer thread
-        drains a bounded queue, so the GPU keeps synthesising while the previous frame
-        is copied to the host and DMA'd to the board. The GPU->host ``.get()`` runs on
-        the writer thread to keep the PCIe transfer off the generation loop.
-        """
+        """Display each frame on the SLM as it is produced."""
         first_frame_at = []
         self.last_first_frame_at = None
+        next_slot = None
 
         def display(index, host_frame):
+            nonlocal next_slot
             self.slm.update_mask(host_frame)
             if not first_frame_at:
                 first_frame_at.append(time.perf_counter())
+            if self.panel_period_s:
+                now = time.perf_counter()
+                if next_slot is not None and now < next_slot:
+                    _wait_until(next_slot)
+                    now = next_slot
+                next_slot = now + self.panel_period_s
 
         n_frames = self._drain_pipelined(frames, display, "slm-upload")
         if first_frame_at:
@@ -356,16 +391,7 @@ class Rearrangement(Coordinator):
         return n_frames
 
     def _preload_sequence_pipelined(self, frames):
-        """Preload each frame into its on-board slot as it is produced.
-
-        Same overlap as :meth:`_play_sequence_pipelined`, but the frames go into
-        the board's frame memory rather than onto the panel, so the sequence is
-        ready for :meth:`~pytweezer.drivers.slm.SLM.start_auto_increment` to clock
-        out on external triggers. Nothing is displayed here.
-
-        Trigger gating must be **off** while this runs, or each upload blocks
-        waiting for a trigger.
-        """
+        """Preload each frame into the SLM's on-board memory as it is produced."""
         first_frame_at = []
         self.last_first_frame_at = None
 
@@ -380,15 +406,7 @@ class Rearrangement(Coordinator):
         return n_frames
 
     def _drain_pipelined(self, frames, sink, thread_name):
-        """Feed ``frames`` to ``sink(index, host_frame)`` on a writer thread.
-
-        The producer (GPU generation) and the writer (host copy + PCIe transfer)
-        run concurrently, bounded by :data:`UPLOAD_QUEUE_DEPTH`.
-
-        cupy frames land in a page-locked staging buffer, which the GPU can DMA
-        into roughly twice as fast as pageable memory and which the SLM driver
-        passes to the board without a further copy.
-        """
+        """Drain a generator of GPU frames into a sink function on a writer thread."""
         upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
         errors = []
 
@@ -431,22 +449,12 @@ class Rearrangement(Coordinator):
         return n_frames
 
     def arm_rearrangement(self):
-        """Run one rearrangement and return the ``(before, after)`` camera images.
-
-        Loads the initial array, grabs an occupancy image, then generates the
-        interpolated phase sequence and uploads it to the SLM *concurrently* - each
-        frame goes to the board as soon as the GPU produces it - and finally grabs a
-        reset image. Timing breakdown is logged.
-
-        Generation and upload overlap, so they are timed together; splitting them
-        would only measure where the pipeline happened to stall.
-        """
+        """Run one rearrangement via software upload."""
         self._require_gpu()
         self._require_initialised()
 
         s = self._state
         PM = s["PM"]
-        arr_shape1 = s["terms1"][4]
 
         # Load the initial array onto the SLM.
         self.slm.update_mask(s["pm_init_uint8"])
@@ -454,11 +462,13 @@ class Rearrangement(Coordinator):
         # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
         img_array0 = self.camera.acquire_n_frames(1)[0]
-        t1 = time.time()
+        # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
+        # the same order as the spans measured here.
+        t1 = time.perf_counter()
 
         # 2. Occupancy mask.
-        occ_mask = self._extract_occupancy(img_array0, arr_shape1, s["threshold"])
-        t2 = time.time()
+        occ_mask = self._extract_occupancy(img_array0, s["threshold"])
+        t2 = time.perf_counter()
 
         # 3. Pairing, interpolation and SLM upload, pipelined.
         frames = PM.iter_rearrangement_sequence(
@@ -470,27 +480,360 @@ class Rearrangement(Coordinator):
             to_host=False,
         )
         n_frames = self._play_sequence_pipelined(frames)
-        t3 = time.time()
+        t3 = time.perf_counter()
 
-        # 4. Reset image.
+        # 4. Follow up images image.
+        try:
+            self.camera.start_acquisition()
+            img_array1 = self.camera.acquire_n_frames(s["num_images"])
+        except Exception:
+            LOGGER.warning(
+                "Reset-image acquisition failed; returning zeros.", exc_info=True
+            )
+            img_array1 = np.zeros((s["num_images"], *img_array0.shape))
+
+        LOGGER.info(
+            f"Rearrangement complete: {n_frames} frames, {(t3 - t1) * 1000:.4f}ms total "
+            f"(occupancy {(t2 - t1) * 1000:.4f}ms, calculation+upload {(t3 - t2) * 1000:.4f}ms)."
+        )
+        # Generation and upload are pipelined (see docstring), so they share one
+        # measured span; both keys report it rather than a fabricated split.
+        timings = {
+            "n_frames": n_frames,
+            "occupancy_extraction_ms": (t2 - t1) * 1000,
+            "calculation_and_upload_ms": (t3 - t2) * 1000,
+            "total_rearrangement_ms": (t3 - t1) * 1000,
+        }
+        return np.asarray(img_array0), np.asarray(img_array1), timings
+
+    def _play_sequence_pipelined_timings(self, frames):
+
+        upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
+        errors = []
+        first_frame_at = []
+        events = []
+        gpu_wait_ms, transfer_ms, display_ms, pacing_ms = [], [], [], []
+        pinned_alloc_ms = [float("nan")]
+        self.last_first_frame_at = None
+
+        def writer():
+            staging = None
+            next_slot = None
+            while True:
+                item = upload_queue.get()
+                if item is None:
+                    return
+                if errors:
+                    continue  # drain the rest so the producer never blocks
+                frame, start_ev, end_ev = item
+                try:
+                    # First frame only: page-locked staging buffer. Timed on its
+                    # own because it is a per-run cost that lands entirely on
+                    # frame 0 and would otherwise inflate that frame's transfer.
+                    if staging is None:
+                        a0 = time.perf_counter()
+                        staging = _pinned_like(frame)
+                        pinned_alloc_ms[0] = (time.perf_counter() - a0) * 1000
+
+                    w0 = time.perf_counter()
+                    end_ev.synchronize()
+                    w1 = time.perf_counter()
+                    frame.get(out=staging)
+                    w2 = time.perf_counter()
+                    self.slm.update_mask(staging)
+                    w3 = time.perf_counter()
+
+                    if not first_frame_at:
+                        first_frame_at.append(w3)
+
+                    if self.panel_period_s:
+                        now = w3
+                        if next_slot is not None and now < next_slot:
+                            _wait_until(next_slot)
+                            now = next_slot
+                        next_slot = now + self.panel_period_s
+                    w4 = time.perf_counter()
+
+                    gpu_wait_ms.append((w1 - w0) * 1000)
+                    transfer_ms.append((w2 - w1) * 1000)
+                    display_ms.append((w3 - w2) * 1000)
+                    pacing_ms.append((w4 - w3) * 1000)
+                    events.append((start_ev, end_ev))
+                except Exception as exc:
+                    errors.append(exc)
+
+        thread = threading.Thread(target=writer, name="slm-upload-timed", daemon=True)
+        thread.start()
+
+        n_frames = 0
+        try:
+            for item in frames:
+                upload_queue.put(item)
+                n_frames += 1
+        finally:
+            upload_queue.put(None)
+            thread.join()
+
+        if errors:
+            raise errors[0]
+        if first_frame_at:
+            self.last_first_frame_at = first_frame_at[0]
+
+        # Read the events only now that every frame has completed. Calling
+        # get_elapsed_time on a still-pending event would block and perturb the
+        # very run it is measuring.
+        gpu_compute_ms = [float(cp.cuda.get_elapsed_time(s, e)) for s, e in events]
+
+        return n_frames, {
+            "gpu_compute_ms": gpu_compute_ms,
+            "gpu_wait_ms": gpu_wait_ms,
+            "transfer_ms": transfer_ms,
+            "display_ms": display_ms,
+            "pacing_ms": pacing_ms,
+            "pinned_alloc_ms": pinned_alloc_ms[0],
+        }
+
+    @staticmethod
+    def _pairing_record(plan):
+        """Host-side copy of the JV assignment produced by ``plan_rearrangement``.
+
+        Indices are flat trap indices: ``moving_idx``/``occ_mask`` index the
+        initial array in the same order as the occupancy mask (i.e. the scorer's
+        ``np.fliplr(score_grid).flatten()`` order), ``final_idx`` indexes the
+        target array. Together they say which atom was sent to which target site,
+        which is what a per-atom survival analysis needs afterwards.
+
+        Called only once the run is over - every ``.get()`` here is a device sync
+        and inside a timed span would be billed as setup or frame time.
+        """
+        occ_mask = cp.asnumpy(plan["occ_mask"]).astype(bool)
+        moving_idx = cp.asnumpy(plan["moving_idx"]).astype(np.int32)
+        final_idx = cp.asnumpy(plan["final_idx"]).astype(np.int32)
+        n_targets = int(plan["n_targets"])
+
+        occupied_idx = np.flatnonzero(occ_mask).astype(np.int32)
+        filled = np.zeros(n_targets, dtype=bool)
+        filled[final_idx] = True
+
+        return {
+            "occ_mask": occ_mask,
+            "occupied_idx": occupied_idx,
+            "moving_idx": moving_idx,
+            "final_idx": final_idx,
+            "pos_init": cp.asnumpy(plan["pos_init"]).astype(np.float32),
+            "pos_final": cp.asnumpy(plan["pos_final"]).astype(np.float32),
+            # Loaded sites the assignment left behind (more atoms than targets);
+            # these traps are switched off by the sequence.
+            "discarded_idx": np.setdiff1d(occupied_idx, moving_idx).astype(np.int32),
+            # Target sites no atom was available for (more targets than atoms).
+            "unfilled_target_idx": np.flatnonzero(~filled).astype(np.int32),
+            "n_occupied": int(occupied_idx.size),
+            "n_moving": int(moving_idx.size),
+            "n_targets": n_targets,
+        }
+
+    def arm_rearrangement_timings(self):
+
+        self._require_gpu()
+        self._require_initialised()
+
+        s = self._state
+        PM = s["PM"]
+
+        self.slm.update_mask(s["pm_init_uint8"])
+
+        # 1. Acquire the occupancy image.
+        self.camera.start_acquisition()
+        img_array0 = self.camera.acquire_n_frames(1)[0]
+        t1 = time.perf_counter()
+
+        # 2. Occupancy mask.
+        occ_mask = self._extract_occupancy(img_array0, s["threshold"])
+        t2 = time.perf_counter()
+
+        # 3. One-time pairing and interpolation setup, eager so it lands in its
+        #    own span instead of on frame 0.
+        plan = PM.plan_rearrangement(
+            s["terms1"],
+            s["terms2"],
+            occ_mask,
+            d0=s["d0"],
+            profile=s.get("profile", "minimum_jerk"),
+        )
+        t_plan = time.perf_counter()
+
+        # 4. Per-frame generation, transfer and upload, still pipelined.
+        frames = PM.iter_rearrangement_sequence_timings(plan, to_host=False)
+        n_frames, stage = self._play_sequence_pipelined_timings(frames)
+        t3 = time.perf_counter()
+
+        # 5. Follow up images
+        try:
+            self.camera.start_acquisition()
+            img_array1 = self.camera.acquire_n_frames(s["num_images"])
+        except Exception:
+            LOGGER.warning(
+                "Reset-image acquisition failed; returning zeros.", exc_info=True
+            )
+            img_array1 = np.zeros((s["num_images"], *img_array0.shape))
+
+        # After the reset image, so the syncs it costs land outside every timed
+        # span and never delay arming the camera.
+        pairing = self._pairing_record(plan)
+
+        ttff_ms = (
+            (self.last_first_frame_at - t2) * 1000
+            if self.last_first_frame_at is not None
+            else float("nan")
+        )
+        med = {
+            k: _steady_median(stage[k])
+            for k in (
+                "gpu_compute_ms",
+                "gpu_wait_ms",
+                "transfer_ms",
+                "display_ms",
+                "pacing_ms",
+            )
+        }
+
+        # After the reset image, so the syncs it costs land outside every timed
+        # span and never delay arming the camera.
+        pairing = self._pairing_record(plan)
+
+        ttff_ms = (
+            (self.last_first_frame_at - t2) * 1000
+            if self.last_first_frame_at is not None
+            else float("nan")
+        )
+        med = {
+            k: _steady_median(stage[k])
+            for k in (
+                "gpu_compute_ms",
+                "gpu_wait_ms",
+                "transfer_ms",
+                "display_ms",
+                "pacing_ms",
+            )
+        }
+
+        LOGGER.info(
+            f"Rearrangement complete: {n_frames} frames, {(t3 - t1) * 1000:.4f}ms total "
+            f"(occupancy {(t2 - t1) * 1000:.4f}ms, pairing+setup {(t_plan - t2) * 1000:.4f}ms, "
+            f"streaming {(t3 - t_plan) * 1000:.4f}ms).\n"
+            f"  per-frame medians (frame 0 excluded): compute {med['gpu_compute_ms']:.4f}ms, "
+            f"gpu-wait {med['gpu_wait_ms']:.4f}ms, transfer {med['transfer_ms']:.4f}ms, "
+            f"board-write {med['display_ms']:.4f}ms, pacing {med['pacing_ms']:.4f}ms.\n"
+            f"  time to first frame {ttff_ms:.4f}ms, "
+            f"pinned alloc {stage['pinned_alloc_ms']:.4f}ms."
+        )
+        timings = {
+            "n_frames": n_frames,
+            "occupancy_extraction_ms": (t2 - t1) * 1000,
+            "calculation_and_upload_ms": (t3 - t2) * 1000,
+            "total_rearrangement_ms": (t3 - t1) * 1000,
+            # One-time costs, now separated out of calculation_and_upload_ms.
+            "pairing_and_setup_ms": (t_plan - t2) * 1000,
+            "streaming_ms": (t3 - t_plan) * 1000,
+            "time_to_first_frame_ms": ttff_ms,
+            "pinned_alloc_ms": stage["pinned_alloc_ms"],
+            "n_moving": plan["n_moving"],
+            # Per-frame series, one entry per frame, in frame order.
+            "gpu_compute_ms": stage["gpu_compute_ms"],
+            "gpu_wait_ms": stage["gpu_wait_ms"],
+            "transfer_ms": stage["transfer_ms"],
+            "display_ms": stage["display_ms"],
+            "pacing_ms": stage["pacing_ms"],
+            # Steady-state medians of the above, frame 0 dropped.
+            "gpu_compute_median_ms": med["gpu_compute_ms"],
+            "gpu_wait_median_ms": med["gpu_wait_ms"],
+            "transfer_median_ms": med["transfer_ms"],
+            "display_median_ms": med["display_ms"],
+            "pacing_median_ms": med["pacing_ms"],
+        }
+        return np.asarray(img_array0), np.asarray(img_array1), timings, pairing
+
+    def arm_rearrangement_preload_trigger(
+        self,
+        pulser,
+        period_us: float = 700,
+        profile: str | None = None,
+        restore_initial_array: bool = True,
+    ):
+        self._require_gpu()
+        self._require_initialised()
+
+        s = self._state
+        PM = s["PM"]
+
+        # Load the initial array onto the SLM.
+        self.slm.update_mask(s["pm_init_uint8"])
+
+        # 1. Acquire the occupancy image.
+        self.camera.start_acquisition()
+        img_array0 = self.camera.acquire_n_frames(1)[0]
+        # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
+        # the same order as the spans measured here.
+        t1 = time.perf_counter()
+
+        # 2. Occupancy mask.
+        occ_mask = self._extract_occupancy(img_array0, s["threshold"])
+        t2 = time.perf_counter()
+
+        # 3. Pairing, interpolation and on-board preload, pipelined.
+        frames = PM.iter_rearrangement_sequence(
+            s["terms1"],
+            s["terms2"],
+            occ_mask,
+            d0=s["d0"],
+            profile=profile or s.get("profile", "minimum_jerk"),
+            to_host=False,
+        )
+        self.slm.set_wait_for_trigger(False)  # must be off while preloading
+        n_frames = self._preload_sequence_pipelined(frames)
+        t3 = time.perf_counter()
+
+        # 4. Clock the preloaded sequence out on hardware triggers.
+        trigger_span_s = float("nan")
+        self.slm.set_wait_for_trigger(True)
+        try:
+            self.slm.start_auto_increment(n_frames)
+            try:
+                trigger_span_s = pulser.send_pulses(n_frames - 1, period_us=period_us)
+            finally:
+                self.slm.stop_auto_increment()
+        finally:
+            self.slm.set_wait_for_trigger(False)
+        t4 = time.perf_counter()
+
+        # 5. Reset image.
         try:
             self.camera.start_acquisition()
             img_array1 = self.camera.acquire_n_frames(1)[0]
         except Exception:
-            LOGGER.exception("Reset-image acquisition failed; returning zeros.")
+            LOGGER.warning(
+                "Reset-image acquisition failed; returning zeros.", exc_info=True
+            )
             img_array1 = np.zeros_like(img_array0)
-        t4 = time.time()
+
+        if restore_initial_array:
+            self.slm.update_mask(
+                s["pm_init_uint8"]
+            )  # restore the initial array for the next run
 
         LOGGER.info(
-            "Rearrangement complete: %d frames, %.4fs total "
-            "(occupancy %.4fs, sequence+upload %.4fs, reset %.4fs).",
-            n_frames,
-            t4 - t1,
-            t2 - t1,
-            t3 - t2,
-            t4 - t3,
+            f"Rearrangement complete (preload+trigger): {n_frames} frames, {(t4 - t1) * 1000:.4f}ms total "
+            f"(occupancy {(t2 - t1) * 1000:.4f}ms, calculation and preload {(t3 - t2) * 1000:.4f}ms, hardware trigger upload {(t4 - t3) * 1000:.4f}ms)."
         )
-        return np.asarray(img_array0), np.asarray(img_array1)
+        timings = {
+            "n_frames": n_frames,
+            "occupancy_extraction_ms": (t2 - t1) * 1000,
+            "calculation_and_preload_ms": (t3 - t2) * 1000,
+            "hardware_trigger_upload_ms": (t4 - t3) * 1000,
+            "total_rearrangement_ms": (t4 - t1) * 1000,
+            "trigger_span_s": trigger_span_s,
+        }
+        return np.asarray(img_array0), np.asarray(img_array1), timings
 
     # ------------------------------------------------------------------ #
     # Test / teardown
@@ -515,8 +858,6 @@ class Rearrangement(Coordinator):
             try:
                 self.camera.stop_acquisition()
             except Exception:
-                LOGGER.debug(
-                    "camera.stop_acquisition() during shutdown failed", exc_info=True
-                )
+                LOGGER.exception("camera.stop_acquisition() during shutdown failed")
         self._state = None
         self._initialised = False

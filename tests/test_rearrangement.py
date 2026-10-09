@@ -102,8 +102,6 @@ def test_initialise_without_cupy_raises_clearly(monkeypatch):
         coord.initialise(
             data1=np.zeros((4, 2)),
             data2=np.zeros((4, 2)),
-            array_shape1=(1, 2),
-            array_shape2=(1, 2),
             d0=0.5,
             fps=30,
             threshold=1.0,
@@ -169,11 +167,10 @@ def _patch_occupancy(monkeypatch):
     monkeypatch.setattr(
         an, "morphological_tophat_high_pass", lambda img, feature_size: img
     )
-    # np.fliplr is applied to this before thresholding, so [[5, 0]] -> [0, 5].
     monkeypatch.setattr(
         an,
         "sum_pixel_values",
-        lambda img, grid, shape, window_size: np.array([[5.0, 0.0]]),
+        lambda img, grid, window_size: np.array([5.0, 0.0]),
     )
 
 
@@ -184,14 +181,17 @@ def _armed_coord(pm, slm=None, camera=None):
     coord._initialised = True
     coord._state = {
         "PM": pm,
-        "terms1": ("w1", "phi1", "x1", "y1", (1, 2)),
-        "terms2": ("w2", "phi2", "x2", "y2", (1, 2)),
+        "terms1": ("w1", "phi1", "x1", "y1"),
+        "terms2": ("w2", "phi2", "x2", "y2"),
         "pm_init_uint8": np.zeros((1024, 1024), dtype=np.uint8),
         "d0": 0.5,
         "fps": 1000.0,
         "threshold": 1.0,
         "grid_positions": None,
-        "roi": None,
+        "window_size": 3,
+        "feature_size": 10,
+        "detector": None,
+        "num_images": 1,
         "profile": "minimum_jerk",
     }
     return coord
@@ -205,17 +205,18 @@ def test_arm_streams_sequence_to_slm(monkeypatch):
     pm = FakePM(n_frames=5)
     coord = _armed_coord(pm, slm=slm)
 
-    img0, img1 = coord.arm_rearrangement()
+    img0, imgs1, timings = coord.arm_rearrangement()
 
     # Sequence generated from the stored terms, thresholded occupancy passed through.
     assert pm.called_with["terms1"] == coord._state["terms1"]
     assert pm.called_with["d0"] == 0.5
-    np.testing.assert_array_equal(pm.called_with["occ_mask"], np.array([False, True]))
+    np.testing.assert_array_equal(pm.called_with["occ_mask"], np.array([True, False]))
     # Frames are consumed on the writer thread, so the copy is left to it.
     assert pm.called_with["to_host"] is False
     # SLM saw the initial mask (1) plus every streamed frame (5), in-process.
     assert slm.frames_written == 1 + 5
-    assert img0.shape == (8, 8) and img1.shape == (8, 8)
+    assert img0.shape == (8, 8) and imgs1.shape == (1, 8, 8)
+    assert timings["n_frames"] == 5
 
 
 def test_arm_passes_configured_profile(monkeypatch):
