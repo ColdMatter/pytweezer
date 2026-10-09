@@ -2,24 +2,24 @@
     "motmaster_parameters": {
         "tMOTLoadCoolVCO": 4.2631578947368425,
         "tMOTLoadRepVCO": 1.8421052631578947,
-        "tMolCoolVCO1": 0.0,
-        "tMolRepVCO1": 0.6047449054854965,
-        "tMolCoolVVA1": 0.7308656225895502,
-        "tMolRepVVA1": 1.0,
-        "tMolCoolVCO2": 2.01361451071215,
-        "tMolRepVCO2": 0.8323988883557638,
+        "tMolCoolVCO1": 3.0,
+        "tMolRepVCO1": 3.11,
+        "tMolCoolVVA1": 1.0,
+        "tMolRepVVA1": 0.53,
+        "tMolCoolVCO2": 0.0,
+        "tMolRepVCO2": 3.26,
         "tMolCoolVVA2": 1.0,
-        "tMolRepVVA2": 0.5756171087721563,
-        "tMOTShimXccValue": 0.4991451750157772,
-        "tMOTShimYccValue": -1.8648591545365227,
-        "tMOTShimZccValue": -0.08719931424260197,
+        "tMolRepVVA2": 0.75,
+        "tMOTShimXccValue": 0.017274499890946874,
+        "tMOTShimYccValue": 1.38581476439688,
+        "tMOTShimZccValue": -0.4844836103904361,
         "tMOTLoadRepVVA": 0.6526315789473685,
         "tMOTLoadCoolVVA": 0.9210526315789475,
-        "tImgCoolVCO": 1.6,
-        "tImgCoolVVA": 1.0,
-        "tMolassesShimXccValue": 5.609956063783662,
-        "tMolassesShimYccValue": 4.465918604815521,
-        "tMolassesShimZccValue": 0.13646836204370819
+        "tImgCoolVCO": 3.0,
+        "tImgCoolVVA": 1.5,
+        "tMolassesShimXccValue": 5.4965,
+        "tMolassesShimYccValue": 3.6861,
+        "tMolassesShimZccValue": 0.114
     },
     "misc_parameters": {
         "rep_vco_resonance": 4.473684210526316,
@@ -28,10 +28,12 @@
     "emccd_parameters": {
         "em_gain": 600,
         "conversion_factor": 0.009508957628343926,
-        "conversion_offset": 1917.159423828125
+        "conversion_offset": 1916.7664794921875
     },
     "image_analysis": {
-        "x_centre": 135.8265306122449,
-        "y_centre": 131.84183673469389
+        "x_centre": 131.49305555555554,
+        "y_centre": 128.21527777777777,
+        "orcacam_mm_per_px": 0.007934071518766623,
+        "thorcam_mm_per_px": 0.005130761086566129
     }
 }
