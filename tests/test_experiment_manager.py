@@ -1,5 +1,6 @@
 """Experiment Manager request handling and restart reconciliation, without sockets."""
 
+import json
 import os
 
 import h5py
@@ -8,6 +9,14 @@ import pytest
 
 from pytweezer.configuration.config import CONFIG
 from pytweezer.experiment.catalogue import Catalogue
+from pytweezer.experiment.client import (
+    ExperimentManagerClient,
+    ManagerError,
+    delete_recipe,
+    recipes,
+    save_recipe,
+    submit_recipe,
+)
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.experiment.queue import WorkerRecord
 from pytweezer.experiment.recipes import Recipe
@@ -313,7 +322,7 @@ def save(manager, **kwargs):
     assert reply == {"ok": True}
 
 
-def submit_recipe(manager, **fields):
+def submit_saved(manager, **fields):
     return manager.handle(
         {
             "command": "submit_recipe",
@@ -376,7 +385,7 @@ def test_a_recipe_is_queued_with_its_settings_and_overrides(recipe_manager):
     manager = recipe_manager()
     scan = Scan(axes=[LinearAxis(argument="pulse_time", start=0, stop=1e-5, n=3)])
     save(manager, args={"atoms": 50, "rabi_frequency": 1e3}, scan=scan, priority=2)
-    reply = submit_recipe(
+    reply = submit_saved(
         manager, args={"atoms": 7}, label="override", submitter="me@pc"
     )
     assert reply == {"ok": True, "rid": 1}
@@ -390,13 +399,13 @@ def test_a_recipe_is_queued_with_its_settings_and_overrides(recipe_manager):
 def test_a_recipe_using_a_removed_argument_is_refused(recipe_manager):
     manager = recipe_manager()
     save(manager, args={"atoms": 5, "old_knob": 1})
-    reply = submit_recipe(manager)
+    reply = submit_saved(manager)
     assert not reply["ok"]
     assert "no longer has" in reply["error"] and "old_knob" in reply["error"]
     save(
         manager, name="scanned", scan=Scan(axes=[ListAxis(argument="old", values=[1])])
     )
-    reply = submit_recipe(manager, name="scanned")
+    reply = submit_saved(manager, name="scanned")
     assert not reply["ok"] and "'old'" in reply["error"]
     assert manager.queue.ordered() == []
 
@@ -404,11 +413,11 @@ def test_a_recipe_using_a_removed_argument_is_refused(recipe_manager):
 def test_an_override_must_name_an_argument_and_not_a_scanned_one(recipe_manager):
     manager = recipe_manager()
     save(manager, scan=Scan(axes=[ListAxis(argument="atoms", values=[1, 2])]))
-    reply = submit_recipe(manager, args={"atom": 3})
+    reply = submit_saved(manager, args={"atom": 3})
     assert not reply["ok"]
     assert "has no argument" in reply["error"] and "'atom'" in reply["error"]
     assert "no longer" not in reply["error"]
-    reply = submit_recipe(manager, args={"atoms": 3})
+    reply = submit_saved(manager, args={"atoms": 3})
     assert not reply["ok"] and "scans" in reply["error"]
     assert manager.queue.ordered() == []
 
@@ -443,3 +452,58 @@ def test_a_recipe_for_a_module_that_fails_to_import_says_why(recipe_manager):
     assert not reply["ok"]
     assert "fails to import" in reply["error"]
     assert "SyntaxError: invalid syntax" in reply["error"]
+
+
+class InProcess:
+    """Routes client requests straight into a manager, through JSON as on the wire."""
+
+    def __init__(self, manager):
+        self.manager = manager
+
+    def request(self, payload):
+        return self.manager.handle(json.loads(json.dumps(payload)))
+
+    def close(self):
+        pass
+
+
+def client_for(manager):
+    client = ExperimentManagerClient(endpoint="tcp://127.0.0.1:1")
+    client._req = InProcess(manager)
+    return client
+
+
+def test_notebook_recipes_round_trip(recipe_manager):
+    manager = recipe_manager()
+    client = client_for(manager)
+    scan = Scan(axes=[LinearAxis(argument="pulse_time", start=0, stop=1e-5, n=3)])
+    save_recipe(RabiDemo, "check", scan, label="nightly", client=client, atoms=50)
+    [saved] = recipes(RabiDemo, client=client)
+    # Every argument is stored, so a later change of default can't alter the recipe.
+    assert saved.args == {"rabi_frequency": 50e3, "atoms": 50, "point_delay": 0.2}
+    assert saved.label == "nightly" and "@" in saved.submitter
+
+    rid = submit_recipe(RabiDemo, "check", client=client, atoms=60)
+    task = manager.queue.get(rid)
+    assert task.args["atoms"] == 60 and task.label == "nightly"
+    assert "@" in task.submitter
+
+    with pytest.raises(ManagerError, match="already exists"):
+        save_recipe(RabiDemo, "check", client=client)
+    save_recipe(RabiDemo, "check", client=client, overwrite=True, atoms=1)
+    assert recipes(client=client)[0].args["atoms"] == 1
+
+    delete_recipe(f"{DEMO}:RabiDemo", "check", client=client)
+    assert recipes(client=client) == []
+
+
+def test_notebook_recipe_arguments_are_checked_before_sending(recipe_manager):
+    manager = recipe_manager()
+    client = client_for(manager)
+    with pytest.raises(ValueError, match="no argument"):
+        save_recipe(RabiDemo, "x", client=client, atom=1)
+    assert recipes(client=client) == []
+    save_recipe(RabiDemo, "x", client=client)
+    with pytest.raises(ValueError, match="no argument"):
+        submit_recipe(RabiDemo, "x", client=client, atom=1)
+    assert manager.queue.ordered() == []
