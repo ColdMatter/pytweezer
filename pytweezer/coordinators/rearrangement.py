@@ -244,8 +244,12 @@ class Rearrangement(Coordinator):
         window_size: int = 5,
         feature_size: int = 10,
         profile: str = "linear",
+        refine_iters: int = 0,
+        refine_damping: float = 0.35,
+        init_refine_iters: int = 0,
+        init_refine_damping: float = 0.35,
         detector=None,
-        num_images: int = 1
+        num_images: int = 1,
     ) -> None:
 
         self._require_gpu()
@@ -270,6 +274,8 @@ class Rearrangement(Coordinator):
             PM=self.pm_gen,
             terms1=terms1, terms2=terms2,
             pm_init_uint8=pm_init_uint8,
+            refine_iters=refine_iters, refine_damping=refine_damping,
+            init_refine_iters=init_refine_iters, init_refine_damping=init_refine_damping,
             d0=d0, fps=fps, threshold=threshold, grid_positions=grid_positions, window_size=window_size, feature_size=feature_size,
             profile=profile, detector=detector, num_images=num_images
         )
@@ -419,6 +425,8 @@ class Rearrangement(Coordinator):
             s["terms1"], s["terms2"], occ_mask,
             d0=s["d0"],
             profile=s.get("profile", "minimum_jerk"),
+            refine_iters=s["refine_iters"], refine_damping=s["refine_damping"],
+            init_refine_iters=s["init_refine_iters"], init_refine_damping=s["init_refine_damping"],
             to_host=False,
         )
         n_frames = self._play_sequence_pipelined(frames)
