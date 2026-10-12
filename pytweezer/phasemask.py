@@ -809,12 +809,6 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         dw[off_mask] = 0.0
         curr_w[off_mask] = 0.0
 
-        if init_refine_iters:
-            target_norm = cp.zeros_like(curr_w)
-            target_norm[moving_idx] = cp.float32(1.0 / len(moving_idx))
-            terms_gpu = (curr_w, curr_phi, curr_x, curr_y)
-            _, curr_w = self.refine_phasemask(terms_gpu, target_norm, init_refine_iters, init_refine_damping)
-        
         dw[moving_idx] = (w2_gpu[final_idx] - w1_gpu[moving_idx]) / n_steps
         total_dx[moving_idx] = vec[:, 0].astype(cp.float32)
         total_dy[moving_idx] = vec[:, 1].astype(cp.float32)
@@ -842,11 +836,6 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             composite_pm = self.superimpose([pm_slm, static_background])
             frame = self.transform_phase_8bit(composite_pm)
             yield frame.get() if to_host else frame
-
-        pm_slm = self.generate_phasemask(terms2)
-        composite_pm = self.superimpose([pm_slm, static_background])
-        frame = self.transform_phase_8bit(composite_pm)
-        yield frame.get() if to_host else frame
 
    
     def plan_rearrangement(self, terms1, terms2, occ_mask, d0=0.5,
