@@ -141,6 +141,24 @@ notebook**; use `run_local` for those (pass `path=` to keep a file).
 delete/set_priority/snapshot/history/catalogue/recipes/save_recipe/
 delete_recipe/submit_recipe`.
 
+For analysis, `Dataset` (`pytweezer/experiment/dataset.py`) reads a file by
+rid (or path) and passes attribute access through to its `Measurement`:
+
+```python
+from pytweezer.experiment import Dataset
+
+ds = Dataset(rid)  # root=... for another data dir; results=[...] to load a subset
+ds.summarise()  # same text as the Results tab's metadata pane
+df = ds.get_data()  # "dataframe" (default) | "dict" | "array"; or get_dataframe/get_dict/get_array
+ax = ds.plot_scan("atom_number")  # mean ± SEM over repetitions; x, series, ax optional
+```
+
+Rows are the points run, in run order: `index`, `repetition`, scanned
+arguments, `t_start`, `t_end`, then results (SI). The DataFrame drops
+array results (images); `get_dict` stacks them; `get_array` is a structured
+array of the numeric scalars. `aggregate`/`describe` live in
+`pytweezer/experiment/summary.py`, shared with the Results tab.
+
 ## Recipes
 
 A recipe is a named, saved form — arguments, scan, priority and label — kept by

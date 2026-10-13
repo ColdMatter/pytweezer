@@ -92,6 +92,15 @@ def highest_rid(root: Path) -> int:
     return highest
 
 
+def find_measurement(rid: int, root: Path | str | None = None) -> Path:
+    """Path of the measurement file for ``rid`` under ``root`` (default :func:`data_root`)."""
+    root = data_root() if root is None else Path(root)
+    matches = sorted(root.glob(f"*/*/*/{rid:06d}_*.h5"))
+    if not matches:
+        raise FileNotFoundError(f"no measurement file for rid {rid} under {root}")
+    return matches[0]
+
+
 def git_provenance() -> dict[str, Any]:
     """Commit and dirty flag of the checkout, best effort (git may not be on PATH)."""
     try:
