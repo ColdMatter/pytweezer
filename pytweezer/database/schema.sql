@@ -30,8 +30,12 @@ CREATE TABLE IF NOT EXISTS runs (
     points_done  integer,
     points_total integer,
     h5_path      text,
-    simulated    boolean
+    simulated    boolean,
+    git_commit   text,
+    git_dirty    boolean
 );
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS git_commit text;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS git_dirty  boolean;
 
 -- One row per scan point that ran. scan_values holds the scanned arguments,
 -- scalars the 0-d numeric results recorded in that point.

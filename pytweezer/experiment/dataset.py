@@ -51,6 +51,14 @@ class Dataset:
         return [axis.argument for axis in self.scan.axes]
 
     @property
+    def git_label(self) -> str:
+        """Short commit the measurement ran, ``-dirty`` if uncommitted changes, for plots."""
+        commit = self.attrs.get("git_commit")
+        if not commit:
+            return "git unknown"
+        return f"git {commit[:7]}" + ("-dirty" if self.attrs.get("git_dirty") else "")
+
+    @property
     def scalar_results(self) -> list[str]:
         """Loaded results with one numeric value per point."""
         return [
@@ -163,8 +171,11 @@ class Dataset:
         ax.set_ylabel(f"{y} ({y_unit})" if y_unit else y)
         label = self.attrs.get("label")
         ax.set_title(
-            f"{self.rid}: {self.attrs['class_name']}" + (f" ({label})" if label else "")
+            f"{self.rid}: {self.attrs['class_name']}"
+            + (f" ({label})" if label else ""),
+            loc="left",
         )
+        ax.set_title(self.git_label, loc="right", fontsize="small", color="grey")
         if series is not None:
             ax.legend()
         return ax

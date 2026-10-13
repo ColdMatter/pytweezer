@@ -86,6 +86,8 @@ def run_row(measurement: Measurement, root: Path) -> dict:
         "points_total": int(attrs.get("n_points", 0)),
         "h5_path": path.relative_to(root).as_posix() if path else None,
         "simulated": bool(attrs.get("simulated", False)),
+        "git_commit": attrs.get("git_commit") or None,
+        "git_dirty": bool(attrs.get("git_dirty", False)),
     }
 
 

@@ -52,6 +52,8 @@ RUN_COLUMNS = (
     "points_total",
     "h5_path",
     "simulated",
+    "git_commit",
+    "git_dirty",
 )
 POINT_COLUMNS = ("rid", "point_index", "t_start", "t_end", "scan_values", "scalars")
 MEASUREMENT_COLUMNS = (

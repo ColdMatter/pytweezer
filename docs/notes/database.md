@@ -243,7 +243,8 @@ The Experiment Manager writes rows into `runs` and `points`:
 
 - **`runs`**: a row when a task starts, updated when it finishes. The final
   row's `arguments` are the effective values read back from the h5 file,
-  defaults included.
+  defaults included, and `git_commit`/`git_dirty` the commit the worker ran
+  (on start, the checkout's commit at that moment).
 - **`points`**: a row per scan point. Each row holds that point's `t_start`,
   `t_end`, the scanned argument values (`scan_values`) and its 0-d numeric
   results (`scalars`).

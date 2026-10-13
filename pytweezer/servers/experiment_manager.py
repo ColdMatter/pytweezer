@@ -49,6 +49,7 @@ from pytweezer.experiment.recipes import (
 )
 from pytweezer.experiment.storage import (
     data_root,
+    git_provenance,
     highest_rid,
     measurement_relpath,
     read_arguments,
@@ -522,13 +523,22 @@ class ExperimentManager:
     def _record_run(self, rid: int) -> None:
         task = self.queue.get(rid)
         arguments = task.args
+        provenance = None
         path = self.root / task.h5_path if task.h5_path else None
         if task.status.finished and path is not None and path.exists():
-            # The file holds the effective values, defaults included.
+            # The file holds the effective values, defaults included, and the
+            # commit the worker actually ran.
             try:
                 arguments = read_arguments(path)
+                header = read_header(path)
+                provenance = {
+                    "git_commit": header.get("git_commit", ""),
+                    "git_dirty": bool(header.get("git_dirty", False)),
+                }
             except (OSError, KeyError):
                 pass
+        if provenance is None:
+            provenance = git_provenance()
         self.db.record_run(
             {
                 "rid": task.rid,
@@ -547,6 +557,8 @@ class ExperimentManager:
                 "points_total": task.points_total,
                 "h5_path": task.h5_path,
                 "simulated": self.simulate,
+                "git_commit": provenance["git_commit"] or None,
+                "git_dirty": provenance["git_dirty"],
             }
         )
 

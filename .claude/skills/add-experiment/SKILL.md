@@ -153,6 +153,10 @@ df = ds.get_data()  # "dataframe" (default) | "dict" | "array"; or get_dataframe
 ax = ds.plot_scan("atom_number")  # mean ± SEM over repetitions; x, series, ax optional
 ```
 
+`plot_scan` stamps the axes top-right with `ds.git_label` (`git 0a575d0`,
+`-dirty` if the run had uncommitted changes), so a plot always names the code
+that took it.
+
 Rows are the points run, in run order: `index`, `repetition`, scanned
 arguments, `t_start`, `t_end`, then results (SI). The DataFrame drops
 array results (images); `get_dict` stacks them; `get_array` is a structured
@@ -200,7 +204,7 @@ data share as mounted there) if set; else that entry's `data_root`; else
 `<repo>/data`. The queue state lives in `{data_root}/queue_state.json`.
 
 The manager also writes each run into the database (`pytweezer.database`): a
-`runs` row on start and finish, and a `points` row per point, holding its times,
+`runs` row on start and finish (git commit/dirty included), and a `points` row per point, holding its times,
 scanned values and 0-d numeric results. Those rows sit next to the monitor
 `readings`, so `points_with_readings(rid, "ni_adc")`
 (`pytweezer.database.analysis`) gives one row per point with the readings during
