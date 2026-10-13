@@ -37,6 +37,7 @@ pillow = "^12.1.0"
 pyzmq = "^27.1.0"
 
 # --- Qt Stuff ---
+# TODO: consider PySide6 - a single wheel instead of PyQt6 + the separate PyQt6-Qt6 pin
 PyQt6 = "^6.9"
 PyQt6-Qt6 = "^6.9"
 
