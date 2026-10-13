@@ -105,6 +105,26 @@ CONFIG = {
             "script": "../pytweezer/servers/imagelogger.py",
             "host": SERVER_HOST,
         },
+        "Experiment Manager": {
+            "active": True,
+            "script": "../pytweezer/servers/experiment_manager.py",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            # Publishes the queue and the running task's points (sipyco
+            # sync_struct).
+            "sync_port": get_next_port(),
+            # Experiments get in-process simulated devices; data goes to
+            # <data_root>/simulated.
+            "simulate": SIMULATING,
+            # Measurement files and the queue state; PYTWEEZER_DATA_DIR overrides it.
+            # None means <repo>/data.
+            "data_root": None,
+            # The same directory as other PCs see it (e.g. a mapped network
+            # share), for their Results tab. None means they use data_root as well.
+            "client_data_root": None,
+            # Seconds a worker keeps running without reaching the manager.
+            "orphan_timeout": 30.0,
+        },
     },
     # Each entry names
     # its backend class directly as "class" (a "module.path:ClassName" string), plus
@@ -246,28 +266,6 @@ CONFIG = {
             "script": "../pytweezer/GUI/analysismanager.py",
         },
     },
-}
-
-# Added after the literal so its ports are allocated last: get_next_port() hands
-# out ports in declaration order, so an entry inside "Servers" would shift every
-# device's port.
-CONFIG["Servers"]["Experiment Manager"] = {
-    "active": True,
-    "script": "../pytweezer/servers/experiment_manager.py",
-    "host": SERVER_HOST,
-    "port": get_next_port(),
-    # Publishes the queue and the running task's points (sipyco sync_struct).
-    "sync_port": get_next_port(),
-    # Experiments get in-process simulated devices; data goes to <data_root>/simulated.
-    "simulate": SIMULATING,
-    # Measurement files and the queue state; PYTWEEZER_DATA_DIR overrides it.
-    # None means <repo>/data.
-    "data_root": None,
-    # The same directory as other PCs see it (e.g. a mapped network share), for
-    # their Results tab. None means they use data_root as well.
-    "client_data_root": None,
-    # Seconds a worker keeps running without reaching the manager.
-    "orphan_timeout": 30.0,
 }
 
 
