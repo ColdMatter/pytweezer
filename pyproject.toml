@@ -140,9 +140,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# tests/ holds the pytest suite plus experiment scripts and tools/ holds one-off
-# benchmarks; also exempt them from bare-assert / blind-raise-assert / "useless
-# expression" (`1 / 0` raised on purpose) checks.
+# tests/ holds the pytest suite and tools/ holds one-off benchmarks and scripts;
+# exempt them from bare-assert / blind-raise-assert / "useless expression"
+# (`1 / 0` raised on purpose) checks.
 "tests/**" = ["S101", "S603", "S607", "B017", "B018"]
 "tools/**" = ["S101", "S603", "S607", "B017", "B018", "F821"]
 # Package __init__.py files are re-export hubs.
