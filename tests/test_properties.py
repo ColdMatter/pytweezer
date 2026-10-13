@@ -1,24 +1,15 @@
 """Properties clients against a real Properties server on loopback."""
 
 import json
-import time
 from types import SimpleNamespace
 
 import pytest
 
 from pytweezer.servers import properties, property_server
 from pytweezer.servers.property_server import PropertyServer
+from tests.helpers import until
 
 HOST = "127.0.0.1"
-
-
-def until(condition, timeout=5.0):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if condition():
-            return True
-        time.sleep(0.01)
-    return False
 
 
 def peek(props, *keys):

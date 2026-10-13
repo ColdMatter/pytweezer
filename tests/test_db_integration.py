@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from tests.test_db_analysis import write_run
+from tests.helpers import write_run
 
 DSN = os.environ.get("PYTWEEZER_TEST_DSN")
 pytestmark = pytest.mark.skipif(not DSN, reason="PYTWEEZER_TEST_DSN not set")

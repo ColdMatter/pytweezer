@@ -1,11 +1,11 @@
 import h5py
 import numpy as np
 import pytest
-from PyQt6 import QtCore
 
 from pytweezer.experiment import Choice, Experiment, ListAxis, Number, Scan, run_local
 from pytweezer.GUI.experiments import results
 from pytweezer.GUI.experiments.results import ResultsPanel, aggregate, resubmission
+from tests.helpers import FakeFeed
 
 
 class Sweep(Experiment):
@@ -183,20 +183,6 @@ def test_selected_running_measurement_reloads_and_keeps_choices(qapp, tmp_path):
     panel.refresh()
     assert "points 12/12" in panel.metadata.toPlainText()
     assert panel.x_choice.currentText() == "mode"
-
-
-class FakeFeed(QtCore.QObject):
-    queue_changed = QtCore.pyqtSignal(dict)
-    point_received = QtCore.pyqtSignal(dict)
-    connection_changed = QtCore.pyqtSignal(bool)
-
-    def __init__(self):
-        super().__init__()
-        self.connected = True
-        self.rows = {}
-
-    def points(self, rid):
-        return list(self.rows.get(rid, []))
 
 
 def running_file(root, rid=1):

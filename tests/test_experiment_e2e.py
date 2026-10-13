@@ -12,6 +12,7 @@ from pytweezer.experiment.catalogue import Catalogue
 from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
 from pytweezer.servers import experiment_manager as em
 from pytweezer.servers.sync import SyncMirror
+from tests.helpers import until
 
 EXPERIMENT = textwrap.dedent(
     """
@@ -150,14 +151,7 @@ def test_tasks_run_in_order_and_write_measurements(harness):
 
 
 def test_catalogue_lists_runnable_experiments(harness):
-    deadline = time.monotonic() + 30
-    modules = []
-    while time.monotonic() < deadline:
-        modules = harness.client.catalogue()
-        if modules:
-            break
-        time.sleep(0.2)
-    [entry] = modules
+    [entry] = until(harness.client.catalogue, timeout=30)
     assert entry["module"] == "labexp.steps"
     assert entry["error"] is None
     assert [c["class_name"] for c in entry["classes"]] == ["Steps", "UsesSequencer"]
@@ -236,9 +230,7 @@ def test_guis_see_the_queue_and_each_point_live(harness):
                 and (history[0]["status"] == "completed")
             )
 
-        deadline = time.monotonic() + 5
-        while not mirror.read(finished) and time.monotonic() < deadline:
-            time.sleep(0.05)
+        until(lambda: mirror.read(finished))
         state = mirror.snapshot()
         assert finished(state) and state["running"] is None
         rows = state["points"]["rows"]

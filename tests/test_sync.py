@@ -5,17 +5,9 @@ import pytest
 from sipyco.sync_struct import Notifier
 
 from pytweezer.servers.sync import SyncMirror, SyncServer
+from tests.helpers import until
 
 HOST = "127.0.0.1"
-
-
-def until(condition, timeout=5.0):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if condition():
-            return True
-        time.sleep(0.01)
-    return False
 
 
 @pytest.fixture

@@ -4,37 +4,14 @@ import math
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from pytweezer.database import analysis
 from pytweezer.database.analysis import aggregate_by_point, points_with_readings
 from pytweezer.database.backfill import backfill
-from pytweezer.experiment import Experiment, ListAxis, Number, Scan, load_measurement
-from pytweezer.experiment.runner import open_writer
-
-
-class Sweep(Experiment):
-    x = Number(0.0, unit="V")
-
-    def run_point(self):
-        pass
-
-
-def write_run(path, rid=7):
-    """A completed 3-point run; point 1 records no counts."""
-    scan = Scan(axes=[ListAxis(argument="x", values=[1.0, 2.0, 3.0])])
-    _, points, writer = open_writer(path, Sweep, {}, scan, {"rid": rid, "label": "t"})
-    for point in points:
-        writer.begin_point(point)
-        if point.index != 1:
-            writer.record("counts", 10 * point.index)
-        writer.record("image", np.zeros((2, 2)))
-        writer.end_point()
-    writer.finalise("completed")
-    writer.close()
-    return path
+from pytweezer.experiment import load_measurement
+from tests.helpers import write_run
 
 
 def test_each_window_is_aggregated_and_empty_windows_take_the_last_reading():

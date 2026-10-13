@@ -1,5 +1,5 @@
 """Database loggers in ``pytweezer/loggers/``, built with simulation on and the
-DBWriter replaced by :class:`RecordingWriter`."""
+DBWriter replaced by :class:`RecordingDB`."""
 
 import threading
 
@@ -8,6 +8,7 @@ import pytest
 from pytweezer.database.writer import _coerce_fields
 from pytweezer.loggers import base as logger_base
 from pytweezer.loggers.ni_adc_logger import NIADCLogger
+from tests.helpers import RecordingDB
 
 NI_CONF = {
     "channels": ["Dev1/ai0", "Dev1/ai1"],
@@ -17,26 +18,10 @@ NI_CONF = {
 }
 
 
-class RecordingWriter:
-    def __init__(self):
-        self.points = []
-        self.measurements = []
-        self.closed = False
-
-    def write(self, measurement, fields, tags=None, time=None):
-        self.points.append((measurement, fields, tags, time))
-
-    def record_measurement(self, measurement, logger, interval_s, limits, active):
-        self.measurements.append((measurement, logger, interval_s, limits, active))
-
-    def close(self):
-        self.closed = True
-
-
 @pytest.fixture
 def build(monkeypatch):
     def build(cls, conf, name=None):
-        writer = RecordingWriter()
+        writer = RecordingDB()
         monkeypatch.setattr(logger_base, "DBWriter", lambda *a, **k: writer)
         return cls(name or cls.__name__, {"simulate": True, **conf})
 
@@ -80,7 +65,7 @@ def test_write_points_accepts_two_and_three_element_points_at_one_time(ni_logger
         ]
     )
 
-    written = ni_logger.writer.points
+    written = ni_logger.writer.writes
     assert [(p[0], p[2]) for p in written] == [("a", None), ("b", {"system": "CaF"})]
     times = {p[3] for p in written}
     assert len(times) == 1 and None not in times

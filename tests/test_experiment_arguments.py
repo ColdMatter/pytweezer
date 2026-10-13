@@ -99,20 +99,8 @@ def test_instance_attributes_hold_effective_values():
     assert experiment.argument_values() == {"detuning": -12e6, "shots": 4}
 
 
-def test_device_is_resolved_lazily_once_and_closed(monkeypatch):
-    opened = []
-
-    class FakeClient:
-        closed = False
-
-        def close_rpc(self):
-            self.closed = True
-
-    def fake_get_device(name, timeout):
-        opened.append(FakeClient())
-        return opened[-1]
-
-    monkeypatch.setattr("pytweezer.experiment.experiment._get_device", fake_get_device)
+def test_device_is_resolved_lazily_once_and_closed(fake_devices):
+    opened = fake_devices
     experiment = Plain()
     assert opened == []
     assert experiment.camera is experiment.camera

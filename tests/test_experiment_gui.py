@@ -1,7 +1,6 @@
 """Experiments tab widgets, offscreen, with a fake manager client and feed."""
 
 import threading
-import time
 
 import pytest
 from PyQt6 import QtCore
@@ -30,6 +29,7 @@ from pytweezer.GUI.experiments.catalogue_view import CatalogueView
 from pytweezer.GUI.experiments.motmaster_params import ParameterFetcher
 from pytweezer.GUI.experiments.panel import ExperimentsPanel
 from pytweezer.GUI.experiments.queue_view import QueueView
+from tests.helpers import FakeFeed, until
 
 Left, Right = QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton
 
@@ -87,25 +87,8 @@ class FakeClient:
         pass
 
 
-class FakeFeed(QtCore.QObject):
-    queue_changed = QtCore.pyqtSignal(dict)
-    point_received = QtCore.pyqtSignal(dict)
-    connection_changed = QtCore.pyqtSignal(bool)
-
-    def close(self):
-        pass
-
-
 def commands(client, name):
     return [fields for command, fields in client.calls if command == name]
-
-
-def pump_until(qapp, condition):
-    deadline = time.monotonic() + 5
-    while not condition() and time.monotonic() < deadline:
-        qapp.processEvents()
-        time.sleep(0.01)
-    return condition()
 
 
 def task(rid, status, **kwargs):
@@ -367,7 +350,7 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
     feed.connection_changed.connect(connections.append)
 
     try:
-        assert pump_until(qapp, lambda: snapshots and connections == [True])
+        assert until(lambda: snapshots and connections == [True], qapp=qapp)
         assert "points" not in snapshots[0]
         assert feed.points(3) == [{"index": 0, "scalars": {"n": 1.0}}]
         assert feed.points(4) == []
@@ -377,14 +360,14 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
         server.call(
             notifier["points"]["rows"].append, {"index": 1, "scalars": {"n": 2.0}}
         ).result()
-        assert pump_until(qapp, lambda: points)
+        assert until(lambda: points, qapp=qapp)
         assert points == [{"rid": 3, "index": 1, "scalars": {"n": 2.0}}]
         assert snapshots == [], "an alive bump alone is not a queue change"
 
         server.call(notifier.__setitem__, "points", {"rid": 4, "rows": []}).result()
         server.call(notifier["points"]["rows"].append, {"index": 0}).result()
         server.call(notifier.__setitem__, "queue", [{"rid": 5}]).result()
-        assert pump_until(qapp, lambda: len(points) == 2 and snapshots)
+        assert until(lambda: len(points) == 2 and snapshots, qapp=qapp)
         assert points[1]["rid"] == 4
         assert snapshots[-1]["queue"] == [{"rid": 5}]
     finally:
@@ -463,7 +446,7 @@ def load_before_fetch(qapp, request):
         kinds = {name: row.schema["kind"] for name, row in editor.rows.items()}
     finally:
         source.release.set()
-    assert pump_until(qapp, lambda: editor.motmaster_boxes["rb"].defaults)
+    assert until(lambda: editor.motmaster_boxes["rb"].defaults, qapp=qapp)
     return editor, kinds
 
 
@@ -547,7 +530,7 @@ def test_a_threaded_fetch_is_delivered_on_the_gui_thread(qapp):
         lambda *args: delivered.append((args, threading.current_thread()))
     )
     fetcher.request("Rb MotMaster", "RbTweezerBasic")
-    assert pump_until(qapp, lambda: delivered)
+    assert until(lambda: delivered, qapp=qapp)
     assert delivered[0][0] == ("Rb MotMaster", "RbTweezerBasic", PARAMETERS)
     assert delivered[0][1] is threading.main_thread()
 

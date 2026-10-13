@@ -119,17 +119,7 @@ def test_control_sees_each_points_scalars_and_times():
         assert progress.t_start <= progress.t_end == stored
 
 
-def test_devices_closed_even_on_failure(monkeypatch):
-    closed = []
-
-    class Client:
-        def close_rpc(self):
-            closed.append(True)
-
-    monkeypatch.setattr(
-        "pytweezer.experiment.experiment._get_device", lambda name, timeout: Client()
-    )
-
+def test_devices_closed_even_on_failure(fake_devices):
     class UsesDevice(Experiment):
         cam = Device("Rb ThorCam")
 
@@ -138,4 +128,4 @@ def test_devices_closed_even_on_failure(monkeypatch):
             raise RuntimeError("after opening")
 
     assert run_local(UsesDevice).status == "failed"
-    assert closed == [True]
+    assert [client.closed for client in fake_devices] == [True]
