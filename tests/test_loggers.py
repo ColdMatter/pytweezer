@@ -1,28 +1,24 @@
-"""Unit tests for the database loggers in ``pytweezer/loggers/``.
+"""Database loggers in ``pytweezer/loggers/``, built with simulation on and the
+DBWriter replaced by :class:`RecordingWriter`."""
 
-A logger's ``__init__`` calls ``setup()`` -- which opens its data source -- and
-builds a :class:`DBWriter`. Neither is wanted in a test, so :func:`build`
-constructs the logger with ``simulate`` forced on and the writer replaced by
-:class:`RecordingWriter`. What's left under test is ``read()``: the mapping from
-a raw source reading to the points that reach the database, which is the part worth
-testing.
-
-:func:`assert_storable` is the guard worth applying to every logger. Each field
-is stored as one float, and ``DBWriter`` silently drops the ones that aren't
-numeric -- so a logger that returns a string or an array loses that value with no error
-anywhere. A test is the only place that mistake surfaces cheaply.
-"""
+import threading
 
 import pytest
 
 from pytweezer.database.writer import _coerce_fields
 from pytweezer.loggers import base as logger_base
+from pytweezer.loggers.ni_adc_logger import NIADCLogger
+
+NI_CONF = {
+    "channels": ["Dev1/ai0", "Dev1/ai1"],
+    "measurement": "ni_adc",
+    "tags": {"system": "Rb"},
+    "interval": 0.5,
+}
 
 
 class RecordingWriter:
-    """Stand-in for :class:`DBWriter` that records instead of connecting."""
-
-    def __init__(self, *_args, **_kwargs):
+    def __init__(self):
         self.points = []
         self.measurements = []
         self.closed = False
@@ -37,110 +33,60 @@ class RecordingWriter:
         self.closed = True
 
 
-def build(cls, conf=None, name=None):
-    """Return a logger instance with the database stubbed and simulation forced on.
+@pytest.fixture
+def build(monkeypatch):
+    def build(cls, conf, name=None):
+        writer = RecordingWriter()
+        monkeypatch.setattr(logger_base, "DBWriter", lambda *a, **k: writer)
+        return cls(name or cls.__name__, {"simulate": True, **conf})
 
-    ``conf`` is the logger's ``CONFIG["Loggers"]`` entry (only the keys its
-    ``setup()``/``read()`` actually read need to be present). The recording
-    writer is reachable afterwards as ``instance.writer``.
-    """
-    conf = dict(conf or {})
-    conf.setdefault("simulate", True)
+    return build
 
-    writer = RecordingWriter()
-    real_cls = logger_base.DBWriter
-    logger_base.DBWriter = lambda *a, **k: writer
-    try:
-        return cls(name or cls.__name__, conf)
-    finally:
-        logger_base.DBWriter = real_cls
+
+@pytest.fixture
+def ni_logger(build):
+    return build(NIADCLogger, NI_CONF)
 
 
 def assert_storable(points):
-    """Fail if any field would be silently dropped on the way into the database."""
-    assert points, "read() produced no points"
-    for point in points:
-        assert 2 <= len(point) <= 3, (
-            f"expected (measurement, fields[, tags]), got {point!r}"
-        )
-        measurement, fields = point[0], point[1]
+    """Fail if any field would be silently dropped by DBWriter (non-numeric)."""
+    assert points
+    for measurement, fields, *_tags in points:
         assert isinstance(measurement, str) and measurement
-        assert isinstance(fields, dict)
-        dropped = sorted(set(fields) - set(_coerce_fields(fields)))
-        assert not dropped, (
-            f"{measurement!r} fields {dropped} are not numeric; DBWriter "
-            f"drops them without raising, so they never reach the database"
-        )
+        dropped = set(fields) - set(_coerce_fields(fields))
+        assert not dropped, f"{measurement!r} fields {dropped} are not numeric"
 
 
-# --------------------------------------------------------------------------- #
-# ni_adc_logger
-# --------------------------------------------------------------------------- #
+def test_ni_adc_reads_one_storable_point_per_cycle(ni_logger):
+    points = ni_logger.read()
 
-NI_CONF = {
-    "channels": ["Dev1/ai0", "Dev1/ai1"],
-    "measurement": "ni_adc",
-    "tags": {"system": "Rb"},
-    "interval": 0.5,
-}
-
-
-def _ni_logger(conf=None):
-    from pytweezer.loggers.ni_adc_logger import NIADCLogger
-
-    return build(NIADCLogger, conf if conf is not None else NI_CONF)
-
-
-def test_ni_adc_reads_one_point_per_cycle_with_a_field_per_channel():
-    points = _ni_logger().read()
-
-    assert len(points) == 1
-    measurement, fields, tags = points[0]
+    assert_storable(points)
+    ((measurement, fields, tags),) = points
     assert measurement == "ni_adc"
-    assert set(fields) == {"ai0", "ai1"}  # device prefix stripped
+    assert set(fields) == {"ai0", "ai1"}
     assert tags == {"system": "Rb"}
 
 
-def test_ni_adc_fields_survive_the_trip_into_the_database():
-    assert_storable(_ni_logger().read())
+def test_ni_adc_without_channels_reads_nothing_rather_than_failing(build):
+    assert build(NIADCLogger, {}).read() is None
 
 
-def test_ni_adc_without_channels_reads_nothing_rather_than_failing():
-    # A misconfigured logger should idle, not crash the process on every cycle.
-    assert _ni_logger({"simulate": True}).read() is None
-
-
-def test_ni_adc_close_releases_the_writer():
-    logger = _ni_logger()
-    logger.close()
-    assert logger.writer.closed, "close() must call super().close()"
-
-
-def test_interval_comes_from_config():
-    assert _ni_logger().interval == 0.5
-
-
-# --------------------------------------------------------------------------- #
-# base loop
-# --------------------------------------------------------------------------- #
-
-
-def test_write_points_accepts_both_two_and_three_element_points():
-    logger = _ni_logger()
-    logger._write_points(
+def test_write_points_accepts_two_and_three_element_points_at_one_time(ni_logger):
+    ni_logger._write_points(
         [
             ("a", {"x": 1.0}),
             ("b", {"y": 2.0}, {"system": "CaF"}),
-            None,  # skipped, not an error
+            None,
         ]
     )
 
-    assert [p[0] for p in logger.writer.points] == ["a", "b"]
-    assert logger.writer.points[0][2] is None
-    assert logger.writer.points[1][2] == {"system": "CaF"}
+    written = ni_logger.writer.points
+    assert [(p[0], p[2]) for p in written] == [("a", None), ("b", {"system": "CaF"})]
+    times = {p[3] for p in written}
+    assert len(times) == 1 and None not in times
 
 
-def test_each_measurement_is_registered_once_with_its_limits():
+def test_each_measurement_is_registered_once_with_its_limits(build):
     logger = build(
         logger_base.Logger,
         {"interval": 2.0, "limits": {"x": [0, 5], "y": [None, 1]}},
@@ -149,50 +95,36 @@ def test_each_measurement_is_registered_once_with_its_limits():
     logger._write_points([("a", {"x": 1.0}), ("b", {"y": 2.0})])
     logger._write_points([("a", {"x": 1.0})])
 
+    limits = {"x": [0.0, 5.0], "y": [None, 1.0]}
     assert logger.writer.measurements == [
-        ("a", "Probe", 2.0, {"x": [0.0, 5.0], "y": [None, 1.0]}, True),
-        ("b", "Probe", 2.0, {"x": [0.0, 5.0], "y": [None, 1.0]}, True),
+        ("a", "Probe", 2.0, limits, True),
+        ("b", "Probe", 2.0, limits, True),
     ]
 
 
-def test_close_marks_registered_measurements_inactive():
-    logger = build(logger_base.Logger, {}, name="Probe")
-    logger._write_points([("a", {"x": 1.0})])
-    logger.close()
+def test_close_marks_measurements_inactive_and_closes_the_writer(ni_logger):
+    ni_logger._write_points([("a", {"x": 1.0})])
+    ni_logger.close()
 
-    assert logger.writer.measurements[-1] == ("a", "Probe", 1.0, {}, False)
-    assert logger.writer.closed
+    assert ni_logger.writer.measurements[-1] == ("a", "NIADCLogger", 0.5, {}, False)
+    assert ni_logger.writer.closed
 
 
-def test_malformed_limits_fail_at_startup():
+def test_malformed_limits_fail_at_startup(build):
     with pytest.raises(ValueError, match="x"):
         build(logger_base.Logger, {"limits": {"x": 5}})
 
 
-def test_one_read_cycle_shares_a_timestamp():
-    logger = _ni_logger()
-    logger._write_points([("a", {"x": 1.0}), ("b", {"y": 2.0})])
-
-    times = {p[3] for p in logger.writer.points}
-    assert len(times) == 1 and None not in times
-
-
-def test_read_failures_do_not_stop_the_run_loop():
-    # run() catches read() errors and keeps polling, so a flaky sensor doesn't
-    # take the logger down. Assert on the base class contract directly.
-    logger = _ni_logger()
-
+def test_read_failures_do_not_stop_the_run_loop(ni_logger):
     def boom():
         raise RuntimeError("sensor unplugged")
 
-    logger.read = boom
-    logger.interval = 0.01
+    ni_logger.read = boom
+    ni_logger.interval = 0.01
 
-    import threading
-
-    thread = threading.Thread(target=logger.run, daemon=True)
+    thread = threading.Thread(target=ni_logger.run, daemon=True)
     thread.start()
     thread.join(timeout=0.3)
     assert thread.is_alive(), "run() died on a read() exception"
-    logger.stop()
+    ni_logger.stop()
     thread.join(timeout=2)

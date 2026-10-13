@@ -1,9 +1,6 @@
-"""Applet Launcher tests: the shared applet list vs the local running-state.
-
-The applet *list* is shared across clients via Properties; *which applets are
-running* is per-machine and lives in local QSettings. These tests build the
-launcher via ``__new__`` (as ``test_gui.py`` does) so no Properties hub
-connection is opened and no applet subprocesses are spawned.
+"""The applet *list* is shared via Properties; *which applets are running* is
+per-machine and lives in local QSettings. Launchers are built via ``__new__`` so
+no Properties hub is contacted and no applet subprocesses are spawned.
 """
 
 import pytest
@@ -12,8 +9,6 @@ from pytweezer.GUI.applet_launcher import AppletLauncher
 
 
 class FakeProps:
-    """Minimal stand-in for a Properties connection, backed by a plain dict."""
-
     def __init__(self, data=None):
         self.data = dict(data or {})
 
@@ -25,8 +20,8 @@ class FakeProps:
 
 
 class FakeProcess:
-    def __init__(self):
-        self.terminated = False
+    def __init__(self, exited=False):
+        self.terminated = exited
 
     def terminate(self):
         self.terminated = True
@@ -38,7 +33,7 @@ class FakeProcess:
         return 0 if self.terminated else None
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def settings_dir(tmp_path):
     """Point QSettings at a temp dir so tests never touch real user settings."""
     from PyQt6.QtCore import QSettings
@@ -53,12 +48,7 @@ def settings_dir(tmp_path):
 
 
 def make_launcher(name="TestLauncher", applets=None, active=None, props=None, qt=False):
-    """A launcher with its collaborators stubbed, skipping ``__init__``.
-
-    ``qt=True`` additionally runs ``QWidget.__init__`` so the underlying Qt
-    object exists — needed only by tests that call ``closeEvent``, which reaches
-    ``BWidget.closeEvent``'s ``saveGeometry()``. Requires the ``qapp`` fixture.
-    """
+    """``qt=True`` creates the underlying QWidget, which ``closeEvent`` needs."""
     launcher = AppletLauncher.__new__(AppletLauncher)
     if qt:
         from PyQt6 import QtWidgets
@@ -70,195 +60,119 @@ def make_launcher(name="TestLauncher", applets=None, active=None, props=None, qt
     launcher._active = set(active or ())
     launcher._processes = {}
     launcher._rows = {}
-    # Status updates need real rows; irrelevant to the state logic under test.
     launcher._set_status = lambda *args, **kwargs: None
     return launcher
 
 
-# --------------------------------------------------------------------------- #
-# Local active-set persistence
-# --------------------------------------------------------------------------- #
+def saved_active(name="TestLauncher"):
+    return make_launcher(name=name)._load_active()
 
 
-def test_active_set_round_trips_through_local_settings(settings_dir):
-    launcher = make_launcher(active={"Live Plot", "Image Monitor"})
+def running_launcher(qt=False):
+    """A launcher with "Image Monitor" running and persisted as active."""
+    launcher = make_launcher(
+        applets={"Image Monitor": {"script": "a.py"}}, active={"Image Monitor"}, qt=qt
+    )
+    launcher._processes["Image Monitor"] = FakeProcess()
     launcher._save_active()
-
-    reloaded = make_launcher()
-    assert reloaded._load_active() == {"Live Plot", "Image Monitor"}
+    return launcher
 
 
-def test_single_active_applet_round_trips(settings_dir):
-    """QSettings collapses a one-element list to a bare string on read."""
-    launcher = make_launcher(active={"Image Monitor"})
-    launcher._save_active()
-
-    assert make_launcher()._load_active() == {"Image Monitor"}
-
-
-def test_empty_active_set_round_trips(settings_dir):
-    """An empty list comes back as None rather than []."""
-    launcher = make_launcher(active=set())
-    launcher._save_active()
-
-    assert make_launcher()._load_active() == set()
+# QSettings collapses a one-element list to a bare string and an empty list to None.
+@pytest.mark.parametrize(
+    "active", [{"Live Plot", "Image Monitor"}, {"Image Monitor"}, set()]
+)
+def test_active_set_round_trips_through_local_settings(active):
+    make_launcher(active=active)._save_active()
+    assert saved_active() == active
 
 
-def test_load_active_defaults_to_empty_for_a_fresh_machine(settings_dir):
-    assert make_launcher(name="NeverRunBefore")._load_active() == set()
-
-
-def test_active_set_is_per_launcher_name(settings_dir):
-    """Different names are independent local namespaces."""
+def test_active_set_is_per_launcher_name():
+    assert saved_active("NeverRunBefore") == set()
     make_launcher(name="LauncherA", active={"Image Monitor"})._save_active()
     make_launcher(name="LauncherB", active={"Live Plot"})._save_active()
+    assert saved_active("LauncherA") == {"Image Monitor"}
+    assert saved_active("LauncherB") == {"Live Plot"}
 
-    assert make_launcher(name="LauncherA")._load_active() == {"Image Monitor"}
-    assert make_launcher(name="LauncherB")._load_active() == {"Live Plot"}
 
-
-def test_set_active_persists_locally_and_not_to_properties(settings_dir):
+def test_set_active_persists_locally_and_not_to_properties():
     props = FakeProps()
     launcher = make_launcher(applets={"Image Monitor": {"script": "a.py"}}, props=props)
 
     launcher._set_active("Image Monitor", True)
-    assert launcher._active == {"Image Monitor"}
-    assert make_launcher()._load_active() == {"Image Monitor"}
+    assert launcher._active == saved_active() == {"Image Monitor"}
 
     launcher._set_active("Image Monitor", False)
-    assert launcher._active == set()
-    assert make_launcher()._load_active() == set()
+    assert launcher._active == saved_active() == set()
 
-    # Running state must never reach the shared tree.
     assert props.data == {}
 
 
-# --------------------------------------------------------------------------- #
-# Startup: launch only what this machine was running
-# --------------------------------------------------------------------------- #
-
-
-def test_start_active_applets_starts_only_the_locally_active_ones(settings_dir):
+def test_start_active_applets_starts_local_ones_and_prunes_deleted():
     launcher = make_launcher(
-        applets={
-            "Image Monitor": {"script": "a.py"},
-            "Live Plot": {"script": "b.py"},
-        },
-        active={"Live Plot"},
+        applets={"Image Monitor": {"script": "a.py"}, "Live Plot": {"script": "b.py"}},
+        active={"Live Plot", "Deleted On Another Client"},
     )
     started = []
     launcher._start_applet = started.append
 
     launcher._start_active_applets()
+
     assert started == ["Live Plot"]
+    assert launcher._active == saved_active() == {"Live Plot"}
 
 
-def test_start_active_applets_prunes_applets_deleted_elsewhere(settings_dir):
-    """A name removed from the shared list is dropped from the local set."""
-    launcher = make_launcher(
-        applets={"Image Monitor": {"script": "a.py"}},
-        active={"Image Monitor", "Deleted On Another Client"},
-    )
-    started = []
-    launcher._start_applet = started.append
-
-    launcher._start_active_applets()
-
-    assert started == ["Image Monitor"]
-    assert launcher._active == {"Image Monitor"}
-    assert make_launcher()._load_active() == {"Image Monitor"}
-
-
-# --------------------------------------------------------------------------- #
-# Stop vs shutdown
-# --------------------------------------------------------------------------- #
-
-
-def test_shutdown_terminates_children_but_keeps_the_active_set(settings_dir, qapp):
+def test_shutdown_terminates_children_but_keeps_the_active_set(qapp):
     """Closing the GUI must not erase what was running, or nothing auto-starts."""
     from PyQt6.QtGui import QCloseEvent
 
-    launcher = make_launcher(
-        applets={"Image Monitor": {"script": "a.py"}},
-        active={"Image Monitor"},
-        qt=True,
-    )
-    process = FakeProcess()
-    launcher._processes["Image Monitor"] = process
-    launcher._save_active()
+    launcher = running_launcher(qt=True)
+    process = launcher._processes["Image Monitor"]
 
     launcher.closeEvent(QCloseEvent())
 
     assert process.terminated
     assert launcher._processes == {}
-    assert launcher._active == {"Image Monitor"}
-    assert make_launcher()._load_active() == {"Image Monitor"}
+    assert launcher._active == saved_active() == {"Image Monitor"}
 
 
-def test_user_stop_clears_the_active_set(settings_dir):
-    launcher = make_launcher(
-        applets={"Image Monitor": {"script": "a.py"}}, active={"Image Monitor"}
-    )
-    process = FakeProcess()
-    launcher._processes["Image Monitor"] = process
-    launcher._save_active()
+def test_user_stop_clears_the_active_set():
+    launcher = running_launcher()
+    process = launcher._processes["Image Monitor"]
 
     launcher._stop_applet("Image Monitor")
 
     assert process.terminated
-    assert launcher._active == set()
-    assert make_launcher()._load_active() == set()
+    assert launcher._active == saved_active() == set()
 
 
-def test_applet_that_exits_on_its_own_is_forgotten(settings_dir):
-    """Closing an applet's own window means don't start it next session."""
-    launcher = make_launcher(
-        applets={"Image Monitor": {"script": "a.py"}}, active={"Image Monitor"}
-    )
-    process = FakeProcess()
-    process.terminated = True  # already exited, so poll() returns 0
-    launcher._processes["Image Monitor"] = process
-    launcher._save_active()
+def test_applet_that_exits_on_its_own_is_forgotten():
+    launcher = running_launcher()
+    launcher._processes["Image Monitor"] = FakeProcess(exited=True)
 
     launcher.refresh_status()
 
-    assert launcher._active == set()
-    assert make_launcher()._load_active() == set()
+    assert launcher._active == saved_active() == set()
 
 
-# --------------------------------------------------------------------------- #
-# Shared list carries no running-state
-# --------------------------------------------------------------------------- #
-
-
-def test_load_applets_strips_a_legacy_active_flag():
-    props = FakeProps(
+def test_shared_applet_list_carries_no_running_state():
+    legacy = FakeProps(
         {"Applets": {"Image Monitor": {"script": "a.py", "active": True}}}
     )
-    launcher = make_launcher(props=props)
+    assert make_launcher(props=legacy)._load_applets() == {
+        "Image Monitor": {"script": "a.py"}
+    }
 
-    assert launcher._load_applets() == {"Image Monitor": {"script": "a.py"}}
-
-
-def test_ensure_defaults_seeds_entries_without_active():
     props = FakeProps()
     launcher = make_launcher(props=props)
-
     launcher._ensure_defaults()
-
-    seeded = props.data["Applets"]
-    assert seeded
-    for entry in seeded.values():
-        assert "active" not in entry
+    assert props.data["Applets"]
+    for entry in props.data["Applets"].values():
         assert set(entry) == {"script", "description"}
 
-
-def test_add_applet_does_not_write_active_or_start_anything(settings_dir):
     props = FakeProps()
     launcher = make_launcher(props=props)
     launcher._add_row = lambda *args, **kwargs: None
-
     launcher.add_applet("New Applet", "new.py")
-
     assert props.data["Applets"] == {"New Applet": {"script": "new.py"}}
     assert launcher._active == set()

@@ -10,7 +10,7 @@ from pytweezer.experiment import (
     TaskStatus,
     run_local,
 )
-from pytweezer.experiment.runner import Progress, open_writer, run_points
+from pytweezer.experiment.runner import open_writer, run_points
 from pytweezer.experiment.task import Action
 
 
@@ -43,16 +43,17 @@ class Recorder(Experiment):
 SCAN = Scan(axes=[ListAxis(argument="x", values=[1.0, 2.0, 3.0])])
 
 
-def run(args=None, control=None):
-    experiment, points, writer = open_writer(
-        None, Recorder, args or {}, SCAN, {"rid": 1}
-    )
-    status, error = run_points(experiment, points, writer, control)
-    return experiment, status, error, writer
+def run(control=None, **args):
+    """Returns ``(experiment, status, error, file attrs, stored point end times)``."""
+    experiment, points, writer = open_writer(None, Recorder, args, SCAN, {"rid": 1})
+    with writer.file:
+        status, error = run_points(experiment, points, writer, control)
+        t_end = list(writer.file["points/t_end"])
+        return experiment, status, error, dict(writer.file.attrs), t_end
 
 
 def test_hook_order_and_scanned_values():
-    experiment, status, error, writer = run()
+    experiment, status, error, *_ = run()
     assert status == TaskStatus.COMPLETED and error is None
     assert experiment.calls == [
         "prepare",
@@ -61,7 +62,6 @@ def test_hook_order_and_scanned_values():
         ("point", 2, 3.0),
         "finish",
     ]
-    writer.close()
 
 
 def test_run_local_stores_effective_arguments_and_results():
@@ -70,78 +70,53 @@ def test_run_local_stores_effective_arguments_and_results():
     assert measurement.arguments["gain"] == 3.0
     assert list(measurement.results["y"]) == [3.0, 6.0, 9.0]
     assert measurement.constants["setup"] == 1
-
-
-def test_run_local_rejects_bad_arguments_up_front():
     with pytest.raises(ValueError, match="no argument"):
         run_local(Recorder, SCAN, gian=3)
 
 
-def test_failure_runs_finish_and_keeps_completed_points():
-    experiment, status, error, writer = run({"fail_at": 1})
-    assert status == TaskStatus.FAILED
-    assert "boom" in error
+@pytest.mark.parametrize(
+    "args, message, n_done",
+    [({"fail_at": 1}, "boom", 1), ({"fail_in_finish": 1}, "finish failed", 3)],
+)
+def test_failure_runs_finish_and_keeps_completed_points(args, message, n_done):
+    experiment, status, error, attrs, _ = run(**args)
+    assert status == TaskStatus.FAILED and message in error
     assert experiment.calls[-1] == "finish"
-    assert writer.file.attrs["n_done"] == 1
-    assert writer.file.attrs["status"] == "failed"
-    assert "boom" in writer.file.attrs["error"]
-    writer.close()
+    assert attrs["n_done"] == n_done
+    assert attrs["status"] == "failed" and message in attrs["error"]
 
 
-def test_failure_in_finish_fails_the_task():
-    _, status, error, writer = run({"fail_in_finish": 1})
-    assert status == TaskStatus.FAILED
-    assert "finish failed" in error
-    writer.close()
+@pytest.mark.parametrize(
+    "action, stop_after, status",
+    [
+        (Action.TERMINATE, 0, TaskStatus.TERMINATED),
+        (Action.TERMINATE, 2, TaskStatus.TERMINATED),
+        (Action.INTERRUPT, 1, TaskStatus.INTERRUPTED),
+    ],
+)
+def test_control_stops_at_a_point_boundary(action, stop_after, status):
+    def control(progress):
+        return action if progress.done == stop_after else Action.CONTINUE
+
+    experiment, got, _, attrs, _ = run(control)
+    assert got == status
+    assert experiment.calls[-1] == "finish"
+    assert len(experiment.calls) == stop_after + 2
+    assert attrs["n_done"] == stop_after
 
 
-def test_terminate_at_point_boundary():
+def test_control_sees_each_points_scalars_and_times():
     seen = []
 
-    def control(progress: Progress):
-        seen.append(progress.done)
-        return Action.TERMINATE if progress.done == 2 else Action.CONTINUE
-
-    experiment, status, _, writer = run(control=control)
-    assert status == TaskStatus.TERMINATED
-    assert seen == [0, 1, 2]
-    assert experiment.calls[-1] == "finish"
-    assert writer.file.attrs["n_done"] == 2
-    writer.close()
-
-
-def test_control_sees_point_scalars_and_interrupt_status():
-    scalars = []
-
-    def control(progress: Progress):
-        scalars.append(progress.scalars)
-        return Action.INTERRUPT if progress.done == 1 else Action.CONTINUE
-
-    _, status, _, writer = run(control=control)
-    assert status == TaskStatus.INTERRUPTED
-    assert scalars == [None, {"y": 2.0}]
-    writer.close()
-
-
-def test_control_sees_when_each_point_ran():
-    times = []
-
-    def control(progress: Progress):
-        times.append((progress.t_start, progress.t_end))
+    def control(progress):
+        seen.append(progress)
         return Action.CONTINUE
 
-    *_, writer = run(control=control)
-    assert times[0] == (None, None)
-    for (t_start, t_end), stored in zip(times[1:], writer.file["points/t_end"]):
-        assert t_start <= t_end == stored
-    writer.close()
-
-
-def test_terminate_before_first_point():
-    experiment, status, _, writer = run(control=lambda progress: Action.TERMINATE)
-    assert status == TaskStatus.TERMINATED
-    assert experiment.calls == ["prepare", "finish"]
-    writer.close()
+    *_, stored_t_end = run(control)
+    assert seen[0].scalars is None and seen[0].t_start is None
+    assert [p.scalars for p in seen[1:]] == [{"y": 2.0}, {"y": 4.0}, {"y": 6.0}]
+    for progress, stored in zip(seen[1:], stored_t_end, strict=True):
+        assert progress.t_start <= progress.t_end == stored
 
 
 def test_devices_closed_even_on_failure(monkeypatch):
@@ -162,6 +137,5 @@ def test_devices_closed_even_on_failure(monkeypatch):
             self.cam
             raise RuntimeError("after opening")
 
-    measurement = run_local(UsesDevice)
-    assert measurement.status == "failed"
+    assert run_local(UsesDevice).status == "failed"
     assert closed == [True]

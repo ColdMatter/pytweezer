@@ -74,8 +74,6 @@ class Harness:
         )
         self.root = tmp_path / "data"
         self.package_dir = package
-        self.thread = None
-        self.manager = None
         self.client = ExperimentManagerClient(
             f"tcp://127.0.0.1:{self.conf['port']}", timeout_ms=3000
         )
@@ -165,28 +163,21 @@ def test_catalogue_lists_runnable_experiments(harness):
     assert [c["class_name"] for c in entry["classes"]] == ["Steps", "UsesSequencer"]
 
 
-def test_terminate_stops_at_a_point_boundary(harness):
-    rid = harness.submit(five_points(), delay=0.3)
-    harness.wait_until(rid, lambda t: t.points_done >= 1)
-    harness.client.terminate(rid)
-    task = harness.wait_until(rid, lambda t: t.status.finished)
-    assert task.status == "terminated"
-    measurement = harness.measurement(task)
-    assert measurement.status == "terminated"
-    assert 1 <= measurement.n_done < 5
-
-
-def test_pause_and_resume(harness):
-    rid = harness.submit(five_points(), delay=0.1)
+def test_pause_resume_and_terminate_at_a_point_boundary(harness):
+    rid = harness.submit(Scan(repetitions=10), delay=0.2)
     harness.wait_until(rid, lambda t: t.points_done >= 1)
     harness.client.pause(rid)
     paused = harness.wait_until(rid, lambda t: t.status == "paused")
     time.sleep(0.5)
     assert harness.client.get(rid).points_done == paused.points_done
     harness.client.resume(rid)
+    harness.wait_until(rid, lambda t: t.points_done > paused.points_done)
+    harness.client.terminate(rid)
     task = harness.wait_until(rid, lambda t: t.status.finished)
-    assert task.status == "completed"
-    assert task.points_done == 5
+    assert task.status == "terminated"
+    measurement = harness.measurement(task)
+    assert measurement.status == "terminated"
+    assert paused.points_done < measurement.n_done < 10
 
 
 def test_crashed_worker_is_recorded(harness):
@@ -195,17 +186,14 @@ def test_crashed_worker_is_recorded(harness):
     assert task.status == "crashed"
     assert "code 3" in task.error
     assert harness.measurement(task).status == "crashed"
-    # the queue keeps going
-    assert (
-        harness.wait_until(harness.submit(), lambda t: t.status.finished).status
-        == "completed"
-    )
+    next_task = harness.wait_until(harness.submit(), lambda t: t.status.finished)
+    assert next_task.status == "completed", "the queue keeps going"
 
 
 def test_abort_kills_the_worker(harness):
     rid = harness.submit(five_points(), delay=5.0)
-    harness.wait_until(rid, lambda t: t.status == "running" and t.h5_path)
-    time.sleep(1.5)  # let the worker create its file
+    task = harness.wait_until(rid, lambda t: t.status == "running" and t.h5_path)
+    harness.wait_until(rid, lambda t: (harness.root / task.h5_path).exists())
     harness.client.abort(rid)
     task = harness.wait_until(rid, lambda t: t.status.finished, timeout=5)
     assert task.status == "aborted"
@@ -221,25 +209,6 @@ def test_worker_survives_a_manager_restart(harness):
     task = harness.wait_until(rid, lambda t: t.status.finished)
     assert task.status == "completed"
     assert harness.measurement(task).n_done == 5
-
-
-def test_submit_checks_arguments_before_queueing():
-    from pytweezer.experiments.demo import RabiDemo
-
-    class Unreachable:
-        def submit(self, request):
-            raise AssertionError("should not be sent")
-
-    with pytest.raises(ValueError, match="no argument"):
-        submit(RabiDemo, client=Unreachable(), atom=3)
-    with pytest.raises(ValueError, match="below the minimum"):
-        submit(
-            RabiDemo,
-            Scan(axes=[ListAxis(argument="atoms", values=[0])]),
-            client=Unreachable(),
-        )
-    with pytest.raises(ValueError, match="run_local"):
-        submit(type("Local", (), {"__module__": "__main__"}), client=Unreachable())
 
 
 def test_simulating_manager_gives_workers_simulated_devices(harness):

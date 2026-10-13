@@ -24,7 +24,7 @@ class Grid(Experiment):
 def _two_by_three(**kwargs):
     return Scan(
         axes=[
-            ListAxis(argument="a", values=[0, 1]),
+            LinearAxis(argument="a", start=0, stop=1, n=2),
             ListAxis(argument="b", values=[0, 1, 2]),
         ],
         **kwargs,
@@ -65,10 +65,11 @@ def test_snake_changes_one_axis_by_one_step():
         assert sum(abs(x - y) for x, y in zip(before, after)) == 1
 
 
-def test_shuffle_gets_a_seed_and_is_reproducible():
+def test_shuffle_gets_a_seed_and_is_reproducible_from_json():
     scan = _two_by_three(order="shuffle")
     assert scan.seed is not None
     again = Scan.model_validate_json(scan.model_dump_json())
+    assert again == scan
     assert indices(scan.points(Grid)) == indices(again.points(Grid))
     assert sorted(indices(scan.points(Grid))) == indices(_two_by_three().points(Grid))
 
@@ -107,16 +108,3 @@ def test_unknown_or_duplicate_axes_are_rejected():
                 ListAxis(argument="a", values=[2]),
             ]
         )
-
-
-def test_json_round_trip_keeps_axis_kinds():
-    scan = Scan(
-        axes=[
-            LinearAxis(argument="a", start=0, stop=1, n=5),
-            ListAxis(argument="b", values=[3, 4]),
-        ],
-        repetitions=2,
-    )
-    again = Scan.model_validate_json(scan.model_dump_json())
-    assert again == scan
-    assert isinstance(again.axes[0], LinearAxis)

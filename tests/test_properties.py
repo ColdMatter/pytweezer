@@ -2,6 +2,7 @@
 
 import json
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,92 +36,65 @@ def peek(props, *keys):
 
 @pytest.fixture
 def lab(tmp_path, monkeypatch):
-    """Start/stop a server on one address; ``process()`` makes a fresh client process."""
+    """A server that can be stopped and restarted on the same address;
+    ``process()`` makes a client as a fresh process would."""
     monkeypatch.setattr(property_server, "SAVE_QUIET_S", 0.05)
-    path = str(tmp_path / "properties.json")
-    with open(path, "w") as f:
+    lab = SimpleNamespace(
+        path=str(tmp_path / "properties.json"), server=None, address=(0, 0)
+    )
+    with open(lab.path, "w") as f:
         json.dump({"Saved": {"x": 1}}, f)
-    state = {"server": None, "address": None, "connections": []}
+    mirrors = []
 
     def start():
-        port, rpc_port = state["address"] or (0, 0)
-        server = PropertyServer(HOST, port, rpc_port, path)
-        state["server"] = server
-        state["address"] = (server.sync.port, server.sync.rpc_port)
-        return server
+        lab.server = PropertyServer(HOST, *lab.address, lab.path)
+        lab.address = (lab.server.sync.port, lab.server.sync.rpc_port)
 
     def stop():
-        state["server"].close()
-        state["server"] = None
+        lab.server.close()
+        lab.server = None
 
     def process(name="Test"):
-        # A new _connections dict is what a separate process would have.
         monkeypatch.setattr(properties, "_connections", {})
-        port, rpc_port = state["address"]
-        monkeypatch.setattr(
-            properties, "server_address", lambda: (HOST, port, rpc_port)
-        )
+        monkeypatch.setattr(properties, "server_address", lambda: (HOST, *lab.address))
         props = properties.Properties(name)
-        state["connections"].append(props._connection)
+        mirrors.append(props._connection.mirror)
         return props
 
+    def served(key):
+        return lab.server.notifier.raw_view.get(key)
+
+    lab.start, lab.stop, lab.process, lab.served = start, stop, process, served
     start()
-    yield type(
-        "Lab",
-        (),
-        {
-            "start": start,
-            "stop": stop,
-            "process": process,
-            "path": path,
-            "state": state,
-        },
-    )
-    for connection in state["connections"]:
-        connection.mirror.close()
-    if state["server"] is not None:
-        state["server"].close()
+    yield lab
+    # Server first: a server closing after its mirrors hung up can raise
+    # ConnectionResetError from SyncServer.close().
+    if lab.server is not None:
+        lab.server.close()
+    for mirror in mirrors:
+        mirror.close()
 
 
 def test_client_starts_from_the_servers_tree_and_creates_its_entry(lab):
     p = lab.process("Viewer/Mon")
     assert p.get("/Saved/x") == 1
-    assert until(
-        lambda: lab.state["server"].notifier.raw_view.get("Viewer") == {"Mon": {}}
-    )
+    assert until(lambda: lab.served("Viewer") == {"Mon": {}})
 
 
-def test_set_reads_back_at_once_and_reaches_other_processes(lab):
+def test_edits_read_back_at_once_and_reach_other_processes(lab):
     a = lab.process("A")
     b = lab.process("B")
+    b.changes()
     a.set("roi/pos", [1, 2])
     assert a.get("roi/pos") == [1, 2]
     assert until(lambda: peek(b, "A", "roi", "pos") == [1, 2])
+    assert "/A/roi/pos" in b.changes(includeparent=False)
 
     b.delete("/A/roi")
     assert until(lambda: peek(a, "A", "roi") is None)
 
 
-def test_late_process_gets_earlier_changes(lab):
-    a = lab.process("A")
-    a.set("/Shared/n", 5)
-    assert until(
-        lambda: lab.state["server"].notifier.raw_view.get("Shared") == {"n": 5}
-    )
-    late = lab.process("Late")
-    assert late.get("/Shared/n") == 5
-
-
-def test_changes_report_edits_from_other_processes(lab):
-    a = lab.process("A")
-    b = lab.process("B")
-    b.changes()
-    a.set("/Shared/deep/value", 3)
-    assert until(lambda: peek(b, "Shared", "deep", "value") == 3)
-    assert "/Shared/deep/value" in b.changes(includeparent=False)
-
-
-def test_option_properties_are_enforced_by_the_server(lab):
+def test_option_properties_are_enforced(lab):
     a = lab.process("A")
     b = lab.process("B")
     a.set("/mode", {"options": ["slow", "fast"], "value": "slow"})
@@ -133,29 +107,24 @@ def test_option_properties_are_enforced_by_the_server(lab):
     assert "/mode" not in b.changes()
 
 
-def test_non_json_values_are_refused(lab):
+def test_edits_are_saved_to_the_file_and_non_json_refused(lab):
     a = lab.process("A")
     a.set("/bad", {1, 2})
-    a.set("/good", 1)
-    assert until(lambda: lab.state["server"].notifier.raw_view.get("good") == 1)
-    assert "bad" not in lab.state["server"].notifier.raw_view
-
-
-def test_edits_are_saved_to_the_file(lab):
-    a = lab.process("A")
     a.set("/Saved/y", [3])
 
     def saved():
         with open(lab.path) as f:
-            return json.load(f).get("Saved", {}).get("y") == [3]
+            return json.load(f)
 
-    assert until(saved)
+    assert until(lambda: saved().get("Saved", {}).get("y") == [3])
+    assert "bad" not in saved()
+    assert lab.served("bad") is None
 
 
 def test_clients_resync_after_a_server_restart(lab):
     a = lab.process("A")
     a.set("/kept", 1)
-    assert until(lambda: lab.state["server"].notifier.raw_view.get("kept") == 1)
+    assert until(lambda: lab.served("kept") == 1)
     lab.stop()
     assert until(lambda: not a._connection.mirror.connected)
 
@@ -169,7 +138,7 @@ def test_clients_resync_after_a_server_restart(lab):
     assert "/" in a.changes()
 
     a.set("/after", 2)
-    assert until(lambda: lab.state["server"].notifier.raw_view.get("after") == 2)
+    assert until(lambda: lab.served("after") == 2)
 
 
 def test_unreachable_server_falls_back_to_the_file(lab, monkeypatch):

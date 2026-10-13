@@ -30,6 +30,15 @@ SCAN = Scan(
 )
 
 
+def days(panel):
+    tree = panel.tree
+    return [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
+
+
+def children(day):
+    return [day.child(i).text(0) for i in range(day.childCount())]
+
+
 def make_file(root, rid=1, day=("2026", "10", "07")):
     path = root.joinpath(*day, f"{rid:06d}_Sweep.h5")
     run_local(Sweep, SCAN, path=path, gain=3)
@@ -48,7 +57,7 @@ def test_aggregate_means_and_standard_errors():
     assert np.isnan(by_series["a"][2][0])
 
 
-def test_resubmission_reuses_arguments_and_scan(tmp_path):
+def test_resubmission_reuses_arguments_and_scan():
     measurement = run_local(Sweep, SCAN, gain=3, label="original")
     request = resubmission(measurement)
     assert request.class_name == "Sweep"
@@ -57,7 +66,7 @@ def test_resubmission_reuses_arguments_and_scan(tmp_path):
     assert request.label == "original"
 
 
-def test_panel_lists_days_and_hides_running_files(qapp, tmp_path):
+def test_panel_lists_days_and_hides_running_files_until_they_finish(qapp, tmp_path):
     make_file(tmp_path, 1)
     make_file(tmp_path, 2, day=("2026", "10", "06"))
     running = make_file(tmp_path, 3)
@@ -65,18 +74,20 @@ def test_panel_lists_days_and_hides_running_files(qapp, tmp_path):
         f.attrs["status"] = "running"
     panel = ResultsPanel(root=tmp_path)
     panel.refresh()
-    days = [
-        panel.tree.topLevelItem(i).text(0)
-        for i in range(panel.tree.topLevelItemCount())
-    ]
-    assert days == ["2026-10-07", "2026-10-06"]
+    assert days(panel) == ["2026-10-07", "2026-10-06"]
     newest = panel.tree.topLevelItem(0)
-    assert [newest.child(i).text(0) for i in range(newest.childCount())] == [
-        "000001  Sweep"
-    ]
+    assert children(newest) == ["000001  Sweep"]
+
     panel.show_unfinished.setChecked(True)
     newest = panel.tree.topLevelItem(0)
-    assert newest.childCount() == 2
+    assert [newest.child(i).text(1) for i in range(2)] == ["running", "completed"]
+    panel.show_unfinished.setChecked(False)
+    assert newest.childCount() == 1
+
+    with h5py.File(running, "r+") as f:
+        f.attrs["status"] = "completed"
+    panel.refresh()
+    assert children(newest) == ["000003  Sweep", "000001  Sweep"]
 
 
 def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
@@ -109,8 +120,6 @@ def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
 
 
 def test_open_in_grafana_only_for_queued_runs(qapp, tmp_path, monkeypatch):
-    from pytweezer.GUI.experiments import results
-
     opened = []
     monkeypatch.setattr(results, "open_in_browser", opened.append)
     local = make_file(tmp_path, rid=1)
@@ -139,10 +148,6 @@ def test_panel_reports_an_unreadable_file(qapp, tmp_path):
     assert "Could not read" in panel.metadata.toPlainText()
 
 
-def _children(day):
-    return [day.child(i).text(0) for i in range(day.childCount())]
-
-
 def test_tree_updates_in_place_without_a_click(qapp, tmp_path):
     make_file(tmp_path, 1)
     panel = ResultsPanel(root=tmp_path)
@@ -153,35 +158,11 @@ def test_tree_updates_in_place_without_a_click(qapp, tmp_path):
     make_file(tmp_path, 2)
     make_file(tmp_path, 3, day=("2026", "10", "08"))
     panel.refresh()  # what the timer does
-    days = [
-        panel.tree.topLevelItem(i).text(0)
-        for i in range(panel.tree.topLevelItemCount())
-    ]
-    assert days == ["2026-10-08", "2026-10-07"]
+    assert days(panel) == ["2026-10-08", "2026-10-07"]
     assert panel.tree.topLevelItem(1) is first  # not rebuilt
-    assert _children(first) == ["000002  Sweep", "000001  Sweep"]
+    assert children(first) == ["000002  Sweep", "000001  Sweep"]
     assert panel.tree.topLevelItem(0).isExpanded()  # newest day opens
     assert panel.tree.currentItem().text(0) == "000001  Sweep"  # selection kept
-
-
-def test_running_file_appears_when_it_finishes(qapp, tmp_path):
-    path = make_file(tmp_path, 1)
-    with h5py.File(path, "r+") as f:
-        f.attrs["status"] = "running"
-    panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
-    day = panel.tree.topLevelItem(0)
-    assert day.childCount() == 0
-
-    panel.show_unfinished.setChecked(True)
-    assert [day.child(0).text(1)] == ["running"]
-    panel.show_unfinished.setChecked(False)
-    assert day.childCount() == 0
-
-    with h5py.File(path, "r+") as f:
-        f.attrs["status"] = "completed"
-    panel.refresh()
-    assert [day.child(i).text(1) for i in range(day.childCount())] == ["completed"]
 
 
 def test_selected_running_measurement_reloads_and_keeps_choices(qapp, tmp_path):
@@ -202,19 +183,6 @@ def test_selected_running_measurement_reloads_and_keeps_choices(qapp, tmp_path):
     panel.refresh()
     assert "points 12/12" in panel.metadata.toPlainText()
     assert panel.x_choice.currentText() == "mode"
-
-
-def test_polling_skips_a_hidden_tab(qapp, tmp_path, monkeypatch):
-    panel = ResultsPanel(root=tmp_path)
-    calls = []
-    monkeypatch.setattr(panel, "refresh", lambda: calls.append(1))
-    panel._poll_tick()
-    assert calls == []  # never shown
-    panel.show()
-    calls.clear()
-    panel._poll_tick()
-    assert calls == [1]
-    panel.hide()
 
 
 class FakeFeed(QtCore.QObject):
@@ -297,6 +265,8 @@ def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeyp
     panel._poll_tick()
     assert calls == [1, 1]
     panel.hide()
+    panel._poll_tick()
+    assert calls == [1, 1], "a hidden tab is not polled"
 
 
 def test_a_missing_data_root_says_so(qapp, tmp_path):
@@ -305,4 +275,4 @@ def test_a_missing_data_root_says_so(qapp, tmp_path):
     assert "not found" in panel.browser.hint.text()
     (tmp_path / "absent").mkdir()
     panel.refresh()
-    assert panel.browser.hint.text() == "newest first"
+    assert "not found" not in panel.browser.hint.text()

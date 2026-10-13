@@ -1,10 +1,20 @@
 from pytweezer.GUI.analysismanager import FilterTable, filter_state
 
 FILTERS = {
-    "Image/a": dict(
-        name="a", category="Image", script="a.py", active=True, streams=["s"]
-    ),
-    "Data/b": dict(name="b", category="Data", script="b.py", active=False, streams=[]),
+    "Image/a": {
+        "name": "a",
+        "category": "Image",
+        "script": "a.py",
+        "active": True,
+        "streams": ["s"],
+    },
+    "Data/b": {
+        "name": "b",
+        "category": "Data",
+        "script": "b.py",
+        "active": False,
+        "streams": [],
+    },
 }
 
 

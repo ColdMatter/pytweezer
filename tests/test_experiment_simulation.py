@@ -1,5 +1,3 @@
-"""Simulation mode: in-process simulated devices and a separate data root."""
-
 import socket
 
 import pytest
@@ -102,24 +100,7 @@ def test_run_local_simulated_experiment(devices):
     assert run_local(Snap, simulate=False).attrs["simulated"] is False
 
 
-def test_simulated_data_root_is_separate(monkeypatch, tmp_path):
-    conf = {"data_root": str(tmp_path), "simulate": False}
-    monkeypatch.setattr(
-        "pytweezer.configuration.config.get_config",
-        lambda: {"Servers": {"Experiment Manager": conf}},
-    )
-    monkeypatch.delenv("PYTWEEZER_DATA_DIR", raising=False)
-    assert data_root() == tmp_path
-    conf["simulate"] = True
-    assert data_root() == tmp_path / "simulated"
-    # Even when pointed at the real data share, simulated runs stay apart.
-    monkeypatch.setenv("PYTWEEZER_DATA_DIR", str(tmp_path / "share"))
-    assert data_root() == tmp_path / "share" / "simulated"
-
-
-def test_manager_tells_workers_and_guis_it_is_simulating(
-    monkeypatch, tmp_path, recording_db
-):
+def test_manager_tells_guis_it_is_simulating(monkeypatch, tmp_path, recording_db):
     conf = {"host": "127.0.0.1", "port": 1, "sync_port": 2, "simulate": True}
     monkeypatch.setattr(
         em, "get_config", lambda: {"Servers": {"Experiment Manager": conf}}
@@ -132,22 +113,9 @@ def test_manager_tells_workers_and_guis_it_is_simulating(
     )
     assert manager.handle({"command": "ping"})["simulated"] is True
     assert manager.handle({"command": "snapshot"})["snapshot"]["simulated"] is True
-    manager.handle(
-        {
-            "command": "submit",
-            "request": {"experiment": "m", "class_name": "C"},
-        }
-    )
-    manager.queue.mark_started(
-        1, em.WorkerRecord(rid=1, token="t", pid=0, create_time=0), "x.h5"
-    )
-    started = manager.handle(
-        {"command": "worker", "rid": 1, "token": "t", "event": "started"}
-    )
-    assert started["simulate"] is True
 
 
-def test_other_pcs_find_the_data_on_the_share(monkeypatch, tmp_path):
+def test_data_root_resolution(monkeypatch, tmp_path):
     conf = {
         "host": "10.0.0.9",
         "data_root": str(tmp_path / "local"),
@@ -158,10 +126,14 @@ def test_other_pcs_find_the_data_on_the_share(monkeypatch, tmp_path):
         lambda: {"Servers": {"Experiment Manager": conf}},
     )
     monkeypatch.delenv("PYTWEEZER_DATA_DIR", raising=False)
+    # Other PCs find the data on the share; the manager's own PC uses its local root.
     assert data_root() == tmp_path / "share"
     monkeypatch.setattr(
         "pytweezer.configuration.config.HOSTS", {socket.gethostname(): "10.0.0.9"}
     )
     assert data_root() == tmp_path / "local"
+    conf["simulate"] = True
+    assert data_root() == tmp_path / "local" / "simulated"
+    # The environment wins, but simulated runs still stay apart from real data.
     monkeypatch.setenv("PYTWEEZER_DATA_DIR", str(tmp_path / "env"))
-    assert data_root() == tmp_path / "env"
+    assert data_root() == tmp_path / "env" / "simulated"

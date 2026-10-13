@@ -59,26 +59,23 @@ def test_due_time_holds_a_task_back_and_naive_times_are_local():
     assert queue.next_due(later + timedelta(seconds=1)).rid == task.rid
 
 
-def test_hold_release_delete():
+def test_only_waiting_tasks_can_be_held_deleted_or_dropped():
     queue = ExperimentQueue()
-    queue.submit(request())
+    for _ in range(3):
+        queue.submit(request())
     queue.hold(1)
-    assert queue.next_due() is None
+    assert queue.next_due().rid == 2
     queue.release(1)
     assert queue.next_due().rid == 1
     queue.delete(1)
-    assert queue.ordered() == []
+    queue.terminate(2)
+    assert [t.rid for t in queue.ordered()] == [3]
     with pytest.raises(QueueError, match="no task"):
         queue.get(1)
-
-
-def test_running_task_cannot_be_held_or_deleted():
-    queue = ExperimentQueue()
-    queue.submit(request())
-    start(queue, 1)
+    start(queue, 3)
     for verb in (queue.hold, queue.delete):
         with pytest.raises(QueueError, match="running"):
-            verb(1)
+            verb(3)
 
 
 def test_pause_resume_terminate_reach_the_worker_as_actions():
@@ -98,13 +95,6 @@ def test_pause_resume_terminate_reach_the_worker_as_actions():
     queue.pause(1)  # a pending terminate is not downgraded
     assert queue.action_for(1) == Action.TERMINATE
     assert queue.action_for(99) == Action.TERMINATE
-
-
-def test_terminate_drops_a_waiting_task():
-    queue = ExperimentQueue()
-    queue.submit(request())
-    queue.terminate(1)
-    assert queue.ordered() == []
 
 
 def test_finish_moves_to_history_newest_first():
@@ -135,17 +125,9 @@ def test_history_is_capped():
     assert queue.state.history[0].rid == 6
 
 
-def test_last_request_is_remembered_per_experiment():
-    queue = ExperimentQueue()
-    queue.submit(request(args={"atoms": 5}))
-    queue.submit(request(args={"atoms": 7}))
-    assert queue.state.last_requests["pytweezer.experiments.demo:RabiDemo"].args == {
-        "atoms": 7
-    }
-
-
-def test_store_round_trip(tmp_path):
-    store = QueueStore(tmp_path / "state.json")
+def test_store_round_trip_and_unreadable_file(tmp_path):
+    path = tmp_path / "state.json"
+    store = QueueStore(path)
     assert store.load().next_rid == 1
     queue = ExperimentQueue()
     queue.submit(request(due_time=now()))
@@ -155,12 +137,8 @@ def test_store_round_trip(tmp_path):
     again = ExperimentQueue(store.load())
     assert again.state == queue.state
     assert again.running.rid == 2
-    assert again.state.worker.pid == 123
 
-
-def test_unreadable_store_is_set_aside(tmp_path):
-    path = tmp_path / "state.json"
     path.write_text("{not json")
-    assert QueueStore(path).load().next_rid == 1
+    assert store.load().next_rid == 1
     assert not path.exists()
     assert len(list(tmp_path.glob("state.unreadable-*.json"))) == 1

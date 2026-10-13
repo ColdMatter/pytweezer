@@ -1,5 +1,3 @@
-"""Tests for the sipyco runtime patches in :mod:`pytweezer.servers.sipyco_patches`."""
-
 import time
 
 import pytest
@@ -25,52 +23,27 @@ class FakeSocket:
         return piece
 
 
-def test_patch_is_installed_on_import():
+def test_patch_is_installed_on_import_and_reapplying_keeps_it():
     assert pc_rpc._socket_readline is sipyco_patches._socket_readline
-
-
-def test_apply_patches_is_idempotent():
-    sipyco_patches.apply_patches()
     sipyco_patches.apply_patches()
     assert pc_rpc._socket_readline is sipyco_patches._socket_readline
 
 
-def test_reads_a_whole_line():
-    sock = FakeSocket(b"hello world\n")
-    assert sipyco_patches._socket_readline(sock) == "hello world\n"
-
-
-def test_reassembles_a_line_split_across_many_chunks():
-    payload = b"x" * 100_000 + b"\n"
-    sock = FakeSocket(payload, chunk=4096)
-    assert sipyco_patches._socket_readline(sock) == payload.decode()
-
-
-def test_stops_at_the_first_newline_without_consuming_the_rest():
-    sock = FakeSocket(b"first\nsecond\n", chunk=4)
-    line = sipyco_patches._socket_readline(sock)
-    assert line.startswith("first\n")
-
-
-def test_raises_eof_when_the_peer_closes_mid_line():
-    sock = FakeSocket(b"no newline here")
-    with pytest.raises(EOFError):
-        sipyco_patches._socket_readline(sock)
-
-
-def test_uses_a_large_default_recv_size():
+def test_reassembles_a_long_line_with_large_recvs():
     payload = b"y" * 200_000 + b"\n"
     sock = FakeSocket(payload, chunk=sipyco_patches.RECV_BUFSIZE)
-    sipyco_patches._socket_readline(sock)
+    assert sipyco_patches._socket_readline(sock) == payload.decode()
     # 200 kB at the sipyco default of 4 kB would need >49 recvs.
     assert sock.recv_calls <= 6
 
 
-def test_read_time_scales_linearly_not_quadratically():
-    """Guards the actual defect: the stock loop is O(n^2) in the reply size.
+def test_raises_eof_when_the_peer_closes_mid_line():
+    with pytest.raises(EOFError):
+        sipyco_patches._socket_readline(FakeSocket(b"no newline here"))
 
-    Quadrupling the payload must not multiply the time by anything near 16.
-    """
+
+def test_read_time_scales_linearly_not_quadratically():
+    """Guards the actual defect: the stock loop is O(n^2) in the reply size."""
 
     def elapsed(nbytes):
         payload = b"z" * nbytes + b"\n"

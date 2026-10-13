@@ -9,6 +9,8 @@ import subprocess
 import sys
 import types
 
+import pytest
+
 from bin import launch
 
 PROBE = """
@@ -37,28 +39,22 @@ def probe(role=None, hostname=None):
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-def test_server_session_off_the_server_pc_simulates_everything():
-    state = probe(role="server", hostname="someones-laptop")
-    assert state == {
-        "simulating": True,
-        "forced": True,
-        "server_host": "127.0.0.1",
-        "manager_simulate": True,
-        "manager_host": "127.0.0.1",
-        "device_simulate": True,
-    }
-
-
-def test_server_session_on_the_server_pc_is_real():
-    state = probe(role="server", hostname="ph-beast")
-    assert not state["simulating"] and not state["forced"]
-    assert state["server_host"] == "10.59.3.1"
-
-
-def test_other_processes_follow_the_flag_only():
-    # e.g. pytweezer-client or a device server on a lab PC
-    state = probe(hostname="IC-CZC4287H3W")
-    assert not state["simulating"] and not state["forced"]
+@pytest.mark.parametrize(
+    "role, hostname, simulates",
+    [
+        ("server", "someones-laptop", True),
+        ("server", "ph-beast", False),
+        (None, "IC-CZC4287H3W", False),  # client / lab-PC device server
+    ],
+)
+def test_only_a_server_session_off_the_server_pc_simulates(role, hostname, simulates):
+    state = probe(role, hostname)
+    assert state["simulating"] is state["forced"] is simulates
+    if simulates:
+        assert state["manager_simulate"] and state["device_simulate"]
+        assert state["server_host"] == state["manager_host"] == "127.0.0.1"
+    else:
+        assert state["server_host"] != "127.0.0.1"
 
 
 def test_launcher_marks_the_session_before_the_gui_imports(monkeypatch):

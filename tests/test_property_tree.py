@@ -1,5 +1,3 @@
-"""Addressing and editing rules of the properties tree."""
-
 import pytest
 from sipyco.sync_struct import Notifier
 
@@ -30,18 +28,13 @@ def set_(tree, keys, value):
     apply_ops(tree, plan_set(tree, keys, value))
 
 
-def test_set_creates_missing_levels_and_copies_the_value():
-    tree = {}
+def test_set_creates_missing_levels_overwrites_leaves_and_copies_the_value():
+    tree = {"a": {"x": 1}}
     value = [1, 2]
     set_(tree, ["a", "b", "c"], value)
     value.append(3)
-    assert tree == {"a": {"b": {"c": [1, 2]}}}
-
-
-def test_set_overwrites_a_plain_leaf():
-    tree = {"a": {"x": 1}}
     set_(tree, ["a", "x"], {"replaced": True})
-    assert tree == {"a": {"x": {"replaced": True}}}
+    assert tree == {"a": {"b": {"c": [1, 2]}, "x": {"replaced": True}}}
 
 
 def test_option_property_only_accepts_its_options():

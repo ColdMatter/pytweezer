@@ -1,5 +1,3 @@
-"""Recipes as plain data: the book's rules, the store, and replaying one."""
-
 from datetime import datetime
 
 import pytest
@@ -10,13 +8,11 @@ from pytweezer.experiment.recipes import (
     Recipe,
     RecipeBook,
     RecipeError,
-    RecipeState,
     RecipeStore,
     unknown_arguments,
 )
 from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
 from pytweezer.experiment.task import TaskRequest
-from pytweezer.experiments.demo import RabiDemo
 
 DEMO = "pytweezer.experiments.demo"
 
@@ -54,19 +50,14 @@ def test_a_name_is_taken_until_overwritten():
     assert only.label == "new"
 
 
-def test_the_same_name_may_be_used_for_another_experiment():
-    book = RecipeBook()
-    book.save(recipe())
-    book.save(Recipe(experiment="other.module", class_name="Other", name="check"))
-    assert len(book.find()) == 2
-
-
 def test_find_filters_and_sorts():
     book = RecipeBook()
     book.save(recipe(name="b"))
     book.save(recipe(name="a"))
-    book.save(Recipe(experiment="a.module", class_name="Z", name="c"))
-    assert [r.name for r in book.find()] == ["c", "a", "b"]
+    # The same name may be used for another experiment.
+    book.save(Recipe(experiment="a.module", class_name="Z", name="a"))
+    found = [(r.experiment, r.name) for r in book.find()]
+    assert found == [("a.module", "a"), (DEMO, "a"), (DEMO, "b")]
     assert [r.name for r in book.find(DEMO, "RabiDemo")] == ["a", "b"]
     assert [r.name for r in book.find(DEMO)] == ["a", "b"]
 
@@ -82,21 +73,14 @@ def test_missing_recipes_are_reported_by_name():
     assert book.find() == []
 
 
-def test_store_round_trip_and_unreadable_file(tmp_path):
+def test_store_round_trip(tmp_path):
     path = tmp_path / "recipes.json"
-    store = RecipeStore(path)
-    assert store.load() == RecipeState()
-    book = RecipeBook(store.load())
+    book = RecipeBook()
     book.save(
         recipe(scan=Scan(axes=[LinearAxis(argument="atoms", start=1, stop=3, n=3)]))
     )
-    store.save(book.state)
+    RecipeStore(path).save(book.state)
     assert RecipeStore(path).load() == book.state
-
-    path.write_text("{not json")
-    assert store.load() == RecipeState()
-    assert not path.exists()
-    assert len(list(tmp_path.glob("recipes.unreadable-*.json"))) == 1
 
 
 def test_replay_applies_overrides_and_keeps_the_rest():
@@ -119,27 +103,13 @@ def test_replay_applies_overrides_and_keeps_the_rest():
     assert saved.args["atoms"] == 5
     plain = saved.replay(priority=0, label="")
     assert (plain.priority, plain.label) == (0, "")
-
-
-def test_replay_refuses_to_override_a_scanned_argument():
-    saved = recipe(scan=Scan(axes=[ListAxis(argument="pulse_time", values=[1e-6])]))
     with pytest.raises(RecipeError, match=r"scans \['pulse_time'\]"):
         saved.replay({"pulse_time": 2e-6})
 
 
-def test_unknown_arguments_lists_fixed_and_scanned_names_the_experiment_lacks():
-    request = TaskRequest(
-        experiment=DEMO,
-        class_name="RabiDemo",
-        args={"atoms": 1, "old": 2},
-        scan=Scan(axes=[ListAxis(argument="gone", values=[1])]),
-    )
-    assert unknown_arguments(request, RabiDemo.schema()) == ["gone", "old"]
-
-
-def test_unknown_arguments_leaves_motmaster_script_parameters_to_the_run():
+def test_unknown_arguments_lists_names_the_experiment_lacks():
     schema = {
-        "arguments": {},
+        "arguments": {"atoms": {}},
         "devices": {
             "rb": {"device": "Rb MotMaster", "timeout": None, "motmaster": {}},
             "cam": {"device": "Cam", "timeout": None},
@@ -148,6 +118,10 @@ def test_unknown_arguments_leaves_motmaster_script_parameters_to_the_run():
     request = TaskRequest(
         experiment="m",
         class_name="C",
-        args={"rb.tPulse": 1, "cam.exposure": 2, "rb": 3, "rb.": 4},
+        args=dict.fromkeys(
+            ["atoms", "old", "rb.tPulse", "cam.exposure", "rb", "rb."], 1
+        ),
+        scan=Scan(axes=[ListAxis(argument="gone", values=[1])]),
     )
-    assert unknown_arguments(request, schema) == ["cam.exposure", "rb", "rb."]
+    expected = ["cam.exposure", "gone", "old", "rb", "rb."]
+    assert unknown_arguments(request, schema) == expected

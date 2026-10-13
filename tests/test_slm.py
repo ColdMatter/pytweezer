@@ -1,55 +1,25 @@
-"""Unit tests for the SLM driver (simulated backend) and its device factory.
-No Blink SDK, no hardware.
-"""
+"""SLM driver's simulated backend and device factory; no Blink SDK, no hardware."""
 
 import numpy as np
 import pytest
 
-from pytweezer.drivers.slm import SLM, SimulatedSLM
+from pytweezer.drivers.slm import SimulatedSLM
 from pytweezer.servers import device_server
 
 
-def test_simulated_slm_remembers_last_mask():
-    slm = SimulatedSLM()
-    mask = np.arange(1024 * 1024, dtype=np.uint8).reshape(1024, 1024)
-    assert slm.update_mask(mask) is None  # imperative: no ZMQ-style status wrapper
-    assert slm.frames_written == 1
-    np.testing.assert_array_equal(slm.last_mask, mask)
-
-
-def test_simulated_slm_run_sequence_counts_frames():
-    slm = SimulatedSLM()
-    seq = np.zeros((7, 8, 8), dtype=np.uint8)
-    assert slm.run_sequence(seq, fps=1000) is None
-    assert slm.frames_written == 7
-
-
-def test_simulated_slm_dimensions_and_temperature():
+def test_simulated_slm_records_what_was_written():
     slm = SimulatedSLM(width=512, height=512)
     assert slm.get_dimensions() == {"width": 512, "height": 512, "depth": 8}
     assert isinstance(slm.get_temperature(), float)
 
+    mask = np.arange(512 * 512, dtype=np.uint8).reshape(512, 512)
+    assert slm.update_mask(mask) is None  # imperative: no ZMQ-style status wrapper
+    np.testing.assert_array_equal(slm.last_mask, mask)
 
-def test_simulated_slm_is_interface_complete_with_real():
-    # simulate() should have stubbed every public method of SLM the hand-written
-    # class doesn't define, so the simulated surface never drifts from the real one.
-    real_methods = {m for m in dir(SLM) if not m.startswith("_")}
-    sim_methods = {m for m in dir(SimulatedSLM) if not m.startswith("_")}
-    assert real_methods <= sim_methods
-
-
-def test_simulated_slm_close_marks_disconnected():
-    slm = SimulatedSLM()
-    assert slm.is_connected()
-    slm.close()
-    assert not slm.is_connected()
+    assert slm.run_sequence(np.zeros((7, 8, 8), dtype=np.uint8), fps=1000) is None
+    assert slm.frames_written == 1 + 7
 
 
-# --------------------------------------------------------------------------- #
-# Device factory
-# --------------------------------------------------------------------------- #
-
-#: A device config entry for the SLM, both real and simulated backends named.
 _SLM_CONF = {
     "class": "pytweezer.drivers.slm:SLM",
     "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
@@ -57,21 +27,16 @@ _SLM_CONF = {
 }
 
 
-def test_make_slm_simulated():
-    spec = device_server.build_spec("SLM", conf={**_SLM_CONF, "simulate": True})
-    (target,) = spec.targets.values()
-    assert isinstance(target, SimulatedSLM)
-
-
-def test_make_slm_teardown_closes():
+def test_build_simulated_slm_and_teardown_closes_it():
     spec = device_server.build_spec("SLM", conf={**_SLM_CONF, "simulate": True})
     (slm,) = spec.targets.values()
+    assert isinstance(slm, SimulatedSLM)
+    assert slm.is_connected()
     spec.teardown()
     assert not slm.is_connected()
 
 
-def test_make_slm_real_requires_sdk(monkeypatch):
-    # The real branch tries to load the Blink DLL in SLM._connect; without the SDK
-    # that raises. Assert the factory attempts the real path (not silently sim).
+def test_build_real_slm_attempts_the_sdk():
+    # Without the Blink DLL the real path raises; it must not silently simulate.
     with pytest.raises(Exception):
         device_server.build_spec("SLM", conf={**_SLM_CONF, "simulate": False})

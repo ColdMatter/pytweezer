@@ -41,12 +41,7 @@ def test_readings_round_trip(conn, writer):
 
     t0 = datetime(2026, 10, 7, 12, tzinfo=UTC)
     for i in range(3):
-        writer.write(
-            "laser",
-            {"power": i, "locked": True},
-            {"system": "Rb"},
-            t0 + timedelta(seconds=i),
-        )
+        writer.write("laser", {"power": i}, {"system": "Rb"}, t0 + timedelta(seconds=i))
     writer.write("laser", {"power": 99.0}, {"system": "CaF"}, t0)
     assert writer.flush(10)
 
@@ -54,25 +49,20 @@ def test_readings_round_trip(conn, writer):
     assert list(table["power"]) == [0.0, 1.0, 2.0]
 
 
-def test_run_upsert_keeps_one_row(conn, writer):
+def test_upserts_keep_one_row_per_key(conn, writer):
     writer.record_run({"rid": 1, "status": "running", "arguments": {"a": 1}})
     writer.record_run({"rid": 1, "status": "completed", "arguments": {"a": 2}})
-    assert writer.flush(10)
-
-    rows = conn.execute("SELECT status, arguments->>'a' FROM runs").fetchall()
-    assert rows == [("completed", "2")]
-
-
-def test_measurement_limits_are_queryable_per_field(conn, writer):
     writer.record_measurement("ni_adc", "NI ADC Logger", 1.0, {"ai0": [0, None]}, True)
     writer.record_measurement("ni_adc", "NI ADC Logger", 1.0, {"ai0": [0, 5]}, False)
     assert writer.flush(10)
 
-    rows = conn.execute(
+    runs = conn.execute("SELECT status, arguments->>'a' FROM runs").fetchall()
+    assert runs == [("completed", "2")]
+    limits = conn.execute(
         "SELECT m.active, l.key, (l.value->>0)::float, (l.value->>1)::float "
         "FROM measurements m, jsonb_each(m.limits) l"
     ).fetchall()
-    assert rows == [(False, "ai0", 0.0, 5.0)]
+    assert limits == [(False, "ai0", 0.0, 5.0)]
 
 
 def test_backfilled_run_joins_with_readings(conn, writer, tmp_path, monkeypatch):

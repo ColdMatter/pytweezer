@@ -144,7 +144,7 @@ surface:
 poetry run python .claude/skills/add-device-driver/scripts/check_device.py "Rb ThorLabs Camera"
 ```
 
-Then add the device to `SIM_CONFS` in `tests/test_simulated_devices.py` — that
+Then add the device to `SIM_CONFS` in `tests/test_simulate_decorator.py` — that
 test PYON-round-trips every simulated method's return value, catching an
 unserializable stub at test time rather than at the first live RPC call. Run:
 

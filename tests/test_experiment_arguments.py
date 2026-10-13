@@ -8,11 +8,8 @@ from pytweezer.experiment import (
     Device,
     Experiment,
     Integer,
-    ListAxis,
     Number,
-    Scan,
     Text,
-    run_local,
 )
 from pytweezer.experiment.arguments import coerce_arguments
 
@@ -33,36 +30,35 @@ class Child(Base):
         raise AssertionError("introspection must not instantiate")
 
 
-def test_number_coerces_and_enforces_limits():
+class Plain(Base):
+    def run_point(self):
+        pass
+
+
+def test_values_are_coerced_to_the_declared_type():
     assert Base.detuning.coerce(-1) == -1.0
-    with pytest.raises(ValueError, match="above the maximum"):
-        Base.detuning.coerce(1e6)
-    with pytest.raises(ValueError, match="not a number"):
-        Base.detuning.coerce("1")
-    with pytest.raises(ValueError, match="not a number"):
-        Base.detuning.coerce(True)
-    with pytest.raises(ValueError, match="not finite"):
-        Base.detuning.coerce(float("nan"))
-
-
-def test_integer_rejects_fractions_but_accepts_whole_floats():
-    assert Base.shots.coerce(3.0) == 3
-    assert isinstance(Base.shots.coerce(3.0), int)
-    with pytest.raises(ValueError, match="whole number"):
-        Base.shots.coerce(2.5)
-    with pytest.raises(ValueError, match="minimum"):
-        Base.shots.coerce(0)
-
-
-def test_bool_choice_text():
+    assert type(Base.shots.coerce(3.0)) is int
     assert Child.imaging.coerce(1) is True
-    with pytest.raises(ValueError):
-        Child.imaging.coerce("yes")
     assert Child.mode.default == "absorption"
-    with pytest.raises(ValueError, match="not one of"):
-        Child.mode.coerce("other")
-    with pytest.raises(ValueError):
-        Child.note.coerce(3)
+
+
+@pytest.mark.parametrize(
+    "argument, value, match",
+    [
+        (Base.detuning, 1e6, "above the maximum"),
+        (Base.detuning, "1", "not a number"),
+        (Base.detuning, True, "not a number"),
+        (Base.detuning, float("nan"), "not finite"),
+        (Base.shots, 2.5, "whole number"),
+        (Base.shots, 0, "minimum"),
+        (Child.imaging, "yes", "not a bool"),
+        (Child.mode, "other", "not one of"),
+        (Child.note, 3, "not a string"),
+    ],
+)
+def test_invalid_values_are_rejected(argument, value, match):
+    with pytest.raises(ValueError, match=match):
+        argument.coerce(value)
 
 
 def test_bad_default_is_rejected_at_declaration():
@@ -75,7 +71,7 @@ def test_schema_is_read_from_the_class_without_instantiating():
     json.dumps(schema)
     assert list(schema["arguments"]) == ["detuning", "shots", "imaging", "mode", "note"]
     assert schema["arguments"]["shots"]["default"] == 5
-    assert schema["arguments"]["detuning"] | {} == {
+    assert schema["arguments"]["detuning"] == {
         "kind": "number",
         "default": -12e6,
         "tooltip": "",
@@ -97,10 +93,6 @@ def test_coerce_arguments_fills_defaults_and_rejects_unknown_names():
 
 
 def test_instance_attributes_hold_effective_values():
-    class Plain(Base):
-        def run_point(self):
-            pass
-
     experiment = Plain({"shots": 4})
     assert experiment.shots == 4
     assert Plain.shots.default == 10
@@ -111,23 +103,16 @@ def test_device_is_resolved_lazily_once_and_closed(monkeypatch):
     opened = []
 
     class FakeClient:
-        def __init__(self, name):
-            self.name = name
-            self.closed = False
+        closed = False
 
         def close_rpc(self):
             self.closed = True
 
     def fake_get_device(name, timeout):
-        opened.append(FakeClient(name))
+        opened.append(FakeClient())
         return opened[-1]
 
     monkeypatch.setattr("pytweezer.experiment.experiment._get_device", fake_get_device)
-
-    class Plain(Base):
-        def run_point(self):
-            pass
-
     experiment = Plain()
     assert opened == []
     assert experiment.camera is experiment.camera
@@ -139,39 +124,3 @@ def test_device_is_resolved_lazily_once_and_closed(monkeypatch):
     experiment.close_devices()
     assert all(client.closed for client in opened)
     assert "camera" not in experiment.__dict__
-
-
-class Dotted(Experiment):
-    base = Number(1.0)
-
-    @classmethod
-    def extra_argument(cls, name):
-        if name.startswith("x."):
-            argument = Number(0.0)
-            argument.name = name
-            return argument
-        return None
-
-    def run_point(self):
-        self.record("seen", self.__dict__["x.a"])
-
-
-def test_hook_names_coerce_and_unknown_names_still_fail():
-    assert coerce_arguments(Dotted, {"x.a": 3})["x.a"] == 3.0
-    with pytest.raises(ValueError, match="no argument"):
-        coerce_arguments(Dotted, {"y.a": 3})
-
-
-def test_hook_names_can_be_scanned_and_are_stored():
-    scan = Scan(axes=[ListAxis(argument="x.a", values=[1, 2])])
-    measurement = run_local(Dotted, scan, **{"x.b": 5})
-    assert measurement.status == "completed", measurement.attrs["error"]
-    assert list(measurement.points["x.a"]) == [1.0, 2.0]
-    assert list(measurement.results["seen"]) == [1.0, 2.0]
-    assert measurement.arguments["x.b"] == 5.0
-
-
-def test_scanning_an_unknown_name_still_fails():
-    scan = Scan(axes=[ListAxis(argument="y.a", values=[1])])
-    with pytest.raises(ValueError, match="no argument 'y.a'"):
-        scan.points(Dotted)

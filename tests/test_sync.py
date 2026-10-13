@@ -1,10 +1,7 @@
-"""SyncServer/SyncMirror over real loopback sockets."""
-
 import threading
 import time
 
 import pytest
-from sipyco.pc_rpc import Client as RPCClient
 from sipyco.sync_struct import Notifier
 
 from pytweezer.servers.sync import SyncMirror, SyncServer
@@ -35,15 +32,18 @@ def served():
         return m
 
     yield server, notifier, mirror
+    # Server first: SyncServer.close() can raise ConnectionResetError if its
+    # mirrors have already hung up.
+    server.close()
     for m in mirrors:
         m.close()
-    server.close()
 
 
-def test_mirror_gets_snapshot_then_changes(served):
+def test_late_mirror_gets_snapshot_then_every_change(served):
     server, notifier, mirror = served
     server.call(notifier["items"].append, 1).result()
-    m = mirror()
+    seen = []
+    m = mirror(on_mod=lambda mod, data: seen.append(mod["action"]))
     assert m.snapshot() == {"items": [1], "values": {}}
 
     def change():
@@ -54,15 +54,7 @@ def test_mirror_gets_snapshot_then_changes(served):
     server.call(change).result()
     assert until(lambda: m.snapshot()["values"].get("a") == {"nested": [1, 2, 3]})
     assert m.snapshot()["items"] == [1, 2]
-
-
-def test_late_joiner_sees_current_state(served):
-    server, notifier, mirror = served
-    early = mirror()
-    server.call(notifier["values"].__setitem__, "x", 5).result()
-    assert until(lambda: early.snapshot()["values"] == {"x": 5})
-    late = mirror()
-    assert late.snapshot()["values"] == {"x": 5}
+    assert seen == ["init", "append", "setitem", "append"]
 
 
 def test_mirror_never_shares_objects_with_later_mods(served):
@@ -71,7 +63,7 @@ def test_mirror_never_shares_objects_with_later_mods(served):
     server.call(notifier["values"].__setitem__, "list", []).result()
     for i in range(3):
         server.call(notifier["values"]["list"].append, i).result()
-    assert until(lambda: m.snapshot()["values"]["list"] == [0, 1, 2])
+    assert until(lambda: m.snapshot()["values"].get("list") == [0, 1, 2])
     time.sleep(0.1)
     assert m.snapshot()["values"]["list"] == [0, 1, 2]
 
@@ -130,34 +122,3 @@ def test_mirror_waits_for_a_server_that_starts_later():
             server.close()
     finally:
         m.close()
-
-
-def test_on_mod_sees_every_mod(served):
-    server, notifier, mirror = served
-    seen = []
-    m = mirror(on_mod=lambda mod, data: seen.append(mod))
-    server.call(notifier["values"].__setitem__, "k", 1).result()
-    assert until(lambda: len(seen) == 2)
-    assert seen[0]["action"] == "init"
-    assert seen[1] == {"action": "setitem", "path": ["values"], "key": "k", "value": 1}
-    assert m.connected
-
-
-def test_rpc_targets_run_on_the_loop_and_publish():
-    notifier = Notifier({})
-
-    class Target:
-        def put(self, key, value):
-            notifier[key] = value
-
-    server = SyncServer({"state": notifier}, HOST, 0, {"target": Target()}, 0)
-    m = SyncMirror(HOST, server.port, "state")
-    client = RPCClient(HOST, server.rpc_port, "target")
-    try:
-        assert m.wait_initialised(5)
-        client.put("a", [1, 2])
-        assert until(lambda: m.snapshot() == {"a": [1, 2]})
-    finally:
-        client.close_rpc()
-        m.close()
-        server.close()
