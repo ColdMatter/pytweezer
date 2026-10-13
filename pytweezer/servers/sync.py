@@ -118,14 +118,27 @@ class SyncServer:
         self._closed = True
 
         async def stop():
-            await self._publisher.stop()
-            if self._rpc is not None:
-                await self._rpc.stop()
+            for server in (self._publisher, self._rpc):
+                if server is not None:
+                    await _stop_tolerating_resets(server)
 
         try:
             self._loop.submit(stop()).result(timeout=5)
         finally:
             self._loop.stop()
+
+
+async def _stop_tolerating_resets(server) -> None:
+    # sipyco's stop() cancels each client handler, but a handler whose peer has
+    # reset raises ConnectionResetError from its cleanup instead, which aborts
+    # stop() before the listening socket closes. Each retry gets past one such
+    # client (it is then done and forgotten), so this terminates.
+    while True:
+        try:
+            await server.stop()
+            return
+        except ConnectionError:
+            continue
 
 
 def _bound_port(server) -> int:
