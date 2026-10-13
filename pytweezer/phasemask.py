@@ -1917,7 +1917,7 @@ class OptimisationBasedPhasemaskGeneratorGPU3D:
         frame = self.transform_phase_8bit(composite_pm)
         yield frame.get() if to_host else frame
 
-    def iter_transport_sequence_3D(self, terms1, terms2, d0=0.5, d0_z=None,
+    def iter_transport_sequence(self, terms1, terms2, d0=0.5, d0_z=None,
                                 profile="minimum_jerk", path_fn=linear_path,
                                 step_norm="max", to_host=True,
                                 refine_iters=0, refine_damping=0.5,

@@ -28,11 +28,11 @@
     "emccd_parameters": {
         "em_gain": 600,
         "conversion_factor": 0.009508957628343926,
-        "conversion_offset": 1916.9132080078125
+        "conversion_offset": 1916.911865234375
     },
     "image_analysis": {
-        "x_centre": 130.97041420118344,
-        "y_centre": 129.19526627218934,
+        "x_centre": 131.28402366863907,
+        "y_centre": 128.97041420118344,
         "orcacam_mm_per_px": 0.007934071518766623,
         "thorcam_mm_per_px": 0.005130761086566129
     }
