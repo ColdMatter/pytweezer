@@ -201,7 +201,7 @@ CONFIG = {
             "devices": {
                 "Rb HamCam": {
                     "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
-                    "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
+                    "sim_class": "pytweezer.drivers.imagemX2:SimulatedTweezerArrayCamera",
                     "role": "camera",
                     "stream_name": "rb_hamcam",
                     "timeout": 20.0,

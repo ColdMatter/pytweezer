@@ -781,6 +781,40 @@ class MotMasterInterface:
 SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
     "RbTweezerBasic": {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5, "nShots": 1},
     "CaFTweezerLoad": {"tLoad": 100, "bTop": 0.5, "tHold": 10e-3},
+    "RbTweezerBasic2026_2": {
+        **dict.fromkeys(
+            [
+                "tMOTLoadRepVCO",
+                "tMOTLoadCoolVCO",
+                "tMOTLoadRepVVA",
+                "tMOTLoadCoolVVA",
+                "tMolCoolVCO1",
+                "tMolRepVCO1",
+                "tMolCoolVVA1",
+                "tMolRepVVA1",
+                "tMolCoolVCO2",
+                "tMolRepVCO2",
+                "tMolCoolVVA2",
+                "tMolRepVVA2",
+                "tImgCoolVCO1",
+                "tImgCoolVVA1",
+                "tImgCoolVCO2",
+                "tImgCoolVVA2",
+                "tMOTShimXccValue",
+                "tMOTShimYccValue",
+                "tMOTShimZccValue",
+                "tMolassesShimXccValue",
+                "tMolassesShimYccValue",
+                "tMolassesShimZccValue",
+                "tTweezerSetVVA0",
+                "tTweezerSetVVA1",
+            ],
+            0.0,
+        ),
+        "BackgroundDrop": 0,
+        "tDelay2": 100,
+        "tDropDuration": 4,
+    },
 }
 _SIMULATED_FALLBACK = {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5}
 

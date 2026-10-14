@@ -29,6 +29,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from functools import wraps
+from typing import Any
 
 import numpy as np
 import tifffile as tiff
@@ -274,7 +275,9 @@ class SimulatedCamera(Camera):
         return np.stack([self._generate_frame() for _ in range(count)], axis=0)
 
 
-def simulated_camera_for(real_cls: type) -> type:
+def simulated_camera_for(
+    real_cls: type, defaults: dict[str, Any] | None = None
+) -> type:
     """Return a :class:`SimulatedCamera` subclass tailored to ``real_cls``.
 
     The returned class has the full generic simulated behaviour, plus a
@@ -282,10 +285,11 @@ def simulated_camera_for(real_cls: type) -> type:
     :class:`Camera` interface (e.g. a driver's EM-gain setters), courtesy of
     :func:`~pytweezer.servers.simulated_device.simulate`. This keeps the
     simulated surface interface-complete with the real driver without any
-    hand-written per-driver simulated class.
+    hand-written per-driver simulated class. ``defaults`` gives stubs a return
+    value, as for :func:`~pytweezer.servers.simulated_device.simulate`.
     """
 
-    @simulate(real_cls)
+    @simulate(real_cls, defaults=defaults)
     class _Simulated(SimulatedCamera):
         pass
 
