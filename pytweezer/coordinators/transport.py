@@ -244,8 +244,12 @@ class Transport(Coordinator):
         init_refine_damping: float = 0.35,
         detector=None,
         path_fn: str = "linear",
+        d0_transport: float = 0.0,
+        d0_z_transport: float = 0.0,
         step_norm: str = "max",
-        d_lift: np.ndarray = np.zeros(3, dtype=np.float32)
+        d_lift: np.ndarray = np.zeros(3, dtype=np.float32),
+        smooth_corners: bool = True,
+        only_moving: bool = True
     ) -> None:
 
         self._require_gpu()
@@ -278,10 +282,12 @@ class Transport(Coordinator):
             window_size=window_size, 
             feature_size=feature_size,
             profile=profile, 
+            d0_transport=d0_transport, d0_z_transport=d0_z_transport,
             path_fn=path_fn,
             d_lift=d_lift,
             detector=detector,
-
+            smooth_corners=smooth_corners,
+            only_moving=only_moving
         )
         self._initialised = True
         if detector is not None:
@@ -441,14 +447,14 @@ class Transport(Coordinator):
         if s["path_fn"] == "linear":
             path = linear_path
         elif s["path_fn"] == "lift":
-            path = lift_path(s["d_lift"], smooth_corners=True, only_moving=True)
+            path = lift_path(s["d_lift"], smooth_corners=s["smooth_corners"], only_moving=s["only_moving"])
         else:
             raise ValueError("Invalid path function.")
         
         print("Transporting...")
         frames = PM.iter_transport_sequence(
             s["terms2"], s["terms3"],
-            d0=s["d0"], d0_z=s["d0_z"], step_norm=s["step_norm"],
+            d0=s["d0_transport"], d0_z=s["d0_z_transport"], step_norm=s["step_norm"],
             path_fn=path,
             profile=s.get("profile", "minimum_jerk"),
             refine_iters=s["refine_iters"], refine_damping=s["refine_damping"],
@@ -456,6 +462,7 @@ class Transport(Coordinator):
             to_host=False,
         )
         n_frames1 = self._play_sequence_pipelined(frames)
+        
         t5 = time.perf_counter()
 
         print("Transport complete.")
