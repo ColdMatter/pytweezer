@@ -19,6 +19,12 @@ Control software for an atom-tweezer experiment (Rb and CaF systems). PyQt6 GUIs
 ZMQ messaging, and sipyco RPC servers coordinate device drivers (cameras,
 MotMaster experiment sequencers) across the lab PCs.
 
+## important branches
+
+exp-handler is the branch developing a full device server and experiment handler, based on artiq, balic, and sipyco. it is in active development. docs are descriptive, not proscriptive. 
+
+rearrangement-optimisation-RnD is a stripped-down branch for optimisation of tweezer control with an SLM. 
+
 ## Commands
 
 This project uses Poetry.
