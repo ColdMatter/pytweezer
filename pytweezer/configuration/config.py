@@ -3,7 +3,7 @@ import socket
 
 HOSTS = {
     "PH-BEAST": "10.59.3.1",
-    "IC-CZC4287H3W": "10.59.3.2",  # rb pc
+    "IC-CZC221CCHS": "10.59.3.2",  # rb pc
     "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
 }
@@ -141,7 +141,7 @@ CONFIG = {
             "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
             "config_file": "rb_mm_config.json",
-            "host": HOSTS["IC-CZC4287H3W"],
+            "host": HOSTS["IC-CZC221CCHS"],
             "port": get_next_port(),
             "simulate": SIMULATING,
         },
