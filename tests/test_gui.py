@@ -15,6 +15,16 @@ def test_devices_panel_check_host_is_case_and_whitespace_insensitive():
     assert panel.check_host(None) is False
 
 
+def test_this_pc_address_ignores_hostname_case(monkeypatch):
+    from pytweezer.configuration import config
+
+    monkeypatch.setattr(config, "HOSTS", {"IC-CZC4287H3W": "10.59.3.2"})
+    monkeypatch.setattr(config.socket, "gethostname", lambda: "ic-czc4287h3w")
+    assert config.this_pc_address() == "10.59.3.2"
+    monkeypatch.setattr(config.socket, "gethostname", lambda: "elsewhere")
+    assert config.this_pc_address() is None
+
+
 def test_bwidget_constructs_headless_without_property_hub(qapp):
     from pytweezer.GUI.pytweezerQt import BWidget
 

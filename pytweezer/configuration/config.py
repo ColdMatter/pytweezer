@@ -276,3 +276,15 @@ def get_config():
     Tests monkeypatch this (per importing module) to inject a fake config.
     """
     return CONFIG
+
+
+def this_pc_address():
+    """Return this PC's ``HOSTS`` address, or None if it is not listed.
+
+    Windows reports hostnames in whatever case it likes, so the match ignores case.
+    """
+    hostname = socket.gethostname().lower()
+    return next(
+        (address for name, address in HOSTS.items() if name.lower() == hostname),
+        None,
+    )
