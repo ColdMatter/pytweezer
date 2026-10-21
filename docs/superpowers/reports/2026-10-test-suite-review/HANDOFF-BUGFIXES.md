@@ -4,6 +4,21 @@ Written 2026-10-21 at the end of the session that worked through
 `NEXT-STEPS.md` (in this folder). Read that file first for the rules this work
 followed; this note says where it ended up.
 
+## Status, end of 2026-10-21
+
+- **The urgent bug fixes are merged into `exp-handler`** (#12, #10, #13–#17),
+  each with its regression test. The suite there passes.
+- **The full test rework is on hold, at the user's request.** Data recording
+  was reworked in #18, which was then closed unmerged; its branch
+  `rework-data-recording-tests` is kept in case the rework resumes. No other
+  area was started.
+- **The 62 suspected bugs not yet fixed** are listed in
+  `docs/notes/suspected_bugs.md` (#19).
+- **Test-only PRs are squash-merged** from now on, so `exp-handler`'s history
+  isn't flooded with test commits.
+
+The rest of this note describes the state before the merges.
+
 ## Where things stand
 
 **Every item on the urgent list is fixed, tested and pushed.** Nothing is
