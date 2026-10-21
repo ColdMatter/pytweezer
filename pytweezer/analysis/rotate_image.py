@@ -1,6 +1,6 @@
 import argparse
 
-import imutils
+import cv2
 import numpy as np
 
 from pytweezer.servers import *
@@ -26,7 +26,11 @@ class ImageRotate:
                 msgstr, head, img = msg
 
                 # rotate the image
-                img_rot = imutils.rotate(img, self._angle)
+                height, width = img.shape[:2]
+                rotation = cv2.getRotationMatrix2D(
+                    (width // 2, height // 2), self._angle, 1.0
+                )
+                img_rot = cv2.warpAffine(img, rotation, (width, height))
 
                 # rotate the coordinate system
                 offsetx, offsety = head["_offset"]
