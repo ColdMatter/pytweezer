@@ -338,7 +338,7 @@ def test_a_failing_rpc_call_is_logged_on_the_device_server_and_still_raised(capl
             raise ValueError("bad value")
 
     loop = asyncio.new_event_loop()
-    server = device_server.LoggingServer("Cam", {"cam": Backend()}, None, True)
+    server = device_server.RPCServer("Cam", {"cam": Backend()}, None, True)
     loop.run_until_complete(server.start("127.0.0.1", 0))
     port = server.server.sockets[0].getsockname()[1]
     thread = threading.Thread(target=loop.run_forever, daemon=True)

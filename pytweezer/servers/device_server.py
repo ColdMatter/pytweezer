@@ -98,12 +98,13 @@ class DeviceServerSpec:
 # --------------------------------------------------------------------------- #
 
 
-class LoggingServer(Server):
-    """A sipyco ``Server`` that logs every RPC call that raises.
+class RPCServer(Server):
+    """The sipyco RPC server every device is served by.
 
-    sipyco sends a failing call's exception back to the caller and records
-    nothing, so without this an error seen in a notebook leaves no trace in the
-    device's own log.
+    It differs from sipyco's ``Server`` in one way: a call that raises is also
+    logged here, with its traceback, before the exception goes back to the
+    caller. sipyco alone records nothing, so an error seen in a notebook would
+    leave no trace in the device's own log.
     """
 
     def __init__(self, device_name, targets, *args, **kwargs):
@@ -133,16 +134,14 @@ def _short_call_args(obj):
 
 
 def serve(device_name, targets, host, port, description=None, allow_parallel=False):
-    """``sipyco.pc_rpc.simple_server_loop``, serving with :class:`LoggingServer`."""
+    """``sipyco.pc_rpc.simple_server_loop``, serving with :class:`RPCServer`."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         signal_handler = SignalHandler()
         signal_handler.setup()
         try:
-            server = LoggingServer(
-                device_name, targets, description, True, allow_parallel
-            )
+            server = RPCServer(device_name, targets, description, True, allow_parallel)
             loop.run_until_complete(server.start(host, port))
             try:
                 _, pending = loop.run_until_complete(

@@ -29,7 +29,7 @@ cam.close_rpc()
 ```
 
 A call that raises comes back to the caller as the same exception, and the
-device server also logs it with its traceback (`LoggingServer` in
+device server also logs it with its traceback (`RPCServer` in
 `device_server.py`). Plain sipyco would only send it back. A method name
 the server doesn't serve fails in the client (`AttributeError`) and never
 reaches the server, so it leaves no server log.
