@@ -760,6 +760,24 @@ def convert_counts_to_photons(counts):
     return photons_array
 
 
+def _fixed_threshold_fidelity(photons, threshold):
+    """``(fidelity, mu_bg, var_bg, mu_sig, var_sig)`` for ``photons`` split at ``threshold``.
+
+    Each side is taken as a Gaussian, weighted by the fraction of shots on that side.
+    """
+    background = photons[photons < threshold]
+    signal = photons[photons >= threshold]
+    mu_bg, var_bg = background.mean(), background.var()
+    mu_sig, var_sig = signal.mean(), signal.var()
+    prob_false_positive = 1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg))
+    prob_false_negative = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig))
+    weight_bg = len(background) / len(photons)
+    total_error = (
+        weight_bg * prob_false_positive + (1 - weight_bg) * prob_false_negative
+    )
+    return 1 - total_error, mu_bg, var_bg, mu_sig, var_sig
+
+
 def get_array_loading_statistics_grid(
     images,
     grid_positions,
@@ -830,29 +848,23 @@ def get_array_loading_statistics_grid(
                 f"Threshold detection failed: {e}. Trying default threshold of {threshold:.2f} kHz."
             )
             try:
-                mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
-                mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
-                var_bg = tot_photon_array[tot_photon_array < threshold].var()
-                var_sig = tot_photon_array[tot_photon_array >= threshold].var()
-                fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (
-                    1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg))
+                fidelity, mu_bg, var_bg, mu_sig, var_sig = _fixed_threshold_fidelity(
+                    tot_photon_array, threshold
                 )
             except Exception as e:
                 print(
-                    f"Fallback threshold calculation failed: {e}. Setting fidelity to 0."
+                    f"Fallback threshold calculation failed: {e}. Setting fidelity to NaN."
                 )
                 fidelity = np.nan
     else:
         try:
-            mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
-            mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
-            var_bg = tot_photon_array[tot_photon_array < threshold].var()
-            var_sig = tot_photon_array[tot_photon_array >= threshold].var()
-            fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (
-                1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg))
+            fidelity, mu_bg, var_bg, mu_sig, var_sig = _fixed_threshold_fidelity(
+                tot_photon_array, threshold
             )
         except Exception as e:
-            print(f"Fallback threshold calculation failed: {e}. Setting fidelity to 0.")
+            print(
+                f"Fallback threshold calculation failed: {e}. Setting fidelity to NaN."
+            )
             fidelity = np.nan
 
     # Atom counting and loading probabilities
@@ -997,29 +1009,23 @@ def get_array_loading_statistics(
                 f"Threshold detection failed: {e}. Trying default threshold of {threshold:.2f} kHz."
             )
             try:
-                mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
-                mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
-                var_bg = tot_photon_array[tot_photon_array < threshold].var()
-                var_sig = tot_photon_array[tot_photon_array >= threshold].var()
-                fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (
-                    1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg))
+                fidelity, mu_bg, var_bg, mu_sig, var_sig = _fixed_threshold_fidelity(
+                    tot_photon_array, threshold
                 )
             except Exception as e:
                 print(
-                    f"Fallback threshold calculation failed: {e}. Setting fidelity to 0."
+                    f"Fallback threshold calculation failed: {e}. Setting fidelity to NaN."
                 )
                 fidelity = np.nan
     else:
         try:
-            mu_bg = tot_photon_array[tot_photon_array < threshold].mean()
-            mu_sig = tot_photon_array[tot_photon_array >= threshold].mean()
-            var_bg = tot_photon_array[tot_photon_array < threshold].var()
-            var_sig = tot_photon_array[tot_photon_array >= threshold].var()
-            fidelity = norm.cdf((threshold - mu_sig) / np.sqrt(var_sig)) + (
-                1 - norm.cdf((threshold - mu_bg) / np.sqrt(var_bg))
+            fidelity, mu_bg, var_bg, mu_sig, var_sig = _fixed_threshold_fidelity(
+                tot_photon_array, threshold
             )
         except Exception as e:
-            print(f"Fallback threshold calculation failed: {e}. Setting fidelity to 0.")
+            print(
+                f"Fallback threshold calculation failed: {e}. Setting fidelity to NaN."
+            )
             fidelity = np.nan
 
     # Atom counting and loading probabilities
