@@ -43,6 +43,16 @@ def test_backfill_records_queued_runs_and_skips_local_runs_and_unreadable_files(
     assert [p["scalars"] for p in points] == [{"counts": 0.0}, {}, {"counts": 20.0}]
 
 
+def test_backfill_skips_simulated_runs_that_share_a_real_rid(tmp_path, recording_db):
+    real = "2026/10/21/000005_Sweep.h5"
+    write_run(tmp_path / real, rid=5)
+    write_run(tmp_path / "simulated" / real, rid=5)
+
+    assert backfill(tmp_path, writer=recording_db) == 1
+    assert [run["h5_path"] for run in recording_db.runs] == [real]
+    assert len(recording_db.points) == 3
+
+
 def test_points_with_readings_joins_by_point_window(tmp_path, monkeypatch):
     path = write_run(tmp_path / "m.h5")
     t_start = load_measurement(path).points["t_start"]

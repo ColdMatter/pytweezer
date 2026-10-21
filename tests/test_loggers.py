@@ -52,6 +52,12 @@ def test_ni_adc_reads_one_storable_point_per_cycle(ni_logger):
     assert tags == {"system": "Rb"}
 
 
+def test_ni_adc_channels_sharing_a_short_name_keep_their_full_names(build):
+    conf = {**NI_CONF, "channels": ["Dev1/ai0", "Dev2/ai0", "Dev1/ai1"]}
+    ((_measurement, fields, _tags),) = build(NIADCLogger, conf).read()
+    assert set(fields) == {"Dev1/ai0", "Dev2/ai0", "ai1"}
+
+
 def test_ni_adc_without_channels_reads_nothing_rather_than_failing(build):
     assert build(NIADCLogger, {}).read() is None
 

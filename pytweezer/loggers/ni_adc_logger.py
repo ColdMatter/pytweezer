@@ -39,6 +39,15 @@ def _short_name(channel):
     return channel.rsplit("/", 1)[-1]
 
 
+def _field_names(channels):
+    """Each channel's short name, or its full name where two channels share one."""
+    short = [_short_name(channel) for channel in channels]
+    return [
+        name if short.count(name) == 1 else channel
+        for channel, name in zip(channels, short)
+    ]
+
+
 class NIADCLogger(Logger):
     """Read analog-input voltages off an NI DAQ and log them as one measurement."""
 
@@ -76,7 +85,7 @@ class NIADCLogger(Logger):
             # nidaqmx returns a bare float for a single channel, else a list.
             values = raw if isinstance(raw, (list, tuple)) else [raw]
 
-        fields = {_short_name(ch): v for ch, v in zip(self.channels, values)}
+        fields = dict(zip(_field_names(self.channels), values))
         return [(self.measurement, fields, self.tags)]
 
     def _simulated_values(self):

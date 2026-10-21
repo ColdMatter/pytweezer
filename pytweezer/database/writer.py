@@ -19,15 +19,20 @@ Driver usage (own writer instance)::
 Writes **never raise and never block**: each call queues rows for a background
 thread, which batches them into the database. While the database is unreachable
 rows are held (oldest dropped beyond ``max_pending``) and retried with backoff,
-so neither a notebook cell nor the Experiment Manager's loop waits on it.
+so neither a notebook cell nor the Experiment Manager's loop waits on it. A row
+the database itself rejects (text containing NUL, say) is dropped with a
+warning, so it cannot hold up the rows behind it.
 """
 
 import atexit
 import json
+import math
 import threading
 from collections import deque
 from datetime import UTC, datetime
 from numbers import Real
+
+import numpy as np
 
 from pytweezer.configuration.config import DATABASE
 from pytweezer.database.schema import ensure_schema
@@ -95,8 +100,8 @@ def _coerce_fields(fields):
     """
     clean = {}
     for key, value in fields.items():
-        if isinstance(value, bool):
-            clean[key] = value
+        if isinstance(value, (bool, np.bool_)):
+            clean[key] = bool(value)
         elif isinstance(value, Real):
             clean[key] = float(value)
         else:
@@ -104,15 +109,26 @@ def _coerce_fields(fields):
     return clean
 
 
-def _json_default(value):
+def _finite(value):
+    """``value`` as plain JSON types, with NaN and infinity as None.
+
+    jsonb has no NaN or infinity, and one such row would fail its whole batch
+    on every retry.
+    """
     # numpy scalars and arrays, as read back from h5 files
     if hasattr(value, "tolist"):
-        return value.tolist()
-    return str(value)
+        value = value.tolist()
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _finite(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(item) for item in value]
+    return value
 
 
 def _json(value):
-    return json.dumps(value or {}, default=_json_default)
+    return json.dumps(_finite(value or {}), default=str)
 
 
 def _timestamp(value):
@@ -304,10 +320,11 @@ class DBWriter:
                 self._pending.clear()
                 self._in_flight = len(batch)
                 closing = self._closing
-            ok = self._send(batch) if batch else True
+            unsent = self._send(batch) if batch else []
+            ok = not unsent
             with self._cond:
-                if not ok:
-                    self._pending.extendleft(reversed(batch))
+                if unsent:
+                    self._pending.extendleft(reversed(unsent))
                     self._trim()
                 self._in_flight = 0
                 self._hurry = False
@@ -329,24 +346,46 @@ class DBWriter:
         return conn
 
     def _send(self, batch):
-        by_table = {}
-        for table, row in batch:
-            by_table.setdefault(table, []).append(row)
+        """Write ``batch``; returns the rows still to be written (none on success)."""
+        from psycopg import DataError, IntegrityError
+
+        rejected = (DataError, IntegrityError)
+        done = 0  # rows of ``batch`` written or dropped
         try:
             conn = self._ensure_connected()
-            with conn.transaction(), conn.cursor() as cursor:
-                for table, rows in by_table.items():
-                    cursor.executemany(SQL[table], rows)
+            try:
+                self._write(conn, batch)
+            except rejected:
+                # The data, not the connection, is at fault: write the rows one
+                # at a time and drop only those the database refuses.
+                for table, row in batch:
+                    try:
+                        self._write(conn, [(table, row)])
+                    except rejected as exc:
+                        logger.warning(
+                            "Dropped a %s row the database rejected: %s", table, exc
+                        )
+                    done += 1
         except Exception as exc:
             if not self._failed:
                 logger.warning("Database write failed (%s): %s", self.dsn_host, exc)
                 self._failed = True
             self._disconnect()
-            return False
+            return batch[done:]
         if self._failed:
             logger.info("Database writes resumed (%s)", self.dsn_host)
             self._failed = False
-        return True
+        return []
+
+    @staticmethod
+    def _write(conn, rows):
+        """Write ``rows`` in one transaction: all of them or none."""
+        by_table = {}
+        for table, row in rows:
+            by_table.setdefault(table, []).append(row)
+        with conn.transaction(), conn.cursor() as cursor:
+            for table, table_rows in by_table.items():
+                cursor.executemany(SQL[table], table_rows)
 
     def _disconnect(self):
         conn, self._conn = self._conn, None
@@ -359,10 +398,14 @@ class DBWriter:
     @property
     def dsn_host(self):
         """The DSN with any password removed, for log messages."""
-        if "@" in self.dsn:
-            scheme, _, rest = self.dsn.partition("://")
-            return f"{scheme}://{rest.rpartition('@')[2]}"
-        return self.dsn
+        from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+        try:
+            params = conninfo_to_dict(self.dsn)
+        except Exception:
+            return "<unparseable DSN>"
+        params.pop("password", None)
+        return make_conninfo(**params)
 
 
 _default_writer = None

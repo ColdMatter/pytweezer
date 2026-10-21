@@ -5,6 +5,7 @@ import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
+import numpy as np
 import pytest
 
 from pytweezer.database import writer as writer_module
@@ -103,6 +104,17 @@ def test_write_makes_a_row_per_numeric_field_sharing_one_timestamp(db, writer):
     assert json.loads(rows[0][4]) == {"n": "2"}
 
 
+@pytest.mark.parametrize(
+    "value, stored",
+    [(np.bool_(True), 1.0), (np.float32(0.5), 0.5), (np.int64(3), 3.0)],
+    ids=["bool", "float32", "int64"],
+)
+def test_numpy_scalar_fields_are_written(db, writer, value, stored):
+    writer.write("laser", {"field": value})
+    assert writer.flush(2)
+    assert [row[3] for row in db.sent["readings"]] == [stored]
+
+
 def test_records_convert_times_and_json(db, writer):
     writer.record_run(
         {
@@ -165,8 +177,19 @@ def test_backlog_beyond_max_pending_drops_the_oldest():
     writer.close(timeout=5)
 
 
-def test_log_messages_hide_the_password(writer):
-    assert writer.dsn_host == "postgresql://db:5432/x"
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql://u:secret@db:5432/x",
+        "host=db port=5432 password=secret dbname=x",
+        "host=db password='secret' dbname=x",
+    ],
+    ids=["url", "key-value", "quoted"],
+)
+def test_log_messages_hide_the_password(dsn):
+    dsn_host = DBWriter(dsn).dsn_host
+    assert "secret" not in dsn_host
+    assert "db" in dsn_host
 
 
 def test_a_failed_schema_setup_is_retried_on_a_fresh_connection(

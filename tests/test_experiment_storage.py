@@ -82,6 +82,20 @@ def test_missing_values_are_flagged_and_float_gaps_are_nan():
     writer.close()
 
 
+def test_complex_results_read_back_with_nan_gaps():
+    points, writer = make_writer()
+    for point in points:
+        writer.begin_point(point)
+        if point.index != 1:
+            writer.record("amplitude", complex(point.index, -0.5))
+        writer.end_point()
+    amplitude = load_measurement(writer.file).results["amplitude"]
+    assert amplitude[0] == complex(0, -0.5)
+    assert np.isnan(amplitude[1].real) and np.isnan(amplitude[1].imag)
+    assert amplitude[2] == complex(2, -0.5)
+    writer.close()
+
+
 def test_a_result_keeps_its_first_shape_and_dtype():
     points, writer = make_writer()
     writer.begin_point(points[0])
@@ -117,6 +131,24 @@ def test_strings_dicts_and_constants():
     assert measurement.results["meta"] == [{"a": 1}]
     with pytest.raises(RecordError, match="already recorded"):
         writer.record("reference", 1)
+    writer.close()
+
+
+@pytest.mark.parametrize(
+    "first, second",
+    [({"a": 1}, "plain"), ("plain", {"a": 1})],
+    ids=["dict-str", "str-dict"],
+)
+def test_a_text_result_cannot_switch_between_string_and_dict(first, second):
+    points, writer = make_writer()
+    writer.begin_point(points[0])
+    writer.record("note", first)
+    writer.end_point()
+    writer.begin_point(points[1])
+    with pytest.raises(RecordError, match="note"):
+        writer.record("note", second)
+    writer.end_point()
+    assert load_measurement(writer.file).results["note"] == [first, None]
     writer.close()
 
 
