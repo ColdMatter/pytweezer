@@ -139,5 +139,6 @@ Load a skill when you need more than that:
 | Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Running or screenshotting the GUI | `run-pytweezer` |
+| Writing, reviewing or deleting tests | `write-tests` |
 
 Each skill is self-contained; there is no separate long-form documentation.
