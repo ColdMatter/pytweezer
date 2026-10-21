@@ -12,6 +12,7 @@ from pytweezer.drivers.camera_base import (
     requires_camera,
     simulated_camera_for,
 )
+from pytweezer.drivers.hamamatsu import find_dcam_index
 from pytweezer.logging_utils import get_logger
 
 IMAGE_DIRECTORY = (
@@ -24,16 +25,24 @@ LOGGER = get_logger("imagemx2")
 class ImagEMX2Camera(Camera):
     """dcam shim: translates the generic :class:`Camera` interface to the
     Hamamatsu ImagEM X2's pylablib DCAM driver, plus the EM-gain/sensitivity
-    controls specific to this camera."""
+    controls specific to this camera.
+
+    Args:
+        serial_number: DCAM serial number of the camera to open (e.g. ``"000407"``).
+            If None, the only connected ImagEM X2 is opened.
+    """
 
     image_prefix = "HamTweezer"
+    model_prefix = "C9100"
 
     def __init__(
         self,
         image_dir: str | None = None,
         timeout: float = 20.0,
         stream_name: str | None = None,
+        serial_number: str | None = None,
     ):
+        self.serial_number = serial_number
         super().__init__(
             image_dir=image_dir or IMAGE_DIRECTORY,
             timeout=timeout,
@@ -46,7 +55,8 @@ class ImagEMX2Camera(Camera):
 
     def _connect(self) -> None:
         try:
-            camera = dcam.DCAMCamera()
+            index = find_dcam_index(self.serial_number, self.model_prefix)
+            camera = dcam.DCAMCamera(index)
             camera.open()
         except Exception as exc:
             self._backend = None

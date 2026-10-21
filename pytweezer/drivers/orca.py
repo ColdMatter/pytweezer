@@ -8,6 +8,8 @@ import numpy as np
 import pylablib.devices.DCAM as dcam
 import tifffile as tiff
 
+from pytweezer.drivers.hamamatsu import find_dcam_index
+
 IMAGE_DIRECTORY = (
     "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/HamCamImages"
 )
@@ -25,23 +27,31 @@ def requires_camera(func):
 
 
 class ORCACamera:
-    """Low-level wrapper around the Hamamatsu ORCA DCAM driver."""
+    """Low-level wrapper around the Hamamatsu ORCA DCAM driver.
+
+    Args:
+        serial_number: DCAM serial number of the camera to open (e.g. ``"280187"``).
+            If None, the only connected ORCA-R2 is opened.
+    """
+
+    model_prefix = "C10600"
 
     def __init__(
         self,
         image_dir: str | None = None,
         timeout: float = 5 * 60.0,
-        camera_index: int = 1,
+        serial_number: str | None = None,
     ):
         self.image_dir = image_dir or IMAGE_DIRECTORY
         self.timeout = timeout
-        self.camera_index = camera_index
+        self.serial_number = serial_number
         self.dcam: dcam.DCAMCamera
         self._open_camera()
 
     def _open_camera(self):
         try:
-            self.dcam = dcam.DCAMCamera(self.camera_index)
+            index = find_dcam_index(self.serial_number, self.model_prefix)
+            self.dcam = dcam.DCAMCamera(index)
             self.dcam.open()
             print("ORCA camera initialised.")
         except Exception as exc:

@@ -203,6 +203,7 @@ CONFIG = {
                     "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
                     "sim_class": "pytweezer.drivers.imagemX2:SimulatedTweezerArrayCamera",
                     "role": "camera",
+                    "serial_number": "000407",
                     "stream_name": "rb_hamcam",
                     "timeout": 20.0,
                     "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
