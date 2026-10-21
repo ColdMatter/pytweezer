@@ -21,6 +21,7 @@ No entries: it only re-exports `Coordinator`.
 | numerical/rearrangement#7 | `arm_rearrangement_preload_trigger` arms auto-increment for n frames and asks the pulser for n−1 pulses at `period_us`. | 4 | unit | quiet: one trigger too many wraps the SLM back to frame 0, i.e. the initial array | — |
 | numerical/rearrangement#8 | After a pulser failure, `arm_rearrangement_preload_trigger` still stops auto-increment and switches wait-for-trigger off. | 4 | unit | quiet: the SLM keeps advancing on stray triggers, or later writes block until timeout | — |
 | numerical/rearrangement#9 | `shutdown` clears the initialised state even when `camera.stop_acquisition` raises. | 4 | unit | loud: an exception during server teardown | — |
+| numerical/rearrangement#10 | `arm_rearrangement` passes the occupancy mask it measured, and `d0`/`profile` from `initialise`, to `iter_rearrangement_sequence`. *Added from stage 2; covered by `tests/test_rearrangement.py::test_arm_streams_sequence_to_slm` (deleted in PR #12 because it failed; this entry now has no cover).* | 4 | unit | quiet: atoms move at the wrong speed, or to and from the wrong sites | — |
 
 ## pytweezer/coordinators/transport.py
 

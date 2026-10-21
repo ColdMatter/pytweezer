@@ -23,6 +23,7 @@
 | gui/managed_panel#8 | `DevicesPanel.check_host` matches this PC's address while ignoring case and surrounding whitespace, and treats a missing host as not local. | 4 | unit | Quiet: a device is spawned nowhere, or on every PC. | — |
 | gui/managed_panel#9 | `ControlPanel` in view-only mode maps probe results to up/down, and shows "unprobeable" (n/a) for entries with no port. | 4 | unit | Quiet: a client shows a server as Stopped (or Running) when it cannot actually see it. | — |
 | gui/managed_panel#10 | `DevicesPanel._apply_snapshot` applies each snapshot entry, sub-devices included, to the row of the same name, with the address shown as `host:port` and last-seen shown as an age. | 4 | unit | Quiet: a sub-device that failed to open reads as up, because its state lands on the wrong row or none. | — |
+| gui/managed_panel#11 | A degraded composite counts as running: its button reads Stop, so it can't be started twice. *Added from stage 2; covered by `tests/test_gui.py::test_managed_row_toggle_reflects_controllability_and_state`.* | 4 | unit | quiet: a second copy is started on top of the first | — |
 
 ## pytweezer/GUI/analysismanager.py
 
@@ -74,6 +75,7 @@
 | gui/arg_editor#8 | `request()` raises ValueError when a searched Int32 script parameter has a non-whole value, list value or linear-scan point; `validate=False` skips the check. | 1 | unit | Quiet: a non-whole value is sent to an Int32 MOTMaster parameter. | — |
 | gui/arg_editor#9 | `add_motmaster_row` types the row from the script default (int gives integer, float gives number), uses the given value when the script lacks the parameter, and raises when neither is known. | 1 | unit | Quiet: an Int32 parameter is sent as a float, or a row is created with no value behind it. | — |
 | gui/arg_editor#10 | A MOTMaster row added before the script's parameters arrived keeps its typed value and scan once the parameters arrive and the row is rebuilt (`_parameters_fetched`). | 1 | unit | Quiet: the user's edit is replaced by the script default just before they press Submit. | — |
+| gui/arg_editor#11 | Removing a scanned MOTMaster row also removes its scan axis. *Added from stage 2; covered by `tests/test_experiment_gui.py::test_a_searched_parameter_can_be_scanned_removed_and_reset`.* | 1 | unit | quiet: the run still scans a parameter the user removed | — |
 
 ## pytweezer/GUI/experiments/catalogue_view.py
 
@@ -105,6 +107,7 @@ No entries: the file holds only a docstring.
 | gui/motmaster_params#1 | `MotMasterBox.choose` emits `parameter_chosen` only for a name in the numeric (non-bool) script defaults that the experiment does not already declare, and parses the "name · type · default" completer label. | 1 | unit | Quiet: a declared parameter is added a second time with a conflicting value, or a bool parameter is sent as a number. | — |
 | gui/motmaster_params#2 | `ParameterFetcher` calls the source once per (device, script): repeats are served from the cache and concurrent duplicates are not refetched, while a failure is not cached and a retry calls the source again. | 4 | unit | Quiet: the device is hammered with RPCs, or a transient failure leaves the box broken until the GUI restarts. | — |
 | gui/motmaster_params#3 | `DeviceParameterSource` reads parameters from the simulated device when `simulated()` is True, and never builds a real device client. | 4 | unit | Quiet: a simulation session on a laptop opens RPC connections to lab hardware, or hangs on timeouts. | — |
+| gui/motmaster_params#4 | Parameters fetched on a worker thread reach the widgets on the GUI thread. *Added from stage 2; covered by `tests/test_experiment_gui.py::test_a_threaded_fetch_is_delivered_on_the_gui_thread`.* | 4 | unit | quiet: intermittent crashes that are hard to trace back | — |
 
 ## pytweezer/GUI/experiments/panel.py
 
@@ -118,6 +121,7 @@ No entries: the file holds only a docstring.
 | gui/panel#6 | `load_request` for an experiment not in the catalogue shows an error and leaves the form alone; otherwise it selects that experiment and fills the form with the request. | 4 | unit | Quiet: Resubmit loads into whichever experiment happened to be open. | — |
 | gui/panel#7 | A queue snapshot with `simulated` set shows the banner and switches MOTMaster parameter lookups to the simulated devices. | 4 | unit | Quiet: in simulation the form reads parameters from (or times out on) real hardware. | — |
 | gui/panel#8 | A queue snapshot whose `catalogue_version` or `recipes_version` differs from the last one seen refetches the catalogue or the recipes. | 4 | unit | Quiet: a new or edited experiment class never appears until the GUI is restarted. | — |
+| gui/panel#9 | Deleting a shared recipe asks for confirmation first. *Added from stage 2; covered by `tests/test_experiment_gui.py::test_deleting_a_recipe_needs_confirmation`.* | 4 | unit | quiet: one mis-click deletes a recipe on every PC | — |
 
 ## pytweezer/GUI/experiments/queue_view.py
 
@@ -141,6 +145,7 @@ No entries: the file holds only a docstring.
 | gui/results#6 | Running files are left out of the tree unless "Show running" is ticked, and a file that has finished appears on the next refresh. | 4 | gui | Quiet: a finished measurement never shows up in the tree. | — |
 | gui/results#7 | A selected file that can't be read yet is retried on the poll until it loads. | 4 | gui | Quiet: a just-started measurement stays "unreadable" until it is clicked again. | — |
 | gui/results#8 | A scan over string values is plotted at integer positions labelled with those values, in the order they first appear. | 4 | gui | Loud: a crash, or an empty plot for categorical scans. | — |
+| gui/results#9 | A selected running measurement reloads on refresh without a live feed, keeping the user's choices. *Added from stage 2; covered by `tests/test_results_browser.py::test_selected_running_measurement_reloads_and_keeps_choices`.* | 4 | unit | quiet: the display stays on stale data | — |
 
 ## pytweezer/GUI/fitfunctions.py
 

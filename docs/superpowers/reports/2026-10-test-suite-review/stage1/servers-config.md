@@ -118,6 +118,8 @@ No entries: nothing in CONFIG or the codebase imports or launches it, so it has 
 | servers-config/experiment_manager#8 | A finished run's DB `runs` row takes its arguments (defaults included) and git commit from the h5 file, not from the submitted request or the manager's checkout. | 2 | unit | quiet: the database records arguments or code that the run did not use | — |
 | servers-config/experiment_manager#9 | On restart, a still-running worker with the recorded pid and create time is adopted; a pid since reused by another process is not, and its task is settled as interrupted. | 4 | unit | quiet: the queue waits for ever on an unrelated process, or orphans a live worker | — |
 | servers-config/experiment_manager#10 | A submit sent over the manager's REQ socket, as `ExperimentManagerClient` sends it, is queued and answered with its rid. | 4 | integration | loud: submit from notebooks and the GUI fails | — |
+| servers-config/experiment_manager#11 | The manager relays pause, resume and terminate to the worker, which acts at point boundaries. *Added from stage 2; covered by `tests/test_experiment_e2e.py::test_pause_resume_and_terminate_at_a_point_boundary`.* | 1 | integration | quiet: Pause or Terminate does nothing, or acts mid-point | — |
+| servers-config/experiment_manager#12 | A simulating manager's workers get simulated devices and mark the file simulated. *Added from stage 2; covered by `tests/test_experiment_e2e.py::test_simulating_manager_gives_workers_simulated_devices`.* | 1 | integration | quiet: a simulated run drives real hardware | — |
 
 ## pytweezer/servers/imagelogger.py
 
@@ -199,6 +201,9 @@ No entries: a direct wrapper of `socket.create_connection`, with no pytweezer lo
 | servers-config/sync#1 | A mirror gets the full state on connect and then each mutation in order, and after nested mutations (append a dict, edit inside it, delete a key) it equals the notifier's `raw_view`. | 4 | integration | quiet: GUIs show a queue or points that drift from the manager's | — |
 | servers-config/sync#2 | After the server restarts on the same port, the mirror reconnects, reports `connected` again, and its data, local edits included, is replaced by the new snapshot. | 4 | integration | quiet: a GUI keeps showing pre-restart state | — |
 | servers-config/sync#3 | With `keep_mods`, `drain()` returns each mod once and in order, and `on_mod` sees each mod after it has been applied. | 4 | integration | quiet: the experiment feed misses or repeats points | — |
+| servers-config/sync#4 | A mirror's state never aliases objects in later mods, so a list is never appended to twice. *Added from stage 2; covered by `tests/test_sync.py::test_mirror_never_shares_objects_with_later_mods`.* | 4 | unit | quiet: GUIs drift from the manager | — |
+| servers-config/sync#5 | `SyncServer.call` from several threads leaves the mirror equal to the notifier's state. *Added from stage 2; covered by `tests/test_sync.py::test_mutations_from_many_threads_stay_consistent`.* | 4 | integration | quiet: GUIs drift from the manager | — |
+| servers-config/sync#6 | A mirror started before its server connects once the server comes up. *Added from stage 2; covered by `tests/test_sync.py::test_mirror_waits_for_a_server_that_starts_later`.* | 4 | integration | quiet: a GUI opened before the manager stays empty with no error | — |
 
 ## pytweezer/servers/xsub_xpub.py
 

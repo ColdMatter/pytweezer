@@ -21,6 +21,7 @@ No entries: nothing in CONFIG or the package imports `AnapicoSYN420`, and its pr
 |---|---|---|---|---|---|
 | drivers/hamamatsu#1 | With `serial_number=None`, `find_dcam_index` returns the one camera whose model starts with the prefix, and raises when none or several match (e.g. an ORCA and an ImagEM on one host). | 4 | unit | quiet: the wrong Hamamatsu is opened, and nothing checks the serial afterwards | — |
 | drivers/hamamatsu#2 | `find_dcam_index` matches a configured serial whether or not either side carries the `"S/N:"` prefix (parametrised). | 4 | unit | loud: the camera fails to open with "found 0" | — |
+| drivers/hamamatsu#3 | `open_dcam_camera` closes and refuses a camera whose serial differs from the configured one (DCAM indices shift when another process holds a camera). *Added from stage 2; covered by `tests/test_hamamatsu.py::test_open_rejects_a_camera_with_the_wrong_serial`.* | 2 | unit | quiet: the wrong camera is opened and its frames recorded as the configured one's | — |
 
 ## pytweezer/drivers/imagemX2.py
 
@@ -45,6 +46,8 @@ No entries: nothing in CONFIG or the package imports `AnapicoSYN420`, and its pr
 | drivers/motmaster#8 | `SimulatedMotMasterInterface.start_motmaster_experiment` rejects a parameter the selected script does not have. | 1 | unit | quiet: typos in experiment arguments pass in simulation and reach the lab | — |
 | drivers/motmaster#9 | `SimulatedMotMasterInterface.start_motmaster_experiment` rejects a non-integer value for an Int32 script parameter. | 1 | unit | quiet: type errors in experiments go unseen until real MOTMaster runs | — |
 | drivers/motmaster#10 | `SimulatedMotMasterInterface` has every public method of `MotMasterInterface`. | 4 | unit | loud: the RPC call fails in simulation | — |
+| drivers/motmaster#11 | A failed `SetScriptPath` raises and leaves no script selected. *Added from stage 2; covered by `tests/test_motmaster_experiment.py::test_driver_raises_instead_of_printing`.* | 1 | unit | quiet: the next shot runs the previous script | — |
+| drivers/motmaster#12 | A failed `Go` raises rather than printing. *Added from stage 2; covered by `tests/test_motmaster_experiment.py::test_driver_raises_instead_of_printing`.* | 1 | unit | quiet: a run that never happened is reported as done | — |
 
 ## pytweezer/drivers/orca.py
 

@@ -12,6 +12,7 @@
 | experiments/arguments#6 | `Choice.coerce` refuses a value that is not one of the options, and a `Choice` with no default takes its first option. | 1 | unit | quiet: a mode the experiment does not handle reaches `run_point` | — |
 | experiments/arguments#7 | `collect` gives base-class declarations first; a subclass redeclaring a name replaces it, and a subclass setting a plain value under that name removes the argument. | 1 | unit | quiet: a subclass runs with the base class's default or limits, or the form shows an argument that does nothing | — |
 | experiments/arguments#8 | `to_schema` carries `unit`, `scale`, `min` and `max` through JSON unchanged, so the form shows and limits values in display units. | 4 | unit | quiet: a value typed in MHz is taken as Hz, or the form allows values the experiment will refuse | — |
+| experiments/arguments#9 | A default outside the declared limits is rejected when the class is defined. *Added from stage 2; covered by `tests/test_experiment_arguments.py::test_bad_default_is_rejected_at_declaration`.* | 4 | unit | quiet: an out-of-range default nobody chose is submitted | — |
 
 ## pytweezer/experiment/catalogue.py
 
@@ -81,6 +82,8 @@ No entries: re-exports only.
 | experiments/motmaster#8 | When several sequencers fail, the master's error is raised and the followers' errors are logged. | 4 | unit | quiet: the root cause is hidden behind a follower timeout | — |
 | experiments/motmaster#9 | A follower still running `follower_timeout` after the master finishes raises `TimeoutError`, and the next `run_sequences()` uses a new client for it. | 4 | unit | loud: the task hangs, or the next call is queued behind the blocked `Go()` | — |
 | experiments/motmaster#10 | Class definition refuses several `MotMaster`s without exactly one master, two on one device, two arguments setting one parameter, and a `device=` that is not a `MotMaster` (parametrised). | 4 | unit | loud at import, but if broken the experiment deadlocks on the shared device server | — |
+| experiments/motmaster#11 | The failure of any one sequencer, master or a single follower, fails the task. *Added from stage 2; covered by `tests/test_motmaster_experiment.py::test_master_or_follower_failure_fails_the_task`.* | 1 | unit | quiet: the task is marked completed although a follower never ran | — |
+| experiments/motmaster#12 | No follower is armed when another follower can't be reached. *Added from stage 2; covered by `tests/test_motmaster_experiment.py::test_failure_opening_a_follower_client_starts_no_follower`.* | 4 | unit | quiet: an armed follower blocks its device server until it times out | — |
 
 ## pytweezer/experiment/queue.py
 
@@ -107,6 +110,8 @@ No entries: re-exports only.
 | experiments/recipes#4 | `save` refuses a name that already exists for that experiment unless `overwrite`, comparing names with surrounding whitespace stripped. | 4 | unit | quiet: another user's recipe is replaced | — |
 | experiments/recipes#5 | `save` with `overwrite` replaces the recipe in place, leaving exactly one under that name. | 4 | unit | quiet: duplicates appear and an arbitrary one is run | — |
 | experiments/recipes#6 | `save` clears `due_time`. | 4 | unit | quiet: every later submission of the recipe is held back to a time long past, or one in the future | — |
+| experiments/recipes#7 | Saved recipes, scans included, read back identical through `RecipeStore`. *Added from stage 2; covered by `tests/test_experiment_recipes.py::test_store_round_trip`.* | 2 | unit | quiet: a recipe runs different settings from those saved | — |
+| experiments/recipes#8 | Recipes are listed per experiment, sorted, and one name may be used by two experiments. *Added from stage 2; covered by `tests/test_experiment_recipes.py::test_find_filters_and_sorts`.* | 4 | unit | quiet: another experiment's recipe is offered, or two recipes clash | — |
 
 ## pytweezer/experiment/runner.py
 
@@ -121,6 +126,8 @@ No entries: re-exports only.
 | experiments/runner#7 | After each point, `control` receives a `Progress` carrying that point, its 0-d numeric results and its start and end times; after `prepare` it receives `done=0`. | 2 | unit | quiet: the live plot and the database `points` rows show wrong or missing values | — |
 | experiments/runner#8 | An exception in `finish` after a good run makes it failed, and one after a failed `run_point` keeps the first traceback. | 4 | unit | quiet: a broken `finish` (hardware left on) is reported as completed, or the real error is hidden | — |
 | experiments/runner#9 | A `KeyboardInterrupt` in `run_point` gives status terminated, with the file finalised and `finish` run. | 4 | unit | quiet: Ctrl-C in a notebook leaves a file marked running and the hardware not reset | — |
+| experiments/runner#10 | A simulated `run_local` records `simulated` truthfully in its file. *Added from stage 2; covered by `tests/test_experiment_simulation.py::test_run_local_simulated_experiment`.* | 2 | unit | quiet: simulated data passes for real data | — |
+| experiments/runner#11 | The runner closes its device clients on every exit path, including after a failing point. *Added from stage 2; covered by `tests/test_experiment_runner.py::test_devices_closed_even_on_failure`.* | 4 | unit | quiet: a failed run leaves device clients open | — |
 
 ## pytweezer/experiment/scan.py
 
@@ -189,6 +196,7 @@ No entries: pydantic models and an enum whose one rule (`finished`) is exercised
 | experiments/worker#3 | An outage shorter than `orphan_timeout` is retried, and the run continues. | 4 | unit | quiet: a network blip kills an overnight scan | — |
 | experiments/worker#4 | A reply with no `action` (e.g. the manager rejected the token) gives `TERMINATE`. | 1 | unit | quiet: a worker the manager has disowned runs on | — |
 | experiments/worker#5 | `run()` reports `finished` with status failed and the traceback when the class cannot be imported or its arguments are invalid. | 4 | unit | loud: the task stays running in the queue for ever | — |
+| experiments/worker#6 | `worker.run` passes the manager's `simulate` flag to `open_writer`, so a simulating manager's tasks get simulated devices. *Added from stage 2; covered by `tests/test_experiment_e2e.py::test_simulating_manager_gives_workers_simulated_devices`.* | 1 | integration | quiet: a simulating manager's worker drives real hardware | — |
 
 ## Suspected bugs
 

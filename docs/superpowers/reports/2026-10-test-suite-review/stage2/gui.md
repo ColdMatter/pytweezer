@@ -191,5 +191,7 @@
 | `tests/test_grafana.py::test_alert_rules_query_the_provisioned_datasource_or_expressions` | alert rules query a provisioned datasource | no — deployment data, outside this area |
 | `tests/test_simulation_mode.py::test_only_a_server_session_off_the_server_pc_simulates` | only a server session off the server PC simulates | no — config and launch code, in the servers-config area |
 
+Merged into the stage-1 lists on 2026-10-21: every row above marked "yes" (and the "partly" schema-retry row) is now a stage-1 entry that names this test as its cover.
+
 ## Verdict
 **rework**: 32 of the 67 decided tests (48 %) are kept as they are, well above a third, so the suite is a sound base. Its weaknesses follow a pattern: long scenario tests that check several behaviours at once (queue view, results panel, devices panel), and applet-launcher tests that build the object with `__new__` and replace its own methods. Most rewrites mean splitting these tests and moving stand-ins out to the process edge (Popen, the control channel). The bigger gap is coverage: 41 of the 103 stage-1 behaviours have no test at all. That includes every viewer, the property and subscription editors, `theme.resolve_state`, `build_gui`/`closeEvent` teardown, and the Analysis Manager commands. Several partly-covered entries miss exactly the case behind a suspected bug: the selection after a row is removed (analysismanager#2, queue_view#2), a default smaller than the display precision (arg_editor#2), and a shuffled live plot (results#4). Kept as is / total decided: 32 / 67.

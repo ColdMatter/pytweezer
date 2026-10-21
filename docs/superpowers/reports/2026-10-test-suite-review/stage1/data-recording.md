@@ -32,6 +32,7 @@ No entries: it only re-exports `DBWriter`, `get_default_writer` and `log`, which
 |---|---|---|---|---|---|
 | data-recording/schema#1 | Running `ensure_schema` on an already initialised database succeeds and leaves existing rows untouched (every new writer connection does this). | 4 | integration | quiet: every writer logs one warning and then holds and eventually drops its rows | — |
 | data-recording/schema#2 | An older `runs` table without `git_commit`/`git_dirty` gains those columns, so runs rows carrying provenance can still be written. | 4 | integration | quiet: every runs upsert fails and takes its batch with it | — |
+| data-recording/schema#3 | On a server without TimescaleDB preloaded, `ensure_schema` reports it, keeps the connection open, and writes still succeed. *Added from stage 2; covered by `tests/test_db_writer.py::test_schema_reports_timescale_and_keeps_the_connection`.* | 4 | unit | quiet: every write fails behind one warning | — |
 
 ## pytweezer/database/writer.py
 
@@ -46,6 +47,7 @@ No entries: it only re-exports `DBWriter`, `get_default_writer` and `log`, which
 | data-recording/writer#7 | JSON columns holding numpy scalars and arrays (as read back from h5 files) are stored as plain JSON numbers and lists. | 2 | unit | quiet: values stored as their `str()` repr and unusable in SQL | — |
 | data-recording/writer#8 | A run recorded at start and again at finish, with its points, reads back from the test database as one `runs` row with the finish values and one `points` row per point (normal case of writer -> Postgres). | 2 | integration | quiet: run history shows runs stuck as "running", or duplicates | — |
 | data-recording/writer#9 | A point whose scalar result is NaN does not stop rows queued after it from being written. | 2 | integration | quiet: one failed fit silently stops all later database writes from that process (see Suspected bugs) | — |
+| data-recording/writer#10 | A failure in `ensure_schema` closes that connection, and the queued rows are written later on a fresh one. *Added from stage 2; covered by `tests/test_db_writer.py::test_a_failed_schema_setup_is_retried_on_a_fresh_connection`.* | 4 | unit | quiet: rows are lost, or the writer stays on a half-set-up connection | — |
 
 ## pytweezer/experiment/storage.py
 
@@ -60,6 +62,9 @@ No entries: it only re-exports `DBWriter`, `get_default_writer` and `log`, which
 | data-recording/storage#7 | A `record()` outside a point is stored under `/constants` and reads back identical, not as a result row. | 2 | unit | quiet: a background image or calibration lands in a result row or is lost | — |
 | data-recording/storage#8 | A `MeasurementWriter` at a path that already exists raises and leaves the existing file unchanged. | 2 | unit | quiet: an earlier measurement is overwritten | — |
 | data-recording/storage#9 | The effective argument values and the header (with None stored as `""`) read back as plain Python values, through both `load_measurement` and `read_arguments` (which leaves out `__schema__`). | 2 | unit | quiet: "Resubmit" or the analysis uses arguments that differ from what ran | — |
+| data-recording/storage#10 | `data_root` puts a simulating manager's files under `<root>/simulated/`, apart from real data and its rid sequence, and on a PC other than the manager's uses `client_data_root` when it is set. *Added from stage 2; covered by `tests/test_experiment_simulation.py::test_data_root_resolution`.* | 2 | unit | quiet: simulated files mix with real data and use up its rids, or a client PC reads the wrong folder | — |
+| data-recording/storage#11 | `highest_rid` returns the largest rid among files in the `YYYY/MM/DD` layout (0 for an empty root) and ignores files without a numeric prefix, so the manager never reuses a rid. *Added from stage 2; covered by `tests/test_experiment_storage.py::test_paths_and_rid_scan`.* | 2 | unit | quiet: a reused rid overwrites the `runs` row through the upsert | — |
+| data-recording/storage#12 | `Measurement.result_shapes` and `result_kinds` describe every result, including those not loaded with `results=`. *Added from stage 2; covered by `tests/test_experiment_storage.py::test_load_only_selected_results_but_know_all_shapes`.* | 4 | unit | quiet: `scalar_result_names` sends the wrong results to the database | — |
 
 ## pytweezer/loggers/base.py
 
@@ -70,6 +75,7 @@ No entries: it only re-exports `DBWriter`, `get_default_writer` and `log`, which
 | data-recording/base#3 | The first write of each measurement registers it once in `measurements` with the logger's name, interval and parsed limits, marked active. | 4 | unit | quiet: Grafana's out-of-range and stale alerts never fire for that measurement | — |
 | data-recording/base#4 | A clean stop marks every registered measurement inactive. | 4 | unit | quiet: stopping a logger from the GUI raises a false "Logger stale" alert | — |
 | data-recording/base#5 | `limits` bounds are normalised to float or None (numeric strings accepted), and a malformed entry raises `ValueError` naming the field (parametrised). | 4 | unit | quiet: alert thresholds differ from the configured ones | — |
+| data-recording/base#6 | A `read()` that raises is logged, and the run loop carries on at the next interval. *Added from stage 2; covered by `tests/test_loggers.py::test_read_failures_do_not_stop_the_run_loop`.* | 4 | unit | quiet: one transient sensor error leaves a gap in the record until someone notices | — |
 
 ## pytweezer/loggers/__init__.py
 
