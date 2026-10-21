@@ -61,7 +61,9 @@ class ValueField(QWidget):
                 _FLOAT_LIMIT if high is None else high / self.scale,
             )
             decimals = schema.get("ndecimals")
-            widget.setDecimals(6 if decimals is None else decimals)
+            # QDoubleSpinBox rounds its value to decimals(), so without an
+            # explicit ndecimals keep a double's full precision.
+            widget.setDecimals(15 if decimals is None else decimals)
             if schema.get("step"):
                 widget.setSingleStep(schema["step"] / self.scale)
             widget.valueChanged.connect(self.changed)

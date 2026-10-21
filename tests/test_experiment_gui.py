@@ -131,6 +131,20 @@ def test_form_shows_display_units_and_returns_si(editor):
     assert request.class_name == "Demo"
 
 
+class Tiny(Experiment):
+    pulse = Number(2e-7, unit="s")
+
+    def run_point(self):
+        pass
+
+
+def test_a_small_default_without_ndecimals_is_submitted_unchanged(qapp):
+    editor = ArgumentEditor()
+    editor.set_experiment(Tiny.schema())
+    assert editor.request().args["pulse"] == pytest.approx(2e-7, rel=1e-12)
+    assert editor.rows["pulse"].label.property("state") != "modified"
+
+
 def test_scan_axes_and_point_count(editor):
     detuning = editor.rows["detuning"]
     detuning.scan_button.setChecked(True)

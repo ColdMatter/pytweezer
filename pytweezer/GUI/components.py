@@ -5,6 +5,8 @@ object names and dynamic properties the stylesheet keys on. See the
 ``pytweezer-gui-design`` skill for when to use which.
 """
 
+import math
+
 from PyQt6 import QtCore, QtGui
 from PyQt6.QtWidgets import QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
@@ -80,5 +82,10 @@ class CompactDoubleSpinBox(QDoubleSpinBox):
     """Shows 1.5 rather than 1.500000; precision stays at ``decimals()``."""
 
     def textFromValue(self, value):
-        text = f"{value:.{self.decimals()}f}"
+        decimals = self.decimals()
+        if value:
+            # Digits beyond a double's 15 significant figures are rounding noise.
+            significant = 15 - 1 - math.floor(math.log10(abs(value)))
+            decimals = max(0, min(decimals, significant))
+        text = f"{value:.{decimals}f}"
         return text.rstrip("0").rstrip(".") if "." in text else text
