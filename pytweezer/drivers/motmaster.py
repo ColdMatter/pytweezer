@@ -677,7 +677,8 @@ class MotMasterInterface:
         exactly ``shots_per_point`` frames per MOTMaster shot.
 
         Returns, per laser, the scan range, mean and standard-error counts at each
-        point, the chosen set point and the set point the laser started from; pass
+        point (the error is NaN for one shot per point), the chosen set point and
+        the set point the laser started from; pass
         that dict to :func:`plot_auto_mot_results` to see the scans.
         """
         client = get_device(camera) if isinstance(camera, str) else camera
@@ -757,7 +758,10 @@ class MotMasterInterface:
             for _, images in shots:
                 counts = np.sum(images - images_bg, axis=(1, 2))
                 numbers.append(float(np.mean(counts)))
-                errors.append(float(np.std(counts) / np.sqrt(len(counts))))
+                if len(counts) > 1:
+                    errors.append(float(np.std(counts, ddof=1) / np.sqrt(len(counts))))
+                else:
+                    errors.append(float("nan"))  # one shot has no spread to measure
             set_point = scan_range[int(np.argmax(numbers))]
             # Leave the laser on its best set point before optimising the next.
             self.scan_wm_laser_set_points(
