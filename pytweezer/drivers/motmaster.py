@@ -189,7 +189,7 @@ class MotMasterInterface:
                 except Exception as e:
                     print(f"Error: {e} encountered")
             elif key == "picomotor" and path_info.get("connect"):
-                self.picomotor_default_axis = None
+                self.picomotor_default_motor = None
                 self.picomotor_default_speed = None
                 self.picomotor_default_acceleration = None
                 self.picomotor_default_steps = None
@@ -322,7 +322,7 @@ class MotMasterInterface:
                 speed=self.picomotor_default_speed,
                 accel=self.picomotor_default_acceleration,
             )
-        if (self.picomotor_default_axis is not None) and (
+        if (self.picomotor_default_motor is not None) and (
             self.picomotor_default_steps is not None
         ):
             motor: str = self.picomotor_default_motor

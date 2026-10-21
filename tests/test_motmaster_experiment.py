@@ -327,6 +327,12 @@ def test_yag_spot_moves_use_the_configured_velocity(monkeypatch):
     assert stage.velocity == (100, 1000)
 
 
+def test_yag_spot_moves_step_the_configured_motor(monkeypatch):
+    driver, stage = _picomotor_driver(monkeypatch, motor="m1", steps=10, max_steps=100)
+    driver._move_picomotor_with_default_settings()
+    assert stage.moves == [(2, 10)]
+
+
 def test_simulated_sequencer_serves_and_validates_parameters():
     simulated = SimulatedMotMasterInterface()
     parameters = simulated.script_parameters("RbTweezerBasic")
