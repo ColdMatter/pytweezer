@@ -1,0 +1,207 @@
+import itertools
+
+import pytest
+from pydantic import ValidationError
+
+from pytweezer.experiment.arguments import Choice, Integer, Number
+from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
+
+
+class Exp:
+    detuning = Number(0.0, min=-10.0, max=10.0)
+    shots = Integer(1, min=0)
+    mode = Choice(["a", "b", "c"])
+
+
+class ExpWithExtras(Exp):
+    @classmethod
+    def extra_argument(cls, name):
+        return Number(0.0) if name.startswith("mm_") else None
+
+
+def linear(argument, start, stop, n):
+    return LinearAxis(argument=argument, start=start, stop=stop, n=n)
+
+
+def listed(argument, values):
+    return ListAxis(argument=argument, values=values)
+
+
+def test_linear_axis_includes_both_endpoints_and_coerces_to_float():
+    values = Scan(axes=[linear("detuning", -1, 1, 5)]).axis_values(Exp)
+    assert values == {"detuning": [-1.0, -0.5, 0.0, 0.5, 1.0]}
+    assert all(type(v) is float for v in values["detuning"])
+
+
+def test_list_axis_values_are_coerced_by_the_argument():
+    values = Scan(axes=[listed("shots", [3, 1.0, 2])]).axis_values(Exp)
+    assert values == {"shots": [3, 1, 2]}
+    assert all(type(v) is int for v in values["shots"])
+
+
+@pytest.mark.parametrize(
+    "axis",
+    [listed("mode", ["a", "z"]), linear("detuning", 0, 20, 3), listed("shots", [1.5])],
+)
+def test_values_the_argument_rejects_raise(axis):
+    with pytest.raises(ValueError):
+        Scan(axes=[axis]).points(Exp)
+
+
+def test_integer_linear_axis_is_rounded_to_ints():
+    values = Scan(axes=[linear("shots", 0, 10, 3)]).axis_values(Exp)
+    assert values == {"shots": [0, 5, 10]}
+
+
+def test_integer_linear_axis_that_repeats_after_rounding_is_rejected():
+    with pytest.raises(ValueError, match="repeats values after rounding"):
+        Scan(axes=[linear("shots", 0, 2, 5)]).axis_values(Exp)
+
+
+def test_unknown_argument_is_rejected():
+    with pytest.raises(ValueError, match="no argument 'nope'"):
+        Scan(axes=[listed("nope", [1])]).points(Exp)
+
+
+def test_extra_argument_hook_resolves_undeclared_names():
+    scan = Scan(axes=[listed("mm_field", [1, 2])])
+    assert scan.axis_values(ExpWithExtras) == {"mm_field": [1.0, 2.0]}
+    with pytest.raises(ValueError):
+        Scan(axes=[listed("other", [1])]).axis_values(ExpWithExtras)
+
+
+def test_scanning_the_same_argument_twice_is_rejected():
+    with pytest.raises(ValidationError, match="scanned twice"):
+        Scan(axes=[listed("shots", [1]), listed("shots", [2])])
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: LinearAxis(argument="x", start=0, stop=1, n=0),
+        lambda: ListAxis(argument="x", values=[]),
+        lambda: Scan(repetitions=0),
+        lambda: Scan(order="random"),
+        lambda: Scan(repeat="never"),
+    ],
+)
+def test_invalid_fields_are_rejected(build):
+    with pytest.raises(ValidationError):
+        build()
+
+
+def test_no_axes_gives_one_point_per_repetition():
+    points = Scan(repetitions=3).points(Exp)
+    assert [(p.index, p.repetition, p.axis_indices, p.values) for p in points] == [
+        (0, 0, (), {}),
+        (1, 1, (), {}),
+        (2, 2, (), {}),
+    ]
+
+
+def test_nested_order_has_first_axis_outermost():
+    scan = Scan(axes=[listed("mode", ["a", "b"]), listed("shots", [1, 2, 3])])
+    points = scan.points(Exp)
+    assert [p.axis_indices for p in points] == list(
+        itertools.product(range(2), range(3))
+    )
+    assert [p.index for p in points] == list(range(6))
+    assert points[4].values == {"mode": "b", "shots": 2}
+
+
+def test_point_values_match_axis_indices():
+    scan = Scan(
+        axes=[listed("mode", ["a", "b", "c"]), linear("detuning", 0, 1, 3)],
+        order="shuffle",
+        repetitions=2,
+    )
+    axis_values = scan.axis_values(Exp)
+    for p in scan.points(Exp):
+        assert p.values == {
+            "mode": axis_values["mode"][p.axis_indices[0]],
+            "detuning": axis_values["detuning"][p.axis_indices[1]],
+        }
+
+
+def test_snake_reverses_inner_loops_on_alternate_passes():
+    scan = Scan(
+        axes=[listed("mode", ["a", "b"]), listed("shots", [1, 2, 3])], order="snake"
+    )
+    assert [p.axis_indices for p in scan.points(Exp)] == [
+        (0, 0), (0, 1), (0, 2), (1, 2), (1, 1), (1, 0),
+    ]  # fmt: skip
+
+
+def test_snake_covers_grid_once_with_unit_steps_in_one_axis():
+    scan = Scan(
+        axes=[
+            listed("mode", ["a", "b", "c"]),
+            listed("shots", [1, 2, 3]),
+            linear("detuning", 0, 1, 2),
+        ],
+        order="snake",
+    )
+    path = [p.axis_indices for p in scan.points(Exp)]
+    assert sorted(path) == list(itertools.product(range(3), range(3), range(2)))
+    for before, after in itertools.pairwise(path):
+        steps = [abs(a - b) for a, b in zip(before, after)]
+        assert sorted(steps) == [0, 0, 1]
+
+
+def test_repeat_point_runs_repetitions_back_to_back():
+    scan = Scan(axes=[listed("shots", [1, 2])], repetitions=2, repeat="point")
+    assert [(p.repetition, p.axis_indices) for p in scan.points(Exp)] == [
+        (0, (0,)), (1, (0,)), (0, (1,)), (1, (1,)),
+    ]  # fmt: skip
+
+
+def test_repeat_scan_repeats_whole_sweep():
+    scan = Scan(axes=[listed("shots", [1, 2])], repetitions=2, repeat="scan")
+    assert [(p.repetition, p.axis_indices) for p in scan.points(Exp)] == [
+        (0, (0,)), (0, (1,)), (1, (0,)), (1, (1,)),
+    ]  # fmt: skip
+
+
+def test_shuffle_without_seed_gets_one_and_non_shuffle_does_not():
+    assert Scan(order="shuffle").seed is not None
+    assert Scan(order="nested").seed is None
+    assert Scan(order="shuffle", seed=7).seed == 7
+
+
+def test_shuffle_is_a_reproducible_permutation_of_the_grid():
+    axes = [listed("mode", ["a", "b", "c"]), listed("shots", [0, 1, 2, 3])]
+    first = Scan(axes=axes, order="shuffle", seed=123).points(Exp)
+    again = Scan(axes=axes, order="shuffle", seed=123).points(Exp)
+    grid = list(itertools.product(range(3), range(4)))
+    order = [p.axis_indices for p in first]
+    assert order == [p.axis_indices for p in again]
+    assert sorted(order) == grid
+    assert order != grid
+
+
+def test_shuffle_with_repeat_scan_visits_every_point_once_per_pass():
+    scan = Scan(
+        axes=[listed("shots", list(range(6)))],
+        order="shuffle",
+        repetitions=3,
+        repeat="scan",
+    )
+    points = scan.points(Exp)
+    for rep in range(3):
+        pass_points = points[rep * 6 : (rep + 1) * 6]
+        assert {p.repetition for p in pass_points} == {rep}
+        assert sorted(p.axis_indices for p in pass_points) == [(i,) for i in range(6)]
+
+
+def test_json_round_trip_preserves_axes_and_shuffled_order():
+    scan = Scan(
+        axes=[linear("detuning", -1, 1, 4), listed("mode", ["c", "a"])],
+        order="shuffle",
+        repetitions=2,
+        repeat="scan",
+    )
+    restored = Scan.model_validate_json(scan.model_dump_json())
+    assert restored == scan
+    assert isinstance(restored.axes[0], LinearAxis)
+    assert isinstance(restored.axes[1], ListAxis)
+    assert restored.points(Exp) == scan.points(Exp)

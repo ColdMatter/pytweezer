@@ -1,0 +1,376 @@
+"""Tests for pytweezer.experiment.storage: writing and reading measurement files."""
+
+import hashlib
+import subprocess
+from datetime import UTC, datetime
+from pathlib import Path
+
+import h5py
+import numpy as np
+import pytest
+
+from pytweezer.configuration import config as config_module
+from pytweezer.experiment import storage
+from pytweezer.experiment.scan import LinearAxis, ListAxis, Point, Scan
+from pytweezer.experiment.storage import (
+    MeasurementWriter,
+    RecordError,
+    find_measurement,
+    highest_rid,
+    load_measurement,
+    measurement_relpath,
+    read_arguments,
+    read_header,
+    read_planned_points,
+)
+
+SCAN = Scan(axes=[LinearAxis(argument="detuning", start=0.0, stop=2.0, n=3)])
+POINTS = [
+    Point(index=i, repetition=0, axis_indices=(i,), values={"detuning": float(i)})
+    for i in range(3)
+]
+SOURCE_TEXT = "class Demo(Experiment):\n    pass\n"
+
+
+def make_writer(path, points=POINTS, scan=SCAN, **header):
+    return MeasurementWriter(
+        path,
+        header={
+            "rid": 7,
+            "experiment": "demo.Demo",
+            "class_name": "Demo",
+            "label": None,
+            **header,
+        },
+        argument_values={"detuning": 0.0, "camera": "andor", "shots": 5},
+        argument_schema={"detuning": {"kind": "Float", "default": 0.0}},
+        scan=scan,
+        points=points,
+        sources={"demo": SOURCE_TEXT},
+    )
+
+
+def run_point(writer, point, **records):
+    writer.begin_point(point)
+    for name, value in records.items():
+        writer.record(name, value)
+    writer.end_point()
+
+
+@pytest.fixture
+def writer(tmp_path):
+    w = make_writer(tmp_path / "2026" / "10" / "21" / "000007_Demo.h5")
+    yield w
+    w.close()
+
+
+def test_full_round_trip(writer):
+    w = writer
+    w.record("calibration", 1.5, unit="mW")
+    for point in POINTS:
+        w.begin_point(point)
+        w.record("atom_number", 100 * point.index + 0.5, unit="atoms")
+        w.record("image", np.full((2, 3), point.index, dtype=np.uint16))
+        w.end_point()
+    w.finalise("done")
+    w.close()
+
+    m = load_measurement(w.path)
+    assert (m.rid, m.status, m.n_done) == (7, "done", 3)
+    assert m.attrs["label"] == ""
+    assert m.attrs["schema_version"] == storage.SCHEMA_VERSION
+    assert m.attrs["n_points"] == 3
+    assert m.arguments == {"detuning": 0.0, "camera": "andor", "shots": 5}
+    assert m.argument_schema == {"detuning": {"kind": "Float", "default": 0.0}}
+    assert m.scan == SCAN
+    np.testing.assert_array_equal(m.points["index"], [0, 1, 2])
+    np.testing.assert_array_equal(m.points["detuning"], [0.0, 1.0, 2.0])
+    assert np.all(np.isfinite(m.points["t_start"]))
+    assert np.all(m.points["t_end"] >= m.points["t_start"])
+    np.testing.assert_array_equal(m.results["atom_number"], [0.5, 100.5, 200.5])
+    assert m.results["image"].shape == (3, 2, 3)
+    assert m.results["image"].dtype == np.uint16
+    np.testing.assert_array_equal(m.recorded["image"], [True, True, True])
+    assert m.constants == {"calibration": 1.5}
+    assert m.units == {"atom_number": "atoms", "image": "", "calibration": "mW"}
+    assert m.result_shapes == {"atom_number": (), "image": (2, 3)}
+    assert m.source == {"demo": SOURCE_TEXT}
+    assert m.path == w.path
+    with h5py.File(w.path, "r") as f:
+        assert f["source/demo"].attrs["sha256"] == (
+            hashlib.sha256(SOURCE_TEXT.encode()).hexdigest()
+        )
+
+
+def test_partial_run_is_trimmed_but_planned_points_are_not(writer):
+    run_point(writer, POINTS[0], signal=1.0)
+    run_point(writer, POINTS[1], signal=2.0)
+
+    m = load_measurement(writer.path)
+    assert m.n_done == 2
+    assert m.status == "running"
+    np.testing.assert_array_equal(m.results["signal"], [1.0, 2.0])
+    np.testing.assert_array_equal(m.points["detuning"], [0.0, 1.0])
+
+    planned = read_planned_points(writer.path)
+    np.testing.assert_array_equal(planned["detuning"], [0.0, 1.0, 2.0])
+    assert np.isnan(planned["t_start"][2])
+
+
+def test_file_is_readable_while_the_writer_holds_it_open(writer):
+    run_point(writer, POINTS[0], signal=1.0)
+    header = read_header(writer.path)
+    assert header["status"] == "running"
+    assert header["n_done"] == 1
+    assert isinstance(header["class_name"], str)
+
+
+def test_existing_file_is_never_overwritten(writer):
+    writer.close()
+    with pytest.raises(FileExistsError):
+        make_writer(writer.path)
+
+
+def test_skipped_records_leave_fill_and_recorded_false(writer):
+    run_point(writer, POINTS[0], signal=1.0, count=3)
+    run_point(writer, POINTS[1])
+    run_point(writer, POINTS[2], signal=3.0, count=4)
+
+    m = load_measurement(writer.path)
+    np.testing.assert_array_equal(m.recorded["signal"], [True, False, True])
+    assert np.isnan(m.results["signal"][1])
+    np.testing.assert_array_equal(m.recorded["count"], [True, False, True])
+    assert m.results["count"][1] == 0
+
+
+def test_records_outside_a_point_are_constants(writer):
+    writer.record("before", 1)
+    run_point(writer, POINTS[0])
+    writer.record("after", "text")
+    writer.begin_point(POINTS[1])
+    writer.abandon_point()
+    writer.record("abandoned", {"reason": "interlock"})
+
+    m = load_measurement(writer.path)
+    assert m.constants == {
+        "before": 1,
+        "after": "text",
+        "abandoned": {"reason": "interlock"},
+    }
+    assert m.results == {}
+    assert m.n_done == 1
+
+
+def test_text_and_json_results_round_trip(writer):
+    run_point(writer, POINTS[0], note="first", meta={"ok": True})
+    run_point(writer, POINTS[1])
+    run_point(writer, POINTS[2], note="third", meta={"ok": False})
+
+    m = load_measurement(writer.path)
+    assert list(m.results["note"]) == ["first", "", "third"]
+    assert m.results["meta"] == [{"ok": True}, None, {"ok": False}]
+    assert m.result_kinds["note"] == "O"
+
+
+def test_string_scan_column_is_stored_as_text(tmp_path):
+    scan = Scan(axes=[ListAxis(argument="mode", values=["a", "b"])])
+    points = [
+        Point(index=i, repetition=0, axis_indices=(i,), values={"mode": v})
+        for i, v in enumerate(["a", "b"])
+    ]
+    w = make_writer(tmp_path / "m.h5", points=points, scan=scan)
+    w.close()
+    assert list(read_planned_points(tmp_path / "m.h5")["mode"]) == ["a", "b"]
+
+
+def test_recording_twice_in_one_point_raises(writer):
+    writer.begin_point(POINTS[0])
+    writer.record("signal", 1.0)
+    with pytest.raises(RecordError, match="twice"):
+        writer.record("signal", 2.0)
+
+
+def test_recording_a_constant_twice_raises(writer):
+    writer.record("offset", 1.0)
+    with pytest.raises(RecordError, match="already"):
+        writer.record("offset", 2.0)
+
+
+@pytest.mark.parametrize("name", ["", "a/b", "__schema__"])
+def test_invalid_names_are_rejected(writer, name):
+    with pytest.raises(RecordError, match="invalid record name"):
+        writer.record(name, 1.0)
+
+
+@pytest.mark.parametrize(
+    "first, second",
+    [
+        (1, 2.5),  # float does not fit an int column
+        (1.0, "text"),
+        ("text", 1.0),
+        (np.zeros(3), np.zeros(4)),
+    ],
+)
+def test_inconsistent_records_raise(writer, first, second):
+    run_point(writer, POINTS[0], value=first)
+    writer.begin_point(POINTS[1])
+    with pytest.raises(RecordError):
+        writer.record("value", second)
+
+
+def test_safely_castable_values_are_accepted(writer):
+    run_point(writer, POINTS[0], value=1.5)
+    run_point(writer, POINTS[1], value=np.int32(2))
+    np.testing.assert_array_equal(
+        load_measurement(writer.path).results["value"], [1.5, 2.0]
+    )
+
+
+def test_unsupported_type_raises(writer):
+    with pytest.raises(RecordError, match="unsupported type"):
+        writer.record("thing", object())
+
+
+def test_point_scalars_hold_only_real_numeric_scalars(writer):
+    writer.begin_point(POINTS[0])
+    writer.record("n", 3)
+    writer.record("flag", True)
+    writer.record("trace", [1.0, 2.0])
+    writer.record("note", "hi")
+    assert writer.point_scalars == {"n": 3.0, "flag": 1.0}
+    writer.end_point()
+    writer.begin_point(POINTS[1])
+    assert writer.point_scalars == {}
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="storage uses a float NaN fillvalue for complex results, which h5py rejects",
+)
+def test_complex_results_round_trip(writer):
+    run_point(writer, POINTS[0], z=1 + 2j)
+    assert load_measurement(writer.path).results["z"][0] == 1 + 2j
+    assert "z" not in writer.point_scalars
+
+
+def test_finalise_records_status_and_error(writer):
+    writer.finalise("failed", "RuntimeError: laser unlocked")
+    header = read_header(writer.path)
+    assert header["status"] == "failed"
+    assert header["error"] == "RuntimeError: laser unlocked"
+    assert datetime.fromisoformat(header["t_end"])
+
+
+def test_results_filter_still_reports_shapes_and_kinds(writer):
+    run_point(writer, POINTS[0], small=1.0, big=np.zeros((4, 4)))
+    m = load_measurement(writer.path, results=["small"])
+    assert set(m.results) == {"small"}
+    assert m.result_shapes["big"] == (4, 4)
+    assert m.result_kinds["big"] == "f"
+
+
+def test_in_memory_writer_can_be_loaded_from_its_file():
+    w = make_writer(None)
+    try:
+        run_point(w, POINTS[0], signal=1.0)
+        m = load_measurement(w.file)
+        assert m.path is None
+        np.testing.assert_array_equal(m.results["signal"], [1.0])
+    finally:
+        w.close()
+
+
+def test_read_arguments_excludes_schema(writer):
+    args = read_arguments(writer.path)
+    assert args == {"detuning": 0.0, "camera": "andor", "shots": 5}
+    assert all(not isinstance(v, np.generic) for v in args.values())
+
+
+def test_relpath_and_lookup_by_rid(tmp_path):
+    rel = measurement_relpath(42, "Demo", datetime(2026, 3, 4, 12, tzinfo=UTC))
+    assert rel == Path("2026", "03", "04", "000042_Demo.h5")
+
+    assert highest_rid(tmp_path) == 0
+    for rid, day in [(42, "04"), (1234, "05")]:
+        path = tmp_path / "2026" / "03" / day / f"{rid:06d}_Demo.h5"
+        path.parent.mkdir(parents=True)
+        path.touch()
+    (tmp_path / "2026" / "03" / "05" / "notes_Demo.h5").touch()
+
+    assert highest_rid(tmp_path) == 1234
+    assert (
+        find_measurement(42, tmp_path)
+        == tmp_path / "2026" / "03" / "04" / "000042_Demo.h5"
+    )
+    with pytest.raises(FileNotFoundError):
+        find_measurement(43, tmp_path)
+
+
+@pytest.fixture
+def manager_conf(monkeypatch):
+    conf = {}
+    monkeypatch.setattr(
+        config_module, "get_config", lambda: {"Servers": {"Experiment Manager": conf}}
+    )
+    monkeypatch.setattr(config_module, "this_pc_address", lambda: "10.0.0.1")
+    monkeypatch.delenv("PYTWEEZER_DATA_DIR", raising=False)
+    return conf
+
+
+@pytest.mark.parametrize(
+    "conf, env, expected",
+    [
+        ({"host": "10.0.0.1", "data_root": "/srv/data"}, None, "/srv/data"),
+        (
+            {
+                "host": "10.0.0.2",
+                "data_root": "/srv/data",
+                "client_data_root": "/mnt/d",
+            },
+            None,
+            "/mnt/d",
+        ),
+        (
+            {
+                "host": "10.0.0.1",
+                "data_root": "/srv/data",
+                "client_data_root": "/mnt/d",
+            },
+            None,
+            "/srv/data",
+        ),
+        ({"host": "10.0.0.2", "client_data_root": "/mnt/d"}, "/env", "/env"),
+        (
+            {"host": "localhost", "data_root": "/srv/data", "simulate": True},
+            None,
+            "/srv/data/simulated",
+        ),
+    ],
+)
+def test_data_root_precedence(manager_conf, monkeypatch, conf, env, expected):
+    manager_conf.update(conf)
+    if env:
+        monkeypatch.setenv("PYTWEEZER_DATA_DIR", env)
+    assert storage.data_root() == Path(expected)
+
+
+def test_data_root_defaults_under_tweezerpath(manager_conf):
+    assert storage.data_root() == Path(storage.tweezerpath) / "data"
+
+
+def test_git_provenance_without_git(monkeypatch):
+    def no_git(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(storage.subprocess, "run", no_git)
+    assert storage.git_provenance() == {"git_commit": "", "git_dirty": False}
+
+
+def test_git_provenance_reports_commit_and_dirty(monkeypatch):
+    outputs = {"rev-parse": "abc123\n", "status": " M pytweezer/x.py\n"}
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=outputs[cmd[1]])
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    assert storage.git_provenance() == {"git_commit": "abc123", "git_dirty": True}
