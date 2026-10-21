@@ -28,6 +28,12 @@ cam = get_device("Rb HamCam")  # transparent sipyco Client; methods are RPC call
 cam.close_rpc()
 ```
 
+A call that raises comes back to the caller as the same exception, and the
+device server also logs it with its traceback (`LoggingServer` in
+`device_server.py`). Plain sipyco would only send it back. A method name
+the server doesn't serve fails in the client (`AttributeError`) and never
+reaches the server, so it leaves no server log.
+
 Prefer this over hand-built `Client(host, port, target)` calls anywhere in new
 experiment code — it resolves host, port and target from config for you.
 `get_device_config(name)` returns an entry without connecting, but for a

@@ -326,3 +326,38 @@ def test_is_reachable():
     finally:
         srv.close()
     assert is_reachable(host, port, timeout=0.3) is False
+
+
+def test_a_failing_rpc_call_is_logged_on_the_device_server_and_still_raised(caplog):
+    import threading
+
+    from sipyco.pc_rpc import Client
+
+    class Backend:
+        def fail(self, value):
+            raise ValueError("bad value")
+
+    loop = asyncio.new_event_loop()
+    server = device_server.LoggingServer("Cam", {"cam": Backend()}, None, True)
+    loop.run_until_complete(server.start("127.0.0.1", 0))
+    port = server.server.sockets[0].getsockname()[1]
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    client = Client("127.0.0.1", port, "cam")
+    try:
+        with (
+            caplog.at_level("ERROR", logger="device server"),
+            pytest.raises(Exception, match="bad value"),
+        ):
+            client.fail(list(range(1000)))
+    finally:
+        client.close_rpc()
+        asyncio.run_coroutine_threadsafe(server.stop(), loop).result(5)
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(5)
+        loop.close()
+
+    [record] = [r for r in caplog.records if r.name == "device server"]
+    assert record.getMessage().startswith("Device 'Cam': cam.fail([0, 1, 2")
+    assert "..." in record.getMessage()  # a big argument is abbreviated
+    assert record.exc_info[0] is ValueError

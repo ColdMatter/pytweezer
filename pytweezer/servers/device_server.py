@@ -43,13 +43,16 @@ individually addressable: ``get_device("RbHamCam")``.
 """
 
 import argparse
+import asyncio
 import importlib
 import inspect
+import reprlib
 import signal
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from sipyco.pc_rpc import simple_server_loop
+from sipyco.pc_rpc import Server
+from sipyco.tools import SignalHandler
 
 from pytweezer.configuration.config import get_config
 from pytweezer.logging_utils import get_logger
@@ -64,7 +67,7 @@ class DeviceServerSpec:
     A spec carries either a single target (``target_name``/``target``) or several
     (``targets``, a ``{target_name: target}`` dict — see :func:`_make_composite`),
     never both. Either way :attr:`targets` is the normalized form passed to
-    ``simple_server_loop``. ``teardown`` (if given) is called in a ``finally``
+    :func:`serve`. ``teardown`` (if given) is called in a ``finally``
     after the loop ends, for backends that need an explicit disconnect.
     ``failed`` names the composite sub-devices that could not be built and are
     therefore absent from :attr:`targets`.
@@ -88,6 +91,77 @@ class DeviceServerSpec:
             raise ValueError(
                 "DeviceServerSpec takes target_name/target or targets, not both"
             )
+
+
+# --------------------------------------------------------------------------- #
+# Serving
+# --------------------------------------------------------------------------- #
+
+
+class LoggingServer(Server):
+    """A sipyco ``Server`` that logs every RPC call that raises.
+
+    sipyco sends a failing call's exception back to the caller and records
+    nothing, so without this an error seen in a notebook leaves no trace in the
+    device's own log.
+    """
+
+    def __init__(self, device_name, targets, *args, **kwargs):
+        super().__init__(targets, *args, **kwargs)
+        self.device_name = device_name
+        self._target_names = {id(target): name for name, target in targets.items()}
+
+    async def _process_action(self, target, obj):
+        try:
+            return await super()._process_action(target, obj)
+        except Exception:
+            logger.exception(
+                "Device %r: %s.%s%s failed",
+                self.device_name,
+                self._target_names.get(id(target), "?"),
+                obj.get("name", obj.get("action")),
+                _short_call_args(obj),
+            )
+            raise
+
+
+def _short_call_args(obj):
+    # Arguments can be whole SLM phase masks; keep the log line readable.
+    args = [reprlib.repr(a) for a in obj.get("args", ())]
+    args += [f"{k}={reprlib.repr(v)}" for k, v in obj.get("kwargs", {}).items()]
+    return "(" + ", ".join(args) + ")"
+
+
+def serve(device_name, targets, host, port, description=None, allow_parallel=False):
+    """``sipyco.pc_rpc.simple_server_loop``, serving with :class:`LoggingServer`."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        signal_handler = SignalHandler()
+        signal_handler.setup()
+        try:
+            server = LoggingServer(
+                device_name, targets, description, True, allow_parallel
+            )
+            loop.run_until_complete(server.start(host, port))
+            try:
+                _, pending = loop.run_until_complete(
+                    asyncio.wait(
+                        [
+                            loop.create_task(signal_handler.wait_terminate()),
+                            loop.create_task(server.wait_terminate()),
+                        ],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                )
+                for task in pending:
+                    task.cancel()
+            finally:
+                loop.run_until_complete(server.stop())
+        finally:
+            signal_handler.teardown()
+    finally:
+        loop.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -569,7 +643,8 @@ def run_device_server(name, host=None, port=None, allow_parallel=None):
             ", ".join(sorted(spec.failed)),
         )
     try:
-        simple_server_loop(
+        serve(
+            name,
             spec.targets,
             host=host,
             port=port,
@@ -598,7 +673,7 @@ def main():
     args, _unknown = parser.parse_known_args()
 
     def _stop(_signo, _frame):
-        # Let simple_server_loop unwind (KeyboardInterrupt) so teardown runs.
+        # Let serve() unwind (KeyboardInterrupt) so teardown runs.
         raise KeyboardInterrupt
 
     try:
