@@ -98,6 +98,8 @@ def backfill(root: Path | str | None = None, writer=None) -> int:
     writer = writer or DBWriter()
     count = 0
     for path in sorted(root.rglob("*.h5")):
+        if path.relative_to(root).parts[0] == "simulated":
+            continue  # simulated runs number their rids separately from real ones
         try:
             measurement = load_with_scalars(path)
         except Exception as exc:
