@@ -487,7 +487,9 @@ exclusion for free.
   launches the same `device_server.py` via the `DEVICE_SERVER_SCRIPT` constant,
   since device entries carry no `"script"`. A composite is one *controllable* row
   — its sub-devices are not separately launchable — plus an indented, view-only
-  row per sub-device so each one's state is readable on its own.
+  row per sub-device so each one's state is readable on its own. A row for a
+  device on another PC has a toggle too, which asks that PC's `DevicesPanel` over
+  the Commandhub to start or stop it (`pytweezer/servers/device_control.py`).
 - **`DeviceStatusServer`** (`pytweezer/servers/device_status.py`) independently
   TCP-probes `host:port` for every top-level `CONFIG["Devices"]` entry to publish
   a cross-PC up/down feed (see `gui_architecture.md` for the full Device Status

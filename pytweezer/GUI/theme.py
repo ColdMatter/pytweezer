@@ -32,6 +32,7 @@ STATE_STYLE = {
     "running": ("#2ecc71", "Running"),
     "up": ("#2ecc71", "Running"),
     "starting": ("#f5a623", "Starting"),
+    "stopping": ("#f5a623", "Stopping"),
     "degraded": ("#f5a623", "Degraded"),
     "stopped": ("#6b6c76", "Stopped"),
     "down": ("#6b6c76", "Stopped"),
@@ -389,6 +390,7 @@ QFrame#ProcessTile[state="up"] {
 }
 
 QFrame#ProcessTile[state="starting"],
+QFrame#ProcessTile[state="stopping"],
 QFrame#ProcessTile[state="degraded"] {
     border-left: 4px solid #f5a623;
 }
