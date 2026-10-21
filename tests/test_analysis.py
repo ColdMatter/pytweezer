@@ -1,6 +1,7 @@
-"""Numerical analysis helpers in ``pytweezer/analysis/analysis.py``."""
+"""The analysis code in ``pytweezer/analysis/``."""
 
 import threading
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -89,3 +90,47 @@ def test_fitted_gaussian_width_errors_follow_their_widths():
     fit, fit_transposed = an.fit_gaussian(image), an.fit_gaussian(image.T)
     for name in ("sx", "sy", "sx_err", "sy_err"):
         assert fit[name] == pytest.approx(fit_transposed[name], rel=1e-3), name
+
+
+class _StreamEnded(Exception):
+    pass
+
+
+class OneMessageStream:
+    """Stands in for an ``ImageClient``: delivers one message, then ends ``run()``."""
+
+    def __init__(self, head, image):
+        self.inbox = [("cam", head, image)]
+        self.sent = []
+
+    def recv(self):
+        if not self.inbox:
+            raise _StreamEnded
+        return self.inbox.pop()
+
+    def send(self, head, data, channel=""):
+        self.sent.append((head, data))
+
+
+def _run_filter(filter_class, stream, **properties):
+    """Run a streaming filter over one message; returns what it sent."""
+    process = filter_class.__new__(filter_class)
+    process._props = SimpleNamespace(
+        get=lambda name, default: properties.get(name, default)
+    )
+    process.imageq = stream
+    with pytest.raises(_StreamEnded):
+        process.run()
+    return stream.sent
+
+
+@pytest.mark.parametrize(
+    "angle, offset, rotated",
+    [(0, [10, 0], [10, 0]), (90, [10, 0], [0, -10]), (90, [0, 10], [10, 0])],
+)
+def test_rotating_an_image_rotates_its_offset_the_same_way(angle, offset, rotated):
+    from pytweezer.analysis.rotate_image import ImageRotate
+
+    stream = OneMessageStream({"_offset": offset}, np.zeros((4, 4)))
+    [(head, _image)] = _run_filter(ImageRotate, stream, angle=angle)
+    np.testing.assert_allclose(head["_offset"], rotated, atol=1e-12)
