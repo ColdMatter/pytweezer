@@ -83,16 +83,20 @@ class Sweep(Experiment):
         pass
 
 
-def write_run(path, rid=7):
-    """A completed 3-point run; point 1 records no counts."""
+def write_run(path, rid=7, points_run=3, point_s=0.0):
+    """A 3-point run of which the first ``points_run`` ran; point 1 records no counts.
+
+    Each point lasts at least ``point_s``, so a reading can be placed inside it.
+    """
     scan = Scan(axes=[ListAxis(argument="x", values=[1.0, 2.0, 3.0])])
     _, points, writer = open_writer(path, Sweep, {}, scan, {"rid": rid, "label": "t"})
-    for point in points:
+    for point in points[:points_run]:
         writer.begin_point(point)
         if point.index != 1:
             writer.record("counts", 10 * point.index)
         writer.record("image", np.zeros((2, 2)))
+        time.sleep(point_s)
         writer.end_point()
-    writer.finalise("completed")
+    writer.finalise("completed" if points_run == len(points) else "terminated")
     writer.close()
     return path
