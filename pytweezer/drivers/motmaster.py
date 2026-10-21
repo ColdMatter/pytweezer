@@ -333,7 +333,8 @@ class MotMasterInterface:
             self.stage.wait_move()
             self.picomotor_steps_moved += abs(self.picomotor_default_steps)
             if self.picomotor_steps_moved >= self.picomotor_default_max_steps:
-                self.picomotor_default_steps *= -1.0
+                self.picomotor_default_steps = -self.picomotor_default_steps
+                self.picomotor_steps_moved = 0
 
     def get_laser_set_points_tcl(self) -> dict[str, dict[str, float]]:
         lasers = {}
