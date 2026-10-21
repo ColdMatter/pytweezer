@@ -281,6 +281,15 @@ def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     assert view.selected_task()["rid"] == 4
 
 
+def test_queue_view_selects_nothing_when_the_selected_task_disappears(qapp):
+    view = QueueView()
+    view.set_snapshot({"queue": [task(4, "queued"), task(5, "queued")]})
+    view.table.selectRow(0)
+    view.set_snapshot({"queue": [task(5, "queued")]})
+    assert view.selected_task() is None
+    assert not view.buttons["delete"].isEnabled()
+
+
 def test_panel_submits_and_forwards_actions(qapp):
     client, feed = FakeClient(), FakeFeed()
     panel = ExperimentsPanel(client=client, feed=feed)

@@ -139,7 +139,10 @@ class QueueView(QWidget):
                 self.table.setItem(row, column, item)
             if task["rid"] == selected_rid:
                 reselect = row
-        if reselect is not None:
+        # Qt keeps the selected row index, which may now hold a different task.
+        if reselect is None:
+            self.table.clearSelection()
+        else:
             self.table.selectRow(reselect)
         self._update_buttons()
 
