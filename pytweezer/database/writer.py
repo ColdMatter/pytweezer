@@ -24,6 +24,7 @@ so neither a notebook cell nor the Experiment Manager's loop waits on it.
 
 import atexit
 import json
+import math
 import threading
 from collections import deque
 from datetime import UTC, datetime
@@ -104,15 +105,26 @@ def _coerce_fields(fields):
     return clean
 
 
-def _json_default(value):
+def _finite(value):
+    """``value`` as plain JSON types, with NaN and infinity as None.
+
+    jsonb has no NaN or infinity, and one such row would fail its whole batch
+    on every retry.
+    """
     # numpy scalars and arrays, as read back from h5 files
     if hasattr(value, "tolist"):
-        return value.tolist()
-    return str(value)
+        value = value.tolist()
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _finite(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(item) for item in value]
+    return value
 
 
 def _json(value):
-    return json.dumps(value or {}, default=_json_default)
+    return json.dumps(_finite(value or {}), default=str)
 
 
 def _timestamp(value):
