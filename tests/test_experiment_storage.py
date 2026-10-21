@@ -82,6 +82,20 @@ def test_missing_values_are_flagged_and_float_gaps_are_nan():
     writer.close()
 
 
+def test_complex_results_read_back_with_nan_gaps():
+    points, writer = make_writer()
+    for point in points:
+        writer.begin_point(point)
+        if point.index != 1:
+            writer.record("amplitude", complex(point.index, -0.5))
+        writer.end_point()
+    amplitude = load_measurement(writer.file).results["amplitude"]
+    assert amplitude[0] == complex(0, -0.5)
+    assert np.isnan(amplitude[1].real) and np.isnan(amplitude[1].imag)
+    assert amplitude[2] == complex(2, -0.5)
+    writer.close()
+
+
 def test_a_result_keeps_its_first_shape_and_dtype():
     points, writer = make_writer()
     writer.begin_point(points[0])

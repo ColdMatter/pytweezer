@@ -63,8 +63,8 @@ as an object array.
 - **Make the reader tolerate a bad column.** This would hide corrupt data
   instead of preventing it.
 
-## Also found, separate fix
+## Also found, fixed separately
 
-Complex-valued results cannot be recorded: `_record_result` uses `np.nan` as the
-fill value for complex dtypes, which h5py rejects. Use `complex(np.nan, np.nan)`.
-It fails loudly, so it's lower priority.
+Complex-valued results could not be recorded: `_record_result` used `np.nan` as
+the fill value for complex dtypes, which h5py rejects. It now uses
+`complex(np.nan, np.nan)`.

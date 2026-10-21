@@ -257,7 +257,7 @@ class MeasurementWriter:
         results = self.file["results"]
         if name not in results:
             shape = np.shape(data)
-            fill = np.nan if np.dtype(dtype).kind in "fc" else None
+            fill = {"f": np.nan, "c": complex(np.nan, np.nan)}.get(np.dtype(dtype).kind)
             results.create_dataset(
                 name,
                 shape=(self.n_points, *shape),
