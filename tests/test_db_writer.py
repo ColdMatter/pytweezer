@@ -1,35 +1,34 @@
 """DBWriter queues rows and writes them from a background thread, never raising."""
 
 import json
-import time
+import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import numpy as np
 import pytest
 
-from pytweezer.database import writer as writer_module
-from pytweezer.database.schema import TIMESCALE_SQL, ensure_schema
-from pytweezer.database.writer import DBWriter
+from pytweezer.database.writer import POINT_COLUMNS, RUN_COLUMNS, DBWriter
 
 
 class FakeConnection:
-    """Postgres with TimescaleDB installed; records executemany() rows per table.
+    """Postgres at the network edge; records executemany() rows per table.
 
     Unless TimescaleDB is preloaded, CREATE EXTENSION timescaledb is FATAL: the
     server drops the connection rather than raising an ordinary error.
     """
 
-    def __init__(self, sent=None, preloaded=True):
-        self.sent = {} if sent is None else sent
+    def __init__(self, sent, preloaded=True, schema_fails=False):
+        self.sent = sent
         self.preloaded = preloaded
-        self.executed = []
+        self.schema_fails = schema_fails
         self.closed = False
 
     def execute(self, sql, params=None):
         if self.closed:
             raise ConnectionError("the connection is lost")
-        self.executed.append(sql)
+        if self.schema_fails:
+            raise RuntimeError("permission denied for schema public")
         if "CREATE EXTENSION" in sql and not self.preloaded:
             self.closed = True
             raise ConnectionError('extension "timescaledb" must be preloaded')
@@ -57,14 +56,18 @@ class FakeConnection:
 class FakeDatabase:
     """A connect() callable that can be switched between up and down."""
 
-    def __init__(self, up=True):
+    def __init__(self, up=True, preloaded=True, schema_failures=0):
         self.up = up
+        self.preloaded = preloaded
+        self.schema_failures = schema_failures
         self.sent = {}
 
     def __call__(self, dsn):
         if not self.up:
             raise ConnectionError("database down")
-        return FakeConnection(self.sent)
+        schema_fails = self.schema_failures > 0
+        self.schema_failures -= 1
+        return FakeConnection(self.sent, self.preloaded, schema_fails)
 
 
 @pytest.fixture
@@ -79,12 +82,8 @@ def writer(db):
     writer.close(timeout=5)
 
 
-@pytest.mark.parametrize("preloaded", [True, False])
-def test_schema_reports_timescale_and_keeps_the_connection(preloaded):
-    conn = FakeConnection(preloaded=preloaded)
-    assert ensure_schema(conn) is preloaded
-    assert (TIMESCALE_SQL in conn.executed) is preloaded
-    assert not conn.closed
+def fields_written(db):
+    return [row[2] for row in db.sent.get("readings", [])]
 
 
 def test_write_makes_a_row_per_numeric_field_sharing_one_timestamp(db, writer):
@@ -115,65 +114,112 @@ def test_numpy_scalar_fields_are_written(db, writer, value, stored):
     assert [row[3] for row in db.sent["readings"]] == [stored]
 
 
-def test_records_convert_times_and_json(db, writer):
-    writer.record_run(
-        {
-            "rid": 7,
-            "class_name": "Scan",
-            "arguments": {"detuning": -3.0},
-            "t_start": "2026-10-07T12:00:00+01:00",
-            "t_end": None,
-            "simulated": False,
-        }
-    )
-    writer.record_point(3, 0, 1_700_000_000.0, 1_700_000_001.5, {"x": 1}, {"n": 4.0})
-    writer.record_measurement("ni_adc", "NI ADC", 1.0, {"ai0": [0.0, None]}, True)
+INSTANT = datetime(2026, 10, 7, 11, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "when",
+    [INSTANT, INSTANT.timestamp(), "2026-10-07T12:00:00+01:00"],
+    ids=["datetime", "epoch", "iso-with-offset"],
+)
+def test_run_and_point_times_store_the_same_instant_however_given(db, writer, when):
+    writer.record_run({"rid": 7, "t_start": when})
+    writer.record_point(7, 0, when, when, {}, {})
     assert writer.flush(2)
 
     (run,) = db.sent["runs"]
-    assert run[0] == 7 and run[2] == "Scan"
-    assert json.loads(run[5]) == {"detuning": -3.0}
-    assert run[10] == datetime.fromisoformat("2026-10-07T12:00:00+01:00")
-    assert run[11] is None and run[15] is False
+    (point,) = db.sent["points"]
+    assert run[RUN_COLUMNS.index("t_start")] == INSTANT
+    assert point[POINT_COLUMNS.index("t_start")] == INSTANT
+
+
+def test_numpy_values_in_json_columns_are_stored_as_plain_json(db, writer):
+    scalars = {"n": np.int64(3), "width": np.float32(0.5), "trace": np.arange(3)}
+    writer.record_point(7, 0, 0.0, 1.0, {"x": np.float64(1.5)}, scalars)
+    assert writer.flush(2)
 
     (point,) = db.sent["points"]
-    assert point[:3] == (3, 0, datetime.fromtimestamp(1_700_000_000.0, UTC))
-    assert json.loads(point[5]) == {"n": 4.0}
+    assert json.loads(point[POINT_COLUMNS.index("scan_values")]) == {"x": 1.5}
+    assert json.loads(point[POINT_COLUMNS.index("scalars")]) == {
+        "n": 3,
+        "width": 0.5,
+        "trace": [0, 1, 2],
+    }
 
-    (measurement,) = db.sent["measurements"]
-    assert measurement[:3] == ("ni_adc", "NI ADC", 1.0)
-    assert json.loads(measurement[3]) == {"ai0": [0.0, None]}
-    assert measurement[4] is True
 
+def test_writes_return_while_the_database_is_still_connecting(db):
+    connecting, connected = threading.Event(), threading.Event()
 
-def test_write_does_not_wait_for_an_unreachable_database():
-    writer = DBWriter("postgresql://u:p@127.0.0.1:1/none", batch_s=0.01)
-    start = time.monotonic()
-    for _ in range(100):
-        writer.write("m", {"x": 1.0})
-    assert time.monotonic() - start < 0.1
-    assert not writer.flush(0.5)
+    def slow_connect(dsn):
+        connecting.set()
+        connected.wait()
+        return db(dsn)
+
+    writer = DBWriter(connect=slow_connect, batch_s=0.01)
+    writer.write("m", {"x": 0.0})
+    assert connecting.wait(2)
+    more = threading.Thread(
+        target=lambda: [writer.write("m", {"x": float(i)}) for i in range(100)]
+    )
+    more.start()
+    more.join(timeout=1)
+    finished_before_connecting = not more.is_alive()
+    connected.set()
+    assert finished_before_connecting, "write() waited for the database"
+    assert writer.flush(2)
+    assert len(db.sent["readings"]) == 101
     writer.close(timeout=5)
 
 
-def test_rows_are_kept_through_an_outage_and_written_once_it_ends(db, writer):
+def test_rows_queued_through_an_outage_are_all_written_in_order(db, writer):
     db.up = False
-    writer.write("m", {"x": 1.0})
+    for name in ("a", "b", "c"):
+        writer.write("m", {name: 1.0})
     assert not writer.flush(0.3)
-    assert "readings" not in db.sent
+    assert fields_written(db) == []
 
     db.up = True
-    assert writer.flush(2)
-    assert len(db.sent["readings"]) == 1
+    assert writer.flush(5)
+    assert fields_written(db) == ["a", "b", "c"]
 
 
-def test_backlog_beyond_max_pending_drops_the_oldest():
-    writer = DBWriter(connect=FakeDatabase(up=False), max_pending=3, batch_s=60)
+def test_a_backlog_beyond_max_pending_keeps_the_newest_rows():
+    db = FakeDatabase(up=False)
+    writer = DBWriter(connect=db, max_pending=3, batch_s=0.01)
     writer.write("m", {f"f{i}": float(i) for i in range(5)})
+    assert not writer.flush(0.3)
 
-    with writer._cond:
-        kept = [row[2] for _table, row in writer._pending]
-    assert kept == ["f2", "f3", "f4"]
+    db.up = True
+    assert writer.flush(5)
+    assert fields_written(db) == ["f2", "f3", "f4"]
+    writer.close(timeout=5)
+
+
+def test_close_writes_every_queued_row_before_returning():
+    db = FakeDatabase()
+    writer = DBWriter(connect=db, batch_s=60)
+    for name in ("a", "b", "c"):
+        writer.write("m", {name: 1.0})
+    writer.close(timeout=5)
+    assert fields_written(db) == ["a", "b", "c"]
+
+
+def test_a_server_without_timescaledb_preloaded_still_takes_writes():
+    db = FakeDatabase(preloaded=False)
+    writer = DBWriter(connect=db, batch_s=0.01)
+    writer.write("m", {"x": 1.0})
+    assert writer.flush(5)
+    assert fields_written(db) == ["x"]
+    writer.close(timeout=5)
+
+
+def test_rows_survive_a_failed_schema_setup():
+    db = FakeDatabase(schema_failures=1)
+    writer = DBWriter(connect=db, batch_s=0.01)
+    writer.write("m", {"x": 1.0})
+    writer.flush(0.2)  # the failed attempt; the next flush cuts its backoff short
+    assert writer.flush(5)
+    assert fields_written(db) == ["x"]
     writer.close(timeout=5)
 
 
@@ -190,21 +236,3 @@ def test_log_messages_hide_the_password(dsn):
     dsn_host = DBWriter(dsn).dsn_host
     assert "secret" not in dsn_host
     assert "db" in dsn_host
-
-
-def test_a_failed_schema_setup_is_retried_on_a_fresh_connection(
-    monkeypatch, db, writer
-):
-    attempts = []
-
-    def flaky_schema(conn):
-        attempts.append(conn)
-        if len(attempts) == 1:
-            raise RuntimeError("permission denied")
-
-    monkeypatch.setattr(writer_module, "ensure_schema", flaky_schema)
-    writer.write("m", {"x": 1.0})
-    assert writer.flush(5)
-
-    assert attempts[0].closed and not attempts[1].closed
-    assert len(db.sent["readings"]) == 1
