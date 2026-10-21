@@ -236,8 +236,9 @@ class ExperimentQueue:
 class ModelStore:
     """Persists one pydantic model as JSON, replacing the file atomically.
 
-    Subclasses set :attr:`model`. An unreadable file is moved aside and an
-    empty model returned, so a corrupt file never stops the manager starting.
+    Subclasses set :attr:`model`. A corrupt file is moved aside and an empty
+    model returned, so it never stops the manager starting. A file that can't
+    be read is retried briefly, then the error is raised and the file left alone.
     """
 
     model: type[BaseModel]
@@ -247,14 +248,27 @@ class ModelStore:
 
     def load(self) -> BaseModel:
         try:
-            return self.model.model_validate_json(self.path.read_text())
+            text = self._read_text()
         except FileNotFoundError:
             return self.model()
-        except (ValidationError, json.JSONDecodeError, OSError):
+        try:
+            return self.model.model_validate_json(text)
+        except (ValidationError, json.JSONDecodeError):
             aside = self.path.with_suffix(f".unreadable-{int(time.time())}.json")
             logger.exception("%s is unreadable; moved to %s", self.path, aside)
             self.path.replace(aside)
             return self.model()
+
+    def _read_text(self) -> str:
+        for attempt in range(20):
+            try:
+                return self.path.read_text()
+            except PermissionError:
+                # Windows refuses a read while another process holds the file
+                # exclusively (a backup tool); it is usually released quickly.
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
 
     def save(self, state: BaseModel) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
