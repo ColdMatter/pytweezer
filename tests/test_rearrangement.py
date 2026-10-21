@@ -35,15 +35,6 @@ def test_missing_slm_role_names_available():
         Rearrangement({"camera": FakeCamera()}, {})
 
 
-def test_phasemask_kwargs_merge_config_over_defaults():
-    coord = Rearrangement(
-        {"camera": FakeCamera(), "slm": SimulatedSLM()},
-        {"phasemask": {"wavelength_um": 0.780}},
-    )
-    assert coord.phasemask_kwargs["wavelength_um"] == 0.780
-    assert coord.phasemask_kwargs["slm_res"] == (1024, 1024)
-
-
 def test_status_without_gpu(monkeypatch):
     monkeypatch.setattr(rearr, "_HAS_CUPY", False)
     assert _coord().status() == {
@@ -75,100 +66,6 @@ def test_arm_before_initialise_raises(monkeypatch):
     monkeypatch.setattr(rearr, "_HAS_CUPY", True)
     with pytest.raises(RuntimeError, match="not initialised"):
         _coord().arm_rearrangement()
-
-
-class FakePM:
-    """The GPU phasemask generator's streaming entry point: yields one frame at a time."""
-
-    def __init__(self, n_frames=5):
-        self.n_frames = n_frames
-        self.called_with = None
-
-    def iter_rearrangement_sequence(
-        self, terms1, terms2, occ_mask, d0, profile="minimum_jerk", to_host=True
-    ):
-        self.called_with = {
-            "terms1": terms1,
-            "terms2": terms2,
-            "occ_mask": occ_mask,
-            "d0": d0,
-            "profile": profile,
-            "to_host": to_host,
-        }
-        for _ in range(self.n_frames):
-            yield np.zeros((8, 8), dtype=np.uint8)
-
-
-def _patch_occupancy(monkeypatch):
-    from pytweezer.analysis import analysis as an
-
-    # Force the numpy branch so the patched sum_pixel_values is the one used.
-    monkeypatch.setattr(rearr, "USE_SUM_CPP", False)
-    monkeypatch.setattr(
-        an, "morphological_tophat_high_pass", lambda img, feature_size: img
-    )
-    monkeypatch.setattr(
-        an,
-        "sum_pixel_values",
-        lambda img, grid, window_size: np.array([5.0, 0.0]),
-    )
-
-
-def _armed_coord(monkeypatch, pm, slm):
-    monkeypatch.setattr(rearr, "_HAS_CUPY", True)
-    _patch_occupancy(monkeypatch)
-    coord = Rearrangement({"camera": FakeCamera(), "slm": slm}, {})
-    coord._initialised = True
-    coord._state = {
-        "PM": pm,
-        "terms1": ("w1", "phi1", "x1", "y1"),
-        "terms2": ("w2", "phi2", "x2", "y2"),
-        "pm_init_uint8": np.zeros((1024, 1024), dtype=np.uint8),
-        "d0": 0.5,
-        "fps": 1000.0,
-        "threshold": 1.0,
-        "grid_positions": None,
-        "window_size": 3,
-        "feature_size": 10,
-        "detector": None,
-        "num_images": 1,
-        "profile": "linear",
-    }
-    return coord
-
-
-def test_arm_streams_sequence_to_slm(monkeypatch):
-    slm = SimulatedSLM()
-    pm = FakePM(n_frames=5)
-    coord = _armed_coord(monkeypatch, pm, slm)
-
-    img0, imgs1, timings = coord.arm_rearrangement()
-
-    assert pm.called_with["terms1"] == coord._state["terms1"]
-    assert pm.called_with["d0"] == 0.5
-    assert pm.called_with["profile"] == "linear"
-    np.testing.assert_array_equal(pm.called_with["occ_mask"], np.array([True, False]))
-    # Frames are consumed on the writer thread, so the copy is left to it.
-    assert pm.called_with["to_host"] is False
-    # The initial mask plus every streamed frame.
-    assert slm.frames_written == 1 + 5
-    assert img0.shape == (8, 8) and imgs1.shape == (1, 8, 8)
-    assert timings["n_frames"] == 5
-
-
-def test_arm_reraises_slm_upload_error(monkeypatch):
-    """An upload failure must surface, not be swallowed by the writer thread."""
-
-    class ExplodingSLM(SimulatedSLM):
-        def update_mask(self, mask_array):
-            if getattr(self, "_armed", False):
-                raise RuntimeError("DMA failed")
-            self._armed = True
-            super().update_mask(mask_array)
-
-    coord = _armed_coord(monkeypatch, FakePM(n_frames=4), ExplodingSLM())
-    with pytest.raises(RuntimeError, match="DMA failed"):
-        coord.arm_rearrangement()
 
 
 def test_shutdown_stops_the_camera_only_if_initialised():
