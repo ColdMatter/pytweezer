@@ -1,3 +1,4 @@
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -279,6 +280,107 @@ def test_script_parameters_leaves_the_selected_script_unchanged():
         "/scripts/A.cs",
     ]
     assert driver.script == "A"
+
+
+class FakePicomotor:
+    """The Newport stage at the USB edge; records what it is asked to do."""
+
+    def __init__(self):
+        self.moves, self.velocity = [], None
+
+    def setup_velocity(self, speed, accel):
+        self.velocity = (speed, accel)
+
+    def move_by(self, axis, steps):
+        self.moves.append((axis, steps))
+
+    def wait_move(self):
+        pass
+
+
+def _picomotor_driver(monkeypatch, **defaults):
+    """A driver connected to a :class:`FakePicomotor` with these picomotor defaults."""
+    stage = FakePicomotor()
+    newport = SimpleNamespace(
+        get_usb_devices_number_picomotor=lambda: 1, Picomotor8742=lambda: stage
+    )
+    monkeypatch.setitem(
+        sys.modules, "pylablib.devices", SimpleNamespace(Newport=newport)
+    )
+    driver = MotMasterInterface.__new__(MotMasterInterface)
+    driver.hardware_controller = None
+    driver.config = {
+        "dll_paths": {},
+        "picomotor": {
+            "connect": True,
+            "motor_to_axis": {"m1": 2},
+            "defaults": defaults,
+        },
+    }
+    driver.connect()
+    return driver, stage
+
+
+def test_yag_spot_moves_use_the_configured_velocity(monkeypatch):
+    driver, stage = _picomotor_driver(monkeypatch, speed=100, acceleration=1000)
+    driver._move_picomotor_with_default_settings()
+    assert stage.velocity == (100, 1000)
+
+
+def test_yag_spot_moves_step_the_configured_motor(monkeypatch):
+    driver, stage = _picomotor_driver(monkeypatch, motor="m1", steps=10, max_steps=100)
+    driver._move_picomotor_with_default_settings()
+    assert stage.moves == [(2, 10)]
+
+
+def test_yag_spot_moves_travel_max_steps_then_back(monkeypatch):
+    driver, stage = _picomotor_driver(monkeypatch, motor="m1", steps=10, max_steps=20)
+    for _ in range(6):
+        driver._move_picomotor_with_default_settings()
+    steps = [step for _axis, step in stage.moves]
+    assert steps == [10, 10, -10, -10, 10, 10]
+    assert all(type(step) is int for step in steps)
+
+
+class FakeCamera:
+    """Hands out one-pixel frames with the given counts, in order of frame number."""
+
+    def __init__(self, counts):
+        self.counts = counts
+
+    def start_acquisition(self):
+        pass
+
+    def stop_acquisition(self):
+        pass
+
+    def acquire_n_frames(self, n, start_frame=0):
+        return [[[count]] for count in self.counts[start_frame : start_frame + n]]
+
+
+@pytest.mark.parametrize(
+    "shot_counts, error", [([2.0], float("nan")), ([0.0, 2.0], 1.0)], ids=["1", "2"]
+)
+def test_auto_mot_error_bars_are_standard_errors_of_the_shots(
+    monkeypatch, shot_counts, error
+):
+    def run_each(*args):
+        values, callback = args[2], args[4]
+        return [callback(value) for value in values]
+
+    # The two scan loops drive MOTMaster over .NET; each calls back once per point.
+    driver = MotMasterInterface.__new__(MotMasterInterface)
+    driver.config = {"lasers": {"v00": "cavity"}}
+    driver.wavemeter_lock = SimpleNamespace(getSlaveFrequency=lambda laser: 1.0)
+    driver.scan_motmaster_parameter = run_each
+    driver.scan_wm_laser_set_points = run_each
+    monkeypatch.setattr("pytweezer.drivers.motmaster.time.sleep", lambda _s: None)
+
+    n = len(shot_counts)
+    # The background shot, the one scan point, then parking on the best point.
+    camera = FakeCamera([0.0] * n + shot_counts + [0.0] * n)
+    results = driver.auto_mot({"v00": [1.0]}, camera, shots_per_point=n)
+    assert results["v00"]["errors"] == [pytest.approx(error, nan_ok=True)]
 
 
 def test_simulated_sequencer_serves_and_validates_parameters():
