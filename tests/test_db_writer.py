@@ -5,6 +5,7 @@ import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
+import numpy as np
 import pytest
 
 from pytweezer.database import writer as writer_module
@@ -101,6 +102,17 @@ def test_write_makes_a_row_per_numeric_field_sharing_one_timestamp(db, writer):
     ]
     assert rows[0][0] == rows[1][0]
     assert json.loads(rows[0][4]) == {"n": "2"}
+
+
+@pytest.mark.parametrize(
+    "value, stored",
+    [(np.bool_(True), 1.0), (np.float32(0.5), 0.5), (np.int64(3), 3.0)],
+    ids=["bool", "float32", "int64"],
+)
+def test_numpy_scalar_fields_are_written(db, writer, value, stored):
+    writer.write("laser", {"field": value})
+    assert writer.flush(2)
+    assert [row[3] for row in db.sent["readings"]] == [stored]
 
 
 def test_records_convert_times_and_json(db, writer):

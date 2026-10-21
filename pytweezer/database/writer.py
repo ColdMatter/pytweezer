@@ -30,6 +30,8 @@ from collections import deque
 from datetime import UTC, datetime
 from numbers import Real
 
+import numpy as np
+
 from pytweezer.configuration.config import DATABASE
 from pytweezer.database.schema import ensure_schema
 from pytweezer.logging_utils import get_logger
@@ -96,8 +98,8 @@ def _coerce_fields(fields):
     """
     clean = {}
     for key, value in fields.items():
-        if isinstance(value, bool):
-            clean[key] = value
+        if isinstance(value, (bool, np.bool_)):
+            clean[key] = bool(value)
         elif isinstance(value, Real):
             clean[key] = float(value)
         else:
