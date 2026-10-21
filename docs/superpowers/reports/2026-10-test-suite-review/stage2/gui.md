@@ -193,5 +193,16 @@
 
 Merged into the stage-1 lists on 2026-10-21: every row above marked "yes" (and the "partly" schema-retry row) is now a stage-1 entry that names this test as its cover.
 
+## Tests added by the bug-fix PRs (2026-10-21)
+
+Written after this comparison, on branches not yet merged. Fold them into the coverage table above when the rework starts.
+
+| test | PR | stage-1 ids | status |
+|---|---|---|---|
+| `tests/test_experiment_gui.py::test_a_small_default_without_ndecimals_is_submitted_unchanged` | #14 | arg_editor#2 | covered |
+| `tests/test_experiment_gui.py::test_queue_view_selects_nothing_when_the_selected_task_disappears` | #14 | queue_view#2 | covered |
+| `tests/test_analysis_gui.py::test_table_selects_nothing_when_the_selected_filter_is_removed` | #14 | analysismanager#2 | partly: the removal case |
+| (no test) `CompactDoubleSpinBox` now shows at most 15 significant figures | #14 | components#1 | unchanged; the new cap has no test |
+
 ## Verdict
 **rework**: 32 of the 67 decided tests (48 %) are kept as they are, well above a third, so the suite is a sound base. Its weaknesses follow a pattern: long scenario tests that check several behaviours at once (queue view, results panel, devices panel), and applet-launcher tests that build the object with `__new__` and replace its own methods. Most rewrites mean splitting these tests and moving stand-ins out to the process edge (Popen, the control channel). The bigger gap is coverage: 41 of the 103 stage-1 behaviours have no test at all. That includes every viewer, the property and subscription editors, `theme.resolve_state`, `build_gui`/`closeEvent` teardown, and the Analysis Manager commands. Several partly-covered entries miss exactly the case behind a suspected bug: the selection after a row is removed (analysismanager#2, queue_view#2), a default smaller than the display precision (arg_editor#2), and a shuffled live plot (results#4). Kept as is / total decided: 32 / 67.

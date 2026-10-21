@@ -32,6 +32,7 @@
 | experiments/client#3 | `save_recipe(cls, ...)` stores every argument value, defaults included, except those the scan sweeps. | 1 | unit | quiet: a later change of a default changes what an old recipe runs | — |
 | experiments/client#4 | `ReqClient.request` raises `ManagerUnavailable` when no reply arrives within the retries, and the next request on the same client succeeds once the server answers. | 4 | integration | loud: a notebook or GUI hangs or is wedged after one missed reply | — |
 | experiments/client#5 | `wait` returns the task once its status is final, and raises `TimeoutError` after `timeout_s` otherwise. | 4 | unit | loud: a notebook blocks for ever or returns before the data exists | — |
+| experiments/client#6 | A command that changes state is sent once, even when the manager replies after the timeout; only read-only commands are resent. *Added with the fix in PR #13; covered by `tests/test_experiment_manager.py::test_a_slow_manager_receives_each_submit_once`.* | 1 | integration | quiet: a slow manager queues the same task twice | — |
 
 ## pytweezer/experiment/dataset.py
 
@@ -99,6 +100,7 @@ No entries: re-exports only.
 | experiments/queue#8 | `action_for` a rid that is not the running task returns `TERMINATE`. | 1 | unit | quiet: a stale worker left over from a crash keeps running alongside the new task | — |
 | experiments/queue#9 | `QueueStore.save` then `load` gives back an identical state: active tasks, history, `next_rid`, scan seeds, due times and the worker record. | 2 | unit | quiet: after a manager restart, tasks are lost or rids are reused | — |
 | experiments/queue#10 | An unparseable state file is moved aside and an empty state returned, so the manager still starts. | 4 | unit | loud: the manager will not start after a power cut that left the file half written | — |
+| experiments/queue#11 | A state file that can't be read (as opposed to parsed) is retried briefly; if it still can't be read the error is raised and the file left in place. *Added with the fix in PR #13; covered by `tests/test_experiment_queue.py::test_a_transient_read_error_still_loads_the_saved_queue` and `::test_a_persistent_read_error_raises_and_leaves_the_file`.* | 2 | unit | quiet: a transient read error loses the queue or every recipe | — |
 
 ## pytweezer/experiment/recipes.py
 

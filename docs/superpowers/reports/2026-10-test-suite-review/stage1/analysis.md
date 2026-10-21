@@ -23,6 +23,8 @@
 | analysis/analysis#8 | `detect_loading_threshold` puts the threshold midway between two equal-weight, equal-variance Gaussian populations. | 3 | unit | quiet: the occupied/empty cut is biased, so loading and fidelity are wrong | symmetry: the intersection of identical-width Gaussians is (μ₁+μ₂)/2; use a seeded sample and separation ≫ σ |
 | analysis/analysis#9 | `build_psf_templates` recovers a known PSF, normalised to unit sum, from a stack made of that PSF × random occupancy plus a constant background. | 3 | unit | quiet: a distorted template biases every PSF score | known input PSF divided by its sum |
 | analysis/analysis#10 | `fit_gaussian` recovers the centre, widths (with `sx` the larger) and amplitude of a noise-free rotated 2-D Gaussian. | 3 | unit | quiet: optimisation scans centre their count windows in the wrong place | analytic Gaussian image with known parameters |
+| analysis/analysis#11 | `detect_trap_sites` and `detect_trap_sites_grid` return on a `uint16` frame that never shows the requested number of sites. *Added with the fix in PR #17; covered by `tests/test_analysis.py::test_trap_site_search_gives_up_on_a_uint16_frame_with_too_few_sites`.* | 4 | unit | the call never returns: the threshold wraps round below zero | — |
+| analysis/analysis#12 | When `fit_gaussian` reports `sx` as the larger width, the width errors and `theta` follow: transposing the image changes none of `sx`, `sy`, `sx_err`, `sy_err`. *Added with the fix in PR #17; covered by `tests/test_analysis.py::test_fitted_gaussian_width_errors_follow_their_widths`.* | 3 | unit | quiet: each width carries the other axis's error bar | — |
 
 ## pytweezer/analysis/crashit.py
 
@@ -108,6 +110,7 @@ No entries: it is a test stub that publishes random integers, and nothing relies
 |---|---|---|---|---|---|
 | analysis/rotate_image#1 | At `angle = 0`, both the image and the header `_offset` pass through unchanged. | 3 | unit | quiet: rotated frames are placed at the wrong physical origin (fails today, see bugs) | identity transform |
 | analysis/rotate_image#2 | `_offset` is rotated by the same angle and in the same sense as the image, so its length is preserved. | 3 | unit | quiet: positions in rotated frames are mis-located | a rotation preserves the norm; 90° maps (x, y) to (−y, x) or (y, −x) depending on the image convention |
+| analysis/rotate_image#3 | Pixel values are published as rotated, negative values included. *Added with the fix in PR #17; covered by `tests/test_analysis.py::test_rotating_an_image_keeps_negative_pixels`.* | 3 | unit | quiet: background-subtracted residuals are rectified | — |
 
 ## pytweezer/analysis/substract.py
 
@@ -119,7 +122,7 @@ No entries: it is a test stub that publishes random integers, and nothing relies
 
 | id | behaviour | priority | level | if broken | independent check |
 |---|---|---|---|---|---|
-| analysis/subtract_bg#1 | Given a 16-bit background and an 8-bit image, each published pixel is `\|img − bg / 2⁸\|`. | 3 | unit | quiet: a wrongly scaled background leaves a residual on every frame | hand arithmetic on a tiny background PNG written to `tmp_path` |
+| analysis/subtract_bg#1 | Given a 16-bit background and an 8-bit image, each published pixel is `img − bg / 2⁸`, keeping its sign. *The user confirmed on 2026-10-21 that negative residuals stay negative; PR #17 removed the `abs`.* | 3 | unit | quiet: a wrongly scaled background leaves a residual on every frame | hand arithmetic on a tiny background PNG written to `tmp_path` |
 | analysis/subtract_bg#2 | A frame whose shape is the transpose of the background's is corrected against the transposed background. | 4 | unit | quiet-ish: the subtraction is misaligned, or the process crashes on a shape mismatch | — |
 
 ## Suspected bugs

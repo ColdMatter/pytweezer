@@ -59,5 +59,20 @@ No test files were assigned for decisions in this area.
 | `tests/test_rearrangement.py::test_arm_streams_sequence_to_slm` | the coordinator's occupancy cut (`pixel_sums > threshold`) becomes the `occ_mask` passed to the phasemask generator, and every streamed frame reaches the SLM | no. The cut and the streaming live in `pytweezer/coordinators/rearrangement.py`, outside this area, and the analysis functions it calls are patched out. But note that the test fails at HEAD with `AttributeError: module 'pytweezer.analysis' has no attribute 'morphological_tophat_high_pass'`. `rearrangement.py` has the same `from pytweezer import analysis as an` import bug that stage 1 flagged only for `transport.py`, and the test's patch targets `pytweezer.analysis.analysis` while the coordinator reads the empty package. Stage 1 should have named `rearrangement.py` as a second affected caller. |
 | `tests/test_rearrangement.py::test_arm_reraises_slm_upload_error` | an SLM upload error on the writer thread is raised to the caller | no. This is coordinator behaviour outside this area. It also fails at HEAD, on the same import bug, before it gets to the behaviour it is meant to guard. |
 
+## Tests added by the bug-fix PRs (2026-10-21)
+
+Written after this comparison, on branches not yet merged. Fold them into the coverage table above when the rework starts.
+
+| test | PR | stage-1 ids | status |
+|---|---|---|---|
+| `tests/test_analysis.py::test_well_separated_counts_at_a_fixed_threshold_have_fidelity_near_one` | #17 | analysis#5 | covered, for `_grid` too |
+| `tests/test_analysis.py::test_trap_site_search_gives_up_on_a_uint16_frame_with_too_few_sites` | #17 | analysis#11 (new) | covered |
+| `tests/test_analysis.py::test_bright_points_are_placed_at_the_nearest_pixel_to_their_centre_of_mass` | #17 | analysis#3 | partly: the rounding, through `detect_bright_points` |
+| `tests/test_analysis.py::test_fitted_gaussian_parameters_redraw_the_image` | #17 | analysis#10 | partly: a noisy, unrotated cloud, checked through the redrawn image |
+| `tests/test_analysis.py::test_fitted_gaussian_width_errors_follow_their_widths` | #17 | analysis#12 (new) | covered |
+| `tests/test_analysis.py::test_rotating_an_image_rotates_its_offset_the_same_way` | #17 | rotate_image#1, rotate_image#2 | #1 partly (the offset only); #2 covered |
+| `tests/test_analysis.py::test_rotating_an_image_keeps_negative_pixels` | #17 | rotate_image#3 (new) | covered |
+| `tests/test_analysis.py::test_background_subtraction_keeps_negative_residuals` | #17 | subtract_bg#1 | partly: the sign, not the bit-depth scaling |
+
 ## Verdict
 **start again**: this area has no existing tests to rework. 0 kept as is / 0 decided, and none of the 41 stage-1 behaviours is covered or even partly covered. `test_rearrangement.py` touches `analysis` only through monkeypatched stand-ins, so it guards none of the numerical behaviours the skill ranks third, such as site occupancy, box sums, loading statistics, the PSF scores or the Gaussian fits. Those tests have to be written from the stage-1 list, in a new `tests/test_analysis.py` (and per-script files where needed), checked against the independent answers stage 1 gives. Separately, 3 of the 9 tests in `tests/test_rearrangement.py` fail at HEAD. Two hit the analysis import bug above. `test_phasemask_kwargs_merge_config_over_defaults` fails because `Rearrangement` no longer has `phasemask_kwargs`. The coordinators reviewer should pick these up.

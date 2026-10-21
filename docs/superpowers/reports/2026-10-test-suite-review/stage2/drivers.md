@@ -67,5 +67,16 @@
 
 Merged into the stage-1 lists on 2026-10-21: every row above marked "yes" (and the "partly" schema-retry row) is now a stage-1 entry that names this test as its cover.
 
+## Tests added by the bug-fix PRs (2026-10-21)
+
+Written after this comparison, on branches not yet merged. Fold them into the coverage table above when the rework starts.
+
+| test | PR | stage-1 ids | status |
+|---|---|---|---|
+| `tests/test_motmaster_experiment.py::test_yag_spot_moves_use_the_configured_velocity` | #16 | motmaster#7 | covered, with the next two tests |
+| `tests/test_motmaster_experiment.py::test_yag_spot_moves_step_the_configured_motor` | #16 | motmaster#7 | covered |
+| `tests/test_motmaster_experiment.py::test_yag_spot_moves_travel_max_steps_then_back` | #16 | motmaster#7 | covered |
+| `tests/test_motmaster_experiment.py::test_auto_mot_error_bars_are_standard_errors_of_the_shots` | #16 | motmaster#6 | partly: the errors, not the numbers |
+
 ## Verdict
 **rework**: 6 of 9 decided tests are kept as they are. `tests/test_hamamatsu.py` is sound: every test guards pytweezer's own selection logic over a fake enumeration, and mutations to the ambiguity check, the serial-over-model precedence and the post-open serial check are each caught. `tests/test_slm.py` is where the work is. None of its tests reaches the real `SLM` class, so the driver's only data transformation (`_as_c_uint8`, slm#1/#2) and its frame-slot bound (slm#3) can be broken without failing anything, as mutation confirmed. It should be rebuilt around a fake Blink SDK that records the bytes it is handed, as the green trial does (its `test_update_mask_sends_the_pixels_row_major_as_uint8`, `test_run_sequence_displays_every_frame_in_order` and `test_preload_sequence_uploads_frames_in_order` map directly onto slm#1, #4 and #2), with the twin test cut down to slm#5. Beyond these two files, 29 of the 39 stage-1 entries have no coverage. The largest gaps are in `camera_base.py` (frame indexing, TIFF round-trip and no-overwrite), the four pylablib camera drivers (frame range and ROI, where stage 1 suspects an off-by-one) and the `motmaster.py` scan and `_auto_mot` logic. These are new tests to add in each area's existing file. None of them calls for discarding what is there.

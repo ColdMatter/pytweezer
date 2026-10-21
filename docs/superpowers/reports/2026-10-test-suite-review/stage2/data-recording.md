@@ -105,5 +105,20 @@ Notes on the partial entries:
 
 Merged into the stage-1 lists on 2026-10-21: every row above marked "yes" (and the "partly" schema-retry row) is now a stage-1 entry that names this test as its cover.
 
+## Tests added by the bug-fix PRs (2026-10-21)
+
+Written after this comparison, on branches not yet merged. Fold them into the coverage table above when the rework starts.
+
+| test | PR | stage-1 ids | status |
+|---|---|---|---|
+| `tests/test_experiment_storage.py::test_a_text_result_cannot_switch_between_string_and_dict` | #10 | storage#5 | partly: the string/dict case |
+| `tests/test_experiment_storage.py::test_complex_results_read_back_with_nan_gaps` | #10 | storage#1, storage#4 | partly: the complex case of each |
+| `tests/test_db_integration.py::test_non_finite_json_values_are_stored_as_null_without_blocking_writes` | #10 | writer#9 | covered |
+| `tests/test_db_integration.py::test_a_row_the_database_rejects_is_dropped_and_the_rest_are_written` | #10 | writer#11 (new) | covered |
+| `tests/test_db_writer.py::test_numpy_scalar_fields_are_written` | #10 | writer#2 | partly: the numpy-scalar half |
+| `tests/test_db_writer.py::test_log_messages_hide_the_password` (now parametrised over DSN forms) | #10 | — | no stage-1 entry (security hygiene) |
+| `tests/test_db_analysis.py::test_backfill_skips_simulated_runs_that_share_a_real_rid` | #10 | backfill#5 | covered |
+| `tests/test_loggers.py::test_ni_adc_channels_sharing_a_short_name_keep_their_full_names` | #10 | ni_adc_logger#6 (new) | covered |
+
 ## Verdict
 **rework**: 10 kept as is / 30 decided (17 rewrite, 3 delete). That is right on the one-third line, so this is not a start-again. The kept tests already cover the core of h5 storage (gaps, mid-run trimming), the writer's row shape and outage retention, and the logger loop, and each failed under a deliberate fault in a scratch copy (run with `PYTHONPATH` pointing at the copy). Most rewrites are mechanical: split tests that guard several behaviours, parametrise the cases, and stop going through private `_write_points`/`_pending`/`_long_readings`. Two rewrites matter more than the rest. The `points_with_readings` tests, unit and integration, give every point one shared reading, so they cannot catch readings attached to the wrong point; both still passed with per-point windowing broken. That is the data-recording behaviour analysts rely on most. Nine stage-1 entries have no coverage at all. The ones that matter most are writer#4 (close flushes), writer#7 (numpy in JSON), writer#9 (a NaN poisons the queue), backfill#5 (simulated rids collide with real ones), and the real-hardware `nidaqmx` channel mapping (ni_adc_logger#1/#2). Three of these also come with suspected bugs, so their tests should land with the fixes. The integration file only runs with `PYTWEEZER_TEST_DSN` set, so CI should set it, or the one writer -> Postgres test per path is never exercised.

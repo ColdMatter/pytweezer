@@ -33,7 +33,24 @@ the `pytweezer` database, because the tests truncate every table).
    mark it ready when the user is happy.
 2. **After #12 merges**, merge `exp-handler` into each open branch and rerun
    the suite. All 3 rearrangement failures should be gone.
-3. **Then the test rework**, as in `NEXT-STEPS.md` "Not in this work".
+3. **Then the test rework**, as in `NEXT-STEPS.md` "Not in this work" and the
+   report's "Recommended order". The three things that list says to do first
+   are done:
+   - **Conflict rulings applied.** In `stage2/`, the two tests that are
+     another area's only cover now read "keep for now (ruling)".
+   - **Missed behaviours merged.** 28 new stage-1 entries, each naming the
+     existing test that covers it. The stage-2 "Missed by the review"
+     sections say so.
+   - **Re-checked against current code.** `exp-handler` has no code or test
+     changes since `c95e9f5`. The only code changes are the bug-fix PRs, so
+     each `stage2/<area>.md` now ends with "Tests added by the bug-fix PRs",
+     which maps every new test to its stage-1 ids. Seven behaviours that only
+     those tests guard got new stage-1 entries ("Added with the fix in
+     PR #…"), and `analysis/subtract_bg#1` now describes the signed residual.
+
+   The report's counts (418 behaviours and so on) were not recomputed, so
+   recount from the stage files. Fold the "Tests added" tables into each
+   coverage table once the PRs are merged.
 
 ## Decisions the user made this session
 

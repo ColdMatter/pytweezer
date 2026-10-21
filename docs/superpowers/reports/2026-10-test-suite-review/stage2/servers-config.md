@@ -158,5 +158,14 @@
 
 Merged into the stage-1 lists on 2026-10-21: every row above marked "yes" (and the "partly" schema-retry row) is now a stage-1 entry that names this test as its cover.
 
+## Tests added by the bug-fix PRs (2026-10-21)
+
+Written after this comparison, on branches not yet merged. Fold them into the coverage table above when the rework starts.
+
+| test | PR | stage-1 ids | status |
+|---|---|---|---|
+| `tests/test_stream_clients.py::test_an_array_arrives_as_sent` (new file) | #15 | clients#1 | covered: Fortran-order and strided arrays, for `ImageClient` and `DataClient` |
+| `tests/test_servers.py::test_composite_rejects_two_sub_devices_with_one_role` | #15 | device_server#9 | partly: adds duplicate roles to the config errors |
+
 ## Verdict
 **rework**: 31 of 61 decided tests are kept as they are (19 rewrite, 11 delete), well above the one-third threshold. The kept tests cover the behaviours that matter most here: restart reconciliation, recipe refusal, composite partial builds, device-status states, the launch and simulation guard, and sync and Properties resync over real sockets. Mutations of `run_parallel`, rid continuation, busy-target reuse, the non-JSON guard, option checks and exact device-name matching were each caught. The rewrites are mostly of form, not substance. `test_experiment_manager.py` and `test_properties.py` bundle many behaviours per function and should be split or parametrised. A few tests assert internals: recv counts, exact Notifier mod sequences and private fixture attributes. The deletions are loud-failure checks and library wrappers. The larger gap is not in these files: 23 of 74 stage-1 entries have no test at all, including the whole of `logging_utils`, `analysis_manager`, `clients` (with its Fortran-order bug), `device_control` and `messageclient`, composite teardown order, and the real-CONFIG port and name checks. Another 17 are only partly covered.

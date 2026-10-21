@@ -181,5 +181,15 @@
 
 Merged into the stage-1 lists on 2026-10-21: every row above marked "yes" (and the "partly" schema-retry row) is now a stage-1 entry that names this test as its cover.
 
+## Tests added by the bug-fix PRs (2026-10-21)
+
+Written after this comparison, on branches not yet merged. Fold them into the coverage table above when the rework starts.
+
+| test | PR | stage-1 ids | status |
+|---|---|---|---|
+| `tests/test_experiment_manager.py::test_a_slow_manager_receives_each_submit_once` | #13 | client#6 (new) | covered |
+| `tests/test_experiment_queue.py::test_a_transient_read_error_still_loads_the_saved_queue` | #13 | queue#11 (new) | covered, with the next test |
+| `tests/test_experiment_queue.py::test_a_persistent_read_error_raises_and_leaves_the_file` | #13 | queue#11 (new) | covered, with the previous test |
+
 ## Verdict
 **rework**: 29 of the 63 decided tests (46%) are kept as they are, which is more than a third. Almost every rewrite has the same cause: one function guards several behaviours or runs cases in sequence instead of parametrising them. The behaviours themselves are mostly the right ones. Four tests are unsound, not just untidy. Three were confirmed in a scratch copy run with `PYTHONPATH` set to the copy: the integer-axis rounding test passes when rounding is replaced by truncation, the naive due-time test passes under `TZ=UTC` when naive times are read as UTC, and the MOTMaster fake ignores the iterations, script and save settings, so removing `set_iterations` goes unnoticed. The fourth is a driver test that checks the vendor call sequence. The three slow end-to-end tests (pause, crash, restart) should become unit tests of `ManagerLink` and the manager. Coverage gaps are larger than test-quality problems: `dataset.py`, `tweezer_baseline.py`, most of `catalogue.py`/`introspect.py`, the `worker.py` orphan, disowned and failed-start paths, a failing `prepare`, `KeyboardInterrupt`, and the `run_local` file-versus-memory check have no tests at all. Six tests should go: four loud or trivial ones, one that counts calls to a fake, and one that duplicates the GUI tests.

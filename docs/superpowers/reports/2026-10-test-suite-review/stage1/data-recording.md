@@ -48,6 +48,7 @@ No entries: it only re-exports `DBWriter`, `get_default_writer` and `log`, which
 | data-recording/writer#8 | A run recorded at start and again at finish, with its points, reads back from the test database as one `runs` row with the finish values and one `points` row per point (normal case of writer -> Postgres). | 2 | integration | quiet: run history shows runs stuck as "running", or duplicates | — |
 | data-recording/writer#9 | A point whose scalar result is NaN does not stop rows queued after it from being written. | 2 | integration | quiet: one failed fit silently stops all later database writes from that process (see Suspected bugs) | — |
 | data-recording/writer#10 | A failure in `ensure_schema` closes that connection, and the queued rows are written later on a fresh one. *Added from stage 2; covered by `tests/test_db_writer.py::test_a_failed_schema_setup_is_retried_on_a_fresh_connection`.* | 4 | unit | quiet: rows are lost, or the writer stays on a half-set-up connection | — |
+| data-recording/writer#11 | A row the database rejects (text containing NUL, say) is dropped with a warning, and the rows queued around it are written. *Added with the fix in PR #10; covered by `tests/test_db_integration.py::test_a_row_the_database_rejects_is_dropped_and_the_rest_are_written`.* | 2 | integration | quiet: one bad value stops all database logging until a restart | — |
 
 ## pytweezer/experiment/storage.py
 
@@ -90,6 +91,7 @@ No entries: it only re-exports `Logger`, which is covered under `base.py`.
 | data-recording/ni_adc_logger#3 | With no channels configured, `read()` returns None and no DAQ task is opened. | 4 | unit | loud: a crash on start or a reserved DAQ | — |
 | data-recording/ni_adc_logger#4 | In simulation every configured channel gives a storable numeric field. | 4 | unit | quiet: the simulated logger looks alive and stores nothing | — |
 | data-recording/ni_adc_logger#5 | `close()` releases the DAQ task and still closes the writer when `task.close()` raises. | 4 | unit | quiet: final readings lost; loud on the next start (DAQ resource reserved) | — |
+| data-recording/ni_adc_logger#6 | Channels on different devices that share a short name (`Dev1/ai0`, `Dev2/ai0`) are stored under their full names; the others keep their short names. *Added with the fix in PR #10; covered by `tests/test_loggers.py::test_ni_adc_channels_sharing_a_short_name_keep_their_full_names`.* | 2 | unit | quiet: one device's voltage is lost | — |
 
 ## Suspected bugs
 

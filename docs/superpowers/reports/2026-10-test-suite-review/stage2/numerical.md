@@ -52,5 +52,13 @@
 
 Merged into the stage-1 lists on 2026-10-21: every row above marked "yes" (and the "partly" schema-retry row) is now a stage-1 entry that names this test as its cover.
 
+## Tests added by the bug-fix PRs (2026-10-21)
+
+Written after this comparison, on branches not yet merged. Fold them into the coverage table above when the rework starts.
+
+| test | PR | stage-1 ids | status |
+|---|---|---|---|
+| deleted: `test_phasemask_kwargs_merge_config_over_defaults`, `test_arm_streams_sequence_to_slm`, `test_arm_reraises_slm_upload_error` | #12 | rearrangement#10 | now uncovered: `test_arm_streams_sequence_to_slm` was its only cover |
+
 ## Verdict
 **start again**: none of the 9 decided tests can be kept as they are (0/9 kept, 2 rewrite, 7 delete). Seven guard only loud failures, stale API or generic framework wiring. The two worth having both fail today, before they reach the behaviour they target. Their occupancy stub patches `pytweezer.analysis.analysis`, while the coordinator calls the empty `pytweezer.analysis` package. That confirms stage 1's first suspected bug: with the patch pointed at `rearr.an`, both pass. Today no stage-1 entry is covered: nothing touches `phasemask.py`, `optimisation.py` or `transport.py`, nor the rearrangement plumbing (pairing record, preload slots, panel pacing, trigger arming). The file should be rebuilt around the stage-1 list plus the missed forwarding entry above. Its stand-ins should sit only at the camera, SLM and pulser edges, not at pytweezer's own analysis functions. The `phasemask.py` entries also need the import-time cupy dependency resolved before they can run on CI.
