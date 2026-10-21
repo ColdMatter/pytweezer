@@ -60,6 +60,18 @@ def test_managed_row_toggle_reflects_controllability_and_state(make_row):
     assert degraded.toggleButton.text() == "Stop"
 
 
+def test_client_control_panel_marks_portless_servers_unprobeable(qapp, monkeypatch):
+    from bin import managed_panel
+
+    config = {"Servers": {"Datalogger": {"script": "x.py", "host": "10.0.0.1"}}}
+    monkeypatch.setattr(managed_panel, "get_config", lambda: config)
+    panel = managed_panel.ControlPanel("Servers", "Servers", controllable=False)
+
+    row = panel._rows["Datalogger"]
+    assert row.property("state") == "unprobeable"
+    assert row.stateLabel.text() == "n/a"
+
+
 _PANEL_CONFIG = {
     "Devices": {
         "Rig": {

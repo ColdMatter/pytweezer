@@ -382,7 +382,10 @@ class ControlPanel(BWidget):
             elif host is not None and port is not None:
                 probe_targets[pname] = (host, port)
             else:
-                row.addressLabel.setToolTip("no probeable port")
+                row.apply_status("unprobeable")
+                row.stateLabel.setToolTip(
+                    "Binds no port, so its status cannot be seen from this PC"
+                )
             self._rows[pname] = row
             outer.addWidget(row)
         outer.addStretch(1)

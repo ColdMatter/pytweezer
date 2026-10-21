@@ -39,6 +39,8 @@ STATE_STYLE = {
     "failed": ("#e74c3c", "Failed"),
     "disabled": ("#6b6c76", "Disabled"),
     "unknown": ("#6b6c76", "Unknown"),
+    # A pure subscriber binds no port, so a client has nothing to probe.
+    "unprobeable": ("#6b6c76", "n/a"),
 }
 
 
@@ -405,7 +407,8 @@ QFrame#ProcessTile[tier="child"] {
 QFrame#ProcessTile[state="stopped"],
 QFrame#ProcessTile[state="down"],
 QFrame#ProcessTile[state="disabled"],
-QFrame#ProcessTile[state="unknown"] {
+QFrame#ProcessTile[state="unknown"],
+QFrame#ProcessTile[state="unprobeable"] {
     border-left: 4px solid #6b6c76;
 }
 
