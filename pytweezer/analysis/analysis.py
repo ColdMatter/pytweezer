@@ -225,7 +225,8 @@ def sort_into_grid(centers, grid_shape=(2, 2)):
 
 def detect_trap_sites_grid(img_array, grid_shape, detection_step=100):
     print("Looking for trap sites...")
-    detection_threshold = img_array.max()
+    # A Python float, so stepping down cannot wrap round on unsigned frames.
+    detection_threshold = float(img_array.max())
     while 1:
         if detection_threshold < 1:
             print("Could not detect.")
@@ -243,7 +244,8 @@ def detect_trap_sites_grid(img_array, grid_shape, detection_step=100):
 
 def detect_trap_sites(img_array, atom_number, detection_step=100):
     print("Looking for trap sites...")
-    detection_threshold = img_array.max()
+    # A Python float, so stepping down cannot wrap round on unsigned frames.
+    detection_threshold = float(img_array.max())
     while 1:
         if detection_threshold < 1:
             print("Could not detect.")

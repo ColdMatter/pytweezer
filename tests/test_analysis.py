@@ -1,5 +1,7 @@
 """Numerical analysis helpers in ``pytweezer/analysis/analysis.py``."""
 
+import threading
+
 import numpy as np
 import pytest
 
@@ -40,3 +42,21 @@ def test_well_separated_counts_at_a_fixed_threshold_have_fidelity_near_one(
         verbose=False,
     )
     assert fidelity == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "detect",
+    [
+        lambda frame: an.detect_trap_sites(frame, atom_number=2),
+        lambda frame: an.detect_trap_sites_grid(frame, grid_shape=(1, 2)),
+    ],
+    ids=["sites", "grid"],
+)
+def test_trap_site_search_gives_up_on_a_uint16_frame_with_too_few_sites(detect):
+    frame = np.array([[0, 50]], dtype=np.uint16)
+    thread = threading.Thread(target=detect, args=(frame,), daemon=True)
+    thread.start()
+    thread.join(timeout=2)
+    assert not thread.is_alive(), (
+        "the threshold wrapped round and the search never ended"
+    )
