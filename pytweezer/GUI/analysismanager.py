@@ -173,6 +173,9 @@ class FilterTable(QTableWidget):
             self.item(row, 1).setIcon(status_icon(state))
             if key == selected and not self.item(row, 0).isSelected():
                 self.selectRow(row)
+        # Qt keeps the selected row index, which may now hold a different filter.
+        if selected not in keys:
+            self.clearSelection()
 
 
 class AddFilterSheet(Region):
