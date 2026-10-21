@@ -1,7 +1,9 @@
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
+from pytweezer.experiment import queue as queue_module
 from pytweezer.experiment.queue import (
     HISTORY_LIMIT,
     ExperimentQueue,
@@ -142,3 +144,36 @@ def test_store_round_trip_and_unreadable_file(tmp_path):
     assert store.load().next_rid == 1
     assert not path.exists()
     assert len(list(tmp_path.glob("state.unreadable-*.json"))) == 1
+
+
+def _saved_queue_failing_reads(tmp_path, monkeypatch, failures):
+    """A store holding a saved queue whose next ``failures`` reads raise PermissionError."""
+    path = tmp_path / "state.json"
+    store = QueueStore(path)
+    queue = ExperimentQueue()
+    queue.submit(request())
+    store.save(queue.state)
+    read_text = Path.read_text
+    remaining = [failures]
+
+    def flaky_read_text(self, *args, **kwargs):
+        if self == path and remaining[0] > 0:
+            remaining[0] -= 1
+            raise PermissionError("file held by a backup tool")
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", flaky_read_text)
+    return store, queue.state
+
+
+def test_a_transient_read_error_still_loads_the_saved_queue(tmp_path, monkeypatch):
+    store, saved = _saved_queue_failing_reads(tmp_path, monkeypatch, failures=1)
+    assert store.load() == saved
+
+
+def test_a_persistent_read_error_raises_and_leaves_the_file(tmp_path, monkeypatch):
+    store, _ = _saved_queue_failing_reads(tmp_path, monkeypatch, failures=10**6)
+    monkeypatch.setattr(queue_module.time, "sleep", lambda _s: None)
+    with pytest.raises(PermissionError):
+        store.load()
+    assert [p.name for p in tmp_path.iterdir()] == ["state.json"]

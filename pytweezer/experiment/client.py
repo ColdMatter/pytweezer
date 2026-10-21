@@ -74,8 +74,13 @@ class ReqClient:
         self._context = zmq.Context.instance()
         self._socket: zmq.Socket | None = None
 
-    def request(self, payload: dict[str, Any]) -> dict[str, Any]:
-        for _attempt in range(self.retries + 1):
+    def request(self, payload: dict[str, Any], *, retry: bool = True) -> dict[str, Any]:
+        """Send ``payload`` and return the reply.
+
+        Without a reply in time it is resent up to ``retries`` times, unless
+        ``retry`` is false: a slow server would then carry it out twice.
+        """
+        for _attempt in range((self.retries if retry else 0) + 1):
             if self._socket is None:
                 self._socket = self._context.socket(zmq.REQ)
                 self._socket.setsockopt(zmq.LINGER, 0)
@@ -94,6 +99,18 @@ class ReqClient:
             self._socket = None
 
 
+#: Commands that change nothing, so resending one after a timeout is harmless.
+_READ_ONLY_COMMANDS = {
+    "ping",
+    "snapshot",
+    "catalogue",
+    "get",
+    "history",
+    "last_request",
+    "recipes",
+}
+
+
 class ExperimentManagerClient:
     def __init__(
         self,
@@ -105,7 +122,9 @@ class ExperimentManagerClient:
         self._req = ReqClient(endpoint or rep_endpoint(), timeout_ms, retries)
 
     def call(self, command: str, **fields: Any) -> dict[str, Any]:
-        reply = self._req.request({"command": command, **fields})
+        reply = self._req.request(
+            {"command": command, **fields}, retry=command in _READ_ONLY_COMMANDS
+        )
         if not reply.get("ok"):
             raise ManagerError(reply.get("error", "unknown error"))
         return reply
