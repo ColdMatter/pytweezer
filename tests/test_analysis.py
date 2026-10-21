@@ -112,13 +112,19 @@ class OneMessageStream:
         self.sent.append((head, data))
 
 
-def _run_filter(filter_class, stream, **properties):
-    """Run a streaming filter over one message; returns what it sent."""
+def _run_filter(filter_class, stream, properties=None, **attributes):
+    """Run a streaming filter over one message; returns what it sent.
+
+    ``properties`` stands in for the property server; ``attributes`` are what
+    the filter's ``__init__`` would have loaded.
+    """
+    properties = properties or {}
     process = filter_class.__new__(filter_class)
     process._props = SimpleNamespace(
         get=lambda name, default: properties.get(name, default)
     )
     process.imageq = stream
+    vars(process).update(attributes)
     with pytest.raises(_StreamEnded):
         process.run()
     return stream.sent
@@ -132,5 +138,14 @@ def test_rotating_an_image_rotates_its_offset_the_same_way(angle, offset, rotate
     from pytweezer.analysis.rotate_image import ImageRotate
 
     stream = OneMessageStream({"_offset": offset}, np.zeros((4, 4)))
-    [(head, _image)] = _run_filter(ImageRotate, stream, angle=angle)
+    [(head, _image)] = _run_filter(ImageRotate, stream, {"angle": angle})
     np.testing.assert_allclose(head["_offset"], rotated, atol=1e-12)
+
+
+def test_background_subtraction_keeps_negative_residuals():
+    from pytweezer.analysis.subtract_bg import SubtractBackground
+
+    stream = OneMessageStream({}, np.array([[0, 5]], dtype=np.uint8))
+    background = np.array([[1.0, 2.0]])
+    [(_head, residual)] = _run_filter(SubtractBackground, stream, background=background)
+    assert residual.tolist() == [[-1.0, 3.0]]
