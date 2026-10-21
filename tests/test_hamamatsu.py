@@ -1,3 +1,6 @@
+import contextlib
+from typing import ClassVar
+
 import pytest
 
 from pytweezer.drivers import hamamatsu
@@ -36,3 +39,35 @@ def test_ambiguous_model_raises(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="found 2"):
         hamamatsu.find_dcam_index(None, "C9100")
+
+
+class _FakeDCAMCamera:
+    serials: ClassVar[dict[int, str]] = {0: "S/N: 280187", 1: "S/N: 000407"}
+
+    def __init__(self, index):
+        self.serial_number = self.serials[index]
+        self.closed = False
+
+    def get_device_info(self):
+        return type("Info", (), {"serial_number": self.serial_number})
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def fake_dcam(monkeypatch):
+    monkeypatch.setattr(hamamatsu, "DCAMCamera", _FakeDCAMCamera)
+    monkeypatch.setattr(hamamatsu.libctl, "temp_open", contextlib.nullcontext)
+
+
+def test_open_returns_the_requested_camera(fake_dcam):
+    assert hamamatsu.open_dcam_camera("000407", "C9100").serial_number.endswith(
+        "000407"
+    )
+
+
+def test_open_rejects_a_camera_with_the_wrong_serial(fake_dcam, monkeypatch):
+    monkeypatch.setattr(_FakeDCAMCamera, "serials", {1: "S/N: 280187"})
+    with pytest.raises(RuntimeError, match="expected 000407"):
+        hamamatsu.open_dcam_camera("000407", "C9100")

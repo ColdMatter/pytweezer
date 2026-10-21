@@ -550,7 +550,11 @@ def run_device_server(name, host=None, port=None, allow_parallel=None):
     if allow_parallel is None:
         allow_parallel = bool(conf.get("allow_parallel", False))
 
-    spec = build_spec(name, conf)
+    try:
+        spec = build_spec(name, conf)
+    except Exception:
+        logger.exception("Device %r failed to start", name)
+        raise
     logger.info(
         "Serving device %r (targets: %s) on tcp://%s:%s",
         name,

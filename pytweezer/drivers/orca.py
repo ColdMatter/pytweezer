@@ -1,11 +1,9 @@
-import pylablib.devices.DCAM as dcam
-
 from pytweezer.drivers.camera_base import (
     Camera,
     requires_camera,
     simulated_camera_for,
 )
-from pytweezer.drivers.hamamatsu import find_dcam_index
+from pytweezer.drivers.hamamatsu import open_dcam_camera
 
 
 class ORCACamera(Camera):
@@ -37,9 +35,7 @@ class ORCACamera(Camera):
 
     def _connect(self) -> None:
         try:
-            index = find_dcam_index(self.serial_number, self.model_prefix)
-            camera = dcam.DCAMCamera(index)
-            camera.open()
+            camera = open_dcam_camera(self.serial_number, self.model_prefix)
         except Exception as exc:
             self._backend = None
             raise RuntimeError("Could not connect to ORCA camera") from exc

@@ -1,7 +1,7 @@
 """Locating a specific Hamamatsu camera among several on one DCAM host."""
 
 from pylablib.devices.DCAM import dcamapi4_lib
-from pylablib.devices.DCAM.DCAM import lib, libctl
+from pylablib.devices.DCAM.DCAM import DCAMCamera, lib, libctl
 
 
 def _normalise_serial(serial: str) -> str:
@@ -51,3 +51,23 @@ def find_dcam_index(serial_number: str | None, model_prefix: str) -> int:
             f"connected: {cameras}"
         )
     return matches[0]["index"]
+
+
+def open_dcam_camera(serial_number: str | None, model_prefix: str) -> DCAMCamera:
+    """Open the camera :func:`find_dcam_index` selects.
+
+    A camera held by another process is not enumerated, so indices shift
+    whenever the DCAM library is re-initialised; the lookup and the open
+    therefore share one library session.
+    """
+    with libctl.temp_open():
+        camera = DCAMCamera(find_dcam_index(serial_number, model_prefix))
+    opened_serial = _normalise_serial(camera.get_device_info().serial_number)
+    if serial_number is not None and opened_serial != _normalise_serial(
+        str(serial_number)
+    ):
+        camera.close()
+        raise RuntimeError(
+            f"Opened DCAM camera {opened_serial}, expected {serial_number}"
+        )
+    return camera
