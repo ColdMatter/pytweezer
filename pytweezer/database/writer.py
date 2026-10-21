@@ -19,7 +19,9 @@ Driver usage (own writer instance)::
 Writes **never raise and never block**: each call queues rows for a background
 thread, which batches them into the database. While the database is unreachable
 rows are held (oldest dropped beyond ``max_pending``) and retried with backoff,
-so neither a notebook cell nor the Experiment Manager's loop waits on it.
+so neither a notebook cell nor the Experiment Manager's loop waits on it. A row
+the database itself rejects (text containing NUL, say) is dropped with a
+warning, so it cannot hold up the rows behind it.
 """
 
 import atexit
@@ -318,10 +320,11 @@ class DBWriter:
                 self._pending.clear()
                 self._in_flight = len(batch)
                 closing = self._closing
-            ok = self._send(batch) if batch else True
+            unsent = self._send(batch) if batch else []
+            ok = not unsent
             with self._cond:
-                if not ok:
-                    self._pending.extendleft(reversed(batch))
+                if unsent:
+                    self._pending.extendleft(reversed(unsent))
                     self._trim()
                 self._in_flight = 0
                 self._hurry = False
@@ -343,24 +346,46 @@ class DBWriter:
         return conn
 
     def _send(self, batch):
-        by_table = {}
-        for table, row in batch:
-            by_table.setdefault(table, []).append(row)
+        """Write ``batch``; returns the rows still to be written (none on success)."""
+        from psycopg import DataError, IntegrityError
+
+        rejected = (DataError, IntegrityError)
+        done = 0  # rows of ``batch`` written or dropped
         try:
             conn = self._ensure_connected()
-            with conn.transaction(), conn.cursor() as cursor:
-                for table, rows in by_table.items():
-                    cursor.executemany(SQL[table], rows)
+            try:
+                self._write(conn, batch)
+            except rejected:
+                # The data, not the connection, is at fault: write the rows one
+                # at a time and drop only those the database refuses.
+                for table, row in batch:
+                    try:
+                        self._write(conn, [(table, row)])
+                    except rejected as exc:
+                        logger.warning(
+                            "Dropped a %s row the database rejected: %s", table, exc
+                        )
+                    done += 1
         except Exception as exc:
             if not self._failed:
                 logger.warning("Database write failed (%s): %s", self.dsn_host, exc)
                 self._failed = True
             self._disconnect()
-            return False
+            return batch[done:]
         if self._failed:
             logger.info("Database writes resumed (%s)", self.dsn_host)
             self._failed = False
-        return True
+        return []
+
+    @staticmethod
+    def _write(conn, rows):
+        """Write ``rows`` in one transaction: all of them or none."""
+        by_table = {}
+        for table, row in rows:
+            by_table.setdefault(table, []).append(row)
+        with conn.transaction(), conn.cursor() as cursor:
+            for table, table_rows in by_table.items():
+                cursor.executemany(SQL[table], table_rows)
 
     def _disconnect(self):
         conn, self._conn = self._conn, None

@@ -78,6 +78,17 @@ def test_non_finite_json_values_are_stored_as_null_without_blocking_writes(
     assert conn.execute("SELECT count(*) FROM readings").fetchone() == (1,)
 
 
+def test_a_row_the_database_rejects_is_dropped_and_the_rest_are_written(conn, writer):
+    writer.write("laser", {"power": 1.0})
+    writer.record_run({"rid": 1, "label": "NUL \x00 is not valid text"})
+    writer.write("laser", {"power": 2.0})
+    assert writer.flush(3)
+
+    powers = conn.execute("SELECT value FROM readings ORDER BY value").fetchall()
+    assert powers == [(1.0,), (2.0,)]
+    assert conn.execute("SELECT count(*) FROM runs").fetchone() == (0,)
+
+
 def test_backfilled_run_joins_with_readings(conn, writer, tmp_path, monkeypatch):
     from pytweezer.database import analysis
     from pytweezer.database.backfill import backfill
