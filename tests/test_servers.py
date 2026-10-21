@@ -171,6 +171,20 @@ def test_composite_rejects_a_nested_composite():
         )
 
 
+def test_composite_rejects_two_sub_devices_with_one_role():
+    devices = {"SLM A": _WORKING_SLM, "SLM B": _WORKING_SLM}
+    with pytest.raises(ValueError, match="SLM A.*SLM B.*'slm'"):
+        device_server.build_spec(
+            "Rig",
+            conf={
+                "host": "h",
+                "port": 1,
+                "devices": devices,
+                "coordinator": _COORDINATOR,
+            },
+        )
+
+
 # --------------------------------------------------------------------------- #
 # device_client endpoints
 # --------------------------------------------------------------------------- #

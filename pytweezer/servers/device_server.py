@@ -233,7 +233,8 @@ def _make_composite(name, conf):
     ``"module.path:ClassName"`` string; it is constructed as ``cls(roles, conf)``
     with direct references to the backend objects, so its methods drive them with
     plain Python calls rather than RPC. It receives them keyed by each sub-config's
-    ``"role"`` (defaulting to the device name), so a coordinator asks for
+    ``"role"`` (defaulting to the device name, and unique within the composite),
+    so a coordinator asks for
     ``targets["camera"]`` regardless of what that camera is called in config.
 
     **A sub-device that fails to build does not stop the rig.** Its exception is
@@ -267,12 +268,20 @@ def _make_composite(name, conf):
             f"collides with sub-device {target_names[coordinator_name]!r}"
         )
 
+    role_owners = {}
     for device_name, sub_conf in sub_confs.items():
         if "devices" in sub_conf:
             raise ValueError(
                 f"Composite device {name!r}: sub-device {device_name!r} may not "
                 "itself be a composite"
             )
+        role = sub_conf.get("role", device_name)
+        if role in role_owners:
+            raise ValueError(
+                f"Composite device {name!r}: sub-devices {role_owners[role]!r} "
+                f"and {device_name!r} both have role {role!r}"
+            )
+        role_owners[role] = device_name
 
     targets = {}
     roles = {}
