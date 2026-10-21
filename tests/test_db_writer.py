@@ -2,72 +2,13 @@
 
 import json
 import threading
-from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import numpy as np
 import pytest
 
 from pytweezer.database.writer import POINT_COLUMNS, RUN_COLUMNS, DBWriter
-
-
-class FakeConnection:
-    """Postgres at the network edge; records executemany() rows per table.
-
-    Unless TimescaleDB is preloaded, CREATE EXTENSION timescaledb is FATAL: the
-    server drops the connection rather than raising an ordinary error.
-    """
-
-    def __init__(self, sent, preloaded=True, schema_fails=False):
-        self.sent = sent
-        self.preloaded = preloaded
-        self.schema_fails = schema_fails
-        self.closed = False
-
-    def execute(self, sql, params=None):
-        if self.closed:
-            raise ConnectionError("the connection is lost")
-        if self.schema_fails:
-            raise RuntimeError("permission denied for schema public")
-        if "CREATE EXTENSION" in sql and not self.preloaded:
-            self.closed = True
-            raise ConnectionError('extension "timescaledb" must be preloaded')
-        return self
-
-    def fetchone(self):
-        return (1,) if self.preloaded else None
-
-    @contextmanager
-    def transaction(self):
-        yield
-
-    @contextmanager
-    def cursor(self):
-        yield self
-
-    def executemany(self, sql, rows):
-        table = sql.split()[2]
-        self.sent.setdefault(table, []).extend(rows)
-
-    def close(self):
-        self.closed = True
-
-
-class FakeDatabase:
-    """A connect() callable that can be switched between up and down."""
-
-    def __init__(self, up=True, preloaded=True, schema_failures=0):
-        self.up = up
-        self.preloaded = preloaded
-        self.schema_failures = schema_failures
-        self.sent = {}
-
-    def __call__(self, dsn):
-        if not self.up:
-            raise ConnectionError("database down")
-        schema_fails = self.schema_failures > 0
-        self.schema_failures -= 1
-        return FakeConnection(self.sent, self.preloaded, schema_fails)
+from tests.helpers import FakeDatabase
 
 
 @pytest.fixture
