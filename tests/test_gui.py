@@ -15,6 +15,16 @@ def test_devices_panel_check_host_is_case_and_whitespace_insensitive():
     assert panel.check_host(None) is False
 
 
+def test_this_pc_address_ignores_hostname_case(monkeypatch):
+    from pytweezer.configuration import config
+
+    monkeypatch.setattr(config, "HOSTS", {"IC-CZC4287H3W": "10.59.3.2"})
+    monkeypatch.setattr(config.socket, "gethostname", lambda: "ic-czc4287h3w")
+    assert config.this_pc_address() == "10.59.3.2"
+    monkeypatch.setattr(config.socket, "gethostname", lambda: "elsewhere")
+    assert config.this_pc_address() is None
+
+
 def test_bwidget_constructs_headless_without_property_hub(qapp):
     from pytweezer.GUI.pytweezerQt import BWidget
 
@@ -48,6 +58,18 @@ def test_managed_row_toggle_reflects_controllability_and_state(make_row):
     degraded = make_row()
     degraded.apply_status("degraded")
     assert degraded.toggleButton.text() == "Stop"
+
+
+def test_client_control_panel_marks_portless_servers_unprobeable(qapp, monkeypatch):
+    from bin import managed_panel
+
+    config = {"Servers": {"Datalogger": {"script": "x.py", "host": "10.0.0.1"}}}
+    monkeypatch.setattr(managed_panel, "get_config", lambda: config)
+    panel = managed_panel.ControlPanel("Servers", "Servers", controllable=False)
+
+    row = panel._rows["Datalogger"]
+    assert row.property("state") == "unprobeable"
+    assert row.stateLabel.text() == "n/a"
 
 
 _PANEL_CONFIG = {
@@ -157,7 +179,7 @@ def test_devices_panel_carries_out_requests_only_for_its_own_devices(
 ):
     from bin import managed_panel
 
-    monkeypatch.setattr(managed_panel, "HOSTS", {})  # this PC -> 127.0.0.1
+    monkeypatch.setattr(managed_panel, "this_pc_address", lambda: None)  # -> 127.0.0.1
     config = {
         "Devices": {
             "Local Cam": {"host": "127.0.0.1", "port": 1},

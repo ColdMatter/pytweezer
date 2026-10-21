@@ -3,7 +3,7 @@ import socket
 
 HOSTS = {
     "PH-BEAST": "10.59.3.1",
-    "IC-CZC4287H3W": "10.59.3.2",  # rb pc
+    "IC-CZC221CCHS": "10.59.3.2",  # rb pc
     "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
 }
@@ -141,7 +141,7 @@ CONFIG = {
             "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
             "config_file": "rb_mm_config.json",
-            "host": HOSTS["IC-CZC4287H3W"],
+            "host": HOSTS["IC-CZC221CCHS"],
             "port": get_next_port(),
             "simulate": SIMULATING,
         },
@@ -155,14 +155,28 @@ CONFIG = {
             "port": get_next_port(),
             "simulate": SIMULATING,
         },
-        "CaF HamCam": {
-            "active": True,
-            "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
-            "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
+        # The ORCA moves between PCs: keep exactly one of these two entries active.
+        "CaF ORCA": {
+            "active": False,
+            "class": "pytweezer.drivers.orca:ORCACamera",
+            "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
             "simulate": SIMULATING,
-            "stream_name": "caf_hamcam",
+            "serial_number": "280187",
+            "stream_name": "caf_orca",
+            "timeout": 5.0,
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
+        },
+        "Rb ORCA": {
+            "active": True,
+            "class": "pytweezer.drivers.orca:ORCACamera",
+            "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "serial_number": "280187",
+            "stream_name": "rb_orca",
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
@@ -203,6 +217,7 @@ CONFIG = {
                     "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
                     "sim_class": "pytweezer.drivers.imagemX2:SimulatedTweezerArrayCamera",
                     "role": "camera",
+                    "serial_number": "000407",
                     "stream_name": "rb_hamcam",
                     "timeout": 20.0,
                     "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
@@ -276,3 +291,15 @@ def get_config():
     Tests monkeypatch this (per importing module) to inject a fake config.
     """
     return CONFIG
+
+
+def this_pc_address():
+    """Return this PC's ``HOSTS`` address, or None if it is not listed.
+
+    Windows reports hostnames in whatever case it likes, so the match ignores case.
+    """
+    hostname = socket.gethostname().lower()
+    return next(
+        (address for name, address in HOSTS.items() if name.lower() == hostname),
+        None,
+    )

@@ -34,7 +34,7 @@ from PyQt6 import QtCore
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from pytweezer.configuration.config import HOSTS, get_config
+from pytweezer.configuration.config import HOSTS, get_config, this_pc_address
 from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
@@ -429,7 +429,10 @@ class ControlPanel(BWidget):
             elif host is not None and port is not None:
                 probe_targets[pname] = (host, port)
             else:
-                row.addressLabel.setToolTip("no probeable port")
+                row.apply_status("unprobeable")
+                row.stateLabel.setToolTip(
+                    "Binds no port, so its status cannot be seen from this PC"
+                )
             self._rows[pname] = row
             outer.addWidget(row)
         outer.addStretch(1)
@@ -484,7 +487,7 @@ class DevicesPanel(BWidget):
     def __init__(self, name, parent=None):
         super().__init__(name, parent=parent, create_props=False)
         self.host_name = gethostname()
-        self.host_addr = HOSTS.get(self.host_name, None)
+        self.host_addr = this_pc_address()
         if self.host_addr is None:
             self.host_addr = "127.0.0.1"
             logger.warning(

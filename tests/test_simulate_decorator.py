@@ -7,6 +7,7 @@ import pytest
 from sipyco import pyon
 
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera, SimulatedImagEMX2Camera
+from pytweezer.drivers.orca import ORCACamera, SimulatedORCACamera
 from pytweezer.drivers.slm import SLM, SimulatedSLM
 from pytweezer.servers import device_server
 from pytweezer.servers.simulated_device import public_methods, simulate
@@ -99,7 +100,11 @@ def test_simulate_defaults_and_exclude():
 
 @pytest.mark.parametrize(
     "real, simulated",
-    [(ImagEMX2Camera, SimulatedImagEMX2Camera), (SLM, SimulatedSLM)],
+    [
+        (ImagEMX2Camera, SimulatedImagEMX2Camera),
+        (ORCACamera, SimulatedORCACamera),
+        (SLM, SimulatedSLM),
+    ],
 )
 def test_simulated_backend_covers_real_interface(real, simulated):
     assert not set(public_methods(real)) - set(dir(simulated))

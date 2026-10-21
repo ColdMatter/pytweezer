@@ -70,12 +70,11 @@ def data_root() -> Path:
 
 
 def _is_this_pc(host: str | None) -> bool:
-    from pytweezer.configuration.config import HOSTS
+    from pytweezer.configuration.config import this_pc_address
 
     if host in (None, "localhost", "127.0.0.1", "*", "0.0.0.0"):
         return True
-    addresses = {name.lower(): address for name, address in HOSTS.items()}
-    return addresses.get(socket.gethostname().lower()) == host
+    return this_pc_address() == host
 
 
 def measurement_relpath(rid: int, class_name: str, when: datetime) -> Path:

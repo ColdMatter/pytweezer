@@ -1,180 +1,107 @@
-import logging
-import os
-import time
-from functools import wraps
-from typing import Any
-
-import numpy as np
-import pylablib.devices.DCAM as dcam
-import tifffile as tiff
-
-IMAGE_DIRECTORY = (
-    "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/HamCamImages"
+from pytweezer.drivers.camera_base import (
+    Camera,
+    requires_camera,
+    simulated_camera_for,
 )
-
-LOGGER = logging.getLogger(__name__)
-
-
-def requires_camera(func):
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        self._require_camera()
-        return func(self, *args, **kwargs)
-
-    return wrapper
+from pytweezer.drivers.hamamatsu import open_dcam_camera
 
 
-class ORCACamera:
-    """Low-level wrapper around the Hamamatsu ORCA DCAM driver."""
+class ORCACamera(Camera):
+    """dcam shim: translates the generic :class:`Camera` interface to the
+    Hamamatsu ORCA-R2's pylablib DCAM driver, plus its binning, readout-speed
+    and contrast-gain controls.
+
+    Args:
+        serial_number: DCAM serial number of the camera to open (e.g. ``"280187"``).
+            If None, the only connected ORCA-R2 is opened.
+    """
+
+    image_prefix = "ORCA"
+    model_prefix = "C10600"
 
     def __init__(
         self,
         image_dir: str | None = None,
         timeout: float = 5 * 60.0,
-        camera_index: int = 1,
+        stream_name: str | None = None,
+        serial_number: str | None = None,
     ):
-        self.image_dir = image_dir or IMAGE_DIRECTORY
-        self.timeout = timeout
-        self.camera_index = camera_index
-        self.dcam: dcam.DCAMCamera
-        self._open_camera()
+        self.serial_number = serial_number
+        super().__init__(image_dir=image_dir, timeout=timeout, stream_name=stream_name)
 
-    def _open_camera(self):
+    # ------------------------------------------------------------------ #
+    # Camera hooks
+    # ------------------------------------------------------------------ #
+
+    def _connect(self) -> None:
         try:
-            self.dcam = dcam.DCAMCamera(self.camera_index)
-            self.dcam.open()
-            print("ORCA camera initialised.")
+            camera = open_dcam_camera(self.serial_number, self.model_prefix)
         except Exception as exc:
-            self.dcam = None
+            self._backend = None
             raise RuntimeError("Could not connect to ORCA camera") from exc
+        self._backend = camera
 
-    def _require_camera(self):
-        if self.dcam is None:
-            raise RuntimeError("ORCA camera connection has been relinquished")
-
-    def close(self):
-        try:
-            if self.dcam is not None:
-                self.dcam.close()
-                print("ORCA camera closed.")
-        except Exception:
-            print("Failed to close ORCA camera cleanly.")
-        finally:
-            self.dcam = None
-
-    def relinquish_camera(self):
-        self.close()
-        return {"ok": True, "relinquished": True}
-
-    def reacquire_camera(self):
-        if self.dcam is None:
-            self._open_camera()
-        return {"ok": True, "relinquished": False}
+    def _disconnect(self) -> None:
+        if self._backend is not None:
+            self._backend.close()
 
     @requires_camera
     def set_roi(self, x0: int, width: int, y0: int, height: int):
-        self.dcam.set_roi(x0, x0 + width - 1, y0, y0 + height - 1)
-
-    @requires_camera
-    def set_binning(self, binning: int):
-        self.dcam.set_attribute_value("binning", int(binning))
-
-    @requires_camera
-    def set_readout_speed(self, speed: int):
-        self.dcam.set_attribute_value("readout_speed", int(speed))
-
-    @requires_camera
-    def set_ccd_mode(self, mode: int):
-        self.dcam.set_attribute_value("ccd_mode", int(mode))
-
-    @requires_camera
-    def set_gain(self, gain: int):
-        self.dcam.set_attribute_value("contrast gain", int(gain))
-
-    @requires_camera
-    def set_sensitivity(self, sensitivity: int):
-        self.dcam.set_attribute_value("sensitivity", int(sensitivity))
+        self._backend.set_roi(x0, x0 + width - 1, y0, y0 + height - 1)
 
     @requires_camera
     def set_trigger_source(self, source: str):
-        self.dcam.set_trigger_mode(source)
+        self._backend.set_trigger_mode(source)
 
     @requires_camera
     def set_exposure_time(self, exposure: float):
-        self.dcam.set_exposure(exposure)
+        self._backend.set_exposure(exposure)
+
+    @requires_camera
+    def setup_acquisition(self, acq_mode: str, nframes: int):
+        self._backend.setup_acquisition(acq_mode, int(nframes))
+
+    @requires_camera
+    def start_acquisition(self):
+        self._backend.start_acquisition()
+
+    @requires_camera
+    def stop_acquisition(self):
+        self._backend.stop_acquisition()
+
+    @requires_camera
+    def _read_frames(self, nframes: int, start_frame: int):
+        self._backend.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
+        images, _infos = self._backend.read_multiple_images(
+            (int(start_frame), int(start_frame) + int(nframes)), return_info=True
+        )
+        return images
+
+    # ------------------------------------------------------------------ #
+    # ORCA-specific controls (beyond the generic Camera interface)
+    # ------------------------------------------------------------------ #
+
+    @requires_camera
+    def set_binning(self, binning: int):
+        self._backend.set_attribute_value("binning", int(binning))
+
+    @requires_camera
+    def set_readout_speed(self, speed: int):
+        self._backend.set_attribute_value("readout_speed", int(speed))
+
+    @requires_camera
+    def set_gain(self, gain: int):
+        self._backend.set_attribute_value("contrast_gain", int(gain))
 
     @requires_camera
     def set_external_exposure_mode(self):
         self.set_trigger_source("ext")
-        self.dcam.set_attribute_value("trigger_active", 2)
-        self.dcam.setup_ext_trigger(invert=True)
+        self._backend.set_attribute_value("trigger_active", 2)
+        self._backend.setup_ext_trigger(invert=True)
 
-    @requires_camera
-    def setup_acquisition(self, acq_mode: str, nframes: int):
-        self.dcam.setup_acquisition(acq_mode, int(nframes))
+    def trigger(self):
+        """Send a software trigger to the camera."""
+        self._backend.send_software_trigger()
 
-    @requires_camera
-    def start_acquisition(self):
-        self.dcam.start_acquisition()
 
-    @requires_camera
-    def stop_acquisition(self):
-        self.dcam.stop_acquisition()
-
-    @requires_camera
-    def acquire_n_frames(
-        self,
-        nframes: int,
-        start_frame: int = 0,
-        autosave: bool = False,
-        broadcast: bool = False,
-    ) -> np.ndarray:
-        self.dcam.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
-        images, _infos = self.dcam.read_multiple_images(
-            (int(start_frame), int(start_frame) + int(nframes)), return_info=True
-        )
-        for i, image in enumerate(images):
-            if autosave:
-                ORCACamera.save_tiff(image=image, image_dir=self.image_dir)
-            if broadcast:
-                if self.image_client is None:
-                    LOGGER.error("tried to broadcast image but no client exists")
-                info = {
-                    "timestamp": time.time(),
-                    "index": start_frame + i,
-                }
-                self.image_client.send(image, info)
-        return np.asarray(images)
-
-    @requires_camera
-    def acquire_single_frame(
-        self,
-        timeout=None,
-        exp_info: dict[str, Any] | None = None,
-        autosave: bool = False,
-        broadcast: bool = False,
-    ) -> np.ndarray:
-        self.dcam.wait_for_frame(nframes=1, timeout=timeout)
-        image, _info = self.dcam.read_newest_image(return_info=True)
-        image = np.asarray(image)
-        if autosave:
-            ORCACamera.save_tiff(image=image, image_dir=self.image_dir)
-        info = {"timestamp": time.time(), "index": 0}
-        if exp_info is not None:
-            info.update(exp_info)
-        if broadcast:
-            if self.image_client is None:
-                LOGGER.error("tried to broadcasr image but no client exists")
-            self.image_client.send(image, info)
-        return image
-
-    @staticmethod
-    def save_tiff(image: np.ndarray, image_dir: str | None = None, run_no: int = 0):
-        image_dir = image_dir or IMAGE_DIRECTORY
-        i = 1
-        while os.path.exists(
-            os.path.join(image_dir, f"HamTweezer{run_no:04d}_{i}.tif")
-        ):
-            i += 1
-        filename = os.path.join(image_dir, f"HamTweezer{run_no:04d}_{i}.tif")
-        tiff.imwrite(filename, image)
+SimulatedORCACamera = simulated_camera_for(ORCACamera)
