@@ -119,7 +119,7 @@ No entries: it is a test stub that publishes random integers, and nothing relies
 
 | id | behaviour | priority | level | if broken | independent check |
 |---|---|---|---|---|---|
-| analysis/subtract_bg#1 | Given a 16-bit background and an 8-bit image, each published pixel is `|img − bg / 2⁸|`. | 3 | unit | quiet: a wrongly scaled background leaves a residual on every frame | hand arithmetic on a tiny background PNG written to `tmp_path` |
+| analysis/subtract_bg#1 | Given a 16-bit background and an 8-bit image, each published pixel is `\|img − bg / 2⁸\|`. | 3 | unit | quiet: a wrongly scaled background leaves a residual on every frame | hand arithmetic on a tiny background PNG written to `tmp_path` |
 | analysis/subtract_bg#2 | A frame whose shape is the transpose of the background's is corrected against the transposed background. | 4 | unit | quiet-ish: the subtraction is misaligned, or the process crashes on a shape mismatch | — |
 
 ## Suspected bugs
