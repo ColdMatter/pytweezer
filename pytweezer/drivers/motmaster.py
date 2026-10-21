@@ -209,7 +209,7 @@ class MotMasterInterface:
                             self.picomotor_default_speed = path_info["defaults"][
                                 "speed"
                             ]
-                        if "aceeleration" in path_info["defaults"]:
+                        if "acceleration" in path_info["defaults"]:
                             self.picomotor_default_acceleration = path_info["defaults"][
                                 "acceleration"
                             ]

@@ -1,3 +1,4 @@
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -279,6 +280,51 @@ def test_script_parameters_leaves_the_selected_script_unchanged():
         "/scripts/A.cs",
     ]
     assert driver.script == "A"
+
+
+class FakePicomotor:
+    """The Newport stage at the USB edge; records what it is asked to do."""
+
+    def __init__(self):
+        self.moves, self.velocity = [], None
+
+    def setup_velocity(self, speed, accel):
+        self.velocity = (speed, accel)
+
+    def move_by(self, axis, steps):
+        self.moves.append((axis, steps))
+
+    def wait_move(self):
+        pass
+
+
+def _picomotor_driver(monkeypatch, **defaults):
+    """A driver connected to a :class:`FakePicomotor` with these picomotor defaults."""
+    stage = FakePicomotor()
+    newport = SimpleNamespace(
+        get_usb_devices_number_picomotor=lambda: 1, Picomotor8742=lambda: stage
+    )
+    monkeypatch.setitem(
+        sys.modules, "pylablib.devices", SimpleNamespace(Newport=newport)
+    )
+    driver = MotMasterInterface.__new__(MotMasterInterface)
+    driver.hardware_controller = None
+    driver.config = {
+        "dll_paths": {},
+        "picomotor": {
+            "connect": True,
+            "motor_to_axis": {"m1": 2},
+            "defaults": defaults,
+        },
+    }
+    driver.connect()
+    return driver, stage
+
+
+def test_yag_spot_moves_use_the_configured_velocity(monkeypatch):
+    driver, stage = _picomotor_driver(monkeypatch, speed=100, acceleration=1000)
+    driver._move_picomotor_with_default_settings()
+    assert stage.velocity == (100, 1000)
 
 
 def test_simulated_sequencer_serves_and_validates_parameters():
