@@ -66,3 +66,26 @@ def test_bright_points_are_placed_at_the_nearest_pixel_to_their_centre_of_mass()
     # Centre of mass x = (1 * 1 + 2 * 99) / 100 = 1.99
     centres = an.detect_bright_points(np.array([[0, 1, 99]]), threshold=0)
     assert centres.tolist() == [[0, 2]]
+
+
+def _elongated_gaussian_image():
+    """A cloud 30 px wide in x and 70 px in y, with seeded noise."""
+    y, x = np.mgrid[:300, :300]
+    model = an.gaussian2D(x, y, A=100, x0=150, y0=140, sx=30, sy=70, theta=0, offset=10)
+    noisy = model + np.random.default_rng(0).normal(0, 1, model.shape)
+    return x, y, model, noisy
+
+
+def test_fitted_gaussian_parameters_redraw_the_image():
+    x, y, model, image = _elongated_gaussian_image()
+    fit = an.fit_gaussian(image)
+    names = ("A", "x0", "y0", "sx", "sy", "theta", "offset")
+    redrawn = an.gaussian2D(x, y, *(fit[name] for name in names))
+    np.testing.assert_allclose(redrawn, model, atol=1.0)
+
+
+def test_fitted_gaussian_width_errors_follow_their_widths():
+    *_, image = _elongated_gaussian_image()
+    fit, fit_transposed = an.fit_gaussian(image), an.fit_gaussian(image.T)
+    for name in ("sx", "sy", "sx_err", "sy_err"):
+        assert fit[name] == pytest.approx(fit_transposed[name], rel=1e-3), name

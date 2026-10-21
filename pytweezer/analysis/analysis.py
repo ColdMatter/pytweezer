@@ -156,13 +156,18 @@ def fit_gaussian(img):
         theta_fit_err,
         offset_fit_err,
     ) = np.sqrt(np.diag(pcov))
-    sx_fit, sy_fit = sorted([abs(sx_fit), abs(sy_fit)], reverse=True)
+    sx_fit, sy_fit = abs(sx_fit), abs(sy_fit)
+    if sy_fit > sx_fit:
+        # sx is reported as the major axis: the same Gaussian, turned by 90°.
+        sx_fit, sy_fit = sy_fit, sx_fit
+        sx_fit_err, sy_fit_err = sy_fit_err, sx_fit_err
+        theta_fit += np.pi / 2
     return {
         "A": A_fit,
         "x0": x0_fit,
         "y0": y0_fit,
-        "sx": abs(sx_fit),
-        "sy": abs(sy_fit),
+        "sx": sx_fit,
+        "sy": sy_fit,
         "theta": theta_fit,
         "offset": offset_fit,
         "A_err": A_fit_err,
