@@ -1,14 +1,18 @@
-"""Experiment Manager request handling and restart reconciliation, without sockets."""
+"""Experiment Manager request handling and restart reconciliation, mostly without sockets."""
 
 import json
+import threading
+import time
 
 import h5py
 import psutil
 import pytest
+import zmq
 
 from pytweezer.experiment.client import (
     ExperimentManagerClient,
     ManagerError,
+    ManagerUnavailable,
     delete_recipe,
     recipes,
     save_recipe,
@@ -290,11 +294,35 @@ class InProcess:
     def __init__(self, manager):
         self.manager = manager
 
-    def request(self, payload):
+    def request(self, payload, *, retry=True):
         return self.manager.handle(json.loads(json.dumps(payload)))
 
     def close(self):
         pass
+
+
+def test_a_slow_manager_receives_each_submit_once():
+    server = zmq.Context.instance().socket(zmq.REP)
+    server.bind("tcp://127.0.0.1:*")
+    received = []
+
+    def serve_slowly():
+        while server.poll(300):
+            received.append(server.recv_json()["command"])
+            time.sleep(0.2)
+            server.send_json({"ok": True, "rid": 1})
+
+    thread = threading.Thread(target=serve_slowly)
+    thread.start()
+    client = ExperimentManagerClient(
+        server.getsockopt_string(zmq.LAST_ENDPOINT), timeout_ms=50
+    )
+    with pytest.raises(ManagerUnavailable):
+        client.submit(TaskRequest(experiment=DEMO, class_name="RabiDemo"))
+    thread.join()
+    client.close()
+    server.close(linger=0)
+    assert received == ["submit"]
 
 
 def test_notebook_recipes_round_trip(make_manager):
