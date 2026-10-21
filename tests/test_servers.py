@@ -326,3 +326,19 @@ def test_is_reachable():
     finally:
         srv.close()
     assert is_reachable(host, port, timeout=0.3) is False
+
+
+def test_find_device_processes_matches_the_device_name_exactly(monkeypatch):
+    from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT, tweezerpath
+    from pytweezer.servers import process_cleanup
+
+    script = tweezerpath + "/bin/" + DEVICE_SERVER_SCRIPT
+    processes = [
+        (101, f"python3 {script} Cam "),
+        (102, f"python3 {script} Cam 2 "),
+        (103, f'python3.exe "{script}" "Cam"'),
+        (104, "python3 something_else.py Cam"),
+    ]
+    monkeypatch.setattr(process_cleanup, "_list_processes", lambda: iter(processes))
+    assert process_cleanup.find_device_processes("Cam") == [101, 103]
+    assert process_cleanup.find_device_processes("Cam 2") == [102]

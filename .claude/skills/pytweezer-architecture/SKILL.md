@@ -20,8 +20,10 @@ list: a new lab PC is just another `HOSTS` entry with devices pointed at it.
 
 What runs where is decided **per config entry**, not per machine. A device's
 `"host"` is what determines which PC its server runs on — independent of where
-the GUI that shows it was launched. The server GUI can start and stop only what
-`check_host` says is local; everything else it merely displays.
+the GUI that shows it was launched. A GUI spawns only what `check_host` says is
+local. Servers and loggers elsewhere it merely displays; a device elsewhere it can
+still start and stop, by asking the GUI on that device's host to do it (see the
+`pytweezer-gui-internals` skill).
 
 ## `CONFIG` is the single source of truth
 

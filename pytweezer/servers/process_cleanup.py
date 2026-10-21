@@ -138,6 +138,28 @@ def find_stale_processes():
     return matches
 
 
+def find_device_processes(name):
+    """Return the pids of device servers launched as ``<device_server> <name>``.
+
+    Unlike :func:`find_stale_processes` this matches the name exactly, so
+    stopping ``"Cam"`` never touches ``"Cam 2"``.
+    """
+    script_path = os.path.normcase(tweezerpath + "/bin/" + DEVICE_SERVER_SCRIPT)
+    this_pid = os.getpid()
+    pids = []
+    for pid, cmdline in _list_processes():
+        if pid == this_pid:
+            continue
+        index = os.path.normcase(cmdline).find(script_path)
+        if index < 0:
+            continue
+        # lstrip first: on Windows a quoted script path leaves its closing quote.
+        argument = cmdline[index + len(script_path) :].lstrip('"').strip().strip('"')
+        if argument == name:
+            pids.append(pid)
+    return pids
+
+
 def kill_stale_processes(grace_s=2.0, dry_run=False):
     """Find and terminate every stale pytweezer server/device/logger process.
 
@@ -148,7 +170,18 @@ def kill_stale_processes(grace_s=2.0, dry_run=False):
     if not matches or dry_run:
         return matches
 
-    pids = [m[0] for m in matches]
+    _terminate([m[0] for m in matches], grace_s)
+    return matches
+
+
+def kill_device_process(name, grace_s=2.0):
+    """Terminate device ``name``'s server process(es); return the pids killed."""
+    pids = find_device_processes(name)
+    _terminate(pids, grace_s)
+    return pids
+
+
+def _terminate(pids, grace_s):
     for pid in pids:
         try:
             os.kill(pid, signal.SIGTERM)
@@ -170,8 +203,6 @@ def kill_stale_processes(grace_s=2.0, dry_run=False):
                 os.kill(pid, signal.SIGKILL)
             except (ProcessLookupError, OSError):
                 pass
-
-    return matches
 
 
 def _posix_alive(pid):

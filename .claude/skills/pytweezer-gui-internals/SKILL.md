@@ -109,9 +109,29 @@ when a handshake times out — otherwise a busy rig would flap all its sub-devic
 to `failed` mid-acquisition. A server that has never completed a handshake reads
 `unknown`.
 
-`DevicesPanel` renders all of it: every device on every PC, a controllable row
-only where `check_host` matches this machine, and an indented view-only row per
-sub-device (they share the rig's process and start and stop with it).
+`DevicesPanel` renders all of it: every device on every PC, and an indented
+view-only row per sub-device (they share the rig's process and start and stop
+with it).
+
+## Starting and stopping a device on another PC
+
+A row spawns its process only where `check_host` matches this machine. Every
+other device row still has a toggle, which publishes a start/stop request on the
+Commandhub (`pytweezer/servers/device_control.py`). Every `DevicesPanel` hears
+every request and acts only on its own devices, by calling the same
+`startProcess`/`stopProcess` its toggle would, so the host PC always owns the
+subprocess. Consequences:
+
+- **The host's GUI must be running**, or nobody acts. There is no
+  acknowledgement: the requester shows "Starting"/"Stopping" until the Device
+  Status feed agrees, or the grace period runs out and the feed wins.
+- A request matching the current state (start of a running device) is ignored,
+  so a repeated click never restarts anything.
+- `stopProcess` (toggle and remote stop) differs from `terminateProcess` (panel
+  close): if the row is running but did not spawn the process (one left behind
+  by a GUI that died), it kills it by exact command-line match
+  (`process_cleanup.kill_device_process`). Closing a panel never does that, and
+  never sends remote stops.
 
 ## Shared vs per-machine state
 
