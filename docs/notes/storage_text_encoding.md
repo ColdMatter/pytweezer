@@ -1,7 +1,6 @@
 # Storage: one encoding for text results
 
-Status: agreed direction, not yet implemented. Scope is
-`pytweezer/experiment/storage.py`.
+Status: implemented. Scope is `pytweezer/experiment/storage.py`.
 
 ## The bug
 
@@ -42,12 +41,16 @@ adopting one storage rule:
 - Add one test in `tests/test_experiment_storage.py`, parametrised over both
   orders (dict then str, str then dict).
 
-## Still to decide
+## Decided: refuse a mix
 
-Should a string at one point and a dict at another be **recorded as given** or
-**refused** with a `RecordError`? Either way the file stays loadable. Mixing them is
-probably a mistake in the experiment code; refusing catches that, recording it
-is the more literal reading of "record faithfully".
+A string at one point and a dict at another is **refused** with a
+`RecordError`, as a change of dtype or shape already is. Mixing them is
+probably a mistake in the experiment code, and refusing catches it at the
+record that made it.
+
+A string result now loads back as a list, with `None` for points that didn't
+record it, as a dict result already did. Version-1 string results still load
+as an object array.
 
 ## Considered and deferred
 

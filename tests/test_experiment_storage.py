@@ -121,6 +121,24 @@ def test_strings_dicts_and_constants():
 
 
 @pytest.mark.parametrize(
+    "first, second",
+    [({"a": 1}, "plain"), ("plain", {"a": 1})],
+    ids=["dict-str", "str-dict"],
+)
+def test_a_text_result_cannot_switch_between_string_and_dict(first, second):
+    points, writer = make_writer()
+    writer.begin_point(points[0])
+    writer.record("note", first)
+    writer.end_point()
+    writer.begin_point(points[1])
+    with pytest.raises(RecordError, match="note"):
+        writer.record("note", second)
+    writer.end_point()
+    assert load_measurement(writer.file).results["note"] == [first, None]
+    writer.close()
+
+
+@pytest.mark.parametrize(
     "name, value, message",
     [
         ("", 1, "invalid record name"),

@@ -38,7 +38,9 @@ import numpy as np
 from pytweezer.configuration.paths import tweezerpath
 from pytweezer.experiment.scan import Point, Scan
 
-SCHEMA_VERSION = 1
+#: Version 2 stores text results as JSON. Version-1 text datasets have
+#: ``encoding == ""`` and still decode as plain strings.
+SCHEMA_VERSION = 2
 _STR = h5py.string_dtype()
 
 
@@ -158,6 +160,7 @@ class MeasurementWriter:
         self.n_points = len(points)
         self._point: Point | None = None
         self._recorded_this_point: set[str] = set()
+        self._text_kinds: dict[str, str] = {}
         self.point_scalars: dict[str, float] = {}
         self.point_t_start: float | None = None
         self.point_t_end: float | None = None
@@ -224,7 +227,13 @@ class MeasurementWriter:
         self._point = None
 
     def record(self, name: str, value: Any, unit: str = "") -> None:
-        """Record into the current point, or as a constant outside a point."""
+        """Record into the current point, or as a constant outside a point.
+
+        Numbers and numeric arrays are stored as typed arrays; strings and dicts
+        as JSON text. A result's kind (number, string or dict), dtype and shape
+        are fixed by its first record, and a later record that does not fit
+        raises :class:`RecordError`.
+        """
         _check_name(name)
         if self._point is None:
             self._record_constant(name, value, unit)
@@ -262,6 +271,13 @@ class MeasurementWriter:
             )
         dataset = results[name]
         _check_fits(name, dataset, data, dtype)
+        if dtype is _STR:
+            kind = "string" if isinstance(value, str) else "dict"
+            first_kind = self._text_kinds.setdefault(name, kind)
+            if kind != first_kind:
+                raise RecordError(
+                    f"{name!r} was first recorded as a {first_kind}, now got a {kind}"
+                )
         dataset[self._point.index] = data
         self.file["recorded"][name][self._point.index] = True
         self._recorded_this_point.add(name)
@@ -287,9 +303,7 @@ def _check_name(name: str) -> None:
 
 def _encode(name: str, value: Any) -> tuple[Any, Any, str]:
     """Return ``(data, h5 dtype, encoding)`` for a recorded value."""
-    if isinstance(value, str):
-        return value, _STR, ""
-    if isinstance(value, dict):
+    if isinstance(value, (str, dict)):
         return json.dumps(value), _STR, "json"
     data = np.asarray(value)
     if data.dtype.kind not in "biufc":
