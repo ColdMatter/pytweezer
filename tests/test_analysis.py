@@ -149,3 +149,12 @@ def test_background_subtraction_keeps_negative_residuals():
     background = np.array([[1.0, 2.0]])
     [(_head, residual)] = _run_filter(SubtractBackground, stream, background=background)
     assert residual.tolist() == [[-1.0, 3.0]]
+
+
+def test_rotating_an_image_keeps_negative_pixels():
+    from pytweezer.analysis.rotate_image import ImageRotate
+
+    image = np.array([[-1.0, 2.0], [3.0, -4.0]])
+    stream = OneMessageStream({"_offset": [0, 0]}, image)
+    [(_head, rotated)] = _run_filter(ImageRotate, stream, {"angle": 0})
+    np.testing.assert_array_equal(rotated, image)

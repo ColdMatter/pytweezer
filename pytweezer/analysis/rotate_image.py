@@ -1,7 +1,6 @@
 import argparse
 
 import cv2
-import numpy as np
 
 from pytweezer.servers import *
 from pytweezer.servers import ImageClient
@@ -36,7 +35,7 @@ class ImageRotate:
                 head["_offset"] = (rotation[:, :2] @ head["_offset"]).tolist()
 
                 # send the image
-                self.imageq.send(head, np.abs(img_rot), channel="_")
+                self.imageq.send(head, img_rot, channel="_")
 
 
 def main_run(name):
