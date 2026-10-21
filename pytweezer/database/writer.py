@@ -373,10 +373,14 @@ class DBWriter:
     @property
     def dsn_host(self):
         """The DSN with any password removed, for log messages."""
-        if "@" in self.dsn:
-            scheme, _, rest = self.dsn.partition("://")
-            return f"{scheme}://{rest.rpartition('@')[2]}"
-        return self.dsn
+        from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+        try:
+            params = conninfo_to_dict(self.dsn)
+        except Exception:
+            return "<unparseable DSN>"
+        params.pop("password", None)
+        return make_conninfo(**params)
 
 
 _default_writer = None

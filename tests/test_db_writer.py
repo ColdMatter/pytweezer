@@ -177,8 +177,19 @@ def test_backlog_beyond_max_pending_drops_the_oldest():
     writer.close(timeout=5)
 
 
-def test_log_messages_hide_the_password(writer):
-    assert writer.dsn_host == "postgresql://db:5432/x"
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql://u:secret@db:5432/x",
+        "host=db port=5432 password=secret dbname=x",
+        "host=db password='secret' dbname=x",
+    ],
+    ids=["url", "key-value", "quoted"],
+)
+def test_log_messages_hide_the_password(dsn):
+    dsn_host = DBWriter(dsn).dsn_host
+    assert "secret" not in dsn_host
+    assert "db" in dsn_host
 
 
 def test_a_failed_schema_setup_is_retried_on_a_fresh_connection(
