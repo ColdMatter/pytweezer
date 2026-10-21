@@ -60,3 +60,9 @@ def test_trap_site_search_gives_up_on_a_uint16_frame_with_too_few_sites(detect):
     assert not thread.is_alive(), (
         "the threshold wrapped round and the search never ended"
     )
+
+
+def test_bright_points_are_placed_at_the_nearest_pixel_to_their_centre_of_mass():
+    # Centre of mass x = (1 * 1 + 2 * 99) / 100 = 1.99
+    centres = an.detect_bright_points(np.array([[0, 1, 99]]), threshold=0)
+    assert centres.tolist() == [[0, 2]]

@@ -202,7 +202,7 @@ def detect_bright_points(image_array, threshold=200):
 
     centers = np.array(centers)
 
-    return centers.astype(int)  # Return centers as an array of (y, x) coordinates
+    return np.rint(centers).astype(int)  # (y, x) of the nearest pixel to each centre
 
 
 # Sort detected points into a 2D grid and return (i, j) labels
