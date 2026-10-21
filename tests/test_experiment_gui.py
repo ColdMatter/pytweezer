@@ -131,6 +131,20 @@ def test_form_shows_display_units_and_returns_si(editor):
     assert request.class_name == "Demo"
 
 
+class Tiny(Experiment):
+    pulse = Number(2e-7, unit="s")
+
+    def run_point(self):
+        pass
+
+
+def test_a_small_default_without_ndecimals_is_submitted_unchanged(qapp):
+    editor = ArgumentEditor()
+    editor.set_experiment(Tiny.schema())
+    assert editor.request().args["pulse"] == pytest.approx(2e-7, rel=1e-12)
+    assert editor.rows["pulse"].label.property("state") != "modified"
+
+
 def test_scan_axes_and_point_count(editor):
     detuning = editor.rows["detuning"]
     detuning.scan_button.setChecked(True)
@@ -265,6 +279,15 @@ def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     # selection survives a refresh
     view.set_snapshot({"running": None, "queue": [task(4, "queued")], "history": []})
     assert view.selected_task()["rid"] == 4
+
+
+def test_queue_view_selects_nothing_when_the_selected_task_disappears(qapp):
+    view = QueueView()
+    view.set_snapshot({"queue": [task(4, "queued"), task(5, "queued")]})
+    view.table.selectRow(0)
+    view.set_snapshot({"queue": [task(5, "queued")]})
+    assert view.selected_task() is None
+    assert not view.buttons["delete"].isEnabled()
 
 
 def test_panel_submits_and_forwards_actions(qapp):

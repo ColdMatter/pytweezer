@@ -34,3 +34,12 @@ def test_table_updates_in_place_and_keeps_the_selection(qapp):
     assert table.selected_key() == key
     assert table.item(1, 0) is item  # not rebuilt
     assert [table.item(r, 1).text() for r in range(2)] == ["Stopped", "Crashed"]
+
+
+def test_table_selects_nothing_when_the_selected_filter_is_removed(qapp):
+    table = FilterTable()
+    table.update_filters(FILTERS, {})
+    table.selectRow(0)
+    assert table.selected_key() == "Data/b"
+    table.update_filters({"Image/a": FILTERS["Image/a"]}, {})
+    assert table.selected_key() is None
