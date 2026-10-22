@@ -1,6 +1,7 @@
 import argparse
 
-import cv2
+import imutils
+import numpy as np
 
 from pytweezer.servers import *
 from pytweezer.servers import ImageClient
@@ -25,17 +26,22 @@ class ImageRotate:
                 msgstr, head, img = msg
 
                 # rotate the image
-                height, width = img.shape[:2]
-                rotation = cv2.getRotationMatrix2D(
-                    (width // 2, height // 2), self._angle, 1.0
-                )
-                img_rot = cv2.warpAffine(img, rotation, (width, height))
+                img_rot = imutils.rotate(img, self._angle)
 
-                # rotate the offset by the same matrix as the pixels
-                head["_offset"] = (rotation[:, :2] @ head["_offset"]).tolist()
+                # rotate the coordinate system
+                offsetx, offsety = head["_offset"]
+                offxrot = (
+                    np.sin(np.deg2rad(self._angle)) * offsetx
+                    + np.cos(np.deg2rad(self._angle)) * offsety
+                )
+                offyrot = (
+                    np.sin(np.deg2rad(self._angle)) * offsety
+                    + np.cos(np.deg2rad(self._angle)) * offsetx
+                )
+                head["_offset"] = [offxrot, offyrot]
 
                 # send the image
-                self.imageq.send(head, img_rot, channel="_")
+                self.imageq.send(head, np.abs(img_rot), channel="_")
 
 
 def main_run(name):

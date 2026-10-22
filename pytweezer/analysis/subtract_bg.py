@@ -37,7 +37,7 @@ class SubtractBackground:
                 ):
                     self.background = self.background.T
                 img_bfree = img - self.background
-                self.imageq.send(head, img_bfree, channel="_")
+                self.imageq.send(head, np.abs(img_bfree), channel="_")
 
 
 def main_run(name):
