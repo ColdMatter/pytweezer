@@ -26,7 +26,7 @@ LOGGER = logging.getLogger(__name__)
 
 #: Defaults matching the lab's Blink Plus install; overridable via config.
 DEFAULT_SDK_DLL = "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\SDK\\Blink_C_wrapper"
-DEFAULT_LUT_FILE = "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\LUT Files\\slm40_at852.LUT"
+DEFAULT_LUT_FILE = "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\LUT Files\\slm_40deg_852.LUT"
 
 #: Frames the 1024x1024 board's on-board memory holds (manual S4.3.9).
 MAX_PRELOAD_FRAMES = 752
