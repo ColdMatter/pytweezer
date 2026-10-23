@@ -28,7 +28,7 @@
     "emccd_parameters": {
         "em_gain": 600,
         "conversion_factor": 0.009508957628343926,
-        "conversion_offset": 1915.5428466796875
+        "conversion_offset": 1914.0418701171875
     },
     "image_analysis": {
         "x_centre": 130.39,
