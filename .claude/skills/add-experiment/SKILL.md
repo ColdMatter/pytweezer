@@ -106,6 +106,18 @@ finishes fails the task, and its device server stays blocked in the triggered
 before the next task. Camera APIs differ
 between drivers — check the driver, not old notebooks.
 
+**Linked mode** (one script driving PH-BONESAW and RbTweezer together, fired by
+TTL from the CaF side): declare only the primary,
+`MotMaster("CaF MotMaster", script=..., linked=True)`, and no other `MotMaster`.
+Every parameter of both machines, `SecondaryTriggerDelay` included, is a
+parameter of that one script. The link lasts one task: `prepare()` sets linked
+mode on or off on every sequencer (unlinking first) and `close_devices()`
+releases it, even after a failure. While linked, the Rb MOTMaster refuses its
+own `SetScriptPath`/`Go`, so an Rb-only task fails if someone has ticked Linked
+by hand on PH-BONESAW. Any linked failure, either machine, raises from the task.
+`experiments/linked_scope_test.py` is the minimal example; the MOTMaster side
+is EDMSuite's `motmaster-linked-mode` skill.
+
 ## Running
 
 From the GUI: **Experiments** tab → pick the class → edit, toggle "Scan" per

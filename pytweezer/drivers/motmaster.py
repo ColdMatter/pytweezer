@@ -122,6 +122,7 @@ class MotMasterInterface:
         self.hardware_controller = None
         self.script = None
         self.script_path = None
+        self.linked = False
         self.connect()
         if self.motmaster is None:
             raise RuntimeError("Failed to connect to MotMaster.")
@@ -260,10 +261,45 @@ class MotMasterInterface:
             pars_csdict[key] = value
         return pars_csdict
 
+    def set_linked(self, value: bool) -> None:
+        """Turn MOTMaster's linked mode on or off.
+
+        Linked mode lets one script on this MOTMaster (the primary) drive a second
+        MOTMaster too, which it claims over .NET remoting and fires by TTL. Only a
+        MOTMaster whose Hardware class declares a ``MOTMasterLinkConfig`` can be a
+        primary; turning it on anywhere else raises. While linked, every ``Go``
+        drives both machines, and any failure on either raises here rather than
+        ending in a MessageBox.
+
+        Turning it on when already linked keeps the existing claim. Turning it off
+        does nothing on a MOTMaster that is not linked, including a build that
+        predates linked mode.
+        """
+        if not value and not hasattr(self.motmaster, "SetLinked"):
+            self.linked = False
+            return
+        if not (value and self.motmaster.IsLinked):
+            self.motmaster.SetLinked(value)
+        self.linked = value
+
+    def is_linked(self) -> bool:
+        """Whether MOTMaster itself reports linked mode on (it drops it if the
+        secondary takes back control)."""
+        return bool(self.motmaster.IsLinked)
+
     def start_motmaster_experiment(self, parameters: dict | None = None):
         if self.script is None:
             raise ValueError(
                 "MotMaster script not set. Please call set_motmaster_experiment first."
+            )
+        # MOTMaster turns linked mode off by itself when the secondary takes back
+        # control; a linked script must then not run on the primary alone.
+        if self.linked and not self.is_linked():
+            self.linked = False
+            raise RuntimeError(
+                "MOTMaster is no longer linked (the secondary has probably taken "
+                "back control); the linked script was not run. Call "
+                "set_linked(True) to claim the secondary again."
             )
         if parameters is not None:
             self.motmaster.Go(self.python_to_cs_dict(parameters))
@@ -786,6 +822,12 @@ class MotMasterInterface:
 SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
     "RbTweezerBasic": {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5, "nShots": 1},
     "CaFTweezerLoad": {"tLoad": 100, "bTop": 0.5, "tHold": 10e-3},
+    "LinkedScopeTest": {
+        "PatternLength": 20000,
+        "PulseStart": 1000,
+        "PulseDuration": 1000,
+        "SecondaryTriggerDelay": 0,
+    },
     "RbTweezerBasic2026_2": {
         **dict.fromkeys(
             [
@@ -833,6 +875,13 @@ class SimulatedMotMasterInterface:
 
     def __init__(self, *args, **kwargs):
         self.script = None
+        self.linked = False
+
+    def set_linked(self, value: bool) -> None:
+        self.linked = value
+
+    def is_linked(self) -> bool:
+        return self.linked
 
     def script_parameters(self, script: str) -> dict[str, Any]:
         return dict(SIMULATED_SCRIPT_PARAMETERS.get(script, _SIMULATED_FALLBACK))

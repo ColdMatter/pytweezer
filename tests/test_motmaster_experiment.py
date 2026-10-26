@@ -24,8 +24,13 @@ class FakeSequencer:
     def _ignore(self, *args):
         pass
 
-    set_motmaster_experiment = set_run_until_stopped = _ignore
-    set_iterations = set_save_toggle = close_rpc = _ignore
+    set_run_until_stopped = set_iterations = set_save_toggle = close_rpc = _ignore
+
+    def set_linked(self, value):
+        self.log.append((self.name, "linked", value))
+
+    def set_motmaster_experiment(self, script):
+        self.log.append((self.name, "script", script))
 
     def set_trigger_mode(self, value):
         self.log.append((self.name, "triggered", value))
@@ -83,6 +88,11 @@ class Pair(MotMasterExperiment):
     rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
     caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad", follower_timeout=0.1)
     tof = MotMasterInteger(100, device="rb", parameter="tDelay1")
+
+
+class Linked(MotMasterExperiment):
+    caf = MotMaster("CaF MotMaster", script="LinkedTweezerLoad", linked=True)
+    load = MotMasterInteger(100, parameter="tLoad")
 
 
 class Trio(MotMasterExperiment):
@@ -148,6 +158,30 @@ def test_master_is_untriggered_and_followers_start_first(rig, monkeypatch):
     # Only parameters that were chosen are sent; the rest keep the script's defaults.
     assert goes(rig, "caf") == [{"bTop": 0.7}]
     assert goes(rig, "rb") == [{"tDelay1": 100}]
+
+
+def test_linked_sequencer_is_linked_untriggered_and_run_alone(rig):
+    run_local(Linked, **{"caf.bTop": 0.7})
+    assert ("caf", "linked", True) in rig.log
+    assert ("caf", "triggered", False) in rig.log
+    assert goes(rig, "caf") == [{"tLoad": 100, "bTop": 0.7}]
+    assert rig.opened == ["CaF MotMaster"]
+
+
+@pytest.mark.parametrize("fail_go", [False, True], ids=["completed", "failed"])
+def test_link_is_released_when_the_task_ends(rig, fail_go):
+    # Left on, it would lock the secondary against every other task.
+    rig.fakes["CaF MotMaster"].fail_go = fail_go
+    run_local(Linked)
+    assert rig.log[-1] == ("caf", "linked", False)
+
+
+def test_every_sequencer_is_unlinked_before_any_script_is_set(rig):
+    # A secondary still claimed by an earlier linked task refuses SetScriptPath.
+    run_local(Pair)
+    events = [event[:2] for event in rig.log if event[1] in ("linked", "script")]
+    assert events[:2] == [("rb", "linked"), ("caf", "linked")]
+    assert ("rb", "linked", False) in rig.log and ("caf", "linked", False) in rig.log
 
 
 def test_follower_client_is_opened_once_per_task(rig):
@@ -217,6 +251,12 @@ def test_declaration_rules_are_checked_at_class_definition():
             a = MotMaster("Rb MotMaster", script="s", master=True)
             b = MotMaster("Rb MotMaster", script="t")
 
+    with pytest.raises(TypeError, match="declare no other MotMaster"):
+
+        class LinkedPlusFollower(MotMasterExperiment):
+            a = MotMaster("CaF MotMaster", script="s", master=True, linked=True)
+            b = MotMaster("Rb MotMaster", script="t")
+
     with pytest.raises(TypeError, match="'nope'"):
 
         class UnknownDevice(MotMasterExperiment):
@@ -249,13 +289,51 @@ class FakeDotNet:
         raise RuntimeError("Go failed")
 
 
-def _driver(fail=False):
+class FakeLinkableDotNet(FakeDotNet):
+    def __init__(self):
+        super().__init__()
+        self.IsLinked, self.set_linked_calls, self.go_calls = False, [], 0
+
+    def SetLinked(self, value):
+        self.set_linked_calls.append(value)
+        self.IsLinked = value
+
+    def Go(self, *args):
+        self.go_calls += 1
+
+
+def _driver(fail=False, motmaster=None):
     driver = MotMasterInterface.__new__(MotMasterInterface)
-    driver.motmaster = FakeDotNet(fail)
+    driver.motmaster = motmaster or FakeDotNet(fail)
     driver.script_root = Path("/scripts")
     driver.script = driver.script_path = None
     driver.interval = 0
+    driver.linked = False
     return driver
+
+
+def test_linked_script_is_not_run_once_the_secondary_takes_back_control():
+    driver = _driver(motmaster=FakeLinkableDotNet())
+    driver.set_motmaster_experiment("LinkedTweezerLoad")
+    driver.set_linked(True)
+    driver.start_motmaster_experiment()
+    driver.motmaster.IsLinked = False  # what MOTMaster does on LinkLostException
+    with pytest.raises(RuntimeError, match="no longer linked"):
+        driver.start_motmaster_experiment()
+    assert driver.motmaster.go_calls == 1
+
+
+def test_linking_an_already_linked_motmaster_keeps_its_claim():
+    driver = _driver(motmaster=FakeLinkableDotNet())
+    driver.set_linked(True)
+    driver.set_linked(True)
+    assert driver.motmaster.set_linked_calls == [True]
+
+
+def test_unlinking_a_motmaster_built_before_linked_mode_does_nothing():
+    driver = _driver()
+    driver.set_linked(False)
+    assert driver.linked is False
 
 
 def test_driver_raises_instead_of_printing():
