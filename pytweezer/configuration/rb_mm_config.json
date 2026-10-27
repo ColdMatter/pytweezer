@@ -1,10 +1,10 @@
 {
   "dll_paths": {
-    "daq": "C:\\ControlPrograms\\EDMSuite\\DAQ\\bin\\x86\\RbTweezer\\DAQ.dll",
-    "shared_code": "C:\\ControlPrograms\\EDMSuite\\DAQ\\bin\\x86\\RbTweezer\\SharedCode.dll"
+    "daq": "C:\\ControlPrograms\\EDMSuite\\DAQ\\bin\\RbTweezer\\DAQ.dll",
+    "shared_code": "C:\\ControlPrograms\\EDMSuite\\DAQ\\bin\\RbTweezer\\SharedCode.dll"
   },
   "motmaster": {
-    "exe_path": "C:\\ControlPrograms\\EDMSuite\\MOTMaster\\bin\\x86\\RbTweezer\\MOTMaster.exe",
+    "exe_path": "C:\\ControlPrograms\\EDMSuite\\MOTMaster\\bin\\RbTweezer\\MOTMaster.exe",
     "remote_path": "tcp://localhost:1187/controller.rem"
   },
   "wavemeter_lock": {

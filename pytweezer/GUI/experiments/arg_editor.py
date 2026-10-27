@@ -575,6 +575,7 @@ class ArgumentEditor(QWidget):
                 device["device"],
                 device["motmaster"]["script"],
                 declared=declared[attribute],
+                linked=device["motmaster"].get("linked", False),
             )
             box.parameter_chosen.connect(
                 lambda name, attribute=attribute: self.add_motmaster_row(
