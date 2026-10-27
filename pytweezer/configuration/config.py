@@ -233,6 +233,16 @@ CONFIG = {
             },
             "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
         },
+        "IDS-1054B Scope": {
+            "active": True,
+            "class": "pytweezer.drivers.ids1054b:IDS1054B",
+            "sim_class": "pytweezer.drivers.ids1054b:SimulatedIDS1054B",
+            "teardown": "close",
+            "address": "TCPIP::10.59.3.50::3000::SOCKET",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+        },
     },
     # Background database loggers. Each entry runs pytweezer/servers/logger_server.py,
     # which builds the Logger subclass named by "logger" and polls it on "interval".
