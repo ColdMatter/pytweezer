@@ -61,6 +61,9 @@ class LinkedLoad(MotMasterExperiment):
 - **Example / first live test:** `pytweezer/experiments/linked_scope_test.py`
   runs EDMSuite's `MoleculeMOTMasterScripts/LinkedScopeTest.cs`, one 10 ms pulse
   on each machine. Scan `secondary_trigger_delay` with both pulses on a scope.
+- **GUI:** the Experiments-tab MOTMaster box of a linked sequencer is titled
+  "…(script, linked)", with a tooltip saying the secondary's parameters are set
+  there too.
 - **Config fix:** `rb_mm_config.json` pointed at `MOTMaster\bin\x86\RbTweezer\`
   and `DAQ\bin\x86\RbTweezer\`. Those are dead folders from the old solution
   mapping, and a MOTMaster started from there is stale and 32-bit (the primary
@@ -113,8 +116,6 @@ class LinkedLoad(MotMasterExperiment):
   (e.g. `RbTweezerBasic2026_2` plus the CaF load) into one linked script in
   `MoleculeMOTMasterScripts`, each channel name on exactly one machine.
   Experiments like `TweezerBaseline` can then move to `linked=True`.
-- **GUI:** show "linked" on the Experiments-tab MOTMaster box (the schema already
-  carries `"linked"`).
 - `parallel.py` / `optimisation.py` still use the two-device trigger pattern.
   Leave them until the linked path is proven on the rig.
 - Fill in EDMSuite's `motmaster-python-integration` stub skill with what the
