@@ -121,7 +121,9 @@ CONFIG = {
             "data_root": None,
             # The same directory as other PCs see it (e.g. a mapped network
             # share), for their Results tab. None means they use data_root as well.
-            "client_data_root": None,
+            # Clients log in as PH-BEAST\pytweezer-reader, stored once with cmdkey
+            # (labbook: Lab infrastructure/Lab network/Lab network overview).
+            "client_data_root": r"\\10.59.3.1\pytweezer-data",
             # Seconds a worker keeps running without reaching the manager.
             "orphan_timeout": 30.0,
         },
