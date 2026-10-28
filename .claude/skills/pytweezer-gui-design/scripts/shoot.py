@@ -1,6 +1,6 @@
 """Screenshot one pytweezer widget, themed, for design review.
 
-    poetry run python .claude/skills/pytweezer-gui-design/scripts/shoot.py \\
+    uv run python .claude/skills/pytweezer-gui-design/scripts/shoot.py \\
         pytweezer.GUI.experiments.results:ResultsPanel out.png [--size 1500x950]
         [--wait 1500] [--path DIR] [--crop X,Y,W,H]
 

@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-poetry run pytweezer-server
+uv run pytweezer-server
 
 
 endlocal

@@ -158,7 +158,7 @@ Palette (extend with these; don't introduce near-duplicates):
 Screenshot a single widget, themed:
 
 ```bash
-poetry run python .claude/skills/pytweezer-gui-design/scripts/shoot.py \
+uv run python .claude/skills/pytweezer-gui-design/scripts/shoot.py \
     pytweezer.GUI.experiments.results:ResultsPanel /tmp/results.png --size 1500x950
 ```
 

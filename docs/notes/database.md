@@ -223,7 +223,7 @@ example is `NIADCLogger` (`pytweezer/loggers/ni_adc_logger.py`).
 The `add-logger` skill (`.claude/skills/add-logger/`) walks through the class,
 the `LOGGER_REGISTRY` factory in `pytweezer/servers/logger_server.py` and the
 `CONFIG["Loggers"]` entry. Start a logger from the GUI's **Loggers** tab, or
-standalone with `poetry run pytweezer-logger "NI ADC Logger"`.
+standalone with `uv run pytweezer-logger "NI ADC Logger"`.
 
 An entry may set per-field `limits`, either bound `None`:
 
@@ -254,8 +254,8 @@ loaded from the files at any time. Every row is an upsert, so it is safe to
 rerun:
 
 ```bash
-poetry run pytweezer-db-backfill            # the configured data root
-poetry run pytweezer-db-backfill --root D:/data
+uv run pytweezer-db-backfill            # the configured data root
+uv run pytweezer-db-backfill --root D:/data
 ```
 
 ## 6. Reading it back

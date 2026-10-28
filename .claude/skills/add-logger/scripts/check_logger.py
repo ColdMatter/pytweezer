@@ -17,8 +17,8 @@ The failures it exists to catch are all silent at runtime:
 * a ``read()`` return shape the base loop can't unpack
 
 Usage:
-    poetry run python check_logger.py "NI ADC Logger"
-    poetry run python check_logger.py --all
+    uv run python check_logger.py "NI ADC Logger"
+    uv run python check_logger.py --all
 """
 
 import argparse
@@ -28,7 +28,6 @@ import sys
 
 import pytweezer
 from pytweezer.configuration.config import get_config
-
 from pytweezer.servers import logger_server
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(pytweezer.__file__)))

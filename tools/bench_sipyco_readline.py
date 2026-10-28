@@ -6,7 +6,7 @@ then times a stock `sipyco.pc_rpc.Client` against one with
 interpreter warm-up can't leak between measurements.
 
 Usage:
-    poetry run python tools/bench_sipyco_readline.py
+    uv run python tools/bench_sipyco_readline.py
 """
 
 import subprocess

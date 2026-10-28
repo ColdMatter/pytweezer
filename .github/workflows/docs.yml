@@ -20,19 +20,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Poetry
-        run: pipx install poetry
-
-      - uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.11"
-          cache: poetry
+          enable-cache: true
 
       - name: Install docs toolchain
-        run: poetry install --with docs
+        run: uv sync --group docs
 
       - name: Build HTML
-        run: poetry run make -C docs html
+        run: uv run make -C docs html
 
       - uses: actions/upload-pages-artifact@v5
         with:

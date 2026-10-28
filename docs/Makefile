@@ -1,8 +1,8 @@
 # pytweezer documentation build.
 #
-# Usage (from this directory, inside the Poetry env):
-#     poetry run make html      # build, output in _build/html/index.html
-#     poetry run make clean     # remove _build/ and the generated api/ stubs
+# Usage (from this directory):
+#     uv run make html      # build, output in _build/html/index.html
+#     uv run make clean     # remove _build/ and the generated api/ stubs
 #
 # The API reference under api/ is regenerated from the package docstrings on
 # every build by sphinx-apidoc and is intentionally not checked in.

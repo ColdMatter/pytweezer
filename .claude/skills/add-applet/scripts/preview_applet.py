@@ -6,7 +6,7 @@ publishing on them before it shows anything. This driver replaces all three with
 in-process fakes, so any applet script can be built and *looked at* from a plain
 shell:
 
-    poetry run python .claude/skills/add-applet/scripts/preview_applet.py \
+    uv run python .claude/skills/add-applet/scripts/preview_applet.py \
         pytweezer/GUI/viewers/live_plot.py
 
 It writes a PNG (default ``<skill>/shots/<ClassName>.png``) and prints what the
@@ -50,7 +50,9 @@ import zlib
 
 import numpy as np
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
+)
 DEFAULT_SHOTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shots")
 
 # Seeded by --prop and read by every FakeProperties instance, so a seeded value
@@ -151,7 +153,7 @@ def install_fakes():
     the name at import time — so the attributes have to be replaced on the
     package before the applet module is loaded.
     """
-    import pytweezer.servers as servers
+    from pytweezer import servers
 
     servers.Properties = FakeProperties
     servers.DataClient = FakeDataClient
@@ -252,13 +254,17 @@ def find_applet_class(module, wanted=None):
     candidates = [
         obj
         for _, obj in inspect.getmembers(module, inspect.isclass)
-        if issubclass(obj, Applet) and obj is not Applet and obj.__module__ == module.__name__
+        if issubclass(obj, Applet)
+        and obj is not Applet
+        and obj.__module__ == module.__name__
     ]
     if wanted:
         for obj in candidates:
             if obj.__name__ == wanted:
                 return obj
-        sys.exit(f"[preview] no Applet subclass named {wanted}; found {[c.__name__ for c in candidates]}")
+        sys.exit(
+            f"[preview] no Applet subclass named {wanted}; found {[c.__name__ for c in candidates]}"
+        )
     if not candidates:
         sys.exit("[preview] the module defines no Applet subclass")
     if len(candidates) > 1:
@@ -272,19 +278,39 @@ def find_applet_class(module, wanted=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("script", help="path to the applet script")
-    parser.add_argument("--class", dest="cls", default=None, help="Applet subclass to build")
+    parser.add_argument(
+        "--class", dest="cls", default=None, help="Applet subclass to build"
+    )
     parser.add_argument("--out", default=None, help="PNG path")
     parser.add_argument("--name", default=None, help="applet instance name")
-    parser.add_argument("--prop", action="append", default=[], metavar="KEY=JSON",
-                        help="seed a property, repeatable")
-    parser.add_argument("--scalars", action="store_true",
-                        help="feed header-only messages instead of arrays")
-    parser.add_argument("--physical", action="store_true",
-                        help="include _offset/_imgresolution so coordinates are in metres")
-    parser.add_argument("--ticks", type=int, default=20, help="message bursts before grabbing")
-    parser.add_argument("--size", default=None, metavar="WxH", help="resize before grabbing")
-    parser.add_argument("--show", action="store_true",
-                        help="map the window on the real desktop instead of painting off-screen")
+    parser.add_argument(
+        "--prop",
+        action="append",
+        default=[],
+        metavar="KEY=JSON",
+        help="seed a property, repeatable",
+    )
+    parser.add_argument(
+        "--scalars",
+        action="store_true",
+        help="feed header-only messages instead of arrays",
+    )
+    parser.add_argument(
+        "--physical",
+        action="store_true",
+        help="include _offset/_imgresolution so coordinates are in metres",
+    )
+    parser.add_argument(
+        "--ticks", type=int, default=20, help="message bursts before grabbing"
+    )
+    parser.add_argument(
+        "--size", default=None, metavar="WxH", help="resize before grabbing"
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="map the window on the real desktop instead of painting off-screen",
+    )
     args = parser.parse_args()
 
     for item in args.prop:
@@ -298,6 +324,7 @@ def main():
 
     from PyQt6.QtCore import Qt, QTimer
     from PyQt6.QtWidgets import QApplication
+
     from pytweezer.GUI.theme import apply_theme
 
     module = load_module(args.script)
@@ -350,10 +377,14 @@ def main():
 
     print(f"[preview] {applet_cls.__name__}  ->  {out}")
     print(f"[preview] size        {applet.width()}x{applet.height()}")
-    print(f"[preview] subscribed  {subscribed or 'NOTHING - check update_subscriptions()'}")
+    print(
+        f"[preview] subscribed  {subscribed or 'NOTHING - check update_subscriptions()'}"
+    )
     print(f"[preview] consumed    {consumed} messages ({pending} left unread)")
     if published:
-        print(f"[preview] published   {published} messages — applets should be consumers only")
+        print(
+            f"[preview] published   {published} messages — applets should be consumers only"
+        )
     sys.stdout.flush()
 
     # Mirrors run_applet: skip interpreter teardown so a stray non-daemon thread

@@ -194,7 +194,7 @@ hubs, no hardware, and nothing appears on the user's screen — it paints
 off-screen via `WA_DontShowOnScreen` rather than mapping a window.
 
 ```bash
-poetry run python .claude/skills/add-applet/scripts/preview_applet.py \
+uv run python .claude/skills/add-applet/scripts/preview_applet.py \
     pytweezer/GUI/viewers/atom_count.py \
     --prop 'datastreams=["Atom_number","Background"]'
 ```
@@ -226,7 +226,7 @@ would be happy to put on a lab monitor.
 Then run the suite, which covers the framework the applet sits on:
 
 ```bash
-poetry run pytest tests/ -q
+uv run pytest tests/ -q
 ```
 
 ## Register it

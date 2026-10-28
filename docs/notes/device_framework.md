@@ -195,7 +195,7 @@ Two equivalent paths, both ending up at `run_device_server(name)`:
 
 - **CLI:** `pytweezer-device "Rb HamCam"` (console script in `pyproject.toml`, →
   `pytweezer.servers.device_server:main`). Also runnable as
-  `python -m pytweezer.servers.device_server "Rb HamCam"` without `poetry install`.
+  `python -m pytweezer.servers.device_server "Rb HamCam"` without `uv sync`.
 - **Devices tab:** `DevicesPanel` (`bin/managed_panel.py`) builds a `ManagedRow`
   per device, with a Start/Stop toggle on the host-matching ones; the toggle runs
   `python <script> <name>` — same module, same `main()`.
