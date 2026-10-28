@@ -15,11 +15,14 @@
     then applies them in order, stopping at the first failure, and appends one
     line per attempt to <Repo>\logs\lab_setup.jsonl. If any needs admin, the
     applying happens in one elevated window. -Relaunch then starts pytweezer
-    again from this, non-elevated, window.
+    again from this, non-elevated, window, even if something failed.
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File lab_setup\lab-setup.ps1 -Check
 #>
+# Branches older than main run main's copy of this script and parse its -Check
+# JSON, so these parameters and the JSON fields may only be added to, never
+# renamed or removed.
 param(
     [string]$Repo = (Split-Path $PSScriptRoot -Parent),
     [switch]$Check,
@@ -28,7 +31,8 @@ param(
     [string]$HostName = $env:COMPUTERNAME,
     [switch]$NoFetch,
     [string]$Ref = 'origin/main',
-    [string]$FromMain
+    [string]$FromMain,
+    [switch]$PauseOnFailure
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,19 +121,17 @@ function Test-AppliesHere($Manifest) {
     $true
 }
 
+function Format-Argument([string]$Value) {
+    # Backslashes before the closing quote are doubled, or they would escape it.
+    '"' + ($Value -replace '\\+$', '$0$0') + '"'
+}
+
 function Start-Check($Change) {
-    $script = (Join-Path $Change.Folder 'check.ps1').Replace("'", "''")
-    $repoArgument = $Repo.Replace("'", "''")
-    # Run through a wrapper rather than -File: under -File a thrown error also
-    # exits 1, which would read as "pending".
-    $command = @"
-`$ProgressPreference = 'SilentlyContinue'
-try { & '$script' -Repo '$repoArgument'; exit `$LASTEXITCODE }
-catch { [Console]::Error.WriteLine(`$_); exit 2 }
-"@
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    $start = New-Object Diagnostics.ProcessStartInfo 'powershell',
-        "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0} -Script {1} -Repo {2}' -f
+        (Format-Argument (Join-Path $PSScriptRoot 'run-check.ps1')),
+        (Format-Argument (Join-Path $Change.Folder 'check.ps1')),
+        (Format-Argument $Repo)
+    $start = New-Object Diagnostics.ProcessStartInfo 'powershell', $arguments
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -243,8 +245,21 @@ function Write-Record($Change, [string]$Result, $Message) {
         result = $Result
         error = $Message
     }
+    $line = (ConvertTo-AsciiJson $record) + "`n"
     # Not Add-Content -Encoding UTF8, which starts a new file with a BOM.
-    [IO.File]::AppendAllText($RecordPath, (ConvertTo-AsciiJson $record) + "`n")
+    $stream = [IO.File]::Open($RecordPath, 'OpenOrCreate', 'ReadWrite')
+    try {
+        if ($stream.Length -gt 0) {
+            # A run killed mid-line would otherwise glue this record onto that line.
+            $null = $stream.Seek(-1, 'End')
+            if ($stream.ReadByte() -ne 10) { $line = "`n$line" }
+        }
+        $null = $stream.Seek(0, 'End')
+        $bytes = [Text.Encoding]::ASCII.GetBytes($line)
+        $stream.Write($bytes, 0, $bytes.Length)
+    } finally {
+        $stream.Dispose()
+    }
     $record
 }
 
@@ -254,7 +269,7 @@ function Read-RecordLines {
 
 function Invoke-Elevated {
     # The elevated window applies every pending change, admin or not, so they stay in order.
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -FromMain $FromMain -Repo `"$Repo`" -Yes -HostName `"$HostName`""
+    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -FromMain $FromMain -Repo `"$Repo`" -Yes -HostName `"$HostName`" -PauseOnFailure"
     $before = (Read-RecordLines).Count
     try {
         $elevated = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList $arguments
@@ -264,8 +279,8 @@ function Invoke-Elevated {
     }
     $results = @{}
     foreach ($line in (Read-RecordLines | Select-Object -Skip $before)) {
-        $record = $line | ConvertFrom-Json
-        $results[$record.change] = $record
+        try { $record = $line | ConvertFrom-Json } catch { continue }
+        if ($record.change) { $results[$record.change] = $record }
     }
     if (-not $results.Count -and $elevated.ExitCode -ne 0) {
         Write-Host "The elevated window stopped with exit code $($elevated.ExitCode) before applying anything."
@@ -285,27 +300,73 @@ function Show-Summary($Pending, $Results) {
     }
 }
 
+function Wait-Enter([string]$Prompt) {
+    # Read-Host throws when there is no console to read; carry on regardless.
+    try { $null = Read-Host $Prompt } catch { }
+}
+
+function Update-Environment {
+    # Whatever started us exited holding the environment it started with, so
+    # variables set by a change since (PYTWEEZER_DB_DSN, uv on PATH) are re-read.
+    $paths = @()
+    foreach ($scope in 'Machine', 'User') {
+        $variables = [Environment]::GetEnvironmentVariables($scope)
+        foreach ($name in $variables.Keys) {
+            if ($name -ieq 'Path') { $paths += $variables[$name] }
+            else { [Environment]::SetEnvironmentVariable($name, $variables[$name], 'Process') }
+        }
+    }
+    [Environment]::SetEnvironmentVariable('Path', ($paths -join ';'), 'Process')
+}
+
+function Start-Pytweezer {
+    Wait-Enter "Press Enter to start pytweezer-$Relaunch"
+    $launcher = Join-Path $Repo (@{ server = 'start_servers.bat'; client = 'start_client.bat' }[$Relaunch])
+    if (-not (Test-Path -PathType Leaf $launcher)) {
+        Write-Host "Cannot start pytweezer-${Relaunch}: $launcher is missing. Start it by hand."
+        return
+    }
+    try {
+        Update-Environment
+        # A full path, not "cmd /c start_servers.bat": with NoDefaultCurrentDirectoryInExePath
+        # set, cmd does not look in the working directory.
+        Start-Process $launcher -WorkingDirectory $Repo
+    } catch {
+        Write-Host "Cannot start pytweezer-${Relaunch}: $($_.Exception.Message)"
+        Wait-Enter 'Press Enter to close'
+    }
+}
+
 if (-not $FromMain) {
-    $Repo = (Resolve-Path $Repo).Path
-    if (-not $NoFetch -and $Ref.StartsWith('origin/')) { Update-Ref }
-    $commit = git -C $Repo rev-parse --verify --quiet "$Ref^{commit}"
-    if (-not $commit) {
-        Write-Diagnostic "no $Ref in $Repo to read lab_setup/ from"
+    try {
+        $Repo = (Resolve-Path $Repo).Path
+        if (-not $NoFetch -and $Ref.StartsWith('origin/')) { Update-Ref }
+        $commit = git -C $Repo rev-parse --verify --quiet "$Ref^{commit}"
+        if (-not $commit) { throw "no $Ref in $Repo to read lab_setup/ from" }
+        $extracted = Expand-LabSetup $commit
+    } catch {
+        Write-Diagnostic $_.Exception.Message
+        if ($Relaunch) { Start-Pytweezer }
         exit 2
     }
-    $extracted = Expand-LabSetup $commit
     $forward = @{}
     foreach ($key in $PSBoundParameters.Keys) { $forward[$key] = $PSBoundParameters[$key] }
     $forward.Repo = $Repo
     $forward.FromMain = $commit
-    & (Join-Path $extracted 'lab_setup\lab-setup.ps1') @forward
+    try {
+        & (Join-Path $extracted 'lab_setup\lab-setup.ps1') @forward
+    } catch {
+        # Reached only if that copy could not start, e.g. it rejected a parameter.
+        Write-Diagnostic $_.Exception.Message
+        if ($Relaunch) { Start-Pytweezer }
+        exit 2
+    }
     exit $LASTEXITCODE
 }
 
-$changes = @(Get-Changes)
-$states = Get-ChangeStates $changes
-
 if ($Check) {
+    $changes = @(Get-Changes)
+    $states = Get-ChangeStates $changes
     $listed = @(foreach ($change in $changes) {
         [ordered]@{
             id = $change.Id
@@ -321,42 +382,47 @@ if ($Check) {
 }
 
 $RecordPath = Join-Path $Repo 'logs\lab_setup.jsonl'
-foreach ($change in $changes) {
-    if ($states[$change.Id].State -eq 'error') {
-        Write-Host "Could not check '$($change.Title)', so it is left alone: $($states[$change.Id].Error)"
-    }
-}
-$pending = @($changes | Where-Object { $states[$_.Id].State -eq 'pending' })
-$allDone = $true
-if ($pending.Count -eq 0) {
-    Write-Host "Nothing to apply on $HostName."
-} else {
-    Show-Pending $pending
-    if (-not ($Yes -or ((Read-Host "Apply these $($pending.Count) changes? [y/N]") -match '^y(es)?$'))) {
-        Write-Host 'Nothing applied.'
-    } else {
-        if (@($pending | Where-Object Admin).Count -and -not (Test-Elevated)) {
-            $results = Invoke-Elevated
-        } else {
-            $results = @{}
-            foreach ($change in $pending) {
-                Write-Host ''
-                Write-Host "Applying: $($change.Title)"
-                $message = Invoke-Change $change
-                $results[$change.Id] = Write-Record $change $(if ($message) { 'failed' } else { 'done' }) $message
-                if ($message) { break }
-            }
+$allDone = $false
+try {
+    $changes = @(Get-Changes)
+    $states = Get-ChangeStates $changes
+    foreach ($change in $changes) {
+        if ($states[$change.Id].State -eq 'error') {
+            Write-Host "Could not check '$($change.Title)', so it is left alone: $($states[$change.Id].Error)"
         }
-        Show-Summary $pending $results
-        $allDone = -not @($pending | Where-Object { $results[$_.Id].result -ne 'done' }).Count
     }
+    $pending = @($changes | Where-Object { $states[$_.Id].State -eq 'pending' })
+    $allDone = $true
+    if ($pending.Count -eq 0) {
+        Write-Host "Nothing to apply on $HostName."
+    } else {
+        Show-Pending $pending
+        if (-not ($Yes -or ((Read-Host "Apply these $($pending.Count) changes? [y/N]") -match '^y(es)?$'))) {
+            Write-Host 'Nothing applied.'
+        } else {
+            $allDone = $false
+            if (@($pending | Where-Object Admin).Count -and -not (Test-Elevated)) {
+                $results = Invoke-Elevated
+            } else {
+                $results = @{}
+                foreach ($change in $pending) {
+                    Write-Host ''
+                    Write-Host "Applying: $($change.Title)"
+                    $message = Invoke-Change $change
+                    $results[$change.Id] = Write-Record $change $(if ($message) { 'failed' } else { 'done' }) $message
+                    if ($message) { break }
+                }
+            }
+            Show-Summary $pending $results
+            $allDone = -not @($pending | Where-Object { $results[$_.Id].result -ne 'done' }).Count
+        }
+    }
+} catch {
+    $allDone = $false
+    Write-Host ''
+    Write-Host "Stopped by an error: $($_.Exception.Message)" -ForegroundColor Red
 }
 
-if ($Relaunch) {
-    $null = Read-Host "Press Enter to start pytweezer-$Relaunch"
-    $launcher = @{ server = 'start_servers.bat'; client = 'start_client.bat' }[$Relaunch]
-    # A full path, not "cmd /c start_servers.bat": with NoDefaultCurrentDirectoryInExePath
-    # set, cmd does not look in the working directory.
-    Start-Process (Join-Path $Repo $launcher) -WorkingDirectory $Repo
-}
+if ($PauseOnFailure -and -not $allDone) { Wait-Enter 'Press Enter to close' }
+if ($Relaunch) { Start-Pytweezer }
 if ($allDone) { exit 0 } else { exit 1 }

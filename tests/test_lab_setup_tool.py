@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ pytestmark = pytest.mark.skipif(
     sys.platform != "win32", reason="lab-setup.ps1 needs Windows PowerShell"
 )
 
-TOOL = Path(__file__).resolve().parents[1] / "lab_setup" / "lab-setup.ps1"
+LAB_SETUP = Path(__file__).resolve().parents[1] / "lab_setup"
 APPLIED_ORDER = "_applied_order.txt"
 
 
@@ -89,7 +90,8 @@ class LabRepo:
         )
         _new_clone(self.origin, self.work)
         (self.work / "lab_setup").mkdir()
-        shutil.copy(TOOL, self.work / "lab_setup" / "lab-setup.ps1")
+        for script in LAB_SETUP.glob("*.ps1"):
+            shutil.copy(script, self.work / "lab_setup" / script.name)
         _commit_and_push(self.work, "Add the tool")
 
     def git(self, *args):
@@ -167,9 +169,10 @@ class LabRepo:
         assert done.returncode == 0, done.stderr
         return json.loads(done.stdout)
 
-    def apply(self, yes=False, host="PH-BEAST", secret=None):
+    def apply(self, *args, yes=False, host="PH-BEAST", secret=None):
         """``secret`` is given as the value of every secret, instead of a prompt."""
         return self.run(
+            *args,
             *(["-Yes"] if yes else []),
             "-NoFetch",
             "-HostName",
@@ -182,6 +185,14 @@ class LabRepo:
         if not path.exists():
             return []
         return [json.loads(line) for line in path.read_text("utf-8").splitlines()]
+
+    def add_launcher(self, name):
+        """A launcher that records the TEMP it was started with, then exits."""
+        (self.work / "markers").mkdir(exist_ok=True)
+        (self.work / name).write_text(
+            '@echo %TEMP%> "%~dp0markers\\relaunched.txt"\n', encoding="ascii"
+        )
+        return self.work / "markers" / "relaunched.txt"
 
     def marker_order(self):
         path = self.work / "markers" / APPLIED_ORDER
@@ -288,3 +299,56 @@ def test_secret_values_are_masked_in_the_record(lab_repo):
     lab_repo.apply(yes=True, secret="hunter2")
     (record,) = lab_repo.records()
     assert record["error"] == "login with *** failed"
+
+
+def test_a_throwing_check_reports_its_message_as_plain_text(lab_repo):
+    lab_repo.add_change("bad", check='throw "boom"')
+    (change,) = lab_repo.check()["changes"]
+    assert change["error"] == "boom"
+
+
+def test_check_at_a_commit_reads_that_commit_without_fetching(lab_repo):
+    lab_repo.add_change("seen")
+    seen = lab_repo.origin_main_sha()
+    lab_repo.push_change_from_elsewhere("merged-later")
+    lab_repo.git("fetch", "-q", "origin")
+    done = lab_repo.run("-Check", "-Ref", seen, "-HostName", "PH-BEAST")
+    assert done.returncode == 0, done.stderr
+    out = json.loads(done.stdout)
+    assert out["commit"] == seen
+    assert [c["id"] for c in out["changes"]] == ["seen"]
+
+
+def test_a_truncated_record_line_does_not_swallow_the_next_record(lab_repo):
+    lab_repo.add_change("a")
+    (lab_repo.work / "logs").mkdir()
+    (lab_repo.work / "logs" / "lab_setup.jsonl").write_text('{"trunc', "utf-8")
+    lab_repo.apply(yes=True)
+    lines = (lab_repo.work / "logs" / "lab_setup.jsonl").read_text("utf-8")
+    assert json.loads(lines.splitlines()[-1])["change"] == "a"
+
+
+def _wait_for(path, seconds=15):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if path.exists() and path.read_text().strip():
+            return path.read_text().strip()
+        time.sleep(0.2)
+    return None
+
+
+def test_relaunch_still_happens_after_an_error_with_a_fresh_environment(lab_repo):
+    lab_repo.add_change("a")
+    (lab_repo.work / "logs" / "lab_setup.jsonl").mkdir(parents=True)
+    relaunched = lab_repo.add_launcher("start_client.bat")
+    done = lab_repo.apply("-Relaunch", "client", yes=True)
+    assert "lab_setup.jsonl" in done.stdout
+    temp = _wait_for(relaunched)
+    assert temp is not None, done.stdout + done.stderr
+    assert temp != str(lab_repo.temp)
+
+
+def test_relaunch_without_its_launcher_says_so(lab_repo):
+    done = lab_repo.apply("-Relaunch", "server", yes=True)
+    assert "start_servers.bat" in done.stdout
+    assert done.returncode == 0

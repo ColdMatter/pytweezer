@@ -34,9 +34,10 @@ def test_changes_do_not_use_psscriptroot_for_repo_paths():
         assert "$PSScriptRoot" not in script.read_text(), script
 
 
-def test_changes_are_ascii_only():
-    for path in CHANGES.glob("*/*"):
-        path.read_bytes().decode("ascii")
+def test_lab_setup_is_ascii_only():
+    for path in CHANGES.parent.rglob("*"):
+        if path.is_file():
+            path.read_bytes().decode("ascii")
 
 
 def test_the_first_changes_exist():
