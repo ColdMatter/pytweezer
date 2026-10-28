@@ -77,6 +77,14 @@ class ThorCam(Camera):
         self._backend.setup_acquisition(int(nframes))
 
     @requires_camera
+    def arm(self, buffer_frames: int = 1000) -> None:
+        with self._lock:
+            if self._acquisition_in_progress():
+                return
+            self.setup_acquisition(buffer_frames)
+            self.start_acquisition()
+
+    @requires_camera
     def start_acquisition(self):
         self._backend.start_acquisition()
 
