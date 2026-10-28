@@ -44,6 +44,38 @@ def _tool(repo: Path) -> Path:
     return repo / "lab_setup" / "lab-setup.ps1"
 
 
+def _run_bounded(command: list[str], timeout: float) -> tuple[int, bytes, bytes]:
+    """Run ``command``, killing its whole process tree if it outlives ``timeout``.
+
+    Killing only the child would leave ``communicate`` blocked for as long as a
+    grandchild (a hung ``git fetch``) holds the output pipes.
+
+    Raises:
+        subprocess.TimeoutExpired: The command did not finish in time.
+    """
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        try:
+            process.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
+    return process.returncode, stdout, stderr
+
+
 def check(repo: Path = REPO, timeout: float = 10.0) -> CheckResult | None:
     """Ask the lab setup tool which changes apply here and whether they are in place.
 
@@ -62,22 +94,15 @@ def check(repo: Path = REPO, timeout: float = 10.0) -> CheckResult | None:
         return None
     command = [*_POWERSHELL, str(tool), "-Check", "-Repo", str(repo)]
     try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=timeout,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        if completed.returncode != 0:
+        returncode, stdout, stderr = _run_bounded(command, timeout)
+        if returncode != 0:
             logger.warning(
                 "Lab setup check exited with %d: %s",
-                completed.returncode,
-                completed.stderr.strip(),
+                returncode,
+                stderr.decode("utf-8", "replace").strip(),
             )
             return None
-        data = json.loads(completed.stdout)
+        data = json.loads(stdout.decode("utf-8-sig"))
         return CheckResult(
             commit=data["commit"],
             host=data["host"],

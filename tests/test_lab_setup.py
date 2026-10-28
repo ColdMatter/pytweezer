@@ -1,5 +1,7 @@
+import codecs
 import json
 import subprocess
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -14,30 +16,38 @@ def _enable_lab_setup(monkeypatch):
 
 
 class FakeTool:
-    """Stands in for ``subprocess.run`` of the PowerShell tool."""
+    """Stands in for ``subprocess.Popen`` of the PowerShell tool."""
 
     def __init__(self, repo):
         self.repo = repo
         self.calls = 0
         self.failure = None
-        self.stdout = ""
+        self.stdout = b""
 
-    def prints(self, payload):
-        self.stdout = json.dumps(payload)
+    def prints(self, payload, prefix=b""):
+        self.stdout = prefix + json.dumps(payload).encode()
 
     def fails(self, failure):
         self.failure = failure
         if failure == "missing_tool":
             (self.repo / "lab_setup" / "lab-setup.ps1").unlink()
 
-    def run(self, command, timeout, **kwargs):
+    def popen(self, command, **kwargs):
         self.calls += 1
-        if self.failure == "timeout":
-            raise subprocess.TimeoutExpired(command, timeout)
-        if self.failure == "exit_code":
-            return subprocess.CompletedProcess(command, 1, "", "no origin/main")
-        stdout = "not json" if self.failure == "bad_json" else self.stdout
-        return subprocess.CompletedProcess(command, 0, stdout, "")
+        tool = self
+
+        class Process:
+            pid = 0
+            returncode = 1 if tool.failure == "exit_code" else 0
+
+            def communicate(self, timeout=None):
+                if tool.failure == "timeout":
+                    raise subprocess.TimeoutExpired(command, timeout)
+                if tool.failure == "bad_json":
+                    return b"not json", b""
+                return tool.stdout, b""
+
+        return Process()
 
 
 @pytest.fixture
@@ -45,7 +55,8 @@ def fake_tool(tmp_path, monkeypatch):
     (tmp_path / "lab_setup").mkdir()
     (tmp_path / "lab_setup" / "lab-setup.ps1").write_text("")
     tool = FakeTool(tmp_path)
-    monkeypatch.setattr(lab_setup.subprocess, "run", tool.run)
+    monkeypatch.setattr(lab_setup.subprocess, "Popen", tool.popen)
+    monkeypatch.setattr(lab_setup.subprocess, "run", lambda *a, **k: None)
     return tool
 
 
@@ -168,3 +179,21 @@ def test_launch_apply_opens_its_own_console(tmp_path, monkeypatch):
         str(tmp_path),
     ]
     assert launched["creationflags"] == subprocess.CREATE_NEW_CONSOLE
+
+
+def test_check_parses_output_with_a_utf8_bom(fake_tool):
+    fake_tool.prints(
+        {"commit": "abc", "host": "H", "changes": []}, prefix=codecs.BOM_UTF8
+    )
+    assert lab_setup.check(fake_tool.repo).commit == "abc"
+
+
+def test_check_returns_promptly_when_a_grandchild_holds_the_pipe(tmp_path):
+    (tmp_path / "lab_setup").mkdir()
+    (tmp_path / "lab_setup" / "lab-setup.ps1").write_text(
+        "Start-Process powershell -NoNewWindow "
+        "-ArgumentList '-NoProfile','-Command','Start-Sleep 30'; Start-Sleep 30"
+    )
+    started = time.monotonic()
+    assert lab_setup.check(tmp_path, timeout=2) is None
+    assert time.monotonic() - started < 8
