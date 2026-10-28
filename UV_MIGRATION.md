@@ -26,33 +26,27 @@ Checked on the laptop (Linux, Python 3.13):
 The laptop's Poetry env was in-project, so `uv sync` took over that `.venv`.
 `git switch main && poetry install --sync` puts it back.
 
-## Next: test on the beast
+## Checked on the beast (Windows, Python 3.11.4)
 
-The beast's live Poetry env is in `AppData\Local\pypoetry\Cache`, so a separate
-worktree with its own `.venv` won't touch it. uv is already installed there.
-In PowerShell:
+Done in a detached worktree (`git worktree add --detach ..\pytweezer-uv
+uv-migration`), because the live checkout already has `uv-migration` checked
+out and the running servers have its `.pyd` files loaded.
 
-```powershell
-cd <existing pytweezer checkout>
-git fetch origin uv-migration
-git worktree add ..\pytweezer-uv uv-migration
-cd ..\pytweezer-uv
-uv sync --python 3.11
-git status --short pytweezer/cpp
-uv run python -c "from pytweezer.cpp import morph_tophat_cpp, sum_pixel_values_cpp; print('ok')"
-uv run pytest tests/ -q
-```
+- The first `uv sync` failed: uv had locked `pyqt5-qt5==5.15.19` (pulled in
+  by pylablib and qscintilla via PyQt5), which has no Windows wheels. Poetry
+  had 5.15.2. `[tool.uv] required-environments` now lists win/AMD64 and
+  linux/x86_64, so the lock forks: 5.15.2 on Windows, 5.15.19 on Linux
+  (commit ffefdd5).
+- `uv sync --python 3.11` rebuilt both `.pyd` files with MSVC (`git status`
+  showed `M`); they import from the worktree.
+- `uv run pytest tests/ -q`: 331 passed, 5 skipped, 1 failed. The failure,
+  `test_script_parameters_leaves_the_selected_script_unchanged`, expects `/`
+  path separators. It fails the same way under the Poetry env, so it predates
+  this branch.
+- `VIRTUAL_ENV` points at the Poetry env in the beast's shells; uv warns and
+  ignores it, but it'll need unsetting once Poetry is gone.
 
-What to look for:
-
-- `git status` should show both `.pyd` files as `M`, meaning MSVC rebuilt them.
-  The committed cp311 `.pyd` files import even if nothing was built, so a
-  successful import alone proves nothing. If they're unmodified, run
-  `uv sync --reinstall-package pytweezer -v` and look for `*** WARNING: skipping`.
-- Don't launch the servers or GUI from the worktree while the live ones are
-  running.
-
-Clean up afterwards with `git worktree remove ..\pytweezer-uv`.
+`main` has moved on (#27, LoadTweezers), so merge it in before the PR.
 
 ## Still to do on this branch
 
