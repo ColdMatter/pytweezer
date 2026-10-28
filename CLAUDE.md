@@ -112,9 +112,10 @@ cloned at `~/CaFMOT-LabBook`; read its own `CLAUDE.md` before writing to it.
 
 ### Git branching conventions
 
-- New features should usually be developed on feature branches
+- Small, tested fixes may be committed and pushed straight to main, no branch or merge request needed
+- Features, and anything that needs review, go on a feature branch
 - Commit and push as you go: after each coherent, tested step (e.g. one tab restyled), not in one batch at the end. Stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
-- All branches should have an associated merge request
+- Every feature branch should have an associated merge request
 - **The main branch should always be deployable** - no broken code or failing tests allowed
 
 
