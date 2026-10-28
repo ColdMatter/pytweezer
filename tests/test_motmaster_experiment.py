@@ -3,8 +3,10 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
+from pytweezer.drivers import motmaster as motmaster_driver
 from pytweezer.drivers.motmaster import MotMasterInterface, SimulatedMotMasterInterface
 from pytweezer.experiment import ListAxis, Scan, run_local
 from pytweezer.experiment.arguments import coerce_arguments
@@ -21,10 +23,17 @@ class FakeSequencer:
         self.log, self.name, self.params = log, name, params
         self.fail_go, self.go_delay = False, 0.0
 
-    def _ignore(self, *args):
+    def close_rpc(self):
         pass
 
-    set_run_until_stopped = set_iterations = set_save_toggle = close_rpc = _ignore
+    def set_run_until_stopped(self, value):
+        self.log.append((self.name, "run_until_stopped", value))
+
+    def set_iterations(self, value):
+        self.log.append((self.name, "iterations", value))
+
+    def set_save_toggle(self, value):
+        self.log.append((self.name, "save", value))
 
     def set_linked(self, value):
         self.log.append((self.name, "linked", value))
@@ -147,6 +156,38 @@ def test_dotted_names_that_are_not_searchable_are_rejected_at_submit(name):
         coerce_arguments(Single, {name: 1})
     with pytest.raises(ValueError, match="no argument"):
         Scan(axes=[ListAxis(argument=name, values=[1])]).points(Single)
+
+
+class Configured(MotMasterExperiment):
+    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", iterations=3, save=True)
+    caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad", master=True)
+
+
+def test_every_sequencer_is_set_up_as_declared(rig):
+    run_local(Configured)
+    settings = {
+        name: {
+            event[1]: event[2]
+            for event in rig.log
+            if event[0] == name
+            and event[1] in ("script", "run_until_stopped", "iterations", "save")
+        }
+        for name in ("rb", "caf")
+    }
+    assert settings == {
+        "rb": {
+            "script": "RbTweezerBasic",
+            "run_until_stopped": False,
+            "iterations": 3,
+            "save": True,
+        },
+        "caf": {
+            "script": "CaFTweezerLoad",
+            "run_until_stopped": False,
+            "iterations": 1,
+            "save": False,
+        },
+    }
 
 
 def test_master_is_untriggered_and_followers_start_first(rig, monkeypatch):
@@ -443,6 +484,115 @@ def test_auto_mot_error_bars_are_standard_errors_of_the_shots(
     camera = FakeCamera([0.0] * n + shot_counts + [0.0] * n)
     results = driver.auto_mot({"v00": [1.0]}, camera, shots_per_point=n)
     assert results["v00"]["errors"] == [pytest.approx(error, nan_ok=True)]
+
+
+class Int32(int):
+    """Stands in for .NET's System.Int32, which only exists under pythonnet."""
+
+
+class Dictionary(dict):
+    def __class_getitem__(cls, types):
+        return cls
+
+
+@pytest.fixture
+def dotnet_types(monkeypatch):
+    for name, value in {
+        "Int32": Int32,
+        "Dictionary": Dictionary,
+        "String": str,
+        "Object": object,
+    }.items():
+        monkeypatch.setattr(motmaster_driver, name, value, raising=False)
+    monkeypatch.setattr(motmaster_driver.time, "sleep", lambda _s: None)
+
+
+class RecordingDotNet(FakeDotNet):
+    """MOTMaster over .NET; records the parameters of every ``Go``."""
+
+    def __init__(self):
+        super().__init__()
+        self.gos = []
+
+    def Go(self, parameters=None):
+        self.gos.append(dict(parameters or {}))
+
+
+def test_python_values_reach_motmaster_as_int32_or_unchanged(dotnet_types):
+    sent = _driver().python_to_cs_dict(
+        {"a": 3, "b": np.int64(4), "c": 2.5, "d": np.float64(0.5), "e": "x"}
+    )
+    assert {name: type(value) for name, value in sent.items()} == {
+        "a": Int32,
+        "b": Int32,
+        "c": float,
+        "d": np.float64,
+        "e": str,
+    }
+    assert sent == {"a": 3, "b": 4, "c": 2.5, "d": 0.5, "e": "x"}
+
+
+def test_a_parameter_scan_runs_one_shot_per_value_in_order(dotnet_types):
+    driver = _driver(motmaster=RecordingDotNet())
+    results = driver.scan_motmaster_parameter(
+        "S", "tDelay1", [30, 10, 20], callback=lambda value: 2 * value
+    )
+    assert driver.motmaster.gos == [{"tDelay1": 30}, {"tDelay1": 10}, {"tDelay1": 20}]
+    assert results == [60, 20, 40]
+
+
+class FakeWavemeterLock:
+    def __init__(self, start):
+        self.set_points = dict(start)
+        self.history = []
+
+    def getSlaveFrequency(self, laser):
+        return self.set_points[laser]
+
+    def setSlaveFrequency(self, laser, value):
+        self.set_points[laser] = value
+        self.history.append((laser, value))
+
+
+class ShotCamera(FakeCamera):
+    """Gives each shot's frame the counts of the set point the lasers are on."""
+
+    def __init__(self, lock, counts):
+        self.lock, self.counts, self.windows = lock, counts, []
+
+    def acquire_n_frames(self, n, start_frame=0):
+        self.windows.append(start_frame)
+        counts = self.counts(self.lock.set_points) if self.windows[1:] else 0.0
+        return [[[counts]]] * n
+
+
+def _auto_mot(shots_per_point):
+    lock = FakeWavemeterLock({"v00": 1.0, "v10": 2.0})
+
+    def counts(set_points):
+        # Most atoms with v00 at 1.2 and v10 at 1.9.
+        return 100 - abs(set_points["v00"] - 1.2) - abs(set_points["v10"] - 1.9)
+
+    driver = _driver(motmaster=RecordingDotNet())
+    driver.config = {"lasers": {"v00": "cavity", "v10": "cavity"}}
+    driver.wavemeter_lock = lock
+    camera = ShotCamera(lock, counts)
+    scan = {"v00": [1.0, 1.1, 1.2, 1.3], "v10": [2.0, 1.9, 1.8]}
+    results = driver.auto_mot(scan, camera, shots_per_point=shots_per_point)
+    return lock, camera, results
+
+
+def test_auto_mot_leaves_each_laser_on_its_best_set_point(dotnet_types):
+    lock, _camera, results = _auto_mot(shots_per_point=1)
+    assert lock.set_points == {"v00": 1.2, "v10": 1.9}
+    assert [results[laser]["set_point"] for laser in ("v00", "v10")] == [1.2, 1.9]
+
+
+def test_auto_mot_reads_each_shots_frames_in_consecutive_windows(dotnet_types):
+    _lock, camera, _results = _auto_mot(shots_per_point=3)
+    # Background, then each laser's scan and its parking shot.
+    shots = 1 + (4 + 1) + (3 + 1)
+    assert camera.windows == [3 * shot for shot in range(shots)]
 
 
 def test_simulated_sequencer_serves_and_validates_parameters():
