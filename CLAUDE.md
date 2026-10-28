@@ -27,33 +27,33 @@ rearrangement-optimisation-RnD is a stripped-down branch for optimisation of twe
 
 ## Commands
 
-This project uses Poetry.
+This project uses uv; the venv is `.venv` in the repo root, on the Python in
+`.python-version`.
 Code is linted and formatted with ruff. There is a pre-commit hook to run ruff on staged files, but you can also run it manually.
 There is a pytest suite under `tests/` — run it after
 touching code it covers, and add cases there instead of writing one-off
 verification scripts when the change fits its scope.
 
 ```bash
-poetry install                      # (re)generate console scripts after editing pyproject.toml
-poetry run pytest tests/ -q         # run the test suite
-poetry run python <script>.py       # run any script inside the venv
-poetry env info                     # show the venv path (env name looks like pytweezer-<hash>-py3.13)
+uv sync                         # install deps, rebuild the C++ extensions and console scripts
+uv run pytest tests/ -q         # run the test suite
+uv run python <script>.py       # run any script inside the venv
 ```
 
 For behavior the suite doesn't cover (hardware drivers, multi-process
 server/hub interaction, anything needing a real device), fall back to running
-it manually through Poetry — but check `tests/` first; it may already exercise
+it manually through uv — but check `tests/` first; it may already exercise
 what you're about to hand-verify.
 
-Entry points (`[tool.poetry.scripts]` in `pyproject.toml`):
+Entry points (`[project.scripts]` in `pyproject.toml`):
 
 ```bash
-poetry run pytweezer-server         # full-control GUI; simulates on any PC but the server PC
-poetry run pytweezer-client         # view-only GUI, run on client PCs
-poetry run pytweezer-device <name>  # start one device's RPC server standalone
-poetry run pytweezer-logger <name>  # start one database logger standalone
-poetry run pytweezer-experiment-manager <name>  # start the experiment queue manager standalone
-poetry run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
+uv run pytweezer-server         # full-control GUI; simulates on any PC but the server PC
+uv run pytweezer-client         # view-only GUI, run on client PCs
+uv run pytweezer-device <name>  # start one device's RPC server standalone
+uv run pytweezer-logger <name>  # start one database logger standalone
+uv run pytweezer-experiment-manager <name>  # start the experiment queue manager standalone
+uv run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
 ```
 
 `start_servers.bat` / `start_client.bat` / `kill_stale.bat` wrap the above.
@@ -67,9 +67,9 @@ in a non-interactive shell.
 
 ### Documentation
 
-- Sphinx docs live in `docs/`. Build locally: `cd docs && poetry run make html`,
+- Sphinx docs live in `docs/`. Build locally: `cd docs && uv run make html`,
   then open `docs/_build/html/index.html`. Install the toolchain first with
-  `poetry install --with docs`.
+  `uv sync --group docs`.
 - The API reference is auto-generated from docstrings by `sphinx-apidoc` at
   build time and is not checked in (`docs/api/`, `docs/_build/` are gitignored).
 - Use **Google-style docstrings** for new code (napoleon is enabled); existing

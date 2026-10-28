@@ -20,12 +20,12 @@ counts means you are measuring the link, not the camera or the fix.
 
 Usage (from the machine you normally drive the experiment from)::
 
-    poetry run python tools/bench_hamcam_rpc.py
-    poetry run python tools/bench_hamcam_rpc.py --device "Rb ORCA"
-    poetry run python tools/bench_hamcam_rpc.py --frames 1,5,10 --exposure 0.005
+    uv run python tools/bench_hamcam_rpc.py
+    uv run python tools/bench_hamcam_rpc.py --device "Rb ORCA"
+    uv run python tools/bench_hamcam_rpc.py --frames 1,5,10 --exposure 0.005
 
 Requires the device's server to already be running (start it from the GUI's
-Devices tab, or ``poetry run pytweezer-device "Rb Rearrangement Rig"``).
+Devices tab, or ``uv run pytweezer-device "Rb Rearrangement Rig"``).
 """
 
 import argparse

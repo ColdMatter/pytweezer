@@ -12,23 +12,36 @@ are otherwise silent:
 * a callable target, which sipyco would invoke instead of serving
 
 Usage:
-    poetry run python check_device.py "Rb ThorLabs Camera"
-    poetry run python check_device.py --all
+    uv run python check_device.py "Rb ThorLabs Camera"
+    uv run python check_device.py --all
 """
 
 import argparse
 import inspect
 import sys
 
-from pytweezer.servers import device_server
 from pytweezer.servers.configreader import ConfigReader
+
+from pytweezer.servers import device_server
 
 # Keys the framework consumes itself; they are expected not to match a
 # constructor parameter, so they are never reported as unused.
 FRAMEWORK_KEYS = {
-    "active", "class", "sim_class", "simulate", "host", "port", "teardown",
-    "description", "target_name", "allow_parallel", "script", "devices",
-    "coordinator", "coordinator_target_name", "role",
+    "active",
+    "class",
+    "sim_class",
+    "simulate",
+    "host",
+    "port",
+    "teardown",
+    "description",
+    "target_name",
+    "allow_parallel",
+    "script",
+    "devices",
+    "coordinator",
+    "coordinator_target_name",
+    "role",
 }
 
 problems = []
@@ -56,10 +69,7 @@ def check_config_keys(name, conf, cls):
         p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
     )
 
-    unused = [
-        key for key in conf
-        if key not in FRAMEWORK_KEYS and key not in params
-    ]
+    unused = [key for key in conf if key not in FRAMEWORK_KEYS and key not in params]
     if unused and not accepts_kwargs:
         for key in unused:
             problem(
@@ -71,11 +81,12 @@ def check_config_keys(name, conf, cls):
         ok("every config key maps to a constructor parameter")
 
     missing = [
-        pname for pname, p in params.items()
+        pname
+        for pname, p in params.items()
         if pname != "self"
         and p.default is inspect.Parameter.empty
-        and p.kind not in (inspect.Parameter.VAR_POSITIONAL,
-                           inspect.Parameter.VAR_KEYWORD)
+        and p.kind
+        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
         and pname not in conf
     ]
     for pname in missing:
@@ -166,7 +177,8 @@ def check_device(name):
                 f"defines __call__); sipyco would call it instead of serving it"
             )
         methods = [
-            m for m in dir(target)
+            m
+            for m in dir(target)
             if not m.startswith("_") and callable(getattr(target, m, None))
         ]
         ok(f"target {target_name!r} exposes {len(methods)} RPC methods")
@@ -189,7 +201,9 @@ def check_device(name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("name", nargs="?", help="device name (key in CONFIG['Devices'])")
+    parser.add_argument(
+        "name", nargs="?", help="device name (key in CONFIG['Devices'])"
+    )
     parser.add_argument("--all", action="store_true", help="check every device")
     args = parser.parse_args()
 

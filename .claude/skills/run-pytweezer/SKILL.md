@@ -14,12 +14,12 @@ spins the Qt event loop briefly so it fully paints (and, on a networked lab PC,
 fetches live server/device status), then grabs a PNG of the window and of each
 tab.
 
-All paths below are relative to the repo root. Everything runs through Poetry
-(env already set up: Python 3.13, `pytweezer-<hash>-py3.13`).
+All paths below are relative to the repo root. Everything runs through uv
+(env is `.venv` in the repo root).
 
 ## Prerequisites
 
-- Poetry with the project env installed. If imports fail, run `poetry install`.
+- uv with the project env installed. If imports fail, run `uv sync`.
 - On Windows with an active desktop session (a lab PC), no display flags are
   needed — the driver uses the native Qt backend and the window flashes briefly.
 - On a truly headless box (SSH, no session), prefix the run with
@@ -31,7 +31,7 @@ Build the **client** GUI (safe: view-only, spawns no subprocesses) and dump
 screenshots:
 
 ```bash
-poetry run python .claude/skills/run-pytweezer/driver.py client
+uv run python .claude/skills/run-pytweezer/driver.py client
 ```
 
 Output (7 PNGs) lands in `.claude/skills/run-pytweezer/shots/`:
@@ -43,7 +43,7 @@ Output (7 PNGs) lands in `.claude/skills/run-pytweezer/shots/`:
 Pass a second arg to redirect the output dir:
 
 ```bash
-poetry run python .claude/skills/run-pytweezer/driver.py client /tmp/shots
+uv run python .claude/skills/run-pytweezer/driver.py client /tmp/shots
 ```
 
 On a lab PC the shots show **live** state: e.g. the Server Status tab lists
@@ -70,8 +70,8 @@ Qt 6 it closes the window, and closing the server GUI stops every server.
 The real entry points open a window and block:
 
 ```bash
-poetry run pytweezer-client     # or start_client.bat
-poetry run pytweezer-server     # or start_servers.bat; simulates off PH-BEAST
+uv run pytweezer-client     # or start_client.bat
+uv run pytweezer-server     # or start_servers.bat; simulates off PH-BEAST
 ```
 
 Useless in a non-interactive shell (nothing to look at, blocks forever). Ctrl-C
@@ -99,13 +99,13 @@ the registration script on that PC. SSH hosts: `10.59.3.1` (PH-BEAST, user
 ## Test
 
 ```bash
-poetry run pytest tests/ -q --ignore=tests/test_gui.py
+uv run pytest tests/ -q --ignore=tests/test_gui.py
 ```
 
 → `81 passed`. **`tests/test_gui.py` is currently broken** (pre-existing, not
 caused by this skill): it imports `from bin.process_manager import ...`, but that
 module was split into `bin/managed_panel.py` and `bin/process_manager.py` no
-longer exists, so a plain `poetry run pytest tests/ -q` aborts at collection with
+longer exists, so a plain `uv run pytest tests/ -q` aborts at collection with
 `ModuleNotFoundError: No module named 'bin.process_manager'`. Ignore that file
 (as above) to run the rest.
 

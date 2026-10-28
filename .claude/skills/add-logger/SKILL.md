@@ -170,7 +170,7 @@ the writer would drop, a `read()` shape the loop can't unpack, a `close()` that
 forgets the writer.
 
 ```bash
-poetry run python .claude/skills/add-logger/scripts/check_logger.py "Chamber Pressure Logger"
+uv run python .claude/skills/add-logger/scripts/check_logger.py "Chamber Pressure Logger"
 ```
 
 Then add a case to `tests/test_loggers.py` (copy the starter first if that file
@@ -189,14 +189,14 @@ def test_chamber_pressure_reads_one_point():
 
 Test what bites: the reading-to-fields mapping, the degenerate case (no channels,
 sensor returning nothing) returning `None` rather than raising, and `close()`
-releasing both the source and the writer. Then `poetry run pytest tests/ -q`.
+releasing both the source and the writer. Then `uv run pytest tests/ -q`.
 
 ## Turning it on
 
 `pytweezer-server` → **Loggers** tab → Start, or standalone:
 
 ```bash
-poetry run pytweezer-logger "Chamber Pressure Logger"
+uv run pytweezer-logger "Chamber Pressure Logger"
 ```
 
 Values land in the `readings` table; check them in Grafana's *pytweezer
@@ -204,6 +204,7 @@ overview* or *Lab health* dashboard (<http://localhost:3000> on the server PC) o
 
 ```python
 from pytweezer.database.analysis import readings
+
 readings("chamber", start="2026-10-07 09:00")
 ```
 

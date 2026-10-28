@@ -4,8 +4,8 @@ The Experiment Manager records runs as they happen; this fills in whatever it
 missed (runs from before the database existed, or written while it was down).
 Every row is an upsert, so running it again is harmless::
 
-    poetry run pytweezer-db-backfill            # the configured data root
-    poetry run pytweezer-db-backfill --root D:/data
+    uv run pytweezer-db-backfill            # the configured data root
+    uv run pytweezer-db-backfill --root D:/data
 """
 
 import argparse

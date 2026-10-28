@@ -205,7 +205,7 @@ ndim) that must return `None` rather than raise, and any property that changes
 behaviour. Run:
 
 ```bash
-poetry run pytest tests/ -q
+uv run pytest tests/ -q
 ```
 
 ## Turning it on

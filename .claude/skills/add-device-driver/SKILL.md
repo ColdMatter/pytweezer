@@ -141,7 +141,7 @@ reach the constructor, builds the backend in simulation, and reports the RPC
 surface:
 
 ```bash
-poetry run python .claude/skills/add-device-driver/scripts/check_device.py "Rb ThorLabs Camera"
+uv run python .claude/skills/add-device-driver/scripts/check_device.py "Rb ThorLabs Camera"
 ```
 
 Then add the device to `SIM_CONFS` in `tests/test_simulate_decorator.py` — that
@@ -149,11 +149,11 @@ test PYON-round-trips every simulated method's return value, catching an
 unserializable stub at test time rather than at the first live RPC call. Run:
 
 ```bash
-poetry run pytest tests/ -q
+uv run pytest tests/ -q
 ```
 
 Static checks are the goal here; don't launch real servers or hardware to prove
-the work. If the user wants a live check, `poetry run pytweezer-device "<name>"`
+the work. If the user wants a live check, `uv run pytweezer-device "<name>"`
 starts it standalone and `get_device("<name>")` connects from a notebook.
 
 Report honestly what the checker found. A driver that imports and builds in

@@ -3,6 +3,7 @@ __pycache__/
 configuration/configfile.py
 .vscode/
 venv/
+.venv/
 Image Data/
 Image data/
 Rnd-Venv/
@@ -61,3 +62,4 @@ docs/api/
 *.png
 *.pdf
 !pytweezer/GUI/icons/*.png
+pytweezer.egg-info/

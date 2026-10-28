@@ -17,9 +17,9 @@ Panels that connect to the (usually unreachable) Properties server/Analysis Mana
 are wrapped in ``_safe_panel`` upstream, so they degrade to a placeholder label
 instead of aborting the window — the screenshot still succeeds offscreen.
 
-Usage (always via Poetry, from the repo root):
-    poetry run python .claude/skills/run-pytweezer/driver.py client [outdir]
-    poetry run python .claude/skills/run-pytweezer/driver.py server [outdir]
+Usage (always via uv, from the repo root):
+    uv run python .claude/skills/run-pytweezer/driver.py client [outdir]
+    uv run python .claude/skills/run-pytweezer/driver.py server [outdir]
 
 Default outdir is ``.claude/skills/run-pytweezer/shots``. Writes:
     <role>_full.png            whole window, active tab raised

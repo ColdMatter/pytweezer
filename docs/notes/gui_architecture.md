@@ -39,7 +39,7 @@ Two status views, deliberately different mechanisms:
 ## Entry points and launch flow
 
 ```
-pyproject.toml [tool.poetry.scripts]
+pyproject.toml [project.scripts]
   pytweezer-server = "bin.launch:server_main"
   pytweezer-client = "bin.launch:client_main"
 
@@ -53,7 +53,7 @@ bin/gui.py
     _run(build): QApplication -> build() -> win.show() -> SIGTERM handler -> exec_()
 ```
 
-> After changing `pyproject.toml`, run `poetry install` once so the
+> After changing `pyproject.toml`, run `uv sync` once so the
 > `pytweezer-server` / `pytweezer-client` console scripts are (re)generated.
 
 ## Component map
