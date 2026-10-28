@@ -106,6 +106,28 @@ def test_check_parses_the_tool_output(fake_tool):
     assert [c.id for c in result.pending] == ["a"] and result.changes[0].admin
 
 
+def test_check_ignores_fields_it_does_not_know(fake_tool):
+    fake_tool.prints(
+        {
+            "commit": "abc",
+            "host": "PH-BEAST",
+            "added_later": 1,
+            "changes": [
+                {
+                    "id": "a",
+                    "title": "A",
+                    "description": "d",
+                    "admin": False,
+                    "state": "pending",
+                    "error": None,
+                    "added_later": "x",
+                }
+            ],
+        }
+    )
+    assert [c.id for c in lab_setup.check(fake_tool.repo).pending] == ["a"]
+
+
 @pytest.mark.parametrize(
     "failure", ["timeout", "exit_code", "bad_json", "missing_tool"]
 )
@@ -165,18 +187,20 @@ def test_last_attempts_keeps_the_latest_line_and_skips_garbage(tmp_path):
     assert lab_setup.last_attempts(tmp_path / "nowhere") == {}
 
 
-def test_launch_apply_opens_its_own_console(tmp_path, monkeypatch):
+def test_launch_apply_applies_the_commit_that_was_shown(tmp_path, monkeypatch):
     launched = {}
     monkeypatch.setattr(
         lab_setup.subprocess,
         "Popen",
         lambda command, **kwargs: launched.update(command=command, **kwargs),
     )
-    lab_setup.launch_apply("client", tmp_path)
-    assert launched["command"][-5:] == [
+    lab_setup.launch_apply("client", "abc123", tmp_path)
+    assert launched["command"][-7:] == [
         "-Yes",
         "-Relaunch",
         "client",
+        "-Ref",
+        "abc123",
         "-Repo",
         str(tmp_path),
     ]
@@ -216,8 +240,13 @@ def stub_offer(monkeypatch, case="pending", pending=("a",), answer=None):
     monkeypatch.setattr(
         lab_setup, "check", lambda: None if case == "check_failed" else result
     )
-    monkeypatch.setattr(lab_setup, "report", lambda *a, **k: None)
-    monkeypatch.setattr(lab_setup, "launch_apply", launched.append)
+
+    def report(*args, **kwargs):
+        if case == "report_raises":
+            raise RuntimeError("database down")
+
+    monkeypatch.setattr(lab_setup, "report", report)
+    monkeypatch.setattr(lab_setup, "launch_apply", lambda *args: launched.append(args))
 
     def exec_(self):
         if case == "dialog_raises":
@@ -246,7 +275,15 @@ def test_offer_launches_apply_and_asks_to_exit_when_accepted(monkeypatch, qapp):
         monkeypatch, pending=["a"], answer=QDialog.DialogCode.Accepted
     )
     assert lab_setup.offer_lab_setup("client") is True
-    assert launched == ["client"]
+    assert launched == [("client", "abc")]
+
+
+def test_offer_still_asks_when_reporting_fails(monkeypatch, qapp):
+    launched = stub_offer(
+        monkeypatch, case="report_raises", answer=QDialog.DialogCode.Accepted
+    )
+    assert lab_setup.offer_lab_setup("client") is True
+    assert launched == [("client", "abc")]
 
 
 @pytest.mark.parametrize(

@@ -31,6 +31,19 @@ class ChangeStatus:
     state: str
     error: str | None
 
+    @classmethod
+    def from_json(cls, change: dict) -> "ChangeStatus":
+        """Build from one -Check entry, ignoring fields main's tool added later."""
+        id_ = str(change.get("id", ""))
+        return cls(
+            id=id_,
+            title=change.get("title") or id_,
+            description=change.get("description") or "",
+            admin=bool(change.get("admin", False)),
+            state=change.get("state", "error"),
+            error=change.get("error"),
+        )
+
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -109,7 +122,7 @@ def check(repo: Path = REPO, timeout: float = 10.0) -> CheckResult | None:
         return CheckResult(
             commit=data["commit"],
             host=data["host"],
-            changes=[ChangeStatus(**c) for c in data["changes"]],
+            changes=[ChangeStatus.from_json(c) for c in data["changes"]],
         )
     except subprocess.TimeoutExpired:
         logger.warning("Lab setup check timed out after %s s", timeout)
@@ -160,14 +173,23 @@ def report(result: CheckResult, writer, repo: Path = REPO) -> None:
         )
 
 
-def launch_apply(role: str, repo: Path = REPO) -> None:
-    """Start the tool in its own console to apply pending changes, then relaunch pytweezer."""
+def launch_apply(role: str, commit: str, repo: Path = REPO) -> None:
+    """Start the tool in its own console to apply pending changes, then relaunch pytweezer.
+
+    Args:
+        role: ``server`` or ``client``, the pytweezer to relaunch afterwards.
+        commit: The commit whose changes the person was shown, so a change
+            merged since is not applied unseen.
+        repo: The pytweezer working copy.
+    """
     command = [
         *_POWERSHELL,
         str(_tool(repo)),
         "-Yes",
         "-Relaunch",
         role,
+        "-Ref",
+        commit,
         "-Repo",
         str(repo),
     ]
@@ -197,14 +219,17 @@ def offer_lab_setup(role: str, *, timeout_s: float = 120) -> bool:
         result = check()
         if result is None:
             return False
-        report(result, _report_writer())
+        try:
+            report(result, _report_writer())
+        except Exception:
+            logger.exception("Lab setup report failed; offering the changes anyway")
         pending = result.pending
         if not pending:
             return False
         dialog = LabSetupDialog(pending, timeout_s)
         if dialog.exec() != LabSetupDialog.DialogCode.Accepted:
             return False
-        launch_apply(role)
+        launch_apply(role, result.commit)
         return True
     except Exception:
         logger.exception("Lab setup offer failed; starting normally")
