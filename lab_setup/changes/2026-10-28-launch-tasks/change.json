@@ -1,0 +1,6 @@
+{
+  "title": "Register the pytweezer launch tasks",
+  "description": "Registers on-demand scheduled tasks pytweezer-server and pytweezer-client that start the GUI on the desktop, so it can be restarted over SSH.",
+  "systems": ["windows"],
+  "admin": false
+}

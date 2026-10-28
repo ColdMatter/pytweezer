@@ -1,0 +1,10 @@
+{
+  "title": "Store the login for the pytweezer data share",
+  "description": "Lets the Results tab read measurement files from PH-BEAST.",
+  "systems": ["windows"],
+  "hosts": {"except": ["PH-BEAST"]},
+  "admin": false,
+  "secrets": [
+    {"name": "READER_PASSWORD", "prompt": "Password for PH-BEAST\\pytweezer-reader", "ask": "Tom"}
+  ]
+}

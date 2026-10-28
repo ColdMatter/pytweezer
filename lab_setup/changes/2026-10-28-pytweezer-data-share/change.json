@@ -1,0 +1,10 @@
+{
+  "title": "Share the pytweezer data folder",
+  "description": "Creates the read-only account pytweezer-reader, shares the data folder as pytweezer-data and opens SMB to the lab network, so client PCs can read measurement files.",
+  "systems": ["windows"],
+  "hosts": {"only": ["PH-BEAST"]},
+  "admin": true,
+  "secrets": [
+    {"name": "READER_PASSWORD", "prompt": "Password for the new PH-BEAST\\pytweezer-reader account", "ask": "Tom"}
+  ]
+}

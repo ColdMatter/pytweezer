@@ -1,0 +1,9 @@
+{
+  "title": "Set the database connection string",
+  "description": "Sets the user environment variable PYTWEEZER_DB_DSN so this PC can reach the pytweezer database.",
+  "systems": ["windows"],
+  "admin": false,
+  "secrets": [
+    {"name": "DB_DSN", "prompt": "PYTWEEZER_DB_DSN connection string", "ask": "Tom"}
+  ]
+}

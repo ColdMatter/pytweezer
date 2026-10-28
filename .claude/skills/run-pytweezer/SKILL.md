@@ -82,7 +82,7 @@ to quit. Use the driver instead when you need a screenshot.
 Never start the GUI straight from an SSH command: it lands in session 0 with
 no window (and so do the MOTMasters it launches, with their dialogs), and dies
 when SSH disconnects. Each PC instead has on-demand scheduled tasks,
-registered once by a person with `register_launch_tasks.ps1`, that run the
+registered by the `launch-tasks` lab setup change (see `add-lab-change`), that run the
 `.bat` launchers on the logged-on desktop:
 
 ```bash
@@ -93,7 +93,7 @@ ssh 10.59.3.1 "schtasks /run /tn pytweezer-server"               # start on the 
 
 `pytweezer-client` is the client-PC equivalent. Do not create scheduled tasks
 yourself; if `schtasks /run` says the task does not exist, ask the user to run
-the registration script on that PC. SSH hosts: `10.59.3.1` (PH-BEAST, user
+the `launch-tasks` change on that PC (`lab_setup\lab-setup.ps1`). SSH hosts: `10.59.3.1` (PH-BEAST, user
 `tweez`), `rb-mm-pc` (10.59.3.2); see `~/.ssh/config`.
 
 ## Test

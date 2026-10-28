@@ -1,0 +1,6 @@
+{
+  "title": "Install uv",
+  "description": "pytweezer is run through uv; installs it with winget if it is missing.",
+  "systems": ["windows"],
+  "admin": false
+}
