@@ -14,6 +14,15 @@ shown; any other script parameter can be set by passing a dotted argument name
 (``"rb.tPulse"``), which the Experiments form offers through a search box.
 Parameters not set are left at the script's own defaults. One MOTMaster is the
 master; the others are armed in trigger mode and started first.
+
+A MOTMaster in linked mode runs one script across two machines: it claims its
+secondary itself and fires it by TTL, so the experiment declares only the
+primary, and every parameter (both machines', plus ``SecondaryTriggerDelay``)
+belongs to its script::
+
+    class LinkedLoad(MotMasterExperiment):
+        mm = MotMaster("CaF MotMaster", script="LinkedTweezerLoad", linked=True)
+        tof = MotMasterInteger(100, parameter="tDelay1")
 """
 
 import difflib
@@ -34,6 +43,7 @@ class MotMaster(Device):
         *,
         script: str,
         master: bool = False,
+        linked: bool = False,
         iterations: int = 1,
         save: bool = False,
         follower_timeout: float = 60.0,
@@ -42,6 +52,7 @@ class MotMaster(Device):
         super().__init__(device_name, timeout=timeout)
         self.script = script
         self.master = master
+        self.linked = linked
         self.iterations = iterations
         self.save = save
         self.follower_timeout = follower_timeout
@@ -51,6 +62,7 @@ class MotMaster(Device):
             "motmaster": {
                 "script": self.script,
                 "master": self.master,
+                "linked": self.linked,
                 "iterations": self.iterations,
                 "save": self.save,
                 "follower_timeout": self.follower_timeout,
@@ -116,6 +128,12 @@ class MotMasterExperiment(Experiment):
         sequencers = cls.motmasters()
         if not sequencers:
             return
+        linked = [name for name, sequencer in sequencers.items() if sequencer.linked]
+        if linked and len(sequencers) > 1:
+            raise TypeError(
+                f"{cls.__name__}.{linked[0]} is linked, so it drives its secondary "
+                "MOTMaster itself; declare no other MotMaster"
+            )
         masters = [name for name, sequencer in sequencers.items() if sequencer.master]
         if len(sequencers) > 1 and len(masters) != 1:
             raise TypeError(
@@ -210,6 +228,16 @@ class MotMasterExperiment(Experiment):
         master = self.master_name()
         self._script_parameters: dict[str, dict[str, Any]] = {}
         self._follower_clients: dict[str, Any] = {}
+        self._linked: list[str] = []
+        # Linked mode persists in MOTMaster, so set it on every sequencer, unlinking
+        # first: a secondary still claimed by another primary refuses SetScriptPath
+        # and SetTriggered.
+        for attribute, motmaster in sorted(
+            self.motmasters().items(), key=lambda item: item[1].linked
+        ):
+            getattr(self, attribute).set_linked(motmaster.linked)
+            if motmaster.linked:
+                self._linked.append(attribute)
         for attribute, motmaster in self.motmasters().items():
             client = getattr(self, attribute)
             client.set_motmaster_experiment(motmaster.script)
@@ -329,3 +357,16 @@ class MotMasterExperiment(Experiment):
 
     def run_point(self) -> None:
         self.run_sequences()
+
+    def close_devices(self) -> None:
+        # Here rather than in finish(), which subclasses override: a link left on
+        # would lock the secondary MOTMaster against every other task.
+        for attribute in getattr(self, "_linked", []):
+            try:
+                getattr(self, attribute).set_linked(False)
+            except Exception:
+                logger.warning(
+                    "Could not release the %s link", attribute, exc_info=True
+                )
+        self._linked = []
+        super().close_devices()

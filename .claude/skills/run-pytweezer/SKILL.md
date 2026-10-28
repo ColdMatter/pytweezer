@@ -77,6 +77,25 @@ poetry run pytweezer-server     # or start_servers.bat; simulates off PH-BEAST
 Useless in a non-interactive shell (nothing to look at, blocks forever). Ctrl-C
 to quit. Use the driver instead when you need a screenshot.
 
+### Restarting a GUI on another lab PC over SSH
+
+Never start the GUI straight from an SSH command: it lands in session 0 with
+no window (and so do the MOTMasters it launches, with their dialogs), and dies
+when SSH disconnects. Each PC instead has on-demand scheduled tasks,
+registered once by a person with `register_launch_tasks.ps1`, that run the
+`.bat` launchers on the logged-on desktop:
+
+```bash
+ssh 10.59.3.1 "taskkill /pid <gui pid> /t /f"                    # stop (whole tree)
+ssh 10.59.3.1 "cd /d C:\Users\tweez\ColdMatter\pytweezer && git checkout <branch> && git pull --ff-only"
+ssh 10.59.3.1 "schtasks /run /tn pytweezer-server"               # start on the desktop
+```
+
+`pytweezer-client` is the client-PC equivalent. Do not create scheduled tasks
+yourself; if `schtasks /run` says the task does not exist, ask the user to run
+the registration script on that PC. SSH hosts: `10.59.3.1` (PH-BEAST, user
+`tweez`), `rb-mm-pc` (10.59.3.2); see `~/.ssh/config`.
+
 ## Test
 
 ```bash
