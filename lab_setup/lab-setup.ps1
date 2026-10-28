@@ -195,29 +195,41 @@ function Show-Pending($Pending) {
     }
 }
 
-function Read-Secrets($Change) {
-    $secrets = @{}
+function Read-Secrets($Change, [hashtable]$Into) {
     foreach ($secret in $Change.Secrets) {
+        # Only the tests set this: Read-Host -AsSecureString reads the console, which they cannot type into.
+        if ($env:PYTWEEZER_LAB_SETUP_TEST_SECRET) {
+            $Into[$secret.name] = $env:PYTWEEZER_LAB_SETUP_TEST_SECRET
+            continue
+        }
         $secure = Read-Host -AsSecureString "$($secret.prompt) (ask $($secret.ask))"
-        $secrets[$secret.name] = (New-Object Management.Automation.PSCredential 'unused', $secure).GetNetworkCredential().Password
+        $Into[$secret.name] = (New-Object Management.Automation.PSCredential 'unused', $secure).GetNetworkCredential().Password
     }
-    $secrets
 }
 
 function Invoke-Change($Change) {
-    # Returns the error message, or $null once the check confirms the change is in place.
+    # Returns the error message with secret values masked, or $null once the check
+    # confirms the change is in place.
+    $secrets = @{}
+    $message = $null
     try {
-        $secrets = Read-Secrets $Change
+        Read-Secrets $Change $secrets
         & (Join-Path $Change.Folder 'apply.ps1') -Repo $Repo -Secrets $secrets | Out-Host
     } catch {
-        if ($_.Exception.Message) { return $_.Exception.Message } else { return 'apply.ps1 failed' }
+        $message = if ($_.Exception.Message) { $_.Exception.Message } else { 'apply.ps1 failed' }
     }
-    $after = (Get-ChangeStates @($Change))[$Change.Id]
-    switch ($after.State) {
-        'done' { return $null }
-        'pending' { return 'apply finished but the check still says pending' }
+    if (-not $message) {
+        $after = (Get-ChangeStates @($Change))[$Change.Id]
+        $message = switch ($after.State) {
+            'done' { $null }
+            'pending' { 'apply finished but the check still says pending' }
+            default { "check after apply: $($after.Error)" }
+        }
     }
-    "check after apply: $($after.Error)"
+    foreach ($value in $secrets.Values) {
+        if ($message -and $value) { $message = $message.Replace($value, '***') }
+    }
+    $message
 }
 
 function Write-Record($Change, [string]$Result, $Message) {

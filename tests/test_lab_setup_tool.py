@@ -30,7 +30,7 @@ def _new_clone(origin, path):
     _git(path, "config", "user.email", "test@example.com")
 
 
-def _write_change(work, change_id, check, apply, systems, hosts):
+def _write_change(work, change_id, check, apply, systems, hosts, secrets=()):
     folder = work / "lab_setup" / "changes" / change_id
     folder.mkdir(parents=True)
     manifest = {
@@ -41,6 +41,11 @@ def _write_change(work, change_id, check, apply, systems, hosts):
     }
     if hosts is not None:
         manifest["hosts"] = hosts
+    if secrets:
+        manifest["secrets"] = [
+            {"name": name, "prompt": f"Value of {name}", "ask": "Tom"}
+            for name in secrets
+        ]
     marker = f'(Join-Path $Repo "markers/{change_id}")'
     if check is None:
         check = f"if (Test-Path {marker}) {{ exit 0 }} else {{ exit 1 }}"
@@ -91,15 +96,27 @@ class LabRepo:
         return _git(self.work, *args)
 
     def add_change(
-        self, change_id, check=None, apply=None, systems=("windows",), hosts=None
+        self,
+        change_id,
+        check=None,
+        apply=None,
+        systems=("windows",),
+        hosts=None,
+        secrets=(),
     ):
-        self.add_change_uncommitted(change_id, check, apply, systems, hosts)
+        self.add_change_uncommitted(change_id, check, apply, systems, hosts, secrets)
         _commit_and_push(self.work, f"Add {change_id}")
 
     def add_change_uncommitted(
-        self, change_id, check=None, apply=None, systems=("windows",), hosts=None
+        self,
+        change_id,
+        check=None,
+        apply=None,
+        systems=("windows",),
+        hosts=None,
+        secrets=(),
     ):
-        _write_change(self.work, change_id, check, apply, list(systems), hosts)
+        _write_change(self.work, change_id, check, apply, list(systems), hosts, secrets)
 
     def push_change_from_elsewhere(self, change_id):
         elsewhere = self.tmp_path / "elsewhere"
@@ -118,7 +135,7 @@ class LabRepo:
     def origin_main_sha(self):
         return _git(self.origin, "rev-parse", "main")
 
-    def run(self, *args):
+    def run(self, *args, env=None):
         """Run the tool from the clone's working copy, as pytweezer does."""
         return subprocess.run(
             [
@@ -137,7 +154,12 @@ class LabRepo:
             text=True,
             timeout=60,
             check=False,
-            env={**os.environ, "TEMP": str(self.temp), "TMP": str(self.temp)},
+            env={
+                **os.environ,
+                "TEMP": str(self.temp),
+                "TMP": str(self.temp),
+                **(env or {}),
+            },
         )
 
     def check(self, host="PH-BEAST", fetch=False):
@@ -145,8 +167,15 @@ class LabRepo:
         assert done.returncode == 0, done.stderr
         return json.loads(done.stdout)
 
-    def apply(self, yes=False, host="PH-BEAST"):
-        return self.run(*(["-Yes"] if yes else []), "-NoFetch", "-HostName", host)
+    def apply(self, yes=False, host="PH-BEAST", secret=None):
+        """``secret`` is given as the value of every secret, instead of a prompt."""
+        return self.run(
+            *(["-Yes"] if yes else []),
+            "-NoFetch",
+            "-HostName",
+            host,
+            env={"PYTWEEZER_LAB_SETUP_TEST_SECRET": secret} if secret else None,
+        )
 
     def records(self):
         path = self.work / "logs" / "lab_setup.jsonl"
@@ -250,3 +279,12 @@ def test_apply_skips_changes_already_done(lab_repo):
     lab_repo.mark_done("a")
     lab_repo.apply(yes=True)
     assert lab_repo.records() == []
+
+
+def test_secret_values_are_masked_in_the_record(lab_repo):
+    lab_repo.add_change(
+        "a", apply='throw "login with $($Secrets.PW) failed"', secrets=["PW"]
+    )
+    lab_repo.apply(yes=True, secret="hunter2")
+    (record,) = lab_repo.records()
+    assert record["error"] == "login with *** failed"
