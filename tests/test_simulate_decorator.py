@@ -120,6 +120,10 @@ SIM_CONFS = {
         "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
         "simulate": True,
     },
+    "ids1054b": {
+        "sim_class": "pytweezer.drivers.ids1054b:SimulatedIDS1054B",
+        "simulate": True,
+    },
 }
 
 
