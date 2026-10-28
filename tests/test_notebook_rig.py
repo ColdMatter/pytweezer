@@ -284,3 +284,43 @@ def test_numpy_values_reach_motmaster_as_python_numbers(rig_parts):
     rig, motmaster, _ = rig_parts()
     rig.scan("S", "dummy", np.arange(2), save=False)
     assert type(motmaster.go_parameters["dummy"]) is int
+
+
+def test_auto_mot_parks_each_laser_on_its_brightest_point(rig_parts):
+    rig, motmaster, cameras = rig_parts()
+    values = [494.42, 494.43, 494.44]
+    cameras["CaF"].value = lambda _index: (
+        10 if motmaster.set_points["v0"] == values[1] else 1
+    )
+    results = rig.auto_mot("S", {"v0": values})
+    assert results["v0"]["set_point"] == values[1]
+    assert results["v0"]["start_set_point"] == 494.43
+    last_set = [call for call in motmaster.calls if call[:2] == ("set", "v0")][-1]
+    assert last_set == ("set", "v0", values[1])
+
+
+@pytest.mark.parametrize(
+    "frame_counts, error", [([2.0], float("nan")), ([0.0, 2.0], 1.0)], ids=["1", "2"]
+)
+def test_auto_mot_error_bars_are_standard_errors_of_the_frames(
+    rig_parts, frame_counts, error
+):
+    rig, _, cameras = rig_parts(caf=len(frame_counts))
+    camera = cameras["CaF"]
+    camera.shape = (1, 1)
+    background = [0.0] * len(frame_counts)
+    camera.value = lambda index: (background + frame_counts)[index]
+    results = rig.auto_mot("S", {"v0": [494.43]})
+    assert results["v0"]["errors"] == [pytest.approx(error, nan_ok=True)]
+
+
+def test_auto_mot_does_not_save_by_default(rig_parts, tmp_path):
+    rig, _, _ = rig_parts()
+    rig.auto_mot("S", {"v0": [494.43]})
+    assert not list(tmp_path.rglob("*.zip"))
+
+
+def test_auto_mot_names_the_known_lasers_for_an_unknown_one(rig_parts):
+    rig, _, _ = rig_parts()
+    with pytest.raises(KeyError, match="BX"):
+        rig.auto_mot("S", {"v00": [1.0]})

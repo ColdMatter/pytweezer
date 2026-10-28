@@ -189,6 +189,86 @@ class Rig:
             shots.append(shot)
         return shots
 
+    def auto_mot(
+        self,
+        script: str,
+        scan_ranges: dict[str, Sequence[float]],
+        *,
+        camera: str | None = None,
+        iterations: int = 1,
+        field_parameter: str = "MOTCoilsCurrentValue",
+        bg_field_value: float = 0.0,
+        mot_field_value: float = 1.0,
+        save: bool = False,
+        display: bool = False,
+    ) -> dict[str, dict[str, Any]]:
+        """Tune the wavemeter-lock set points laser by laser for the most fluorescence.
+
+        A background shot is taken with ``field_parameter`` at ``bg_field_value``;
+        then each laser in ``scan_ranges`` (set points in THz) is scanned with the
+        field at ``mot_field_value`` and left on the point with the most
+        background-subtracted counts before the next laser is scanned.
+
+        Args:
+            camera: Key of the camera to count on; defaults to :attr:`element`'s.
+
+        Returns:
+            Per laser: ``scan_range``, ``numbers`` (mean counts over a shot's
+            frames), ``errors`` (their standard error; NaN for one frame),
+            ``set_point`` chosen and ``start_set_point``. Pass it to
+            :func:`plot_auto_mot_results`, or set ``display``.
+        """
+        key = camera or self.element
+        start_set_points = self.laser_set_points()
+        unknown = [laser for laser in scan_ranges if laser not in start_set_points]
+        if unknown:
+            raise KeyError(
+                f"{unknown} not among the MOTMaster's lasers {sorted(start_set_points)}"
+            )
+        background = (
+            self.run(
+                script,
+                save=save,
+                iterations=iterations,
+                **{field_parameter: bg_field_value},
+            )
+            .images[key]
+            .mean(axis=0)
+        )
+
+        results: dict[str, dict[str, Any]] = {}
+        for laser, scan_range in scan_ranges.items():
+            scan_range = [float(value) for value in scan_range]
+            shots = self.scan_laser(
+                script,
+                laser,
+                scan_range,
+                save=save,
+                iterations=iterations,
+                **{field_parameter: mot_field_value},
+            )
+            numbers, errors = [], []
+            for shot in shots:
+                counts = np.sum(shot.images[key] - background, axis=(1, 2))
+                numbers.append(float(np.mean(counts)))
+                errors.append(
+                    float(np.std(counts, ddof=1) / np.sqrt(len(counts)))
+                    if len(counts) > 1
+                    else float("nan")
+                )
+            set_point = scan_range[int(np.argmax(numbers))]
+            self.motmaster.set_laser_set_point_wml(laser, set_point)
+            results[laser] = {
+                "scan_range": scan_range,
+                "numbers": numbers,
+                "errors": errors,
+                "set_point": set_point,
+                "start_set_point": start_set_points[laser],
+            }
+        if display:
+            plot_auto_mot_results(results)
+        return results
+
     def laser_set_points(self) -> dict[str, float]:
         """Every laser's wavemeter-lock set point, in THz."""
         return self.motmaster.laser_set_points_wml()
@@ -291,3 +371,45 @@ class Rig:
         for client in self._owned:
             client.close_rpc()
         self._owned = []
+
+
+def plot_auto_mot_results(results: dict[str, dict[str, Any]]):
+    """Plot the scans returned by :meth:`Rig.auto_mot`: one panel per laser,
+    normalised number against detuning from the set point the laser started on, with
+    an arrow marking the set point chosen. Returns the ``(figure, axes)`` pair."""
+    import matplotlib.pyplot as plt
+
+    n_cols = min(3, max(1, len(results)))
+    n_rows = max(1, -(-len(results) // n_cols))
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharey=True, squeeze=False
+    )
+    flat_axes = axes.flatten()
+    for ax, (laser, scan) in zip(flat_axes, results.items()):
+        numbers = np.array(scan["numbers"])
+        errors = np.array(scan["errors"])
+        scale = np.max(numbers) if np.max(numbers) > 0 else 1.0
+        # THz set points shown as MHz detunings from where the laser started.
+        start = scan["start_set_point"]
+        detunings = (np.array(scan["scan_range"]) - start) * 1e6
+        ax.errorbar(detunings, numbers / scale, yerr=errors / scale, fmt="ok")
+        ax.arrow(
+            (scan["set_point"] - start) * 1e6,
+            1.15,
+            0,
+            -0.1,
+            head_width=2.0,
+            head_length=0.03,
+            width=1.0,
+            fc="r",
+            ec="r",
+        )
+        ax.set_title(f"{laser} set @ {scan['set_point']} THz")
+        ax.set_xlabel("Detuning to previous set point [MHz]")
+        ax.set_ylim((0, 1.2))
+    for ax in flat_axes[len(results) :]:
+        ax.set_visible(False)
+    for row in axes:
+        row[0].set_ylabel("Norm. number")
+    fig.tight_layout()
+    return fig, axes
