@@ -77,6 +77,13 @@ Leave the old plans in `docs/superpowers/plans` as they are.
   `uv sync` there will rebuild it on 3.11.
 - The beast's live checkout now has a working uv `.venv` (built and tested
   after the servers were stopped; same 1 known failure).
+- PyQt5 is gone. It came only from `qscintilla` (unused, dropped) and full
+  `pylablib`, now `pylablib-lightweight`, whose newest release is 1.4.3 (was
+  1.4.5); the diff between them is Linux portability and FT232 fixes, nothing
+  our drivers use. `numba` (TLCamera) and `pyusb` (picomotor) are now direct
+  dependencies. On the beast, both builds behave the same: the ImagEM snaps a
+  frame; neither configured ThorCam (32148, 38570) is visible to the Thorlabs
+  SDK; the picomotor lookup fails with pyusb's "No backend available".
 - Every lab PC moves at once. The two lock files won't stay in sync, so don't
   run Poetry and uv side by side. Each PC needs uv installed.
 - Re-point Jupyter/VS Code kernels at the new `.venv`.
@@ -88,7 +95,3 @@ Leave the old plans in `docs/superpowers/plans` as they are.
   up in the logs.
 - Move `pytest` and `ruff` into a dev dependency group; drop
   `zmq>=0.0.0,<0.0.1`, an empty placeholder package (`pyzmq` is the real one).
-- PyQt5 is only here transitively: `qscintilla` (a direct dependency nothing
-  imports) and `pylablib`, which declares `pyqt5` for its GUI modules. Drop
-  `qscintilla` and swap `pylablib` for `pylablib-lightweight` (same code, no
-  dependencies declared), then check the DCAM/Thorlabs cameras still open.
