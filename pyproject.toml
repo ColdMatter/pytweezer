@@ -16,34 +16,22 @@ dependencies = [
     "numba>=0.68.1,<0.69",
     "pyusb>=1.3.1,<2",
     "rich>=13.9.4,<14",
-    "paramiko>=3.4.1,<4",
     "tifffile>=2026.1.28,<2027",
     "pillow>=12.1.0,<13",
     "pyzmq>=27.1.0,<28",
     "PyQt6>=6.9,<7",
     "PyQt6-Qt6>=6.9,<7",
     "ipykernel>=7.3,<8",
-    "ipywidgets>=8.1.5,<9",
-    "tqdm>=4.67.3,<5",
     "h5py>=3.15.1,<4",
     "cupy-cuda13x>=14.0.1,<15",
     "lap>=0.5.13,<0.6",
-    "termcolor>=3.3.0,<4",
-    "pyperclip>=1.11.0,<2",
-    "uncertainties>=3.2.3,<4",
     "imageio>=2.37.3,<3",
-    "zmq>=0.0.0,<0.0.1",
     "pydantic>=2.10.5,<3",
     "psutil>=7.2,<8",
     "pyqtgraph>=0.14,<0.15",
     "pythonnet>=3.0.5,<4",
-    "scikit-image>=0.26.0,<0.27",
     "pyvisa-py>=0.8.1,<0.9",
     "sipyco",
-    "pycaf",
-    "simple-pyspin>=0.1.1,<0.2",
-    "easypyspin>=2.0.1,<3",
-    "opencv-python>=4.13.0.92,<5",
     "pytest>=9.1.1,<10",
     "nidaqmx>=1.5.0,<2",
     "scikit-learn>=1.9.0,<2",
@@ -88,7 +76,6 @@ required-environments = [
 
 [tool.uv.sources]
 sipyco = { git = "https://github.com/m-labs/sipyco.git", rev = "ce454bb64257b1bcef3703f258aaf7fa4ee0c275" }
-pycaf = { git = "https://github.com/ColdMatter/pycaf", branch = "cafmot" }
 
 [tool.setuptools.packages.find]
 include = ["pytweezer*", "bin*"]

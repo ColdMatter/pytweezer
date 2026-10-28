@@ -38,11 +38,6 @@ autodoc_mock_imports = [
     "cupy",
     "nidaqmx",
     "imutils",
-    "pycaf",
-    "easypyspin",
-    "simple_pyspin",
-    "PySpin",
-    "nicelib",
 ]
 
 autodoc_default_options = {
