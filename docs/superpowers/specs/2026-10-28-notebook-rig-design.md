@@ -150,14 +150,13 @@ MOTMaster's default and is acceptable.
 
 ### Notebook environment (decided by the user)
 
-Notebooks keep running in the `caftweeznb` venv
-(`Box\Working folder\caftweezers\pyproject.toml`). It currently pins pytweezer
-by git to branch `exp-handler`, with a stale non-editable copy (branch
-`servers`, July) installed. `get_device` takes device ports from the installed
+Notebooks keep running in the `caftweeznb` uv venv
+(`C:\Users\cafmot\.venvs\caftweeznb`), which installs pytweezer by a git pin
+to `main`; the pin stays. `get_device` takes device ports from the installed
 package's `config.py`, assigned in order, so that copy must match what the
 device servers run; adding the `CaF ThorCam` entry shifts the ports of every
-later device. Updating `caftweeznb` to the deployed pytweezer is part of this
-work.
+later device. Reinstalling pytweezer in `caftweeznb` is therefore a step of
+deploying this work (and any later config change).
 
 ## Calls I made (check these)
 
@@ -192,17 +191,11 @@ work.
   separate settings log). The helper writes each camera's settings (gain,
   binning, exposure mode, ROI) as a small text file into the zip it injects
   into; `readFromZip` ignores non-`.tif`, non-parameter files.
-
 - **The CaF ThorCam acquires continuously** while its device server runs,
   hardware-triggered, broadcasting every frame to the image stream (so the
   live view works during any run, alignment included) and buffering frames
   with arrival indices. The rig records the buffer position before `Go()` and
   takes every frame after it once `Go()` returns.
-- **`caftweeznb` gets an editable path dependency on the ph-bonesaw pytweezer
-  checkout** (`C:\Users\cafmot\pytweezer`) in place of the git pin, so the
-  notebook's `config.py` is the checkout's and a `git pull` keeps it current
-  with no reinstall. That checkout must be on the same commit as the device
-  servers. This needs pytweezer's C++ extensions to build in that venv.
 
 ## Dependencies
 
