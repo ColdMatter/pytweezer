@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -6,17 +7,32 @@ import numpy as np
 import pytest
 
 from pytweezer.experiment import Experiment, ListAxis, Number, Scan, load_measurement
+from pytweezer.experiment.arguments import Bool, Choice, Integer, Text
 from pytweezer.experiment.runner import open_writer
 from pytweezer.experiment.storage import (
     RecordError,
+    find_measurement,
     highest_rid,
     measurement_relpath,
+    read_arguments,
+    read_header,
     read_planned_points,
 )
 
 
 class Sweep(Experiment):
     x = Number(0.0, unit="V")
+
+    def run_point(self):
+        pass
+
+
+class Configured(Experiment):
+    x = Number(0.0, unit="V")
+    mode = Choice(["fast", "slow"])
+    n = Integer(3)
+    flag = Bool(False)
+    note = Text("")
 
     def run_point(self):
         pass
@@ -31,76 +47,127 @@ def make_writer(path=None):
     return points, writer
 
 
-def test_header_and_planned_points_and_no_overwrite(tmp_path):
-    path = tmp_path / "m.h5"
-    make_writer(path)[1].close()
-    with h5py.File(path, "r") as f:
-        assert f.attrs["rid"] == 7
-        assert f.attrs["class_name"] == "Sweep"
-        assert f.attrs["status"] == "running"
-        assert f.attrs["n_points"] == 3
-        assert list(f["points/x"][:]) == [1.0, 2.0, 3.0]
-        assert "test_experiment_storage" in next(iter(f["source"]))
-    with pytest.raises(FileExistsError):
-        make_writer(path)
-
-
-def test_partial_file_is_readable_mid_run(tmp_path):
+def test_results_and_constants_read_back_unchanged(tmp_path):
     path = tmp_path / "m.h5"
     points, writer = make_writer(path)
-    writer.begin_point(points[0])
-    writer.record("y", 1.5, unit="counts")
-    writer.end_point()
-    writer.begin_point(points[1])
-    writer.record("y", 2.5)
-    # point 1 not ended: a reader sees only point 0, but every planned point
-    measurement = load_measurement(path)
-    assert measurement.status == "running"
-    assert measurement.n_done == 1
-    assert list(measurement.results["y"]) == [1.5]
-    assert measurement.units["y"] == "counts"
-    assert list(measurement.points["x"]) == [1.0]
-    planned = read_planned_points(path)
-    assert list(planned["x"]) == [1.0, 2.0, 3.0]
-    assert list(planned["index"]) == [0, 1, 2]
+    writer.record("reference", np.arange(4, dtype=np.int16), unit="px")
+    writer.record("settings", {"gain": 2, "taps": [1, 2]})
+    writer.record("comment", "hello")
+    writer.record("offset", 0.25, unit="V")
+    images = [np.arange(6, dtype=np.uint16).reshape(2, 3) + 100 * i for i in range(3)]
+    for point, image in zip(points, images):
+        writer.begin_point(point)
+        writer.record("image", image, unit="counts")
+        writer.record("count", 10 * point.index)
+        writer.record("flag", point.index == 1)
+        writer.record("y", 0.1 * point.index, unit="mW")
+        writer.record("amplitude", complex(point.index, -0.5))
+        writer.record("note", f"point {point.index}")
+        writer.record("meta", {"index": point.index, "tags": ["a", "b"]})
+        writer.end_point()
     writer.close()
 
+    m = load_measurement(path)
+    assert m.results["image"].dtype == np.uint16
+    np.testing.assert_array_equal(m.results["image"], np.stack(images))
+    assert m.results["count"].dtype == np.int64
+    assert list(m.results["count"]) == [0, 10, 20]
+    assert m.results["flag"].dtype == bool
+    assert list(m.results["flag"]) == [False, True, False]
+    assert list(m.results["y"]) == [0.0, 0.1, 0.2]
+    assert m.results["amplitude"].dtype == np.complex128
+    assert list(m.results["amplitude"]) == [complex(i, -0.5) for i in range(3)]
+    assert list(m.results["note"]) == ["point 0", "point 1", "point 2"]
+    assert m.results["meta"] == [{"index": i, "tags": ["a", "b"]} for i in range(3)]
+    assert m.constants["reference"].dtype == np.int16
+    assert list(m.constants["reference"]) == [0, 1, 2, 3]
+    assert m.constants["settings"] == {"gain": 2, "taps": [1, 2]}
+    assert m.constants["comment"] == "hello"
+    assert m.constants["offset"] == 0.25
+    assert m.units == {
+        "image": "counts",
+        "y": "mW",
+        "reference": "px",
+        "offset": "V",
+        **dict.fromkeys(
+            ["count", "flag", "amplitude", "note", "meta", "settings", "comment"], ""
+        ),
+    }
 
-def test_missing_values_are_flagged_and_float_gaps_are_nan():
+
+def test_header_arguments_scan_and_source_read_back(tmp_path):
+    path = tmp_path / "m.h5"
+    scan = Scan(
+        axes=[
+            ListAxis(argument="mode", values=["slow", "fast"]),
+            ListAxis(argument="x", values=[1.0, 2.0]),
+        ],
+        repetitions=2,
+        order="shuffle",
+    )
+    _, points, writer = open_writer(
+        path,
+        Configured,
+        {"n": 5, "note": "test run"},
+        scan,
+        {"rid": 12, "label": None, "submitter": "tw"},
+    )
+    writer.close()
+
+    m = load_measurement(path)
+    assert m.rid == 12
+    assert m.attrs["class_name"] == "Configured"
+    assert m.attrs["label"] == ""
+    assert m.attrs["submitter"] == "tw"
+    expected = {"x": 0.0, "mode": "fast", "n": 5, "flag": False, "note": "test run"}
+    assert m.arguments == expected
+    assert read_arguments(path) == expected
+    assert type(m.arguments["n"]) is int and m.arguments["flag"] is False
+    assert set(m.argument_schema) == set(expected)
+    # The stored scan, with its shuffle seed, reproduces the order that was run.
+    assert m.scan == scan
+    planned = read_planned_points(path)
+    assert [p.values for p in m.scan.points(Configured)] == [p.values for p in points]
+    assert list(planned["mode"]) == [p.values["mode"] for p in points]
+    assert all(type(mode) is str for mode in planned["mode"])
+    assert list(planned["repetition"]) == [p.repetition for p in points]
+    source = Path(__file__).read_text()
+    assert m.source == {Configured.__module__: source}
+    with h5py.File(path, "r") as f:
+        stored_hash = f["source"][Configured.__module__].attrs["sha256"]
+    assert stored_hash == hashlib.sha256(source.encode()).hexdigest()
+
+
+def test_points_missing_a_result_are_flagged_and_left_blank():
     points, writer = make_writer()
     for point in points:
         writer.begin_point(point)
         if point.index != 1:
             writer.record("count", point.index)
             writer.record("y", float(point.index))
+            writer.record("amplitude", complex(point.index, 1))
+            writer.record("note", "seen")
+            writer.record("meta", {"i": point.index})
         writer.end_point()
-    measurement = load_measurement(writer.file)
-    assert measurement.results["count"].dtype.kind == "i"
-    assert list(measurement.recorded["count"]) == [True, False, True]
-    assert np.isnan(measurement.results["y"][1])
-    assert measurement.results["y"][2] == 2.0
+    m = load_measurement(writer.file)
+    for name in ("count", "y", "amplitude", "note", "meta"):
+        assert list(m.recorded[name]) == [True, False, True]
+    assert list(m.results["count"][m.recorded["count"]]) == [0, 2]
+    assert np.isnan(m.results["y"][1])
+    assert np.isnan(m.results["amplitude"][1].real)
+    assert np.isnan(m.results["amplitude"][1].imag)
+    assert m.results["note"] == ["seen", None, "seen"]
+    assert m.results["meta"] == [{"i": 0}, None, {"i": 2}]
     writer.close()
 
 
-def test_complex_results_read_back_with_nan_gaps():
-    points, writer = make_writer()
-    for point in points:
-        writer.begin_point(point)
-        if point.index != 1:
-            writer.record("amplitude", complex(point.index, -0.5))
-        writer.end_point()
-    amplitude = load_measurement(writer.file).results["amplitude"]
-    assert amplitude[0] == complex(0, -0.5)
-    assert np.isnan(amplitude[1].real) and np.isnan(amplitude[1].imag)
-    assert amplitude[2] == complex(2, -0.5)
-    writer.close()
-
-
-def test_a_result_keeps_its_first_shape_and_dtype():
+def test_a_result_refuses_values_that_would_be_recast():
     points, writer = make_writer()
     writer.begin_point(points[0])
     writer.record("image", np.ones((2, 3), dtype=np.uint16))
     writer.record("count", 3)
+    writer.record("note", "text")
+    writer.record("meta", {"a": 1})
     writer.end_point()
     writer.begin_point(points[1])
     with pytest.raises(RecordError, match="shape"):
@@ -109,61 +176,109 @@ def test_a_result_keeps_its_first_shape_and_dtype():
         writer.record("image", np.ones((2, 3), dtype=np.int32))
     with pytest.raises(RecordError, match="dtype int64"):
         writer.record("count", 2.5)
-    writer.record("count", np.uint8(4))  # widening is fine
-    with pytest.raises(RecordError, match="twice"):
-        writer.record("count", 5)
-    assert writer.file["results/image"].dtype == np.uint16
-    writer.close()
-
-
-def test_strings_dicts_and_constants():
-    points, writer = make_writer()
-    writer.record("reference", np.arange(4))
-    writer.record("settings", {"gain": 2})
-    writer.begin_point(points[0])
-    writer.record("note", "first")
-    writer.record("meta", {"a": 1})
+    with pytest.raises(RecordError, match="text"):
+        writer.record("count", "4")
+    with pytest.raises(RecordError, match="text"):
+        writer.record("note", 4)
+    with pytest.raises(RecordError, match="string"):
+        writer.record("note", {"a": 1})
+    with pytest.raises(RecordError, match="dict"):
+        writer.record("meta", "plain")
+    writer.record("count", np.uint8(4))  # widening loses nothing, so is allowed
     writer.end_point()
-    measurement = load_measurement(writer.file)
-    assert list(measurement.constants["reference"]) == [0, 1, 2, 3]
-    assert measurement.constants["settings"] == {"gain": 2}
-    assert list(measurement.results["note"]) == ["first"]
-    assert measurement.results["meta"] == [{"a": 1}]
-    with pytest.raises(RecordError, match="already recorded"):
-        writer.record("reference", 1)
+    m = load_measurement(writer.file)
+    assert m.results["image"].dtype == np.uint16
+    assert list(m.results["count"]) == [3, 4]
+    assert m.results["note"] == ["text", None]
+    assert m.results["meta"] == [{"a": 1}, None]
     writer.close()
 
 
-@pytest.mark.parametrize(
-    "first, second",
-    [({"a": 1}, "plain"), ("plain", {"a": 1})],
-    ids=["dict-str", "str-dict"],
-)
-def test_a_text_result_cannot_switch_between_string_and_dict(first, second):
-    points, writer = make_writer()
+def test_nothing_already_written_is_overwritten(tmp_path):
+    path = tmp_path / "m.h5"
+    points, writer = make_writer(path)
+    writer.record("reference", 1.0)
     writer.begin_point(points[0])
-    writer.record("note", first)
+    writer.record("y", 1.5)
+    with pytest.raises(RecordError, match="twice"):
+        writer.record("y", 2.5)
+    writer.end_point()
+    with pytest.raises(RecordError, match="already recorded"):
+        writer.record("reference", 2.0)
+    writer.close()
+
+    with pytest.raises(FileExistsError):
+        make_writer(path)
+    m = load_measurement(path)
+    assert m.n_done == 1
+    assert list(m.results["y"]) == [1.5]
+    assert m.constants["reference"] == 1.0
+
+
+def test_file_is_readable_mid_run_up_to_the_last_finished_point(tmp_path):
+    path = tmp_path / "m.h5"
+    points, writer = make_writer(path)
+    writer.begin_point(points[0])
+    writer.record("y", 1.5, unit="counts")
     writer.end_point()
     writer.begin_point(points[1])
-    with pytest.raises(RecordError, match="note"):
-        writer.record("note", second)
-    writer.end_point()
-    assert load_measurement(writer.file).results["note"] == [first, None]
+    writer.record("y", 2.5)
+    m = load_measurement(path)
+    assert m.status == "running"
+    assert m.n_done == 1
+    assert list(m.results["y"]) == [1.5]
+    assert list(m.recorded["y"]) == [True]
+    assert m.units["y"] == "counts"
+    assert list(m.points["x"]) == [1.0]
+    assert len(m.points["t_start"]) == 1
+    planned = read_planned_points(path)
+    assert list(planned["x"]) == [1.0, 2.0, 3.0]
+    assert list(planned["index"]) == [0, 1, 2]
     writer.close()
 
 
-def test_paths_and_rid_scan(tmp_path):
-    rel = measurement_relpath(42, "Sweep", datetime(2026, 3, 4, 5, 6, tzinfo=UTC))
-    assert rel == Path("2026", "03", "04", "000042_Sweep.h5")
-    assert highest_rid(tmp_path) == 0
-    for rid in (3, 41, 12):
-        path = tmp_path / measurement_relpath(
-            rid, "Sweep", datetime(2026, 1, rid % 28 + 1, tzinfo=UTC)
-        )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch()
-    (tmp_path / "2026" / "01" / "04" / "notes.h5").touch()
-    assert highest_rid(tmp_path) == 41
+def test_a_failed_point_is_not_counted_and_later_records_are_constants(tmp_path):
+    path = tmp_path / "m.h5"
+    points, writer = make_writer(path)
+    writer.begin_point(points[0])
+    writer.record("y", 1.0)
+    writer.end_point()
+    writer.begin_point(points[1])
+    writer.record("y", 2.0)
+    # As the runner does when run_point raises: abandon the point, run finish().
+    writer.abandon_point()
+    writer.record("y", 3.0)
+    writer.finalise("failed", "Traceback: boom")
+    writer.close()
+
+    m = load_measurement(path)
+    assert m.n_done == 1
+    assert list(m.results["y"]) == [1.0]
+    assert m.constants["y"] == 3.0
+    header = read_header(path)
+    assert header["status"] == "failed"
+    assert header["error"] == "Traceback: boom"
+    assert header["t_end"] != ""
+    assert type(header["n_done"]) is int
+
+
+def test_point_scalars_hold_only_this_points_numeric_scalars():
+    points, writer = make_writer()
+    writer.begin_point(points[0])
+    writer.record("y", 1.5)
+    writer.record("count", np.uint8(3))
+    writer.record("flag", True)
+    writer.record("image", np.zeros((2, 2)))
+    writer.record("note", "text")
+    writer.record("meta", {"a": 1})
+    writer.end_point()
+    assert writer.point_scalars == {"y": 1.5, "count": 3.0, "flag": 1.0}
+    assert all(type(value) is float for value in writer.point_scalars.values())
+    writer.begin_point(points[1])
+    writer.record("y", 2.0)
+    writer.end_point()
+    assert writer.point_scalars == {"y": 2.0}
+    writer.close()
 
 
 def test_load_only_selected_results_but_know_all_shapes():
@@ -171,9 +286,31 @@ def test_load_only_selected_results_but_know_all_shapes():
     writer.begin_point(points[0])
     writer.record("image", np.zeros((8, 8)))
     writer.record("y", 1.0)
+    writer.record("note", "text")
     writer.end_point()
-    measurement = load_measurement(writer.file, results=["y"])
-    assert list(measurement.results) == ["y"]
-    assert measurement.result_shapes == {"image": (8, 8), "y": ()}
-    assert measurement.result_kinds == {"image": "f", "y": "f"}
+    m = load_measurement(writer.file, results=["y"])
+    assert list(m.results) == ["y"]
+    assert m.result_shapes == {"image": (8, 8), "y": (), "note": ()}
+    assert m.result_kinds == {"image": "f", "y": "f", "note": "O"}
     writer.close()
+
+
+def test_files_are_found_by_exact_rid_and_the_highest_rid_is_known(tmp_path):
+    rel = measurement_relpath(42, "Sweep", datetime(2026, 3, 4, 5, 6, tzinfo=UTC))
+    assert rel == Path("2026", "03", "04", "000042_Sweep.h5")
+    assert highest_rid(tmp_path) == 0
+    written = {}
+    for day, rid in enumerate((100, 11, 1), start=1):
+        path = tmp_path / measurement_relpath(
+            rid, "Sweep", datetime(2026, 1, day, tzinfo=UTC)
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        written[rid] = path
+    (tmp_path / "2026" / "01" / "01" / "notes.h5").touch()
+    (tmp_path / "999999_Stray.h5").touch()  # not in a YYYY/MM/DD folder
+    assert highest_rid(tmp_path) == 100
+    for rid, path in written.items():
+        assert find_measurement(rid, tmp_path) == path
+    with pytest.raises(FileNotFoundError):
+        find_measurement(2, tmp_path)
