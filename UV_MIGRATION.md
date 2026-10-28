@@ -72,8 +72,11 @@ Leave the old plans in `docs/superpowers/plans` as they are.
 
 ## Decisions before merging
 
-- Pin Python with a `.python-version`? The beast runs 3.11 (that's what the
-  committed `.pyd` files are built for); the laptop resolved to 3.13.
+- Python is pinned to 3.11 by `.python-version` (what the beast runs and the
+  committed `.pyd` files are built for). The laptop's `.venv` is 3.13, so
+  `uv sync` there will rebuild it on 3.11.
+- The beast's live checkout now has a working uv `.venv` (built and tested
+  after the servers were stopped; same 1 known failure).
 - Every lab PC moves at once. The two lock files won't stay in sync, so don't
   run Poetry and uv side by side. Each PC needs uv installed.
 - Re-point Jupyter/VS Code kernels at the new `.venv`.
@@ -85,3 +88,7 @@ Leave the old plans in `docs/superpowers/plans` as they are.
   up in the logs.
 - Move `pytest` and `ruff` into a dev dependency group; drop
   `zmq>=0.0.0,<0.0.1`, an empty placeholder package (`pyzmq` is the real one).
+- PyQt5 is only here transitively: `qscintilla` (a direct dependency nothing
+  imports) and `pylablib`, which declares `pyqt5` for its GUI modules. Drop
+  `qscintilla` and swap `pylablib` for `pylablib-lightweight` (same code, no
+  dependencies declared), then check the DCAM/Thorlabs cameras still open.
