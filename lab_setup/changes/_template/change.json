@@ -1,0 +1,10 @@
+{
+  "title": "One line shown in the startup popup",
+  "description": "A few lines on what the change does and why.",
+  "systems": ["windows"],
+  "hosts": {"except": ["PH-EXAMPLE"]},
+  "admin": false,
+  "secrets": [
+    {"name": "EXAMPLE_PASSWORD", "prompt": "Password for the example account on PH-EXAMPLE", "ask": "Tom"}
+  ]
+}
