@@ -1,12 +1,56 @@
-[tool.poetry]
+[project]
 name = "pytweezer"
 version = "0.2.1"
 description = "Pytweezer package"
-authors = ["Daniel Hoare <d.hoare23@imperial.ac.uk>"]
+authors = [{ name = "Daniel Hoare", email = "d.hoare23@imperial.ac.uk" }]
+requires-python = ">=3.11.4,<3.14"
 readme = "README.md"
-packages = [{ include = "pytweezer" }, { include = "bin" }]
+dependencies = [
+    "pandas>=2.2.3,<3",
+    "scipy>=1.17.1,<2",
+    "matplotlib>=3.9.2,<4",
+    "pylablib>=1.4.3,<2",
+    "rich>=13.9.4,<14",
+    "paramiko>=3.4.1,<4",
+    "tifffile>=2026.1.28,<2027",
+    "pillow>=12.1.0,<13",
+    "pyzmq>=27.1.0,<28",
+    "PyQt6>=6.9,<7",
+    "PyQt6-Qt6>=6.9,<7",
+    "ipykernel>=7.3,<8",
+    "ipywidgets>=8.1.5,<9",
+    "tqdm>=4.67.3,<5",
+    "h5py>=3.15.1,<4",
+    "cupy-cuda13x>=14.0.1,<15",
+    "lap>=0.5.13,<0.6",
+    "termcolor>=3.3.0,<4",
+    "qscintilla>=2.14.1,<3",
+    "pyperclip>=1.11.0,<2",
+    "uncertainties>=3.2.3,<4",
+    "imageio>=2.37.3,<3",
+    "zmq>=0.0.0,<0.0.1",
+    "pydantic>=2.10.5,<3",
+    "psutil>=7.2,<8",
+    "pyqtgraph>=0.14,<0.15",
+    "pythonnet>=3.0.5,<4",
+    "scikit-image>=0.26.0,<0.27",
+    "pyvisa-py>=0.8.1,<0.9",
+    "sipyco",
+    "pycaf",
+    "simple-pyspin>=0.1.1,<0.2",
+    "easypyspin>=2.0.1,<3",
+    "opencv-python>=4.13.0.92,<5",
+    "pytest>=9.1.1,<10",
+    "nidaqmx>=1.5.0,<2",
+    "scikit-learn>=1.9.0,<2",
+    "scikit-optimize>=0.10.2,<0.11",
+    "pyserial>=3.5,<4",
+    "pybase64>=1.4.3,<2",
+    "ruff>=0.16.4,<0.17",
+    "psycopg[binary]>=3.2,<4",
+]
 
-[tool.poetry.scripts]
+[project.scripts]
 pytweezer-server = "bin.launch:server_main"
 pytweezer-client = "bin.launch:client_main"
 pytweezer-device = "pytweezer.servers.device_server:main"
@@ -15,81 +59,41 @@ pytweezer-experiment-manager = "pytweezer.servers.experiment_manager:main"
 pytweezer-kill-stale = "bin.kill_stale:main"
 pytweezer-db-backfill = "pytweezer.database.backfill:main"
 
-[tool.poetry.dependencies]
-python = "^3.11.4, <3.14"
+[dependency-groups]
+docs = [
+    "sphinx",
+    "furo",
+    "myst-parser",
+]
 
-# --- Core Data Science & Math ---
-pandas = "^2.2.3"
-scipy = "^1.17.1"
+[tool.uv]
+# uv only rebuilds the project (and so the C++ extensions in setup.py) when
+# one of these changes.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "setup.py" },
+    { file = "cpp_implementations/**/*.cpp" },
+    { file = "cpp_implementations/**/*.h" },
+]
 
-
-# --- Visualization ---
-matplotlib = "^3.9.2"
-
-# --- Hardware & Automation ---
-pylablib = "^1.4.3"
-
-# --- Utilities & Networking ---
-rich = "^13.9.4"
-paramiko = "^3.4.1"     # SSH client
-tifffile = "^2026.1.28"
-pillow = "^12.1.0"
-pyzmq = "^27.1.0"
-
-# --- Qt Stuff ---
-# TODO: consider PySide6 - a single wheel instead of PyQt6 + the separate PyQt6-Qt6 pin
-PyQt6 = "^6.9"
-PyQt6-Qt6 = "^6.9"
-
-
-# --- Jupyter Support ---
-ipykernel = "^7.3"
-ipywidgets = "^8.1.5"
-tqdm = "^4.67.3"
-h5py = "^3.15.1"
-cupy-cuda13x = "^14.0.1"
-lap = "^0.5.13"
-termcolor = "^3.3.0"
-qscintilla = "^2.14.1"
-pyperclip = "^1.11.0"
-uncertainties = "^3.2.3"
-imageio = "^2.37.3"
-zmq = "^0.0.0"
-
-# --- Utilities & Networking ---
-pydantic = "^2.10.5"
-psutil = "^7.2"
-pyqtgraph = "^0.14"
-# rich = "^13.9.4"
-# paramiko = "^3.4.1"     # SSH client
-# rpyc = "^5.3.0"
-# plumbum = "^1.8.3"
-pythonnet = "^3.0.5" # .NET integration
-# wakepy = "^0.9.1"       # from pip section
-# iso8601 = "^2.1.0"      # from pip section
-scikit-image = "^0.26.0"
-pyvisa-py = "^0.8.1"
+[tool.uv.sources]
 sipyco = { git = "https://github.com/m-labs/sipyco.git", rev = "ce454bb64257b1bcef3703f258aaf7fa4ee0c275" }
 pycaf = { git = "https://github.com/ColdMatter/pycaf", branch = "cafmot" }
-simple-pyspin = "^0.1.1"
-easypyspin = "^2.0.1"
-opencv-python = "^4.13.0.92"
-pytest = "^9.1.1"
-nidaqmx = "^1.5.0"
-scikit-learn = "^1.9.0"
-scikit-optimize = "^0.10.2"
-pyserial = "^3.5"
-pybase64 = "^1.4.3"
-ruff = "^0.16.4"
-psycopg = {version = "^3.2", extras = ["binary"]}
 
-[tool.poetry.group.docs]
-optional = true
+[tool.setuptools.packages.find]
+include = ["pytweezer*", "bin*"]
 
-[tool.poetry.group.docs.dependencies]
-sphinx = "*"
-furo = "*"
-myst-parser = "*"
+[tool.setuptools.package-data]
+"*" = ["*"]
+
+[build-system]
+requires = ["setuptools>=77", "pybind11>=2.10.0", "numpy"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+# tests/ imports its own helpers as `tests.*`; the editable install only exposes
+# pytweezer and bin.
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py311"
@@ -148,11 +152,3 @@ ignore = [
 "tools/**" = ["S101", "S603", "S607", "B017", "B018", "F821"]
 # Package __init__.py files are re-export hubs.
 "__init__.py" = ["F401"]
-
-[build-system]
-requires = ["poetry-core", "pybind11>=2.10.0", "setuptools", "numpy"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.build]
-script = "build_tools/build.py"
-generate-setup-file = true
