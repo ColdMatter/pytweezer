@@ -496,3 +496,31 @@ def test_a_simulated_run_lasts_long_enough_for_simulated_cameras(monkeypatch):
     simulated.set_motmaster_experiment("RbTweezerBasic")
     simulated.start_motmaster_experiment()
     assert sum(slept) >= SimulatedMotMasterInterface.sim_run_s > 0
+
+
+def test_simulated_laser_ramp_reaches_its_target(monkeypatch):
+    monkeypatch.setattr("pytweezer.drivers.motmaster.time.sleep", lambda _s: None)
+    simulated = SimulatedMotMasterInterface()
+    laser = next(iter(simulated.laser_set_points_wml()))
+    simulated.ramp_laser_set_point_wml(laser, 400.0)
+    assert simulated.laser_set_points_wml()[laser] == 400.0
+
+
+def test_ramp_steps_towards_the_target_then_sets_it_exactly(monkeypatch):
+    monkeypatch.setattr("pytweezer.drivers.motmaster.time.sleep", lambda _s: None)
+    set_points = {"BX": 1.0}
+    sent = []
+
+    def set_slave_frequency(laser, value):
+        sent.append(value)
+        set_points[laser] = value
+
+    driver = MotMasterInterface.__new__(MotMasterInterface)
+    driver.wavemeter_lock = SimpleNamespace(
+        getSlaveFrequency=lambda laser: set_points[laser],
+        setSlaveFrequency=set_slave_frequency,
+    )
+    driver.ramp_laser_set_point_wml("BX", 1.0 + 3.5e-5)
+    assert sent[:3] == pytest.approx([1.00001, 1.00002, 1.00003])
+    assert sent[-1] == 1.0 + 3.5e-5
+    assert len(sent) == 4

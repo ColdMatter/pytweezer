@@ -109,7 +109,19 @@ class FakeMotMaster:
     def get_params(self):
         return {"dummy": 0.0, "tLoad": 100}
 
+    def laser_set_points_wml(self):
+        return dict(self.set_points)
+
+    def ramp_laser_set_point_wml(self, laser, target):
+        self.calls.append(("ramp", laser, target))
+        self.set_points[laser] = target
+
+    def set_laser_set_point_wml(self, laser, value):
+        self.calls.append(("set", laser, value))
+        self.set_points[laser] = value
+
     def start_motmaster_experiment(self, parameters=None):
+        self.calls.append(("go",))
         self.gos += 1
         if self.fail_on_go == self.gos:
             raise KeyboardInterrupt
@@ -233,3 +245,42 @@ def test_runs_are_never_triggered_or_left_running(rig_parts):
 def test_a_motmaster_object_needs_an_element_and_data_root(tmp_path):
     with pytest.raises(ValueError, match="element"):
         Rig(FakeMotMaster(tmp_path, []), {})
+
+
+def test_scan_runs_once_per_value_with_that_value(rig_parts):
+    rig, motmaster, _ = rig_parts()
+    shots = rig.scan("S", "dummy", [1, 2, 3])
+    assert [shot.params["dummy"] for shot in shots] == [1, 2, 3]
+    assert [shot.zip_number for shot in shots] == [0, 1, 2]
+    assert [motmaster.go_parameters] == [{"dummy": 3}]
+
+
+def test_scan_laser_ramps_then_steps_through_the_values(rig_parts):
+    rig, motmaster, _ = rig_parts()
+    values = [564.57, 564.58, 564.59]
+    shots = rig.scan_laser("S", "BX", values, save=False)
+    laser_calls = [call for call in motmaster.calls if call[0] in ("ramp", "set", "go")]
+    assert laser_calls[0] == ("ramp", "BX", values[0])
+    assert laser_calls[1:] == [
+        call for value in values for call in (("set", "BX", value), ("go",))
+    ]
+    assert [shot.params["BX"] for shot in shots] == values
+
+
+def test_interrupted_scan_keeps_completed_shots(rig_parts):
+    rig, motmaster, _ = rig_parts()
+    motmaster.fail_on_go = 3
+    with pytest.raises(KeyboardInterrupt):
+        rig.scan("S", "dummy", [1, 2, 3, 4], save=False)
+    assert [shot.params["dummy"] for shot in rig.last_shots] == [1, 2]
+
+
+def test_laser_set_points_are_read_from_the_motmaster(rig_parts):
+    rig, _, _ = rig_parts()
+    assert rig.laser_set_points() == {"BX": 564.58, "v0": 494.43}
+
+
+def test_numpy_values_reach_motmaster_as_python_numbers(rig_parts):
+    rig, motmaster, _ = rig_parts()
+    rig.scan("S", "dummy", np.arange(2), save=False)
+    assert type(motmaster.go_parameters["dummy"]) is int

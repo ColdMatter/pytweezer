@@ -389,6 +389,27 @@ class MotMasterInterface:
             print(f"{laser}: set_point = {set_point}")
         return lasers
 
+    def laser_set_points_wml(self) -> dict[str, float]:
+        """``{laser: wavemeter-lock set point in THz}`` for every configured laser."""
+        return {
+            laser: float(self.wavemeter_lock.getSlaveFrequency(laser))
+            for laser in self.config["lasers"]
+        }
+
+    def set_laser_set_point_wml(self, laser: str, value: float) -> None:
+        self.wavemeter_lock.setSlaveFrequency(laser, float(value))
+
+    def ramp_laser_set_point_wml(
+        self, laser: str, target: float, step: float = 1e-5, pause_s: float = 0.05
+    ) -> None:
+        """Walk ``laser``'s set point to ``target`` in ``step`` THz so the lock follows."""
+        start = float(self.wavemeter_lock.getSlaveFrequency(laser))
+        direction = 1.0 if target > start else -1.0
+        for i in range(1, int(abs(target - start) // step) + 1):
+            self.wavemeter_lock.setSlaveFrequency(laser, start + direction * i * step)
+            time.sleep(pause_s)
+        self.wavemeter_lock.setSlaveFrequency(laser, float(target))
+
     def get_laser_frequencies_actual(self) -> dict[str, dict[str, float]]:
         lasers = {}
         for laser in self.config["lasers"]:
@@ -864,6 +885,14 @@ SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
     },
 }
 _SIMULATED_FALLBACK = {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5}
+SIMULATED_LASER_SET_POINTS = {
+    "v0": 494.431874,
+    "BX": 564.582340,
+    "v1": 476.958908,
+    "v2": 477.299380,
+    "v3": 477.627302,
+    "TCool": 494.431874,
+}
 
 
 @simulate(MotMasterInterface)
@@ -879,12 +908,24 @@ class SimulatedMotMasterInterface:
     def __init__(self, *args, **kwargs):
         self.script = None
         self.linked = False
+        self.set_points = dict(SIMULATED_LASER_SET_POINTS)
 
     def set_linked(self, value: bool) -> None:
         self.linked = value
 
     def is_linked(self) -> bool:
         return self.linked
+
+    def laser_set_points_wml(self) -> dict[str, float]:
+        return dict(self.set_points)
+
+    def set_laser_set_point_wml(self, laser: str, value: float) -> None:
+        self.set_points[laser] = float(value)
+
+    def ramp_laser_set_point_wml(
+        self, laser: str, target: float, step: float = 1e-5, pause_s: float = 0.05
+    ) -> None:
+        self.set_points[laser] = float(target)
 
     def script_parameters(self, script: str) -> dict[str, Any]:
         return dict(SIMULATED_SCRIPT_PARAMETERS.get(script, _SIMULATED_FALLBACK))

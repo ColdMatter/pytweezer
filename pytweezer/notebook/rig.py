@@ -19,6 +19,7 @@ import json
 import re
 import time
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -140,10 +141,67 @@ class Rig:
         self.last_shots = []
         return self._run(script, save, iterations, params)
 
+    def scan(
+        self,
+        script: str,
+        parameter: str,
+        values: Sequence[float],
+        *,
+        save: bool = True,
+        iterations: int = 1,
+        **params: Any,
+    ) -> list[Shot]:
+        """One :meth:`run` per value of the script parameter ``parameter``.
+
+        Shots taken so far stay in :attr:`last_shots` if the scan is interrupted.
+        """
+        self.last_shots = []
+        return [
+            self._run(script, save, iterations, {**params, parameter: value})
+            for value in values
+        ]
+
+    def scan_laser(
+        self,
+        script: str,
+        laser: str,
+        values: Sequence[float],
+        *,
+        save: bool = True,
+        iterations: int = 1,
+        settle_s: float = 0.0,
+        **params: Any,
+    ) -> list[Shot]:
+        """One :meth:`run` per wavemeter-lock set point (THz) of ``laser``.
+
+        The set point is walked to the first value, then held ``settle_s`` before
+        the first shot. Each shot's ``params[laser]`` is its set point.
+        """
+        self.last_shots = []
+        values = [float(value) for value in values]
+        self.motmaster.ramp_laser_set_point_wml(laser, values[0])
+        time.sleep(settle_s)
+        shots = []
+        for value in values:
+            self.motmaster.set_laser_set_point_wml(laser, value)
+            shot = self._run(script, save, iterations, params)
+            shot.params[laser] = value
+            shots.append(shot)
+        return shots
+
+    def laser_set_points(self) -> dict[str, float]:
+        """Every laser's wavemeter-lock set point, in THz."""
+        return self.motmaster.laser_set_points_wml()
+
     def _run(
         self, script: str, save: bool, iterations: int, params: dict[str, Any]
     ) -> Shot:
         mm = self.motmaster
+        # numpy scalars from np.arange/np.linspace don't all survive the RPC.
+        params = {
+            name: value.item() if isinstance(value, np.generic) else value
+            for name, value in params.items()
+        }
         if self._linked_set != self.linked:
             mm.set_linked(self.linked)
             self._linked_set = self.linked
