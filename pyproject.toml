@@ -75,6 +75,11 @@ cache-keys = [
     { file = "cpp_implementations/**/*.cpp" },
     { file = "cpp_implementations/**/*.h" },
 ]
+# Without this uv locks pyqt5-qt5 5.15.19, which has no Windows wheels.
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
 
 [tool.uv.sources]
 sipyco = { git = "https://github.com/m-labs/sipyco.git", rev = "ce454bb64257b1bcef3703f258aaf7fa4ee0c275" }
