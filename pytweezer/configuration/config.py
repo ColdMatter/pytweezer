@@ -1,29 +1,45 @@
 import os
+import socket
 
 HOSTS = {
     "PH-BEAST": "10.59.3.1",
-    "IC-CZC4287H3W": "10.59.3.2",  # rb pc
+    "IC-CZC221CCHS": "10.59.3.2",  # rb pc
     "ph-bonesaw": "10.59.3.5",
     "localhost": "127.0.0.1",
 }
+#: The PC that runs the shared servers (hubs, managers) for real.
+SERVER_PC = "PH-BEAST"
 
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
+
 SIMULATING = False  # set to True to run in simulation mode (no real devices, no real cameras, etc.)
 LOCAL = False
-SERVER_HOST = (
-    HOSTS["PH-BEAST"] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
-)
 
-# Self-hosted InfluxDB 2.x connection. Every value can be overridden by an
-# environment variable so the token need not be hardcoded in a real deployment;
-# the defaults let a fresh checkout "just work" against a local InfluxDB.
-INFLUXDB = {
-    "url": os.environ.get("INFLUXDB_URL", f"http://{SERVER_HOST}:8086"),
-    "token": os.environ.get("INFLUXDB_TOKEN", "pytweezer-token"),
-    "org": os.environ.get("INFLUXDB_ORG", "pytweezer"),
-    "bucket": os.environ.get("INFLUXDB_BUCKET", "devices"),
+#: Set to "server" by ``pytweezer-server`` and inherited by every process it starts.
+SERVER_ROLE_ENV = "PYTWEEZER_ROLE"
+#: A server session anywhere but SERVER_PC must not bind the lab's addresses or
+#: drive real hardware, so it simulates whatever SIMULATING says.
+SIMULATION_FORCED = (
+    os.environ.get(SERVER_ROLE_ENV) == "server"
+    and socket.gethostname().lower() != SERVER_PC.lower()
+)
+SIMULATING = SIMULATING or SIMULATION_FORCED
+SERVER_HOST = HOSTS[SERVER_PC] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
+
+# Postgres + TimescaleDB holding monitor readings and experiment runs. Set
+# PYTWEEZER_DB_DSN to keep a real password out of the repository.
+DATABASE = {
+    "dsn": os.environ.get(
+        "PYTWEEZER_DB_DSN",
+        f"postgresql://pytweezer:pytweezer@{SERVER_HOST}:5432/pytweezer",
+    ),
+}
+
+# Grafana on the server PC, for the GUI's "Open in Grafana" buttons.
+GRAFANA = {
+    "url": os.environ.get("PYTWEEZER_GRAFANA_URL", f"http://{SERVER_HOST}:3000"),
 }
 
 
@@ -63,12 +79,13 @@ CONFIG = {
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
-        "Propertyhub": {
+        # The shared properties tree: "port" publishes it, "rpc_port" takes edits.
+        "Properties": {
             "active": True,
+            "script": "../pytweezer/servers/property_server.py",
             "host": SERVER_HOST,
-            "pub_port": get_next_port(),
-            "sub_port": get_next_port(),
-            "script": "../pytweezer/servers/xsub_xpub.py",
+            "port": get_next_port(),
+            "rpc_port": get_next_port(),
         },
         "Messagehub": {
             "active": True,
@@ -77,12 +94,6 @@ CONFIG = {
             "sub_port": get_next_port(),
             "stream_name": "Global Messages",
             "script": "../pytweezer/servers/xsub_xpub.py",
-        },
-        "Propertylogger": {
-            "active": True,
-            "script": "../pytweezer/servers/propertylogger.py",
-            "host": SERVER_HOST,
-            "port": get_next_port(),
         },
         "Datalogger": {
             "active": True,
@@ -93,6 +104,26 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/servers/imagelogger.py",
             "host": SERVER_HOST,
+        },
+        "Experiment Manager": {
+            "active": True,
+            "script": "../pytweezer/servers/experiment_manager.py",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            # Publishes the queue and the running task's points (sipyco
+            # sync_struct).
+            "sync_port": get_next_port(),
+            # Experiments get in-process simulated devices; data goes to
+            # <data_root>/simulated.
+            "simulate": SIMULATING,
+            # Measurement files and the queue state; PYTWEEZER_DATA_DIR overrides it.
+            # None means <repo>/data.
+            "data_root": None,
+            # The same directory as other PCs see it (e.g. a mapped network
+            # share), for their Results tab. None means they use data_root as well.
+            "client_data_root": None,
+            # Seconds a worker keeps running without reaching the manager.
+            "orphan_timeout": 30.0,
         },
     },
     # Each entry names
@@ -107,36 +138,52 @@ CONFIG = {
         "Rb MotMaster": {
             "active": True,
             "class": "pytweezer.drivers.motmaster:MotMasterInterface",
+            "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
             "config_file": "rb_mm_config.json",
-            "host": HOSTS["IC-CZC4287H3W"],
+            "host": HOSTS["IC-CZC221CCHS"],
             "port": get_next_port(),
             "simulate": SIMULATING,
         },
         "CaF MotMaster": {
             "active": True,
             "class": "pytweezer.drivers.motmaster:MotMasterInterface",
+            "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
             "config_file": "caf_mm_config.json",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
             "simulate": SIMULATING,
         },
-        "CaF HamCam": {
-            "active": True,
-            "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
-            "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
+        # The ORCA moves between PCs: keep exactly one of these two entries active.
+        "CaF ORCA": {
+            "active": False,
+            "class": "pytweezer.drivers.orca:ORCACamera",
+            "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
             "simulate": SIMULATING,
-            "stream_name": "caf_hamcam",
+            "serial_number": "280187",
+            "stream_name": "caf_orca",
+            "timeout": 5.0,
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
+        },
+        "Rb ORCA": {
+            "active": True,
+            "class": "pytweezer.drivers.orca:ORCACamera",
+            "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "serial_number": "280187",
+            "stream_name": "rb_orca",
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Rb ThorCam": {
             "active": True,
             "class": "pytweezer.drivers.thorcam:ThorCam",
-            "sim_class": "pytweezer.drivers.thorcam:SimulatedThorCam",
+            "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -147,7 +194,7 @@ CONFIG = {
         "Tweezer Monitor ThorCam": {
             "active": True,
             "class": "pytweezer.drivers.tweezermonitorcam:ThorCam",
-            "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorCam",
+            "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorLabsCamera",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -168,8 +215,9 @@ CONFIG = {
             "devices": {
                 "Rb HamCam": {
                     "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
-                    "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
+                    "sim_class": "pytweezer.drivers.imagemX2:SimulatedTweezerArrayCamera",
                     "role": "camera",
+                    "serial_number": "000407",
                     "stream_name": "rb_hamcam",
                     "timeout": 20.0,
                     "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
@@ -185,11 +233,21 @@ CONFIG = {
             },
             "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
         },
+        "IDS-1054B Scope": {
+            "active": True,
+            "class": "pytweezer.drivers.ids1054b:IDS1054B",
+            "sim_class": "pytweezer.drivers.ids1054b:SimulatedIDS1054B",
+            "teardown": "close",
+            "address": "TCPIP::10.59.3.50::3000::SOCKET",
+            "host": SERVER_HOST,
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+        },
     },
-    # Background InfluxDB loggers. Each entry runs pytweezer/servers/logger_server.py,
+    # Background database loggers. Each entry runs pytweezer/servers/logger_server.py,
     # which builds the Logger subclass named by "logger" and polls it on "interval".
-    # This is opt-in: nothing is pushed to InfluxDB unless a logger (or explicit
-    # InfluxWriter/log() call) writes it.
+    # This is opt-in: nothing reaches the database unless a logger (or explicit
+    # DBWriter/log() call) writes it.
     "Loggers": {
         "NI ADC Logger": {
             "active": False,
@@ -243,3 +301,15 @@ def get_config():
     Tests monkeypatch this (per importing module) to inject a fake config.
     """
     return CONFIG
+
+
+def this_pc_address():
+    """Return this PC's ``HOSTS`` address, or None if it is not listed.
+
+    Windows reports hostnames in whatever case it likes, so the match ignores case.
+    """
+    hostname = socket.gethostname().lower()
+    return next(
+        (address for name, address in HOSTS.items() if name.lower() == hostname),
+        None,
+    )

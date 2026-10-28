@@ -69,7 +69,7 @@ without blocking in sequence.
    This works because `AsyncioClient` awaits the full round trip per call (per
    note 1) but `asyncio.gather` issues both calls before awaiting either, so the
    two `Go()` calls fire close together instead of one waiting for the other to
-   finish. Caveat: GUI is PyQt5 with no `qasync`, so calling from GUI code needs a
+   finish. Caveat: GUI is PyQt6 with no `qasync`, so calling from GUI code needs a
    worker thread; fine from scripts/notebooks. Tests: `tests/test_servers.py`
    (`test_get_device_async_*`).
 

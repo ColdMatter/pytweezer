@@ -26,6 +26,7 @@ identically regardless of source:
 """
 
 import subprocess
+import threading
 import time
 from socket import gethostname
 
@@ -33,13 +34,15 @@ from PyQt6 import QtCore
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from pytweezer.configuration.config import HOSTS, get_config
+from pytweezer.configuration.config import HOSTS, get_config, this_pc_address
 from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import tweezerpath
+from pytweezer.servers.device_control import DeviceControlChannel
 from pytweezer.servers.device_status import DeviceStatusClient
+from pytweezer.servers.process_cleanup import kill_device_process
 from pytweezer.servers.reachability import is_reachable
 
 logger = get_logger("managed_panel")
@@ -57,6 +60,10 @@ ACTIVE_STATES = RUNNING_STATES + ("starting",)
 # between the device subprocess spawning and its RPC server becoming reachable
 # (camera/hardware init can take several seconds).
 _STARTING_GRACE_S = 30.0
+
+# The same for a stop requested of another PC: the feed keeps reading "up" until
+# that PC has acted on the request and the next status snapshot has gone out.
+_STOPPING_GRACE_S = 10.0
 
 # Column heading for the name column, per config category.
 _ITEM_LABEL = {"Servers": "Server", "Loggers": "Logger", "Devices": "Device"}
@@ -120,6 +127,8 @@ class ManagedRow(QFrame):
         show_last_seen=False,
         indent=0,
         reserve_control=False,
+        remote_request=None,
+        stop_orphan=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -127,8 +136,11 @@ class ManagedRow(QFrame):
         self.script = script
         self.name = name
         self.controllable = controllable
+        self.remote_request = None if controllable else remote_request
+        self.stop_orphan = stop_orphan
         self._self_polling = False
         self._starting_since = None  # monotonic time of last start, or None
+        self._stopping_since = None  # monotonic time of a stop the feed hasn't seen
         self.timer = None
 
         self.setObjectName("ProcessTile")
@@ -173,7 +185,7 @@ class ManagedRow(QFrame):
         layout.addWidget(self.stateLabel)
 
         self.toggleButton = None
-        if controllable:
+        if controllable or self.remote_request is not None:
             toggle = QPushButton("Start")
             toggle.setObjectName("ToggleButton")
             toggle.setFixedWidth(_CONTROL_WIDTH)
@@ -235,6 +247,13 @@ class ManagedRow(QFrame):
                 state = "starting"
             else:
                 self._starting_since = None
+        elif self._stopping_since is not None:
+            if state not in RUNNING_STATES:
+                self._stopping_since = None
+            elif time.monotonic() - self._stopping_since < _STOPPING_GRACE_S:
+                state = "stopping"
+            else:
+                self._stopping_since = None
         self._set_state(state)
         if address is not None:
             self.addressLabel.setText(address)
@@ -242,11 +261,25 @@ class ManagedRow(QFrame):
             self.lastSeenLabel.setText(last_seen if last_seen is not None else "—")
 
     def _toggle(self):
-        state = self.property("state")
-        if state in ACTIVE_STATES:
-            self.terminateProcess()
+        action = "stop" if self.property("state") in ACTIVE_STATES else "start"
+        if self.remote_request is not None:
+            self._request_remote(action)
+        elif action == "stop":
+            self.stopProcess()
         else:
             self.startProcess()
+
+    def _request_remote(self, action):
+        """Ask the PC that owns this process to start or stop it."""
+        self.remote_request(action)
+        if action == "start":
+            self._stopping_since = None
+            self._starting_since = time.monotonic()
+            self._set_state("starting")
+        else:
+            self._starting_since = None
+            self._stopping_since = time.monotonic()
+            self._set_state("stopping")
 
     def startProcess(self):
         if not self.controllable or not self.script:
@@ -263,6 +296,20 @@ class ManagedRow(QFrame):
             # confirms it (see apply_status).
             self._starting_since = time.monotonic()
             self._set_state("starting")
+
+    def stopProcess(self):
+        """Stop at an operator's request, including a copy this row did not start.
+
+        Unlike :meth:`terminateProcess`, which panels call on close, this also
+        hands an unowned but running process (one left behind by a GUI that
+        died) to ``stop_orphan``.
+        """
+        orphaned = self.process is None and self.property("state") in ACTIVE_STATES
+        self.terminateProcess()
+        if orphaned and self.stop_orphan is not None:
+            self.stop_orphan(self.name)
+            self._stopping_since = time.monotonic()
+            self._set_state("stopping")
 
     def terminateProcess(self):
         self._starting_since = None
@@ -382,7 +429,10 @@ class ControlPanel(BWidget):
             elif host is not None and port is not None:
                 probe_targets[pname] = (host, port)
             else:
-                row.addressLabel.setToolTip("no probeable port")
+                row.apply_status("unprobeable")
+                row.stateLabel.setToolTip(
+                    "Binds no port, so its status cannot be seen from this PC"
+                )
             self._rows[pname] = row
             outer.addWidget(row)
         outer.addStretch(1)
@@ -408,18 +458,24 @@ class ControlPanel(BWidget):
         super().closeEvent(event)
 
 
+def _stop_orphan(name):
+    # Off the GUI thread: on Windows listing processes takes seconds.
+    threading.Thread(target=kill_device_process, args=(name,), daemon=True).start()
+
+
 #: Left inset of a composite sub-device row, in pixels.
 _SUB_DEVICE_INDENT = 18
 
 
 class DevicesPanel(BWidget):
-    """Devices tab: Start/Stop toggle (for local devices) + cross-PC status.
+    """Devices tab: Start/Stop toggle + cross-PC status for every device.
 
-    Replaces the previous split Devices (host-filtered control grid) /
-    Device Status (cross-PC read-only feed) tabs with one row per device:
-    every device is listed, but the toggle only appears for devices whose
-    config ``host`` matches this machine — status still updates for every row
-    via the server-published :class:`DeviceStatusClient` feed.
+    Every device is listed, and status for every row comes from the
+    server-published :class:`DeviceStatusClient` feed. Only devices whose config
+    ``host`` matches this machine are spawned here; the toggle on any other
+    device sends a request over :class:`DeviceControlChannel` to the GUI on its
+    host, and this panel in turn carries out the requests addressed to its own
+    devices.
 
     A composite device gets a row for the rig itself plus an indented, view-only
     row per sub-device, because a rig comes up serving only the devices that
@@ -431,7 +487,7 @@ class DevicesPanel(BWidget):
     def __init__(self, name, parent=None):
         super().__init__(name, parent=parent, create_props=False)
         self.host_name = gethostname()
-        self.host_addr = HOSTS.get(self.host_name, None)
+        self.host_addr = this_pc_address()
         if self.host_addr is None:
             self.host_addr = "127.0.0.1"
             logger.warning(
@@ -440,10 +496,21 @@ class DevicesPanel(BWidget):
 
         self._rows = {}
 
+        self._control = None
+        try:
+            self._control = DeviceControlChannel()
+            self._control.requested.connect(self._handle_request)
+        except Exception:
+            logger.exception(
+                "Could not connect to device control; remote rows are view-only"
+            )
+
         outer = QVBoxLayout()
         outer.setContentsMargins(10, 10, 10, 10)
         outer.setSpacing(6)
         self.setLayout(outer)
+
+        host_names = {addr: hostname for hostname, addr in HOSTS.items()}
 
         columns = [("Device", 150), ("Address", 170), ("Last seen", 80)]
         outer.addLayout(_header_row(columns, controllable=True))
@@ -452,6 +519,11 @@ class DevicesPanel(BWidget):
         devices = conf.get("Devices", {})
         for pname, params in sorted(devices.items()):
             local = self.check_host(params.get("host"))
+            remote_request = None
+            if not local and self._control is not None:
+                remote_request = lambda action, device=pname: self._control.request(
+                    action, device
+                )
             row = ManagedRow(
                 pname,
                 script=(
@@ -462,7 +534,16 @@ class DevicesPanel(BWidget):
                 controllable=local,
                 show_last_seen=True,
                 reserve_control=True,
+                remote_request=remote_request,
+                stop_orphan=_stop_orphan,
             )
+            if remote_request is not None:
+                host = params.get("host")
+                row.toggleButton.setToolTip(
+                    f"Ask the GUI on {host_names.get(host, host)} to start or stop "
+                    "this device. Nothing happens unless a pytweezer GUI is "
+                    "running there."
+                )
             self._rows[pname] = row
             outer.addWidget(row)
             for sub_name in sorted(params.get("devices") or {}):
@@ -491,6 +572,18 @@ class DevicesPanel(BWidget):
             return False
         return host_addr.strip().lower() == self.host_addr.strip().lower()
 
+    def _handle_request(self, action, device, requester):
+        row = self._rows.get(device)
+        if row is None or not row.controllable:
+            return
+        state = row.property("state")
+        if action == "start" and state not in ACTIVE_STATES:
+            logger.info("Starting %s at the request of %s", device, requester)
+            row.startProcess()
+        elif action == "stop" and state in ACTIVE_STATES:
+            logger.info("Stopping %s at the request of %s", device, requester)
+            row.stopProcess()
+
     def _apply_snapshot(self, devices):
         now = time.time()
         for pname, info in devices.items():
@@ -510,6 +603,11 @@ class DevicesPanel(BWidget):
                 self._client.close()
         except Exception:
             logger.exception("Failed to stop device-status subscriber")
+        try:
+            if self._control is not None:
+                self._control.close()
+        except Exception:
+            logger.exception("Failed to close device control")
         for row in self._rows.values():
             row.terminateProcess()
         logger.info("Terminated all Devices processes.")

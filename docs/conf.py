@@ -23,7 +23,7 @@ extensions = [
 ]
 
 language = "en"
-exclude_patterns = ["_build", "notes/*", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "notes/*", "superpowers/*", "Thumbs.db", ".DS_Store"]
 
 html_theme = "furo"
 html_static_path = ["_static"]

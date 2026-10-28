@@ -6,10 +6,10 @@ which panels they expose:
 
 * ``pytweezer-server`` (:func:`server_main`) runs on the server PC and gives full
   start/stop control of the server processes: Servers | Devices | Loggers |
-  Streams | Applets | Analysis | Properties.
-* ``pytweezer-client`` (:func:`client_main`) runs on client PCs: Server Status |
-  Devices | Applets | Analysis | Properties | Streams. The Servers tab is
-  view-only because the servers run on a remote machine.
+  Streams | Applets | Analysis | Experiments | Results | Properties.
+* ``pytweezer-client`` (:func:`client_main`) runs on client PCs with the same
+  tabs, except that the Servers and Loggers tabs are view-only because those
+  processes run on the server PC.
 
 Each panel is reused from its original module (``bin.managed_panel``,
 ``pytweezer.GUI.applet_launcher``, ``pytweezer.GUI.analysismanager``,
@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
 )
 
 from bin.managed_panel import ControlPanel, DevicesPanel
+from pytweezer.configuration import config
 from pytweezer.GUI.applet_launcher import AppletLauncher
 from pytweezer.GUI.streammonitor import make_stream_monitor
 from pytweezer.GUI.theme import DARK_STYLESHEET
@@ -51,7 +52,7 @@ logger = get_logger("pytweezer GUI")
 def _safe_panel(label, factory):
     """Build a panel, substituting a placeholder if construction raises.
 
-    Several panels connect to the Propertyhub / Analysis Manager on
+    Several panels connect to the Properties server / Analysis Manager on
     construction and raise if those aren't reachable. Isolating each build
     keeps one unreachable service from aborting the whole window.
     """
@@ -164,11 +165,27 @@ class TabbedGUI(QMainWindow):
 
 def build_gui(server: bool) -> TabbedGUI:
     from pytweezer.GUI.analysismanager import AnalysisManager
+    from pytweezer.GUI.experiments.feed import ExperimentFeed
+    from pytweezer.GUI.experiments.panel import ExperimentsPanel
+    from pytweezer.GUI.experiments.results import ResultsPanel
     from pytweezer.GUI.property_editor import PropEdit
 
     name = "Server" if server else "Client"
+    # One live copy of the manager's state, shared by both experiment tabs.
+    try:
+        feed = ExperimentFeed()
+    except Exception:
+        logger.exception("Could not set up the Experiment Manager feed")
+        feed = None
+    experiments = _safe_panel("Experiments", lambda: ExperimentsPanel(feed=feed))
 
-    return TabbedGUI(
+    def make_results():
+        results = ResultsPanel(feed=feed)
+        if isinstance(experiments, ExperimentsPanel):
+            results.resubmit_requested.connect(experiments.load_request)
+        return results
+
+    gui = TabbedGUI(
         f"PyTweezer {name}",
         [
             (
@@ -195,9 +212,15 @@ def build_gui(server: bool) -> TabbedGUI:
                 _safe_panel("Applets", lambda: AppletLauncher("Applet Launcher")),
             ),
             ("Analysis", _safe_panel("Analysis", lambda: AnalysisManager("Analysis"))),
+            ("Experiments", experiments),
+            ("Results", _safe_panel("Results", make_results)),
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],
     )
+    if config.SIMULATING:
+        # After construction: the base title also keys the saved window layout.
+        gui.setWindowTitle(f"{gui.windowTitle()} (SIMULATION)")
+    return gui
 
 
 def build_server_gui():
@@ -238,16 +261,15 @@ def _run(build):
 
 
 def server_main():
+    """Run the server GUI; use ``bin.launch.server_main`` as the entry point so
+    that a session off the server PC simulates."""
+    if config.SIMULATION_FORCED:
+        logger.warning(
+            "Not on the server PC (%s): this session runs in SIMULATION mode",
+            config.SERVER_PC,
+        )
     _run(build_server_gui)
 
 
 def client_main():
     _run(build_client_gui)
-
-
-if __name__ == "__main__":
-    role = sys.argv[1] if len(sys.argv) > 1 else "server"
-    if role == "client":
-        client_main()
-    else:
-        server_main()

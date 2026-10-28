@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Build an applet against fake streams and save a screenshot of it.
 
-An applet normally needs a Propertyhub, a Datahub/Imagehub, and something
+An applet normally needs a Properties server, a Datahub/Imagehub, and something
 publishing on them before it shows anything. This driver replaces all three with
 in-process fakes, so any applet script can be built and *looked at* from a plain
 shell:
@@ -296,8 +296,8 @@ def main():
 
     install_fakes()
 
-    from PyQt5.QtCore import Qt, QTimer
-    from PyQt5.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt, QTimer
+    from PyQt6.QtWidgets import QApplication
     from pytweezer.GUI.theme import apply_theme
 
     module = load_module(args.script)

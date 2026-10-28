@@ -11,8 +11,8 @@ concurrently::
     from pytweezer.servers.device_client import get_device
 
     cam = get_device("Rb HamCam")
-    mm1 = get_device("Rb MotMaster Server")
-    mm2 = get_device("CaF MotMaster Server")
+    mm1 = get_device("Rb MotMaster")
+    mm2 = get_device("CaF MotMaster")
 
     cam.start_acquisition()          # arm the camera (returns immediately)
     mm1.set_trigger_mode(True)       # mm1's Go() will wait for a hardware trigger
@@ -26,7 +26,7 @@ concurrently::
 Each call runs in its own thread. Every device is a separate server process, so
 a :func:`~pytweezer.servers.device_client.get_device` call is just a blocking
 socket round-trip whose ``recv`` releases the GIL — the threads overlap for real,
-and this needs no ``AsyncioClient``/``asyncio.gather`` and works from the PyQt5
+and this needs no ``AsyncioClient``/``asyncio.gather`` and works from the PyQt6
 GUI (which has no ``qasync``). :func:`~pytweezer.servers.device_client.get_device_async`
 + ``asyncio.gather`` remains available as the lower-level async alternative.
 

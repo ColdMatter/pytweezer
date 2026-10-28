@@ -1,6 +1,6 @@
 ---
 name: pytweezer-gui-internals
-description: How the pytweezer PyQt5 shell is built — TabbedGUI's dock-based tabs, the ManagedRow/ControlPanel/DevicesPanel process tiles, the two different status mechanisms and why they differ, and the deliberate hard-exit teardown that the legacy BWidget/Properties stack makes necessary. Use when adding or editing a tab or panel in bin/gui.py or bin/managed_panel.py, touching pytweezer/GUI/pytweezerQt.py or device_status.py, debugging a GUI that hangs on exit or loses its window geometry, working out why a row shows the wrong Running/Stopped state, or changing how processes are started and stopped from the GUI. For building a live viewer window, use the add-applet skill instead.
+description: How the pytweezer PyQt6 shell is built — TabbedGUI's dock-based tabs, the ManagedRow/ControlPanel/DevicesPanel process tiles, the two different status mechanisms and why they differ, and the deliberate hard-exit teardown. Use when adding or editing a tab or panel in bin/gui.py or bin/managed_panel.py, touching pytweezer/GUI/pytweezerQt.py or device_status.py, debugging a GUI that hangs on exit or loses its window geometry, working out why a row shows the wrong Running/Stopped state, or changing how processes are started and stopped from the GUI. For building a live viewer window, use the add-applet skill instead.
 ---
 
 # GUI internals
@@ -8,7 +8,9 @@ description: How the pytweezer PyQt5 shell is built — TabbedGUI's dock-based t
 `pytweezer-server` and `pytweezer-client` are the same window built by
 `build_gui(server: bool)` in `bin/gui.py`, differing only in whether the
 Servers/Loggers tabs are controllable. Tabs: Servers, Devices, Loggers, Streams,
-Applets, Analysis, Properties.
+Applets, Analysis, Experiments, Results, Properties. Experiments and Results
+(`pytweezer/GUI/experiments/`) are covered by the `add-experiment` skill; they
+are built before the list so Results can hand "resubmit" to Experiments.
 
 Each panel is constructed through `_safe_panel`, so one panel that fails to
 build leaves a placeholder instead of killing the whole window.
@@ -17,17 +19,17 @@ build leaves a placeholder instead of killing the whole window.
 
 `pytweezer/GUI/pytweezerQt.py` holds the legacy base classes `BWidget`/`BFrame`/
 `BMainWindow`, each of which constructs a `Properties(name)` connection to the
-Propertyhub. `Properties` spawns **non-daemon** `event_monitor` threads that loop
-forever, so any process using it hangs at interpreter shutdown.
+Properties server; with the server down, that waits a few seconds before
+falling back to the saved file.
 
-`TabbedGUI` therefore does **not** inherit `BMainWindow` — which also keeps
-startup fast and independent of the hubs being up. Two consequences that look
-like bugs and are not:
+`TabbedGUI` therefore does **not** inherit `BMainWindow`, which keeps startup
+fast and independent of the servers being up. Two consequences that look like
+bugs and are not:
 
 - `_run()` calls `logging.shutdown(); os._exit(0)` immediately after the Qt event
-  loop ends, to bypass those lingering threads. By then every panel's
-  `closeEvent` has already terminated its children, so the hard exit is safe. Do
-  not "fix" this into a normal return.
+  loop ends, so no lingering thread or ZMQ socket in any panel can hang
+  shutdown. By then every panel's `closeEvent` has already terminated its
+  children, so the hard exit is safe. Do not "fix" this into a normal return.
 - Because the exit is hard, `closeEvent` must call `settings.sync()` explicitly
   after saving geometry and dock state, or `QSettings`' deferred write never
   reaches disk.
@@ -107,9 +109,29 @@ when a handshake times out — otherwise a busy rig would flap all its sub-devic
 to `failed` mid-acquisition. A server that has never completed a handshake reads
 `unknown`.
 
-`DevicesPanel` renders all of it: every device on every PC, a controllable row
-only where `check_host` matches this machine, and an indented view-only row per
-sub-device (they share the rig's process and start and stop with it).
+`DevicesPanel` renders all of it: every device on every PC, and an indented
+view-only row per sub-device (they share the rig's process and start and stop
+with it).
+
+## Starting and stopping a device on another PC
+
+A row spawns its process only where `check_host` matches this machine. Every
+other device row still has a toggle, which publishes a start/stop request on the
+Commandhub (`pytweezer/servers/device_control.py`). Every `DevicesPanel` hears
+every request and acts only on its own devices, by calling the same
+`startProcess`/`stopProcess` its toggle would, so the host PC always owns the
+subprocess. Consequences:
+
+- **The host's GUI must be running**, or nobody acts. There is no
+  acknowledgement: the requester shows "Starting"/"Stopping" until the Device
+  Status feed agrees, or the grace period runs out and the feed wins.
+- A request matching the current state (start of a running device) is ignored,
+  so a repeated click never restarts anything.
+- `stopProcess` (toggle and remote stop) differs from `terminateProcess` (panel
+  close): if the row is running but did not spawn the process (one left behind
+  by a GUI that died), it kills it by exact command-line match
+  (`process_cleanup.kill_device_process`). Closing a panel never does that, and
+  never sends remote stops.
 
 ## Shared vs per-machine state
 
@@ -122,7 +144,7 @@ Properties would start one PC's applets on every other PC.
 
 ## Running it headless
 
-PyQt5 widgets cannot construct without a display — set
+PyQt6 widgets cannot construct without a display — set
 `QT_QPA_PLATFORM=offscreen` for any non-interactive run. To actually see a change
 rendered, use the `run-pytweezer` skill's screenshot driver rather than launching
 the blocking GUI.

@@ -22,6 +22,7 @@ import numpy as np
 from rich.progress import track
 
 from pytweezer.servers.device_client import get_device
+from pytweezer.servers.simulated_device import simulate
 
 # NOTE: these imports will only work with the pythonnet package
 try:
@@ -121,6 +122,7 @@ class MotMasterInterface:
         self.hardware_controller = None
         self.script = None
         self.script_path = None
+        self.linked = False
         self.connect()
         if self.motmaster is None:
             raise RuntimeError("Failed to connect to MotMaster.")
@@ -188,7 +190,7 @@ class MotMasterInterface:
                 except Exception as e:
                     print(f"Error: {e} encountered")
             elif key == "picomotor" and path_info.get("connect"):
-                self.picomotor_default_axis = None
+                self.picomotor_default_motor = None
                 self.picomotor_default_speed = None
                 self.picomotor_default_acceleration = None
                 self.picomotor_default_steps = None
@@ -208,7 +210,7 @@ class MotMasterInterface:
                             self.picomotor_default_speed = path_info["defaults"][
                                 "speed"
                             ]
-                        if "aceeleration" in path_info["defaults"]:
+                        if "acceleration" in path_info["defaults"]:
                             self.picomotor_default_acceleration = path_info["defaults"][
                                 "acceleration"
                             ]
@@ -238,13 +240,10 @@ class MotMasterInterface:
         self,
         script: str,
     ):
+        script_path = str(self.script_root.joinpath(f"{script}.cs"))
+        self.motmaster.SetScriptPath(script_path)
         self.script = script
-        self.script_path = str(self.script_root.joinpath(f"{script}.cs"))
-        try:
-            self.motmaster.SetScriptPath(self.script_path)
-            print(f"MotMaster script set to {script}.")
-        except Exception as e:
-            print(f"Error: {e} encountered")
+        self.script_path = script_path
 
     def get_motmaster_dictionary(self):
         self.parameter_dictionary = self.motmaster.GetParameters()
@@ -262,26 +261,72 @@ class MotMasterInterface:
             pars_csdict[key] = value
         return pars_csdict
 
+    def set_linked(self, value: bool) -> None:
+        """Turn MOTMaster's linked mode on or off.
+
+        Linked mode lets one script on this MOTMaster (the primary) drive a second
+        MOTMaster too, which it claims over .NET remoting and fires by TTL. Only a
+        MOTMaster whose Hardware class declares a ``MOTMasterLinkConfig`` can be a
+        primary; turning it on anywhere else raises. While linked, every ``Go``
+        drives both machines, and any failure on either raises here rather than
+        ending in a MessageBox.
+
+        Turning it on when already linked keeps the existing claim. Turning it off
+        does nothing on a MOTMaster that is not linked, including a build that
+        predates linked mode.
+        """
+        if not value and not hasattr(self.motmaster, "SetLinked"):
+            self.linked = False
+            return
+        if not (value and self.motmaster.IsLinked):
+            self.motmaster.SetLinked(value)
+        self.linked = value
+
+    def is_linked(self) -> bool:
+        """Whether MOTMaster itself reports linked mode on (it drops it if the
+        secondary takes back control)."""
+        return bool(self.motmaster.IsLinked)
+
     def start_motmaster_experiment(self, parameters: dict | None = None):
         if self.script is None:
             raise ValueError(
                 "MotMaster script not set. Please call set_motmaster_experiment first."
             )
-        try:
-            if parameters is not None:
-                pars_csdict = self.python_to_cs_dict(parameters)
-                self.motmaster.Go(pars_csdict)
-            else:
-                self.motmaster.Go()
-            time.sleep(self.interval)
-        except Exception as e:
-            print(f"Error starting MotMaster experiment {self.script}: {e}")
+        # MOTMaster turns linked mode off by itself when the secondary takes back
+        # control; a linked script must then not run on the primary alone.
+        if self.linked and not self.is_linked():
+            self.linked = False
+            raise RuntimeError(
+                "MOTMaster is no longer linked (the secondary has probably taken "
+                "back control); the linked script was not run. Call "
+                "set_linked(True) to claim the secondary again."
+            )
+        if parameters is not None:
+            self.motmaster.Go(self.python_to_cs_dict(parameters))
+        else:
+            self.motmaster.Go()
+        time.sleep(self.interval)
 
     def get_params(self):
         return dict(self.motmaster.GetParameters())
 
     def get_params_csdict(self):
         return self.motmaster.GetParameters()
+
+    def script_parameters(self, script: str) -> dict[str, Any]:
+        """Return ``{name: default}`` for ``script``, leaving the selected script unchanged.
+
+        Must not run during a sequence: it briefly changes MOTMaster's script path.
+        """
+        previous = self.script
+        self.set_motmaster_experiment(script)
+        try:
+            return self.get_params()
+        finally:
+            if previous is not None:
+                self.set_motmaster_experiment(previous)
+            else:
+                self.script = self.script_path = None
 
     def set_run_until_stopped(self, value: bool):
         self.motmaster.SetRunUntilStopped(value)
@@ -313,7 +358,7 @@ class MotMasterInterface:
                 speed=self.picomotor_default_speed,
                 accel=self.picomotor_default_acceleration,
             )
-        if (self.picomotor_default_axis is not None) and (
+        if (self.picomotor_default_motor is not None) and (
             self.picomotor_default_steps is not None
         ):
             motor: str = self.picomotor_default_motor
@@ -324,7 +369,8 @@ class MotMasterInterface:
             self.stage.wait_move()
             self.picomotor_steps_moved += abs(self.picomotor_default_steps)
             if self.picomotor_steps_moved >= self.picomotor_default_max_steps:
-                self.picomotor_default_steps *= -1.0
+                self.picomotor_default_steps = -self.picomotor_default_steps
+                self.picomotor_steps_moved = 0
 
     def get_laser_set_points_tcl(self) -> dict[str, dict[str, float]]:
         lasers = {}
@@ -667,7 +713,8 @@ class MotMasterInterface:
         exactly ``shots_per_point`` frames per MOTMaster shot.
 
         Returns, per laser, the scan range, mean and standard-error counts at each
-        point, the chosen set point and the set point the laser started from; pass
+        point (the error is NaN for one shot per point), the chosen set point and
+        the set point the laser started from; pass
         that dict to :func:`plot_auto_mot_results` to see the scans.
         """
         client = get_device(camera) if isinstance(camera, str) else camera
@@ -747,7 +794,10 @@ class MotMasterInterface:
             for _, images in shots:
                 counts = np.sum(images - images_bg, axis=(1, 2))
                 numbers.append(float(np.mean(counts)))
-                errors.append(float(np.std(counts) / np.sqrt(len(counts))))
+                if len(counts) > 1:
+                    errors.append(float(np.std(counts, ddof=1) / np.sqrt(len(counts))))
+                else:
+                    errors.append(float("nan"))  # one shot has no spread to measure
             set_point = scan_range[int(np.argmax(numbers))]
             # Leave the laser on its best set point before optimising the next.
             self.scan_wm_laser_set_points(
@@ -767,6 +817,92 @@ class MotMasterInterface:
                 "start_set_point": start_set_point,
             }
         return results
+
+
+SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
+    "RbTweezerBasic": {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5, "nShots": 1},
+    "CaFTweezerLoad": {"tLoad": 100, "bTop": 0.5, "tHold": 10e-3},
+    "LinkedScopeTest": {
+        "PatternLength": 20000,
+        "PulseStart": 1000,
+        "PulseDuration": 1000,
+        "SecondaryTriggerDelay": 0,
+    },
+    "RbTweezerBasic2026_2": {
+        **dict.fromkeys(
+            [
+                "tMOTLoadRepVCO",
+                "tMOTLoadCoolVCO",
+                "tMOTLoadRepVVA",
+                "tMOTLoadCoolVVA",
+                "tMolCoolVCO1",
+                "tMolRepVCO1",
+                "tMolCoolVVA1",
+                "tMolRepVVA1",
+                "tMolCoolVCO2",
+                "tMolRepVCO2",
+                "tMolCoolVVA2",
+                "tMolRepVVA2",
+                "tImgCoolVCO1",
+                "tImgCoolVVA1",
+                "tImgCoolVCO2",
+                "tImgCoolVVA2",
+                "tMOTShimXccValue",
+                "tMOTShimYccValue",
+                "tMOTShimZccValue",
+                "tMolassesShimXccValue",
+                "tMolassesShimYccValue",
+                "tMolassesShimZccValue",
+                "tTweezerSetVVA0",
+                "tTweezerSetVVA1",
+            ],
+            0.0,
+        ),
+        "BackgroundDrop": 0,
+        "tDelay2": 100,
+        "tDropDuration": 4,
+    },
+}
+_SIMULATED_FALLBACK = {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5}
+
+
+@simulate(MotMasterInterface)
+class SimulatedMotMasterInterface:
+    """MOTMaster stand-in with canned script parameters that rejects what the real one would.
+
+    Scripts missing from :data:`SIMULATED_SCRIPT_PARAMETERS` get a fallback parameter set.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.script = None
+        self.linked = False
+
+    def set_linked(self, value: bool) -> None:
+        self.linked = value
+
+    def is_linked(self) -> bool:
+        return self.linked
+
+    def script_parameters(self, script: str) -> dict[str, Any]:
+        return dict(SIMULATED_SCRIPT_PARAMETERS.get(script, _SIMULATED_FALLBACK))
+
+    def set_motmaster_experiment(self, script: str):
+        self.script = script
+
+    def get_params(self) -> dict[str, Any]:
+        if self.script is None:
+            raise ValueError("MotMaster script not set")
+        return self.script_parameters(self.script)
+
+    def start_motmaster_experiment(self, parameters: dict | None = None):
+        known = self.get_params()
+        for name, value in (parameters or {}).items():
+            if name not in known:
+                raise KeyError(f"script {self.script!r} has no parameter {name!r}")
+            if isinstance(known[name], int) and type(value) is not int:
+                raise TypeError(
+                    f"{name!r} is an Int32 in script {self.script!r}; got {value!r}"
+                )
 
 
 def plot_auto_mot_results(results: dict[str, dict[str, Any]]):

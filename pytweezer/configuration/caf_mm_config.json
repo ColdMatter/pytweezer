@@ -16,8 +16,8 @@
     "remote_path": "tcp://localhost:1172/controller.rem"
   },
   "dll_paths": {
-    "daq": "C:\\ControlPrograms\\EDMSuite\\MoleculeMOTHardwareControl\\bin\\CaF\\DAQ.dll",
-    "shared_code": "C:\\ControlPrograms\\EDMSuite\\MoleculeMOTHardwareControl\\bin\\CaF\\SharedCode.dll"
+    "daq": "C:\\ControlPrograms\\EDMSuite\\DAQ\\bin\\CaF\\DAQ.dll",
+    "shared_code": "C:\\ControlPrograms\\EDMSuite\\DAQ\\bin\\CaF\\SharedCode.dll"
   },
   "lasers": {
     "v0": 1,

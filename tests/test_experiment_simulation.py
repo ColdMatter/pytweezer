@@ -1,0 +1,139 @@
+import socket
+
+import pytest
+
+from pytweezer.experiment import Device, Experiment, run_local
+from pytweezer.experiment.catalogue import Catalogue
+from pytweezer.experiment.simulation import SimulatedDevices
+from pytweezer.experiment.storage import data_root
+from pytweezer.servers import device_server
+from pytweezer.servers import experiment_manager as em
+
+TORN_DOWN = []
+
+
+class RealCamera:
+    def __init__(self, **kwargs):
+        raise AssertionError("simulation must never build the real backend")
+
+
+class SimCamera:
+    def __init__(self, gain=1):
+        self.gain = gain
+
+    def snap(self):
+        return [[self.gain]]
+
+    def close(self):
+        TORN_DOWN.append(self)
+
+
+class SimDac:
+    def __init__(self):
+        self.volts = 0.0
+
+    def set(self, volts):
+        self.volts = volts
+
+
+DEVICES = {
+    "Cam": {
+        "class": f"{__name__}:RealCamera",
+        "sim_class": f"{__name__}:SimCamera",
+        "teardown": "close",
+        "simulate": False,
+        "gain": 3,
+    },
+    "Rig": {
+        "simulate": False,
+        "devices": {
+            "Rig Cam": {
+                "class": f"{__name__}:RealCamera",
+                "sim_class": f"{__name__}:SimCamera",
+                "simulate": False,
+            },
+            "Rig Dac": {
+                "class": f"{__name__}:RealCamera",
+                "sim_class": f"{__name__}:SimDac",
+            },
+        },
+    },
+}
+
+
+@pytest.fixture
+def devices(monkeypatch):
+    monkeypatch.setattr(device_server, "get_config", lambda: {"Devices": DEVICES})
+    TORN_DOWN.clear()
+
+
+def test_simulated_backends_are_built_even_when_config_says_real(devices):
+    sim = SimulatedDevices()
+    camera = sim.get("cam")  # lenient name matching, as get_device
+    assert isinstance(camera, SimCamera) and camera.gain == 3
+    assert sim.get("Cam") is camera
+    rig_cam, rig_dac = sim.get("Rig Cam"), sim.get("Rig Dac")
+    assert isinstance(rig_cam, SimCamera) and isinstance(rig_dac, SimDac)
+    sim.close()
+    assert TORN_DOWN == [camera]
+    with pytest.raises(KeyError, match="not found"):
+        sim.get("Nope")
+
+
+def test_run_local_simulated_experiment(devices):
+    class Snap(Experiment):
+        camera = Device("Cam")
+        dac = Device("Rig Dac")
+
+        def run_point(self):
+            assert self.device("Cam", fresh=True) is self.camera
+            self.dac.set(1.5)
+            self.record("image", self.camera.snap())
+            self.record("volts", self.dac.volts)
+
+    measurement = run_local(Snap, simulate=True)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    assert measurement.attrs["simulated"] is True
+    assert measurement.results["image"].tolist() == [[[3]]]
+    assert measurement.results["volts"].tolist() == [1.5]
+    assert len(TORN_DOWN) == 1
+    assert run_local(Snap, simulate=False).attrs["simulated"] is False
+
+
+def test_manager_tells_guis_it_is_simulating(monkeypatch, tmp_path, recording_db):
+    conf = {"host": "127.0.0.1", "port": 1, "sync_port": 2, "simulate": True}
+    monkeypatch.setattr(
+        em, "get_config", lambda: {"Servers": {"Experiment Manager": conf}}
+    )
+    manager = em.ExperimentManager(
+        root=tmp_path,
+        catalogue=Catalogue(package="none", directory=tmp_path / "none"),
+        bind=False,
+        db=recording_db,
+    )
+    assert manager.handle({"command": "ping"})["simulated"] is True
+    assert manager.handle({"command": "snapshot"})["snapshot"]["simulated"] is True
+
+
+def test_data_root_resolution(monkeypatch, tmp_path):
+    conf = {
+        "host": "10.0.0.9",
+        "data_root": str(tmp_path / "local"),
+        "client_data_root": str(tmp_path / "share"),
+    }
+    monkeypatch.setattr(
+        "pytweezer.configuration.config.get_config",
+        lambda: {"Servers": {"Experiment Manager": conf}},
+    )
+    monkeypatch.delenv("PYTWEEZER_DATA_DIR", raising=False)
+    # Other PCs find the data on the share; the manager's own PC uses its local root.
+    assert data_root() == tmp_path / "share"
+    monkeypatch.setattr(
+        "pytweezer.configuration.config.HOSTS", {socket.gethostname(): "10.0.0.9"}
+    )
+    assert data_root() == tmp_path / "local"
+    conf["simulate"] = True
+    assert data_root() == tmp_path / "local" / "simulated"
+    # The environment wins, but simulated runs still stay apart from real data.
+    monkeypatch.setenv("PYTWEEZER_DATA_DIR", str(tmp_path / "env"))
+    assert data_root() == tmp_path / "env" / "simulated"

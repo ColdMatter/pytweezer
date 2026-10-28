@@ -40,8 +40,12 @@ Two status views, deliberately different mechanisms:
 
 ```
 pyproject.toml [tool.poetry.scripts]
-  pytweezer-server = "bin.gui:server_main"
-  pytweezer-client = "bin.gui:client_main"
+  pytweezer-server = "bin.launch:server_main"
+  pytweezer-client = "bin.launch:client_main"
+
+bin/launch.py
+  server_main() sets PYTWEEZER_ROLE=server (simulate off the server PC), then
+  calls bin.gui.server_main(); client_main() calls bin.gui.client_main()
 
 bin/gui.py
   server_main() -> _run(build_server_gui)
@@ -89,7 +93,7 @@ A plain `QMainWindow` whose central widget is a `QTabWidget`. It:
 - **Tears down children on close** — see below.
 
 It is intentionally **not** a `BMainWindow`: `BMainWindow` creates a `Properties`
-object (a Propertyhub/Propertylogger network connection). The shell doesn't need
+object (a connection to the Properties server). The shell doesn't need
 properties, and avoiding it keeps startup fast and independent of the hubs being
 up. (`ProcessManager` avoids `Properties` for the same reason, via
 `create_props=False`.)
@@ -164,7 +168,7 @@ Client/Server GUI:  DeviceStatusClient (SUB) --status_received--> DevicesPanel
 
 - **Pull model:** only the server PC probes; it can reach every device server
   because `CONFIG["Devices"]` lists each one's `host:port`. No client-side plumbing.
-- **Transport:** a dedicated ZMQ `PUB` socket (not model_sync, not a shared hub),
+- **Transport:** a dedicated ZMQ `PUB` socket (not a shared hub),
   registered as the `Device Status` entry in `CONFIG["Servers"]` and launched like
   any other server from the server GUI's **Servers** tab.
 - **Periodic full snapshot** every poll cycle → new subscribers sync within one

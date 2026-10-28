@@ -1,38 +1,42 @@
-"""Unit tests for the InfluxDB loggers in ``pytweezer/loggers/``.
+"""Unit tests for the database loggers in ``pytweezer/loggers/``.
 
 A logger's ``__init__`` calls ``setup()`` -- which opens its data source -- and
-builds an :class:`InfluxWriter`. Neither is wanted in a test, so :func:`build`
+builds a :class:`DBWriter`. Neither is wanted in a test, so :func:`build`
 constructs the logger with ``simulate`` forced on and the writer replaced by
 :class:`RecordingWriter`. What's left under test is ``read()``: the mapping from
-a raw source reading to the points that reach InfluxDB, which is the part worth
+a raw source reading to the points that reach the database, which is the part worth
 testing.
 
-:func:`assert_storable` is the guard worth applying to every logger. InfluxDB
-fields must be scalar, and ``InfluxWriter`` silently drops the ones that aren't
--- so a logger that returns a string or an array loses that value with no error
+:func:`assert_storable` is the guard worth applying to every logger. Each field
+is stored as one float, and ``DBWriter`` silently drops the ones that aren't
+numeric -- so a logger that returns a string or an array loses that value with no error
 anywhere. A test is the only place that mistake surfaces cheaply.
 """
 
+from pytweezer.database.writer import _coerce_fields
 from pytweezer.loggers import base as logger_base
-from pytweezer.servers.influx_client import _coerce_fields
 
 
 class RecordingWriter:
-    """Stand-in for :class:`InfluxWriter` that records instead of connecting."""
+    """Stand-in for :class:`DBWriter` that records instead of connecting."""
 
     def __init__(self, *_args, **_kwargs):
         self.points = []
+        self.measurements = []
         self.closed = False
 
     def write(self, measurement, fields, tags=None, time=None):
-        self.points.append((measurement, fields, tags))
+        self.points.append((measurement, fields, tags, time))
+
+    def record_measurement(self, measurement, logger, interval_s, limits, active):
+        self.measurements.append((measurement, logger, interval_s, limits, active))
 
     def close(self):
         self.closed = True
 
 
 def build(cls, conf=None, name=None):
-    """Return a logger instance with InfluxDB stubbed and simulation forced on.
+    """Return a logger instance with the database stubbed and simulation forced on.
 
     ``conf`` is the logger's ``CONFIG["Loggers"]`` entry (only the keys its
     ``setup()``/``read()`` actually read need to be present). The recording
@@ -42,16 +46,16 @@ def build(cls, conf=None, name=None):
     conf.setdefault("simulate", True)
 
     writer = RecordingWriter()
-    real_cls = logger_base.InfluxWriter
-    logger_base.InfluxWriter = lambda *a, **k: writer
+    real_cls = logger_base.DBWriter
+    logger_base.DBWriter = lambda *a, **k: writer
     try:
         return cls(name or cls.__name__, conf)
     finally:
-        logger_base.InfluxWriter = real_cls
+        logger_base.DBWriter = real_cls
 
 
 def assert_storable(points):
-    """Fail if any field would be silently dropped on the way into InfluxDB."""
+    """Fail if any field would be silently dropped on the way into the database."""
     assert points, "read() produced no points"
     for point in points:
         assert 2 <= len(point) <= 3, (
@@ -62,8 +66,8 @@ def assert_storable(points):
         assert isinstance(fields, dict)
         dropped = sorted(set(fields) - set(_coerce_fields(fields)))
         assert not dropped, (
-            f"{measurement!r} fields {dropped} are not numeric; InfluxWriter "
-            f"drops them without raising, so they never reach InfluxDB"
+            f"{measurement!r} fields {dropped} are not numeric; DBWriter "
+            f"drops them without raising, so they never reach the database"
         )
 
 
@@ -95,7 +99,7 @@ def test_ni_adc_reads_one_point_per_cycle_with_a_field_per_channel():
     assert tags == {"system": "Rb"}
 
 
-def test_ni_adc_fields_survive_the_trip_into_influx():
+def test_ni_adc_fields_survive_the_trip_into_the_database():
     assert_storable(_ni_logger().read())
 
 
@@ -132,6 +136,14 @@ def test_write_points_accepts_both_two_and_three_element_points():
     assert [p[0] for p in logger.writer.points] == ["a", "b"]
     assert logger.writer.points[0][2] is None
     assert logger.writer.points[1][2] == {"system": "CaF"}
+
+
+def test_one_read_cycle_shares_a_timestamp():
+    logger = _ni_logger()
+    logger._write_points([("a", {"x": 1.0}), ("b", {"y": 2.0})])
+
+    times = {p[3] for p in logger.writer.points}
+    assert len(times) == 1 and None not in times
 
 
 def test_read_failures_do_not_stop_the_run_loop():

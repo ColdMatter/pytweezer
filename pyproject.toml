@@ -7,11 +7,13 @@ readme = "README.md"
 packages = [{ include = "pytweezer" }, { include = "bin" }]
 
 [tool.poetry.scripts]
-pytweezer-server = "bin.gui:server_main"
-pytweezer-client = "bin.gui:client_main"
+pytweezer-server = "bin.launch:server_main"
+pytweezer-client = "bin.launch:client_main"
 pytweezer-device = "pytweezer.servers.device_server:main"
 pytweezer-logger = "pytweezer.servers.logger_server:main"
+pytweezer-experiment-manager = "pytweezer.servers.experiment_manager:main"
 pytweezer-kill-stale = "bin.kill_stale:main"
+pytweezer-db-backfill = "pytweezer.database.backfill:main"
 
 [tool.poetry.dependencies]
 python = "^3.11.4, <3.14"
@@ -35,6 +37,7 @@ pillow = "^12.1.0"
 pyzmq = "^27.1.0"
 
 # --- Qt Stuff ---
+# TODO: consider PySide6 - a single wheel instead of PyQt6 + the separate PyQt6-Qt6 pin
 PyQt6 = "^6.9"
 PyQt6-Qt6 = "^6.9"
 
@@ -55,6 +58,8 @@ zmq = "^0.0.0"
 
 # --- Utilities & Networking ---
 pydantic = "^2.10.5"
+psutil = "^7.2"
+pyqtgraph = "^0.14"
 # rich = "^13.9.4"
 # paramiko = "^3.4.1"     # SSH client
 # rpyc = "^5.3.0"
@@ -64,17 +69,19 @@ pythonnet = "^3.0.5" # .NET integration
 # iso8601 = "^2.1.0"      # from pip section
 scikit-image = "^0.26.0"
 pyvisa-py = "^0.8.1"
-sipyco = { git = "https://github.com/m-labs/sipyco.git" }
+sipyco = { git = "https://github.com/m-labs/sipyco.git", rev = "ce454bb64257b1bcef3703f258aaf7fa4ee0c275" }
 pycaf = { git = "https://github.com/ColdMatter/pycaf", branch = "cafmot" }
 simple-pyspin = "^0.1.1"
 easypyspin = "^2.0.1"
 opencv-python = "^4.13.0.92"
 pytest = "^9.1.1"
-influxdb-client = "^1.50.0"
 nidaqmx = "^1.5.0"
 scikit-learn = "^1.9.0"
+scikit-optimize = "^0.10.2"
+pyserial = "^3.5"
 pybase64 = "^1.4.3"
 ruff = "^0.16.4"
+psycopg = {version = "^3.2", extras = ["binary"]}
 
 [tool.poetry.group.docs]
 optional = true
@@ -134,9 +141,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# tests/ holds the pytest suite plus experiment scripts and tools/ holds one-off
-# benchmarks; also exempt them from bare-assert / blind-raise-assert / "useless
-# expression" (`1 / 0` raised on purpose) checks.
+# tests/ holds the pytest suite and tools/ holds one-off benchmarks and scripts;
+# exempt them from bare-assert / blind-raise-assert / "useless expression"
+# (`1 / 0` raised on purpose) checks.
 "tests/**" = ["S101", "S603", "S607", "B017", "B018"]
 "tools/**" = ["S101", "S603", "S607", "B017", "B018", "F821"]
 # Package __init__.py files are re-export hubs.

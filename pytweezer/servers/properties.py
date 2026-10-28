@@ -1,25 +1,44 @@
+"""Client side of the shared properties tree.
+
+Every :class:`Properties` in a process shares one live mirror of the tree held
+by the Properties server (:mod:`pytweezer.servers.property_server`), so reads
+are local and never block on the network. Writes apply to the local mirror at
+once and are then sent to the server, which broadcasts them to every mirror.
+
+While the server is unreachable, reads see the last state the mirror held (or
+the saved file, if it never connected) and writes are applied locally only and
+dropped with a warning: when the mirror reconnects, the server's tree replaces
+the local one, so a stale edit never overwrites newer shared state.
+"""
+
 import copy
-import logging
+import queue
 import threading
 import time
+import weakref
 
-import zmq
-from zmq.utils import jsonapi
+from sipyco.pc_rpc import Client as RPCClient
 
-# logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 from pytweezer.configuration.config import get_config
 from pytweezer.configuration.paths import load_properties
 from pytweezer.logging_utils import get_logger
-from pytweezer.servers import zmqcontext
-from pytweezer.servers.xsub_xpub import event_monitor
+from pytweezer.servers.property_tree import (
+    apply_ops,
+    is_option,
+    lookup,
+    parse_key,
+    plan_delete,
+    plan_set,
+)
+from pytweezer.servers.sync import SyncMirror
 
 _logger = get_logger("Properties")
 
-"""Configuration:  deep, fundamental property of the system.
-                    (which hardware is running, drivers available)
-
-   Properties:     usually refer to objects (position of ROI)
-"""
+SERVER_NAME = "Properties"
+#: How long a new process waits for the server's tree before using the file.
+INIT_TIMEOUT_S = 3.0
+RPC_TIMEOUT_S = 2.0
+DROP_WARNING_INTERVAL_S = 30.0
 
 
 class PropertyAttribute:
@@ -88,333 +107,230 @@ class PropertyAttribute:
         obj._props.set(self._propname, v)
 
 
-class Properties(threading.Thread):
-    @staticmethod
-    def _configure_tcp_socket(socket, endpoint):
-        if isinstance(endpoint, str) and endpoint.startswith("tcp://"):
-            socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
-            if hasattr(zmq, "TCP_KEEPALIVE_IDLE"):
-                socket.setsockopt(zmq.TCP_KEEPALIVE_IDLE, 60)
-            if hasattr(zmq, "TCP_KEEPALIVE_INTVL"):
-                socket.setsockopt(zmq.TCP_KEEPALIVE_INTVL, 30)
-            if hasattr(zmq, "TCP_KEEPALIVE_CNT"):
-                socket.setsockopt(zmq.TCP_KEEPALIVE_CNT, 5)
-            socket.setsockopt(zmq.RECONNECT_IVL, 100)
-            socket.setsockopt(zmq.RECONNECT_IVL_MAX, 2000)
-        socket.setsockopt(zmq.LINGER, 0)
+def server_address(server_name: str = SERVER_NAME) -> tuple[str, int, int]:
+    """``(host, port, rpc_port)`` of the Properties server, from CONFIG."""
+    conf = get_config()["Servers"][server_name]
+    return conf["host"], conf["port"], conf["rpc_port"]
 
-    def _fetch_initial_properties(self, logger_endpoint):
-        last_error = None
-        for _attempt in range(3):
-            init_socket = zmqcontext.socket(zmq.REQ)
-            self._configure_tcp_socket(init_socket, logger_endpoint)
-            init_socket.setsockopt(zmq.RCVTIMEO, 2000)
-            init_socket.setsockopt(zmq.SNDTIMEO, 2000)
-            init_socket.connect(logger_endpoint)
-            try:
-                init_socket.send_string("INIT?")
-                init_socket.recv_string()
-                return init_socket.recv_json()
-            except Exception as error:
-                last_error = error
-                time.sleep(0.15)
-            finally:
-                init_socket.close()
 
-        raise RuntimeError(
-            f"init handshake failed via endpoint {logger_endpoint}: {last_error}"
+class _Connection:
+    """This process's link to one Properties server, shared by its Properties."""
+
+    def __init__(self, host: str, port: int, rpc_port: int):
+        self.host = host
+        self.rpc_port = rpc_port
+        self._listeners = weakref.WeakSet()
+        self._listeners_lock = threading.Lock()
+        self._fallback = None
+        #: Bumped on every (re)sync; an RPC connection from an older one may be
+        #: to a server that has since restarted.
+        self._generation = 0
+        self._writes = queue.SimpleQueue()
+        self._dropped = 0
+        self._last_drop_warning = 0.0
+        self.mirror = SyncMirror(host, port, "properties", on_mod=self._on_mod)
+        if not self.mirror.wait_initialised(INIT_TIMEOUT_S):
+            _logger.warning(
+                "Properties server %s:%s unreachable; starting from the saved file",
+                host,
+                port,
+            )
+            self.mirror.read(self._use_file_if_unsynced)
+        threading.Thread(
+            target=self._write_loop, name="properties-writer", daemon=True
+        ).start()
+
+    def _use_file_if_unsynced(self, data) -> None:
+        if data is None:
+            self._fallback = load_properties()
+
+    def add_listener(self, properties: "Properties") -> None:
+        with self._listeners_lock:
+            self._listeners.add(properties)
+
+    def read(self, fn):
+        """``fn(tree)`` under the mirror's lock; ``fn`` may edit the tree locally."""
+        return self.mirror.read(
+            lambda data: fn(self._fallback if data is None else data)
         )
+
+    def send(self, method: str, *args) -> None:
+        self._writes.put((method, copy.deepcopy(args)))
+
+    def _on_mod(self, mod: dict, tree: dict) -> None:
+        if mod["action"] == "init":
+            self._fallback = None
+            self._generation += 1
+            changed = {"/", *("/" + key for key in tree)}
+        else:
+            changed = {_changed_key(tree, mod)}
+        with self._listeners_lock:
+            listeners = list(self._listeners)
+        for listener in listeners:
+            listener._note_changes(changed)
+
+    def _write_loop(self) -> None:
+        client = None
+        client_generation = None
+        while True:
+            method, args = self._writes.get()
+            if not self.mirror.connected:
+                self._drop(method, args)
+                continue
+            if client is not None and client_generation != self._generation:
+                client.close_rpc()
+                client = None
+            try:
+                if client is None:
+                    client_generation = self._generation
+                    client = RPCClient(
+                        self.host, self.rpc_port, "properties", timeout=RPC_TIMEOUT_S
+                    )
+                getattr(client, method)(*args)
+            except (OSError, EOFError):
+                client = _closed(client)
+                self._drop(method, args)
+            except Exception:
+                client = _closed(client)
+                _logger.exception("Properties server refused %s%r", method, args)
+
+    def _drop(self, method: str, args: tuple) -> None:
+        self._dropped += 1
+        now = time.monotonic()
+        if now - self._last_drop_warning > DROP_WARNING_INTERVAL_S:
+            self._last_drop_warning = now
+            _logger.warning(
+                "Properties server unreachable: %d edit(s) kept locally only "
+                "(latest: %s %s)",
+                self._dropped,
+                method,
+                "/" + "/".join(args[0]),
+            )
+            self._dropped = 0
+
+
+def _closed(client) -> None:
+    if client is not None:
+        try:
+            client.close_rpc()
+        except OSError:
+            pass
+
+
+def _changed_key(tree, mod: dict) -> str:
+    path = list(mod["path"])
+    if mod["action"] == "setitem":
+        node = tree
+        for step in path:
+            node = node[step]
+        # An option property's value changing is a change to the property.
+        if not (mod["key"] == "value" and is_option(node)):
+            path.append(mod["key"])
+    return "/" + "/".join(path)
+
+
+_connections: dict[tuple[str, int, int], _Connection] = {}
+_connections_lock = threading.Lock()
+
+
+def _connection(address: tuple[str, int, int]) -> _Connection:
+    with _connections_lock:
+        if address not in _connections:
+            _connections[address] = _Connection(*address)
+        return _connections[address]
+
+
+class Properties:
+    """A process's handle on the shared properties tree.
+
+    Args:
+        name: Name of the owning process; keys not starting with ``/`` are
+            relative to it, and its own entry is created if missing.
+        initfromfile: Ignored; kept so existing callers still work.
+    """
 
     def __init__(self, name, initfromfile=False):
-        threading.Thread.__init__(self, daemon=True)
-        """ managing configuration and properties within bali control center
-        Keeps an updated and synchronized copy of the property dictionary
-
-        Args:
-            name (string): name of process (will be used as default in all set, get, etc.
-            initfromfile (bool): Leave as default(False). Was used in the earlier versions.
-                Currently only the propertylogger itself inits from a file on start up.
-                All others should ask the propertylogger for an up to date set
-
-        """
-
-        conf = get_config()
-        # iniitialize dictionaries
-        self.properties_lock = threading.Lock()
-        # initialize sockets
-        c = conf["Servers"]["Propertyhub"]
-        host = c["host"]
-        pub_port = c["pub_port"]
-        sub_port = c["sub_port"]
-        hub_sub_endpoint = f"tcp://{host}:{sub_port}"
-        hub_pub_endpoint = f"tcp://{host}:{pub_port}"
-        self.pub_socket = zmqcontext.socket(zmq.PUB)
-        self._configure_tcp_socket(self.pub_socket, hub_sub_endpoint)
-        self.pub_socket.connect(hub_sub_endpoint)
-        self.sub_socket = zmqcontext.socket(zmq.SUB)
-        self._configure_tcp_socket(self.sub_socket, hub_pub_endpoint)
-        self.sub_socket.connect(hub_pub_endpoint)
-        self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "Prop")
-
-        pub_mon = self.pub_socket.get_monitor_socket()
-        pub_mon_thread = threading.Thread(
-            target=event_monitor, args=(pub_mon, "Props: " + name, "PUB")
-        )
-        pub_mon_thread.start()
-        sub_mon = self.sub_socket.get_monitor_socket()
-        sub_mon_thread = threading.Thread(
-            target=event_monitor, args=(sub_mon, "Props: " + name, "SUB")
-        )
-        sub_mon_thread.start()
-
-        time.sleep(0.01)
-        if not initfromfile:
-            host = conf["Servers"]["Propertylogger"].get("host", "localhost")
-            port = conf["Servers"]["Propertylogger"].get("port", 3106)
-            logger_endpoint = f"tcp://{host}:{port}"
-            try:
-                self.properties = self._fetch_initial_properties(logger_endpoint)
-            except Exception as error:
-                _logger.warning(
-                    "properties.py init handshake failed (%s); "
-                    "falling back to property file. "
-                    "Check Servers/Propertylogger/rep reachability for this client.",
-                    error,
-                )
-                self.properties = load_properties()
-        else:
-            self.properties = load_properties()
-        self.recent_changes = set()  # keeps recent changes
-
-        # start socket listening thread
-        self.start()
         self.name = name
-        if name not in self.properties:
+        self.recent_changes = set()
+        self._changes_lock = threading.Lock()
+        self._connection = _connection(server_address())
+        self._connection.add_listener(self)
+        if not self._connection.read(lambda tree: name in tree):
             self.get("/" + name, {})
-        logging.debug(self.properties)
 
-        self.crashed = False
-
-    def _parsekey(self, key):
-        """transform key into list of strings
-        each entry is a key for one level of a multilayer dictionary
-
-        Args:
-            key (str): key of a pytweezer multylayer dictionary.
-                (follows similar nomenclature like unix file system)
-
-        Returns:
-            [(str)] : list of strings
-        """
-        if type(key) != list:
-            if key[0] != "/":
-                if key[-1] == "/":
-                    key = key[:-1]
-                key = "/" + self.name + "/" + key
-            keys = key.split("/")
-        else:
-            keys = key
-        # if the key started with '/'  an empty entry has to be removed
-        if keys[0] == "":
-            keys = keys[1:]
-        return keys
+    def _note_changes(self, keys) -> None:
+        with self._changes_lock:
+            self.recent_changes.update(keys)
 
     def set(self, key, value):
-        """set property
+        """Set a property.
 
         Args:
-            key (string) or (list of strings) :  property to be set
-                adressing is similar to filesystem
-                if the string is starting with '/ start from dictionary root
-                else start from entry=name
-
-
-            value (anything): Anything you consider a useful value.
-                Must be json serializable! (no self defined classes unless you know ...)
-
-            _global (bool) access parameters of other programs
-                    keys will the have to be a list with the first entry being the name of the program whose
-                    Parameters should be modified
-
+            key (str or list of str): Path of the property, filesystem-style:
+                from the root if it starts with ``/``, else from this
+                process's own entry. Missing levels are created.
+            value: Any JSON-serialisable value.
         """
-        if self.get(key) != value:
-            keys = self._parsekey(key)
-            self._set(keys, value)
-            self._send({"keys": keys, "value": value})
-        # print('properties.py Sending: {} with value {}'.format(key, value))
+        keys = parse_key(self.name, key)
 
-    def _set(self, keys, value):
-        with self.properties_lock:
-            prop = self.properties
-            # if the property does not exist we iteratively create it
-            for key in keys[:-1]:
-                if not key in prop:
-                    prop[key] = {}
-                prop = prop[key]
-            # else:
-            if isinstance(value, dict) and "options" in value:
-                if not keys[-1] in prop:
-                    prop[keys[-1]] = {}
-                # print('_set received a dict')
-                # print('now setting:', value)
-                prop[keys[-1]] = copy.deepcopy(value)
-            elif (
-                keys[-1] in prop
-                and isinstance(prop[keys[-1]], dict)
-                and "options" in prop[keys[-1]]
-            ):
-                # print('_set found a dict')
-                # print('which was:', prop[keys[-1]])
-                # print('now setting:', value)
-                if value not in prop[keys[-1]]["options"]:
-                    print(
-                        "value {} not in options {}. no change made to {}".format(
-                            value, prop[keys[-1]]["options"], keys[-1]
-                        )
-                    )
-                else:
-                    prop[keys[-1]]["value"] = copy.deepcopy(value)
-            else:
-                prop[keys[-1]] = copy.deepcopy(value)
-            # for i in range(len(keys)):
-            #    self.recent_changes.add('/'+'/'.join(keys[:i+1]))
-            self.recent_changes.add("/" + "/".join(keys))
+        def edit(tree):
+            try:
+                if lookup(tree, keys) == value:
+                    return False
+            except KeyError:
+                pass
+            ops = plan_set(tree, keys, value)
+            apply_ops(tree, ops)
+            return bool(ops)
 
-    def _send(self, data, flags=0):
-        # self.pub_socket.send(bytes('Propertychange_'+self.name,'utf8'),flags|zmq.SNDMORE)
-        self.pub_socket.send_string("Propertychange_" + self.name, flags | zmq.SNDMORE)
-        # print('properties.py sending _send')
-        return self.pub_socket.send_json(data, flags)
+        if self._connection.read(edit):
+            self._note_changes({"/" + "/".join(keys)})
+            self._connection.send("set", keys, value)
 
     def delete(self, key):
-        """delete an entry including its subentries
-
-        Args:
-            key  (str):  entry to be deleted
-
-        Returns:
-            None.
-        """
-        keys = self._parsekey(key)
-        self._del(keys)
-        self._send({"delete": keys})
-
-    def _del(self, keys):
-        # print(self.name,' properties._del deleting',keys)
-        """delete enty from dictionary"""
-        with self.properties_lock:
-            prop = self.properties
-            for key in keys[:-1]:
-                if not key in prop:
-                    prop[key] = {}
-                prop = prop[key]
-            # logging.debug(prop)
-            if keys[-1] in prop:
-                del prop[keys[-1]]
-            self.recent_changes.add("/" + "/".join(keys[:-1]))
-            # for i in range(len(keys)):
-            #    self.recent_changes.add('/'+'/'.join(keys[:i+1]))
-
-    def _recv(self, flags=0):
-        """recv a numpy array"""
-        parts = self.sub_socket.recv_multipart(flags=flags)
-        if len(parts) < 2:
-            return
-        message = parts[0].decode("utf-8", errors="ignore")
-        logging.debug(self.name, " received: ", message)
-        try:
-            md = jsonapi.loads(parts[1])
-        except Exception as error:
-            _logger.warning("properties.py malformed property payload: %s", error)
-            return
-        logging.debug(self.name, " received: ", message, md)
-        if "delete" in md:
-            # print(self.name,' properties._recv deleting',md['delete'])
-            self._del(md["delete"])
-        elif "keys" in md and "value" in md:
-            self._set(md["keys"], md["value"])
-            # logging.debug('setting: ',md['keys'],md['value'])
+        """Delete an entry and everything below it."""
+        keys = parse_key(self.name, key)
+        self._connection.read(lambda tree: apply_ops(tree, plan_delete(tree, keys)))
+        self._note_changes({"/" + "/".join(keys[:-1])})
+        self._connection.send("delete", keys)
 
     def get(self, key, defaultvalue=None):
-        """returns values from dictionary
-        for details see set(). Values are always deep copies
+        """A deep copy of a property's value.
 
-        Args:
-            key (str): key of the dictionary
-            defaultvalue: used to create the entry in case it is not yet existing
-
-        Returns:
-            the entry from the property dictionary
-
-        It is a good habit to always give reasonable default values so the property tree can
-        create and maintain itself.
+        Addressing is as for :meth:`set`. If the property does not exist yet it
+        is created with ``defaultvalue``, so always give a sensible default:
+        that is how the tree builds and maintains itself.
         """
         if key == "/":
-            with self.properties_lock:
-                return copy.deepcopy(self.properties)
-        elif key[-1] == "/":
+            return self._connection.read(copy.deepcopy)
+        if key[-1] == "/":
             key = key[:-1]
-        keys = self._parsekey(key)
-        return self._get(keys, defaultvalue)
-
-    def _get(self, keys, defaultvalue):
-        # print('_get:')
-        # print(keys)
+        keys = parse_key(self.name, key)
         try:
-            with self.properties_lock:
-                prop = self.properties
-                for key in keys[:-1]:
-                    prop = prop[key]
-                value = copy.deepcopy(prop[keys[-1]])
-                if isinstance(value, dict) and "options" in value:
-                    # print('_get found a dict')
-                    # print('which is:',value)
-                    value = value["value"]
-
-                    # prop[keys[-1]]=copy.deepcopy(value['value'])
-
+            return self._connection.read(lambda tree: lookup(tree, keys))
         except KeyError:
-            logging.debug("properties.py key does not exist")
-            self._set(keys, defaultvalue)
-            self._send({"keys": keys, "value": defaultvalue})
-            value = defaultvalue
-            print(f"tried to _get an unset property {keys}")
-            if isinstance(value, dict) and "options" in value:
-                value = value["value"]
-            print(f"setting default value: {value}")
-        return value
+            _logger.debug("Creating %s with its default", "/" + "/".join(keys))
+            self.set(keys, defaultvalue)
+            if is_option(defaultvalue):
+                return copy.deepcopy(defaultvalue["value"])
+            return copy.deepcopy(defaultvalue)
 
     def changes(self, includeparent=True):
-        """return keys of all entries that have changed since the last call of this function
+        """Keys of all entries changed since the last call.
 
         Args:
-            includeparent (bool): if True the parent classes will be included in the list of changes
+            includeparent (bool): Also include every parent of a changed key.
 
         Returns:
-            set(): set of changes since last call of this function
+            set of str
         """
-        with self.properties_lock:
-            changes = self.recent_changes
-            self.recent_changes = set()
-
-        if includeparent:
-            chang = set()
-            for key in changes:
-                keys = key[1:].split("/")
-                for i in range(len(keys)):
-                    chang.add("/" + "/".join(keys[: i + 1]))
-            return chang
-        else:
+        with self._changes_lock:
+            changes, self.recent_changes = self.recent_changes, set()
+        if not includeparent:
             return changes
-
-    def run(self):
-        while True:
-            try:
-                self._recv()
-            except Exception as error:
-                _logger.warning("properties.py receive loop error: %s", error)
-                time.sleep(0.05)
-
-
-if __name__ == "__main__":
-    pass
+        with_parents = set()
+        for key in changes:
+            keys = key[1:].split("/")
+            for i in range(len(keys)):
+                with_parents.add("/" + "/".join(keys[: i + 1]))
+        return with_parents

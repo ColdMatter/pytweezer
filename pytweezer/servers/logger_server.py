@@ -2,7 +2,7 @@
 ``device_server.py``.
 
 Each logger in ``CONFIG["Loggers"]`` is a background worker that reads a data
-source and pushes values into InfluxDB. Rather than give every logger its own
+source and writes values into the database. Rather than give every logger its own
 ``argparse`` + config-reading boilerplate, this module provides a single
 launcher:
 
@@ -110,7 +110,7 @@ def run_logger(name):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Start a configured InfluxDB logger")
+    parser = argparse.ArgumentParser(description="Start a configured database logger")
     parser.add_argument("name", help="logger name (key in CONFIG['Loggers'])")
     args, _unknown = parser.parse_known_args()
 

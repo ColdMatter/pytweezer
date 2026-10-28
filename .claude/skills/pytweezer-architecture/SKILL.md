@@ -12,27 +12,41 @@ fabric.
 ## One server, many clients
 
 There is a **single server PC** (`PH-BEAST`) running the long-lived shared
-processes — the ZMQ hubs, the stream loggers, Analysis Manager, Device Status —
+processes — the ZMQ hubs, the stream loggers, Analysis Manager, Device Status,
+the Experiment Manager —
 and **arbitrarily many client PCs**, each running whatever devices are plugged
 into it plus its own applets and GUI. Clients are not a fixed pair or a fixed
 list: a new lab PC is just another `HOSTS` entry with devices pointed at it.
 
 What runs where is decided **per config entry**, not per machine. A device's
 `"host"` is what determines which PC its server runs on — independent of where
-the GUI that shows it was launched. The server GUI can start and stop only what
-`check_host` says is local; everything else it merely displays.
+the GUI that shows it was launched. A GUI spawns only what `check_host` says is
+local. Servers and loggers elsewhere it merely displays; a device elsewhere it can
+still start and stop, by asking the GUI on that device's host to do it (see the
+`pytweezer-gui-internals` skill).
 
 ## `CONFIG` is the single source of truth
 
 `pytweezer/configuration/config.py`:
 
-- `HOSTS` — hostname → IP. `SERVER_HOST` resolves from the `SIMULATING`/`LOCAL`
-  flags at the top of the file (both `False` today → the real `PH-BEAST`; set
-  either `True` to bind everything to localhost for dev/sim).
-- `CONFIG["Servers"]` — hubs (`Imagehub`/`Commandhub`/`Datahub`/`Propertyhub`/
-  `Messagehub`), the stream loggers, `Analysis Manager`, `Device Status`.
+- `HOSTS` — hostname → IP; `SERVER_PC` names the server PC. `SERVER_HOST`
+  resolves from the `SIMULATING`/`LOCAL` flags at the top of the file (both
+  `False` → the real `PH-BEAST`; either `True` binds everything to localhost).
+- **`pytweezer-server` simulates anywhere but `SERVER_PC`.** Its entry point
+  (`bin/launch.py`) sets `PYTWEEZER_ROLE=server` before anything imports the
+  config; `config.py` then forces `SIMULATING` (`SIMULATION_FORCED`) when the
+  hostname isn't `SERVER_PC`. Every process the GUI starts inherits the
+  variable, so hubs, device servers and the Experiment Manager all simulate
+  together. Clients and standalone device servers on lab PCs are unaffected.
+  Because `pytweezer/__init__` imports `pytweezer.servers` (and so the config),
+  nothing may import `pytweezer` before that variable is set.
+- `CONFIG["Servers"]` — hubs (`Imagehub`/`Commandhub`/`Datahub`/`Messagehub`),
+  the `Properties` server, the stream loggers, `Analysis Manager`,
+  `Device Status`, `Experiment Manager` (queue + h5 measurement storage; see
+  `add-experiment`).
 - `CONFIG["Devices"]` — one entry per physical device, each with its own `host`.
-- `CONFIG["Loggers"]` — InfluxDB loggers.
+- `CONFIG["Loggers"]` — database loggers (Postgres + TimescaleDB on the server
+  PC; connection string in `DATABASE["dsn"]`).
 - `CONFIG["GUI"]` — standalone GUI tools (StreamMonitor, Applet Launcher, …).
 
 Every category names its `"script"` explicitly **except Devices**: they all run
@@ -41,8 +55,13 @@ in `DEVICE_SERVER_SCRIPT` (`pytweezer/configuration/paths.py`) and spawn sites
 (`DevicesPanel`, `process_cleanup`) reference that constant rather than
 `params["script"]`.
 
-**Append new entries, never insert them.** Ports come from `get_next_port()` in
-declaration order, so inserting one renumbers every entry below it.
+**Never insert a port-owning entry above existing ones.** Ports come from
+`get_next_port()` in declaration order across the whole literal, so inserting
+one renumbers every entry below it — and since `Servers` is declared before
+`Devices`, even appending to `Servers` shifts every device port. A new server
+goes after the `CONFIG` literal (`CONFIG["Servers"]["X"] = {...}`, as the
+Experiment Manager does); `tests/test_experiment_manager.py` checks its ports
+come last.
 
 `get_config()` — defined next to `CONFIG` itself — is the accessor everything
 uses. Tests monkeypatch it **per importing module** to inject a fake config, so
@@ -80,15 +99,31 @@ wherever an operator launched it.
 - `pytweezer/servers/clients.py` — `GenericClient` and its subclasses
   `DataClient`, `ImageClient`, `CommandClient`: the publish/subscribe helpers
   used throughout drivers, servers, analyses and applets.
-- `pytweezer/servers/properties.py` — `Properties(name)`, a ZMQ pub/sub link to
-  the Propertyhub used as shared key-value state (applet catalogues, stream
-  subscriptions, per-viewer settings). It is **shared, always**: every `set()` is
-  broadcast to all clients and persisted centrally, with no local-only write, so
-  anything per-operator belongs in local `QSettings` instead. It also spawns
-  **non-daemon** threads that loop forever; see the `pytweezer-gui-internals`
-  skill for the shutdown consequences.
-- `pytweezer/servers/model_sync.py` exists but its `CONFIG["Servers"]` entry is
-  commented out — present-but-inactive, not dead code to delete.
+- `pytweezer/servers/properties.py` — `Properties(name)`, the shared key-value
+  tree (applet catalogues, stream subscriptions, per-viewer settings). It is
+  **shared, always**: every `set()` is sent to the Properties server and
+  broadcast to all clients, with no local-only write, so anything per-operator
+  belongs in local `QSettings` instead.
+
+## Shared state: sipyco `sync_struct`
+
+State that many processes must agree on is not sent over the hubs. One process
+owns it in a sipyco `Notifier` and serves it with `SyncServer`
+(`pytweezer/servers/sync.py`); every reader holds a `SyncMirror`, which gets the
+whole structure on connect and then each change, in order, on one TCP stream,
+and reconnects with a fresh snapshot. Both run sipyco's asyncio on a daemon
+thread, so they work from threaded and Qt code; mutate a notifier only through
+`SyncServer.call()` (or from an RPC method, which already runs on its loop).
+
+- **Properties** — `pytweezer/servers/property_server.py` owns the tree
+  (notifier `"properties"` on `port`, edits over `pc_rpc` on `rpc_port`) and
+  saves `configuration/properties/properties.json` atomically. Every
+  `Properties` in a process shares one mirror; reads are local, writes apply
+  locally then go to the server. While the server is unreachable, writes stay
+  local and are dropped, and the server's tree replaces them on reconnect. The
+  tree rules (addressing, option properties) are in `property_tree.py`.
+- **Experiment Manager** — publishes the queue and the running task's points as
+  notifier `"experiment"` on `sync_port`; see `add-experiment`.
 
 ## Logging
 
@@ -96,10 +131,12 @@ wherever an operator launched it.
 everywhere (not bare `logging.getLogger`) — it adds structured JSONL output
 under `logs/` (or `$PYTWEEZER_LOG_DIR`) alongside console output.
 
-Do not confuse the pub/sub stream loggers (`datalogger`/`imagelogger`/
-`propertylogger`, which archive ZMQ streams) with **InfluxDB** metric logging,
-which is entirely opt-in and separate. Streams are never auto-forwarded to
-Influx.
+Do not confuse the pub/sub stream loggers (`datalogger`/`imagelogger`, which
+record which streams are active) with **database** metric logging
+(`pytweezer.database`), which is entirely opt-in and separate. Streams are never
+auto-forwarded to the database. The Experiment Manager does write a `runs` row
+per run and a `points` row per scan point there, so readings can be joined to
+runs; see `docs/notes/database.md`.
 
 ## Where to go next
 
@@ -110,7 +147,7 @@ Influx.
 | Add a driver for new hardware | `add-device-driver` skill |
 | Add a live viewer window | `add-applet` skill |
 | Add a streaming analysis | `add-analysis-script` skill |
-| Record a value in InfluxDB | `add-logger` skill |
+| Record a value in the database | `add-logger` skill |
 | Run/screenshot the GUI | `run-pytweezer` skill |
 
 Each of those skills is self-contained — the conventions and constraints that

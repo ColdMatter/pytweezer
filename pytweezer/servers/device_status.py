@@ -235,8 +235,8 @@ class DeviceStatusServer:
 class DeviceStatusClient(QtCore.QObject):
     """Subscribes to the device-status feed and emits the latest device dict.
 
-    Mirrors ``model_sync._ModelSyncClient``: a non-blocking QTimer drains the SUB
-    socket and re-emits the newest snapshot's ``devices`` payload.
+    A non-blocking QTimer drains the SUB socket and re-emits the newest
+    snapshot's ``devices`` payload.
     """
 
     status_received = QtCore.pyqtSignal(object)

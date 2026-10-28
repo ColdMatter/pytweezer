@@ -28,6 +28,12 @@ cam = get_device("Rb HamCam")  # transparent sipyco Client; methods are RPC call
 cam.close_rpc()
 ```
 
+A call that raises comes back to the caller as the same exception, and the
+device server also logs it with its traceback (`RPCServer` in
+`device_server.py`). Plain sipyco would only send it back. A method name
+the server doesn't serve fails in the client (`AttributeError`) and never
+reaches the server, so it leaves no server log.
+
 Prefer this over hand-built `Client(host, port, target)` calls anywhere in new
 experiment code — it resolves host, port and target from config for you.
 `get_device_config(name)` returns an entry without connecting, but for a
@@ -171,7 +177,7 @@ daemon threads. One failing call re-raises its own exception; several raise an
 `get_device_async` is the lower-level alternative, returning an `AsyncioClient`
 whose methods are coroutines. It is **not** fire-and-forget — it still awaits
 every reply; the win is `asyncio.gather` issuing calls to *different* servers
-before awaiting either. Fine from scripts and notebooks; the PyQt5 GUI has no
+before awaiting either. Fine from scripts and notebooks; the PyQt6 GUI has no
 `qasync`, so GUI code would need a worker thread.
 
 ## Verifying a change

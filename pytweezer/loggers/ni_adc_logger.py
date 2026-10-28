@@ -4,7 +4,7 @@ This is the template for the intended Logger model — a Logger opens and owns i
 data source directly (real or virtual), rather than polling an existing device
 RPC server. Here the source is a National Instruments analog-input DAQ: the
 logger creates its own ``nidaqmx.Task``, reads the configured channels on each
-interval, and pushes the voltages to InfluxDB.
+interval, and writes the voltages to the database.
 
 Config entry shape (``CONFIG["Loggers"][name]``)::
 
@@ -37,6 +37,15 @@ logger = get_logger("Logger")
 def _short_name(channel):
     """`"Dev1/ai0"` -> `"ai0"` for a tidy field name; unchanged if no slash."""
     return channel.rsplit("/", 1)[-1]
+
+
+def _field_names(channels):
+    """Each channel's short name, or its full name where two channels share one."""
+    short = [_short_name(channel) for channel in channels]
+    return [
+        name if short.count(name) == 1 else channel
+        for channel, name in zip(channels, short)
+    ]
 
 
 class NIADCLogger(Logger):
@@ -76,7 +85,7 @@ class NIADCLogger(Logger):
             # nidaqmx returns a bare float for a single channel, else a list.
             values = raw if isinstance(raw, (list, tuple)) else [raw]
 
-        fields = {_short_name(ch): v for ch, v in zip(self.channels, values)}
+        fields = dict(zip(_field_names(self.channels), values))
         return [(self.measurement, fields, self.tags)]
 
     def _simulated_values(self):

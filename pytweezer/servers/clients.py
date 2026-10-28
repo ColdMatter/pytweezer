@@ -157,6 +157,8 @@ class GenericClient:
         if not isinstance(A, np.ndarray):
             return self.pub_socket.send_json(datadict, flags, cls=NpEncoder)
         else:
+            # recv() rebuilds the array in C order from the raw buffer.
+            A = np.ascontiguousarray(A)
             datadict["dtype"] = str(A.dtype)
             datadict["shape"] = A.shape
             self.pub_socket.send_json(datadict, flags | zmq.SNDMORE, cls=NpEncoder)
@@ -261,6 +263,8 @@ class ImageClient(DataClient):
         """
         self.pub_socket.send_string(self.name + channel, flags | zmq.SNDMORE)
 
+        # recv() rebuilds the array in C order from the raw buffer.
+        data = np.ascontiguousarray(data)
         header["dtype"] = str(data.dtype)
         header["shape"] = data.shape
         self.pub_socket.send_json(header, flags | zmq.SNDMORE, cls=NpEncoder)

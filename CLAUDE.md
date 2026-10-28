@@ -15,9 +15,15 @@ disclosure through skills gets noticeably better performance out of agents.
 
 ## What this is
 
-Control software for an atom-tweezer experiment (Rb and CaF systems). PyQt5 GUIs,
+Control software for an atom-tweezer experiment (Rb and CaF systems). PyQt6 GUIs,
 ZMQ messaging, and sipyco RPC servers coordinate device drivers (cameras,
 MotMaster experiment sequencers) across the lab PCs.
+
+## important branches
+
+exp-handler is the branch developing a full device server and experiment handler, based on artiq, balic, and sipyco. it is in active development. docs are descriptive, not proscriptive. 
+
+rearrangement-optimisation-RnD is a stripped-down branch for optimisation of tweezer control with an SLM. 
 
 ## Commands
 
@@ -42,10 +48,11 @@ what you're about to hand-verify.
 Entry points (`[tool.poetry.scripts]` in `pyproject.toml`):
 
 ```bash
-poetry run pytweezer-server         # full-control GUI, run on the server PC
+poetry run pytweezer-server         # full-control GUI; simulates on any PC but the server PC
 poetry run pytweezer-client         # view-only GUI, run on client PCs
 poetry run pytweezer-device <name>  # start one device's RPC server standalone
-poetry run pytweezer-logger <name>  # start one InfluxDB logger standalone
+poetry run pytweezer-logger <name>  # start one database logger standalone
+poetry run pytweezer-experiment-manager <name>  # start the experiment queue manager standalone
 poetry run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
 ```
 
@@ -53,7 +60,7 @@ poetry run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
 Run kill-stale after an unclean shutdown, when launch fails with "Address
 already in use".
 
-**Headless/offscreen testing:** PyQt5 windows can't construct without a display.
+**Headless/offscreen testing:** PyQt6 windows can't construct without a display.
 Set `QT_QPA_PLATFORM=offscreen` before running any script that imports Qt widgets
 in a non-interactive shell.
 
@@ -74,13 +81,17 @@ in a non-interactive shell.
   failure fails CI, so keep the docs building.
 
 
+### Lab book
+
+"The labbook" is the shared Obsidian vault github.com/ColdMatter/CaFMOT-LabBook,
+cloned at `~/CaFMOT-LabBook`; read its own `CLAUDE.md` before writing to it.
+
+
 ### Comments and self-documenting code
 
 - **Write self-documenting code; do not over-comment.** The people reading this
-  are PhD-level physicists - do not explain standard physics (a Doppler shift, a
-  π pulse, a light shift). Prefer a good name over a comment: a variable
-  `doppler_shift_hz` needs no comment, and an expression that is obviously a
-  Doppler shift needs at most `# Doppler shift` - usually nothing.
+  are PhD-level physicists - do not explain standard physics. Prefer a good name over a comment: a variable
+  `doppler_shift_hz = ` is better than `d = # Doppler shift in Hz`.
 - **Comment only what is genuinely surprising**: a non-obvious mechanism, a
   convention we have invented, a sign or edge case that bites. Everything else
   should read straight from the code.
@@ -102,6 +113,7 @@ in a non-interactive shell.
 ### Git branching conventions
 
 - New features should usually be developed on feature branches
+- Commit and push as you go: after each coherent, tested step (e.g. one tab restyled), not in one batch at the end. Stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
 - All branches should have an associated merge request
 - **The main branch should always be deployable** - no broken code or failing tests allowed
 
@@ -129,7 +141,11 @@ Load a skill when you need more than that:
 | Config, hosts, launching, pub/sub fabric, general orientation | `pytweezer-architecture` |
 | Device server/client, `get_device()`, composites, coordinators | `pytweezer-device-framework` |
 | GUI shell, tabs, panels, process tiles, teardown | `pytweezer-gui-internals` |
-| Adding a driver / applet / analysis / InfluxDB logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
+| How a panel should look, read and behave (layout, styling, wording) | `pytweezer-gui-design` |
+| Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
+| Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Running or screenshotting the GUI | `run-pytweezer` |
+| Writing, reviewing or deleting tests | `write-tests` |
+| MOTMaster channels (which board/port/line a signal is on), scripts, the C# side | Read `../EDMSuite/.claude/skills/motmaster-controller/SKILL.md` — EDMSuite skills don't load from here. Channel maps: `../EDMSuite/DAQ/MoleculeMOTHardware.cs` (CaF), `../EDMSuite/DAQ/RbTweezerHardware.cs` (Rb) |
 
 Each skill is self-contained; there is no separate long-form documentation.
