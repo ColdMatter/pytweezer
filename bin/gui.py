@@ -44,6 +44,7 @@ from pytweezer.configuration import config
 from pytweezer.GUI.applet_launcher import AppletLauncher
 from pytweezer.GUI.streammonitor import make_stream_monitor
 from pytweezer.GUI.theme import DARK_STYLESHEET
+from pytweezer.lab_setup import offer_lab_setup
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer GUI")
@@ -231,9 +232,12 @@ def build_client_gui():
     return build_gui(False)
 
 
-def _run(build):
+def _run(build, role):
     app = QApplication.instance() or QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)
+    if offer_lab_setup(role):
+        logging.shutdown()
+        os._exit(0)
     win = build()
     win.show()
 
@@ -268,8 +272,8 @@ def server_main():
             "Not on the server PC (%s): this session runs in SIMULATION mode",
             config.SERVER_PC,
         )
-    _run(build_server_gui)
+    _run(build_server_gui, "server")
 
 
 def client_main():
-    _run(build_client_gui)
+    _run(build_client_gui, "client")

@@ -274,6 +274,12 @@ QLabel[role="regionTitle"] {
 QLabel[role="regionHint"] {
     color: #8d8e99;
 }
+QLabel[role="tag"] {
+    color: #f5a623;
+    border: 1px solid #f5a623;
+    border-radius: 3px;
+    padding: 0 5px;
+}
 QLabel[role="experimentTitle"] {
     color: #e6e6e6;
     font-size: 14pt;

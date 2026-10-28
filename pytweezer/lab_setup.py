@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pytweezer.configuration.config import DATABASE
 from pytweezer.configuration.paths import tweezerpath
+from pytweezer.database.writer import DBWriter
+from pytweezer.GUI.lab_setup_dialog import LabSetupDialog
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("lab_setup")
@@ -169,3 +172,40 @@ def launch_apply(role: str, repo: Path = REPO) -> None:
         str(repo),
     ]
     subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
+
+
+_writer: DBWriter | None = None
+
+
+def _report_writer() -> DBWriter:
+    global _writer
+    if _writer is None:
+        _writer = DBWriter(DATABASE["server_dsn"])
+    return _writer
+
+
+def offer_lab_setup(role: str, *, timeout_s: float = 120) -> bool:
+    """Report this PC's lab setup state and offer any pending changes.
+
+    The writer is never flushed or closed here, so an unreachable database cannot
+    delay startup; its daemon thread sends during the session.
+
+    Returns:
+        True when the apply tool was launched and pytweezer should exit.
+    """
+    try:
+        result = check()
+        if result is None:
+            return False
+        report(result, _report_writer())
+        pending = result.pending
+        if not pending:
+            return False
+        dialog = LabSetupDialog(pending, timeout_s)
+        if dialog.exec() != LabSetupDialog.DialogCode.Accepted:
+            return False
+        launch_apply(role)
+        return True
+    except Exception:
+        logger.exception("Lab setup offer failed; starting normally")
+        return False

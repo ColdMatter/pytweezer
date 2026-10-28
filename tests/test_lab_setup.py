@@ -5,8 +5,10 @@ import time
 from datetime import UTC, datetime
 
 import pytest
+from PyQt6.QtWidgets import QDialog, QLabel
 
 from pytweezer import lab_setup
+from pytweezer.GUI.lab_setup_dialog import LabSetupDialog
 from pytweezer.lab_setup import ChangeStatus, CheckResult
 
 
@@ -197,3 +199,60 @@ def test_check_returns_promptly_when_a_grandchild_holds_the_pipe(tmp_path):
     started = time.monotonic()
     assert lab_setup.check(tmp_path, timeout=2) is None
     assert time.monotonic() - started < 8
+
+
+def status(id, title, admin=False):
+    return ChangeStatus(id, title, "description", admin, "pending", None)
+
+
+def all_text(widget):
+    return " ".join(label.text() for label in widget.findChildren(QLabel))
+
+
+def stub_offer(monkeypatch, case="pending", pending=("a",), answer=None):
+    launched = []
+    states = [] if case == "nothing_pending" else list(pending)
+    result = result_with(*[(i, "pending") for i in states])
+    monkeypatch.setattr(
+        lab_setup, "check", lambda: None if case == "check_failed" else result
+    )
+    monkeypatch.setattr(lab_setup, "report", lambda *a, **k: None)
+    monkeypatch.setattr(lab_setup, "launch_apply", launched.append)
+
+    def exec_(self):
+        if case == "dialog_raises":
+            raise RuntimeError("no display")
+        return answer or QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(LabSetupDialog, "exec", exec_)
+    return launched
+
+
+def test_dialog_lists_changes_and_marks_admin(qapp):
+    dialog = LabSetupDialog(
+        [status("a", "Install uv", admin=False), status("b", "Share", admin=True)]
+    )
+    text = all_text(dialog)
+    assert "Install uv" in text and "Share" in text and "needs admin" in text
+
+
+def test_dialog_times_out_to_later(qapp):
+    dialog = LabSetupDialog([status("a", "A")], timeout_s=0.2)
+    assert dialog.exec() == QDialog.DialogCode.Rejected
+
+
+def test_offer_launches_apply_and_asks_to_exit_when_accepted(monkeypatch, qapp):
+    launched = stub_offer(
+        monkeypatch, pending=["a"], answer=QDialog.DialogCode.Accepted
+    )
+    assert lab_setup.offer_lab_setup("client") is True
+    assert launched == ["client"]
+
+
+@pytest.mark.parametrize(
+    "case", ["nothing_pending", "later", "check_failed", "dialog_raises"]
+)
+def test_offer_starts_pytweezer_normally(monkeypatch, qapp, case):
+    launched = stub_offer(monkeypatch, case=case)
+    assert lab_setup.offer_lab_setup("server") is False
+    assert launched == []
