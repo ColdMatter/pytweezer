@@ -873,6 +873,9 @@ class SimulatedMotMasterInterface:
     Scripts missing from :data:`SIMULATED_SCRIPT_PARAMETERS` get a fallback parameter set.
     """
 
+    #: Seconds a simulated run takes, so simulated cameras catch some frames.
+    sim_run_s = 0.5
+
     def __init__(self, *args, **kwargs):
         self.script = None
         self.linked = False
@@ -903,6 +906,7 @@ class SimulatedMotMasterInterface:
                 raise TypeError(
                     f"{name!r} is an Int32 in script {self.script!r}; got {value!r}"
                 )
+        time.sleep(self.sim_run_s)
 
 
 def plot_auto_mot_results(results: dict[str, dict[str, Any]]):

@@ -487,3 +487,12 @@ def test_simulated_end_to_end_with_searched_parameters():
     assert list(measurement.results["sent_coil_current"]) == [2.0, 2.0]
     assert list(measurement.results["sent_tPulse"]) == [20e-6, 20e-6]
     assert measurement.arguments["rb.coil_current"] == 2.0
+
+
+def test_a_simulated_run_lasts_long_enough_for_simulated_cameras(monkeypatch):
+    slept = []
+    monkeypatch.setattr("pytweezer.drivers.motmaster.time.sleep", slept.append)
+    simulated = SimulatedMotMasterInterface()
+    simulated.set_motmaster_experiment("RbTweezerBasic")
+    simulated.start_motmaster_experiment()
+    assert sum(slept) >= SimulatedMotMasterInterface.sim_run_s > 0
