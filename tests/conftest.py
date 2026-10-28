@@ -8,6 +8,7 @@ shared ``QApplication`` for tests that build widgets.
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("PYTWEEZER_SKIP_LAB_SETUP", "1")
 
 import pytest
 
