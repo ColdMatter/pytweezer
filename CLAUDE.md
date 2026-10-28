@@ -145,6 +145,7 @@ Load a skill when you need more than that:
 | How a panel should look, read and behave (layout, styling, wording) | `pytweezer-gui-design` |
 | Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
+| Running shots, scans or auto-tune from a lab-book notebook (`Rig`), MOTMaster zips | `notebook-rig` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 | Writing, reviewing or deleting tests | `write-tests` |
 | MOTMaster channels (which board/port/line a signal is on), scripts, the C# side | Read `../EDMSuite/.claude/skills/motmaster-controller/SKILL.md` — EDMSuite skills don't load from here. Channel maps: `../EDMSuite/DAQ/MoleculeMOTHardware.cs` (CaF), `../EDMSuite/DAQ/RbTweezerHardware.cs` (Rb) |
