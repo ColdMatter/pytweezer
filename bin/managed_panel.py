@@ -26,6 +26,7 @@ identically regardless of source:
 """
 
 import subprocess
+import sys
 import threading
 import time
 from socket import gethostname
@@ -286,7 +287,7 @@ class ManagedRow(QFrame):
             return
         self.terminateProcess()
         logger.info(f"Starting process {self.name} with script {self.script}")
-        self.process = subprocess.Popen(["python3", self.script, self.name])
+        self.process = subprocess.Popen([sys.executable, self.script, self.name])
         if self._self_polling:
             # The subprocess *is* the service, so liveness is the truth.
             self._poll_self()

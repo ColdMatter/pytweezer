@@ -2,6 +2,7 @@ import argparse
 import os
 import signal
 import subprocess
+import sys
 from typing import Any
 
 import zmq
@@ -116,7 +117,7 @@ class AnalysisManagerService:
 
         self._ensure_stopped(category, name)
         token = self._analysis_token(category, name)
-        process = subprocess.Popen(["python3", script_path, token])
+        process = subprocess.Popen([sys.executable, script_path, token])
         self.processes[key] = process
         self.props.set(f"{category}/{name}/active", True)
 

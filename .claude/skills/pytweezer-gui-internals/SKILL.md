@@ -57,7 +57,7 @@ what lets a user drag a panel out into its own floating window. Two rules follow
 ## Process tiles: `ManagedRow`
 
 `bin/managed_panel.py`'s `ManagedRow` is one row = one process. It spawns
-`python3 <script> <name>` (see the `pytweezer-architecture` skill for that launch
+`<sys.executable> <script> <name>` (see the `pytweezer-architecture` skill for that launch
 protocol) and owns the Start/Stop toggle and status LED. Rows for entries marked
 `"active": True` auto-start when the panel opens.
 

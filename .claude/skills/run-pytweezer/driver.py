@@ -8,8 +8,8 @@ whole window and of each tab.
 Why offscreen + grab instead of ``pytweezer-server``:
   * No display is needed (works over SSH / in a non-interactive shell).
   * ``pytweezer-server``'s ControlPanel is controllable=True and would
-    ``subprocess.Popen(['python3', ...])`` every active hub on construction —
-    heavy, and ``python3`` isn't on PATH on Windows. The *client* GUI is
+    ``subprocess.Popen([sys.executable, ...])`` every active hub on
+    construction — heavy. The *client* GUI is
     view-only (probes servers over TCP, spawns nothing), so it is the safe
     default. Pass ``server`` only if you accept those subprocess spawns.
 

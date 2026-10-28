@@ -1,16 +1,11 @@
+import argparse
 import os
 import signal
-import sys
+import threading
 import time
 from typing import Any
 
 import zmq
-
-sys.path.append("../../")
-sys.path.append("../")
-import argparse
-import threading
-
 from zmq.utils.monitor import recv_monitor_message
 
 from pytweezer import *

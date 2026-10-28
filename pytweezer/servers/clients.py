@@ -37,10 +37,6 @@ Classes
 
 """
 
-import sys
-
-sys.path.append("../")
-sys.path.append("../../")
 import json
 
 import numpy

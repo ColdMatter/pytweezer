@@ -1,6 +1,6 @@
 """Cross-platform cleanup for orphaned pytweezer server/device/logger processes.
 
-Every managed process is spawned as ``['python3', <script>, <name>]`` (see
+Every managed process is spawned as ``[sys.executable, <script>, <name>]`` (see
 ``bin/managed_panel.py``/``bin/process_tile_base.py``). If the GUI that
 launched them is killed rather than closed normally, these children can
 outlive it and keep holding their ZMQ sockets, so the next

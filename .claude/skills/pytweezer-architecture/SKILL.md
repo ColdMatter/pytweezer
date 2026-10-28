@@ -79,7 +79,9 @@ startup state) — not the Python `CONFIG` dict.
 ## Launch protocol: `python <script> <name>`
 
 `bin/managed_panel.py`'s `ManagedRow` starts every managed process the same way:
-`subprocess.Popen(['python3', script, name])`, where `name` is the CONFIG key.
+`subprocess.Popen([sys.executable, script, name])`, where `name` is the CONFIG
+key. Use `sys.executable`, never a bare `python3`: uv's `.venv` has no
+`python3.exe` on Windows, so PATH lookup finds some other interpreter.
 
 Every server/device/logger script's `main()` therefore takes that `name` as a
 positional/optional CLI arg and, when given, looks itself up under
