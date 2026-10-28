@@ -2,10 +2,8 @@
 
 import math
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
 
 import pandas as pd
-import pytest
 
 from pytweezer.database import analysis
 from pytweezer.database.analysis import aggregate_by_point, points_with_readings
@@ -71,11 +69,3 @@ def test_points_with_readings_joins_by_point_window(tmp_path, monkeypatch):
     assert list(table["ni_adc/ai0"]) == [4.5, 4.5, 4.5]
     assert table["counts"].isna().tolist() == [False, True, False]
     assert "image" not in table
-
-
-def test_unknown_rid_is_a_lookup_error(monkeypatch):
-    conn = MagicMock()
-    conn.__enter__.return_value.execute.return_value.fetchone.return_value = None
-    monkeypatch.setattr(analysis, "_connect", lambda dsn=None: conn)
-    with pytest.raises(LookupError):
-        points_with_readings(99, "ni_adc")

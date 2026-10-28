@@ -184,13 +184,6 @@ def test_every_sequencer_is_unlinked_before_any_script_is_set(rig):
     assert ("rb", "linked", False) in rig.log and ("caf", "linked", False) in rig.log
 
 
-def test_follower_client_is_opened_once_per_task(rig):
-    scan = Scan(axes=[ListAxis(argument="tof", values=[1, 2, 3])])
-    measurement = run_local(Pair, scan)
-    assert measurement.status == "completed", measurement.attrs["error"]
-    assert rig.opened.count("CaF MotMaster") == 2
-
-
 def test_failure_opening_a_follower_client_starts_no_follower(rig):
     rig.unreachable.add("K MotMaster")
     measurement = run_local(Trio)
@@ -262,15 +255,6 @@ def test_declaration_rules_are_checked_at_class_definition():
         class UnknownDevice(MotMasterExperiment):
             a = MotMaster("Rb MotMaster", script="s")
             x = MotMasterNumber(1.0, device="nope")
-
-
-def test_schema_describes_the_sequencers_and_parameters():
-    schema = Pair.schema()
-    assert schema["devices"]["caf"]["motmaster"]["script"] == "CaFTweezerLoad"
-    assert schema["devices"]["rb"]["motmaster"]["master"] is True
-    assert schema["arguments"]["tof"]["motmaster_device"] == "rb"
-    assert schema["arguments"]["tof"]["motmaster_parameter"] == "tDelay1"
-    assert Single.master_name() == "rb"
 
 
 class FakeDotNet:

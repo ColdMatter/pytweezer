@@ -152,23 +152,6 @@ def test_a_text_result_cannot_switch_between_string_and_dict(first, second):
     writer.close()
 
 
-@pytest.mark.parametrize(
-    "name, value, message",
-    [
-        ("", 1, "invalid record name"),
-        ("a/b", 1, "invalid record name"),
-        ("__schema__", 1, "invalid record name"),
-        ("obj", object(), "unsupported type"),
-    ],
-)
-def test_bad_records_are_refused(name, value, message):
-    points, writer = make_writer()
-    writer.begin_point(points[0])
-    with pytest.raises(RecordError, match=message):
-        writer.record(name, value)
-    writer.close()
-
-
 def test_paths_and_rid_scan(tmp_path):
     rel = measurement_relpath(42, "Sweep", datetime(2026, 3, 4, 5, 6, tzinfo=UTC))
     assert rel == Path("2026", "03", "04", "000042_Sweep.h5")

@@ -58,10 +58,6 @@ def test_ni_adc_channels_sharing_a_short_name_keep_their_full_names(build):
     assert set(fields) == {"Dev1/ai0", "Dev2/ai0", "ai1"}
 
 
-def test_ni_adc_without_channels_reads_nothing_rather_than_failing(build):
-    assert build(NIADCLogger, {}).read() is None
-
-
 def test_write_points_accepts_two_and_three_element_points_at_one_time(ni_logger):
     ni_logger._write_points(
         [

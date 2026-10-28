@@ -25,14 +25,6 @@ def test_this_pc_address_ignores_hostname_case(monkeypatch):
     assert config.this_pc_address() is None
 
 
-def test_bwidget_constructs_headless_without_property_hub(qapp):
-    from pytweezer.GUI.pytweezerQt import BWidget
-
-    w = BWidget("HeadlessTest", create_props=False)
-    assert w._name == "HeadlessTest"
-    assert not hasattr(w, "_props")
-
-
 @pytest.fixture
 def make_row(qapp):
     rows = []

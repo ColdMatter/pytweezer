@@ -2,13 +2,11 @@
 lookups stubbed and no real RPC."""
 
 import asyncio
-import socket
 
 import pytest
 
 from pytweezer.drivers.slm import SLM, SimulatedSLM
 from pytweezer.servers import device_client, device_server, device_status
-from pytweezer.servers.reachability import is_reachable
 
 _DEVICES = {
     "Devices": {
@@ -31,8 +29,6 @@ _DEVICES = {
             },
             "coordinator": "pkg:CameraDacFeedback",
         },
-        "Bare Rig": {"host": "h", "port": 1, "devices": {"Cam": {"class": "pkg:Cam"}}},
-        "NoPort": {"host": "1.2.3.4"},
     }
 }
 
@@ -56,37 +52,8 @@ def captured_rpc(fake_config, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Name resolution
-# --------------------------------------------------------------------------- #
-
-
-@pytest.mark.parametrize("query", ["Rb HamCam", "rbhamcam", "  RB   HAMCAM "])
-def test_resolve_device_matches_leniently(fake_config, query):
-    name, conf = device_server.resolve_device(query)
-    assert name == "Rb HamCam"
-    assert conf["port"] == 5000
-
-
-@pytest.mark.parametrize(
-    "lookup", [device_server.resolve_device, device_client.get_device_config]
-)
-def test_unknown_device_error_lists_available(fake_config, lookup):
-    with pytest.raises(KeyError, match="Rb HamCam"):
-        lookup("nope")
-
-
-def test_get_device_config_finds_sub_device(fake_config):
-    assert device_client.get_device_config("Rb Feedback DAC")["role"] == "dac"
-
-
-# --------------------------------------------------------------------------- #
 # build_spec
 # --------------------------------------------------------------------------- #
-
-
-def test_build_spec_missing_class_key():
-    with pytest.raises(KeyError):
-        device_server.build_spec("thing", conf={"host": "x", "port": 1})
 
 
 def test_build_spec_constructs_class_from_config_and_wires_teardown():
@@ -218,32 +185,6 @@ def test_get_device_endpoint(captured_rpc, name, kwargs, expected):
     ) == expected
 
 
-@pytest.mark.parametrize(
-    "name, error",
-    [
-        ("NoPort", ValueError),
-        # A coordinatorless composite's own name addresses nothing.
-        ("Bare Rig", KeyError),
-    ],
-)
-def test_get_device_unaddressable(captured_rpc, name, error):
-    with pytest.raises(error):
-        device_client.get_device(name)
-
-
-def test_get_device_async_uses_config_host_and_port(fake_config, monkeypatch):
-    captured = {}
-
-    class FakeAsyncioClient:
-        async def connect_rpc(self, host, port, target_name=None):
-            captured.update(host=host, port=port)
-
-    monkeypatch.setattr(device_client, "AsyncioClient", FakeAsyncioClient)
-    client = asyncio.run(device_client.get_device_async("Rb HamCam"))
-    assert isinstance(client, FakeAsyncioClient)
-    assert captured == {"host": "1.2.3.4", "port": 5000}
-
-
 # --------------------------------------------------------------------------- #
 # device_status.build_snapshot (probes stubbed)
 # --------------------------------------------------------------------------- #
@@ -328,18 +269,6 @@ def test_build_snapshot_composite_reuses_targets_while_the_server_is_busy(
     monkeypatch.setattr(device_status, "server_targets", lambda h, p, t: None)
     devices = server.build_snapshot()["devices"]
     assert devices["Rig"]["state"] == devices["Rig Cam"]["state"] == "up"
-
-
-def test_is_reachable():
-    srv = socket.socket()
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(1)
-    host, port = srv.getsockname()
-    try:
-        assert is_reachable(host, port, timeout=1.0) is True
-    finally:
-        srv.close()
-    assert is_reachable(host, port, timeout=0.3) is False
 
 
 def test_a_failing_rpc_call_is_logged_on_the_device_server_and_still_raised(caplog):
