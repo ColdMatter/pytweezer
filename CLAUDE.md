@@ -81,6 +81,12 @@ in a non-interactive shell.
   failure fails CI, so keep the docs building.
 
 
+### Lab book
+
+"The labbook" is the shared Obsidian vault github.com/ColdMatter/CaFMOT-LabBook,
+cloned at `~/CaFMOT-LabBook`; read its own `CLAUDE.md` before writing to it.
+
+
 ### Comments and self-documenting code
 
 - **Write self-documenting code; do not over-comment.** The people reading this
@@ -140,5 +146,6 @@ Load a skill when you need more than that:
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 | Writing, reviewing or deleting tests | `write-tests` |
+| MOTMaster channels (which board/port/line a signal is on), scripts, the C# side | Read `../EDMSuite/.claude/skills/motmaster-controller/SKILL.md` — EDMSuite skills don't load from here. Channel maps: `../EDMSuite/DAQ/MoleculeMOTHardware.cs` (CaF), `../EDMSuite/DAQ/RbTweezerHardware.cs` (Rb) |
 
 Each skill is self-contained; there is no separate long-form documentation.
