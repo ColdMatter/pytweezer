@@ -11,6 +11,12 @@
     this machine and whether each is done, pending or in error; every
     diagnostic goes to stderr.
 
+    Without -Check, lists the pending changes, asks to confirm (unless -Yes),
+    then applies them in order, stopping at the first failure, and appends one
+    line per attempt to <Repo>\logs\lab_setup.jsonl. If any needs admin, the
+    applying happens in one elevated window. -Relaunch then starts pytweezer
+    again from this, non-elevated, window.
+
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File lab_setup\lab-setup.ps1 -Check
 #>
@@ -98,7 +104,8 @@ function Get-Changes {
         }
         if (Test-AppliesHere $manifest) {
             [pscustomobject]@{ Id = $id; Folder = $folder; Title = $manifest.title
-                Description = $manifest.description; Admin = [bool]$manifest.admin; ManifestError = $null }
+                Description = $manifest.description; Admin = [bool]$manifest.admin
+                Secrets = @($manifest.secrets | Where-Object { $_ }); ManifestError = $null }
         }
     }
 }
@@ -174,6 +181,98 @@ function ConvertTo-AsciiJson($Value) {
     [regex]::Replace($json, '[^\x00-\x7F]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
 }
 
+function Test-Elevated {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Show-Pending($Pending) {
+    Write-Host "$($Pending.Count) change(s) pending on ${HostName}:"
+    foreach ($change in $Pending) {
+        $admin = if ($change.Admin) { ' (needs admin)' } else { '' }
+        Write-Host "  $($change.Title)$admin"
+        Write-Host "      $($change.Description)"
+    }
+}
+
+function Read-Secrets($Change) {
+    $secrets = @{}
+    foreach ($secret in $Change.Secrets) {
+        $secure = Read-Host -AsSecureString "$($secret.prompt) (ask $($secret.ask))"
+        $secrets[$secret.name] = (New-Object Management.Automation.PSCredential 'unused', $secure).GetNetworkCredential().Password
+    }
+    $secrets
+}
+
+function Invoke-Change($Change) {
+    # Returns the error message, or $null once the check confirms the change is in place.
+    try {
+        $secrets = Read-Secrets $Change
+        & (Join-Path $Change.Folder 'apply.ps1') -Repo $Repo -Secrets $secrets | Out-Host
+    } catch {
+        if ($_.Exception.Message) { return $_.Exception.Message } else { return 'apply.ps1 failed' }
+    }
+    $after = (Get-ChangeStates @($Change))[$Change.Id]
+    switch ($after.State) {
+        'done' { return $null }
+        'pending' { return 'apply finished but the check still says pending' }
+    }
+    "check after apply: $($after.Error)"
+}
+
+function Write-Record($Change, [string]$Result, $Message) {
+    New-Item -ItemType Directory -Force (Split-Path $RecordPath) | Out-Null
+    $record = [ordered]@{
+        # Invariant culture: in a custom format ':' is the culture's time separator.
+        time = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'+00:00'", [Globalization.CultureInfo]::InvariantCulture)
+        host = $HostName
+        change = $Change.Id
+        commit = $FromMain
+        result = $Result
+        error = $Message
+    }
+    # Not Add-Content -Encoding UTF8, which starts a new file with a BOM.
+    [IO.File]::AppendAllText($RecordPath, (ConvertTo-AsciiJson $record) + "`n")
+    $record
+}
+
+function Read-RecordLines {
+    if (Test-Path $RecordPath) { @(Get-Content -Encoding UTF8 $RecordPath) } else { @() }
+}
+
+function Invoke-Elevated {
+    # The elevated window applies every pending change, admin or not, so they stay in order.
+    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -FromMain $FromMain -Repo `"$Repo`" -Yes -HostName `"$HostName`""
+    $before = (Read-RecordLines).Count
+    try {
+        $elevated = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList $arguments
+    } catch {
+        Write-Host "Not elevated, so nothing was applied: $($_.Exception.Message)"
+        return @{}
+    }
+    $results = @{}
+    foreach ($line in (Read-RecordLines | Select-Object -Skip $before)) {
+        $record = $line | ConvertFrom-Json
+        $results[$record.change] = $record
+    }
+    if (-not $results.Count -and $elevated.ExitCode -ne 0) {
+        Write-Host "The elevated window stopped with exit code $($elevated.ExitCode) before applying anything."
+    }
+    $results
+}
+
+function Show-Summary($Pending, $Results) {
+    Write-Host ''
+    Write-Host 'Summary:'
+    foreach ($change in $Pending) {
+        $result = $Results[$change.Id]
+        $outcome = if (-not $result) { 'not attempted' }
+            elseif ($result.result -eq 'done') { 'done' }
+            else { "FAILED: $($result.error)" }
+        Write-Host "  $($change.Title): $outcome"
+    }
+}
+
 if (-not $FromMain) {
     $Repo = (Resolve-Path $Repo).Path
     if (-not $NoFetch -and $Ref.StartsWith('origin/')) { Update-Ref }
@@ -209,5 +308,43 @@ if ($Check) {
     exit 0
 }
 
-Write-Diagnostic 'apply mode is not implemented yet; run with -Check'
-exit 1
+$RecordPath = Join-Path $Repo 'logs\lab_setup.jsonl'
+foreach ($change in $changes) {
+    if ($states[$change.Id].State -eq 'error') {
+        Write-Host "Could not check '$($change.Title)', so it is left alone: $($states[$change.Id].Error)"
+    }
+}
+$pending = @($changes | Where-Object { $states[$_.Id].State -eq 'pending' })
+$allDone = $true
+if ($pending.Count -eq 0) {
+    Write-Host "Nothing to apply on $HostName."
+} else {
+    Show-Pending $pending
+    if (-not ($Yes -or ((Read-Host "Apply these $($pending.Count) changes? [y/N]") -match '^y(es)?$'))) {
+        Write-Host 'Nothing applied.'
+    } else {
+        if (@($pending | Where-Object Admin).Count -and -not (Test-Elevated)) {
+            $results = Invoke-Elevated
+        } else {
+            $results = @{}
+            foreach ($change in $pending) {
+                Write-Host ''
+                Write-Host "Applying: $($change.Title)"
+                $message = Invoke-Change $change
+                $results[$change.Id] = Write-Record $change $(if ($message) { 'failed' } else { 'done' }) $message
+                if ($message) { break }
+            }
+        }
+        Show-Summary $pending $results
+        $allDone = -not @($pending | Where-Object { $results[$_.Id].result -ne 'done' }).Count
+    }
+}
+
+if ($Relaunch) {
+    $null = Read-Host "Press Enter to start pytweezer-$Relaunch"
+    $launcher = @{ server = 'start_servers.bat'; client = 'start_client.bat' }[$Relaunch]
+    # A full path, not "cmd /c start_servers.bat": with NoDefaultCurrentDirectoryInExePath
+    # set, cmd does not look in the working directory.
+    Start-Process (Join-Path $Repo $launcher) -WorkingDirectory $Repo
+}
+if ($allDone) { exit 0 } else { exit 1 }

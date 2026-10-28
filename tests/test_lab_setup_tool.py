@@ -14,6 +14,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 TOOL = Path(__file__).resolve().parents[1] / "lab_setup" / "lab-setup.ps1"
+APPLIED_ORDER = "_applied_order.txt"
 
 
 def _git(cwd, *args):
@@ -44,7 +45,10 @@ def _write_change(work, change_id, check, apply, systems, hosts):
     if check is None:
         check = f"if (Test-Path {marker}) {{ exit 0 }} else {{ exit 1 }}"
     if apply is None:
-        apply = f"New-Item -ItemType File -Force {marker} | Out-Null"
+        apply = (
+            f"New-Item -ItemType File -Force {marker} | Out-Null\n"
+            f"Add-Content (Join-Path $Repo 'markers/{APPLIED_ORDER}') '{change_id}'"
+        )
     (folder / "change.json").write_text(json.dumps(manifest), encoding="utf-8")
     (folder / "check.ps1").write_text(
         f"param([string]$Repo, [hashtable]$Secrets)\n{check}\n", encoding="utf-8"
@@ -64,7 +68,8 @@ class LabRepo:
     """A pytweezer clone whose ``origin/main`` holds the tool under test.
 
     ``work`` is the clone the tool is run against; fake changes check for and
-    create marker files ``<work>/markers/<id>``.
+    create marker files ``<work>/markers/<id>``, and their applies append
+    their id to ``<work>/markers/_applied_order.txt``.
     """
 
     def __init__(self, tmp_path):
@@ -127,6 +132,7 @@ class LabRepo:
                 str(self.work),
                 *args,
             ],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=60,
@@ -138,6 +144,19 @@ class LabRepo:
         done = self.run("-Check", "-HostName", host, *([] if fetch else ["-NoFetch"]))
         assert done.returncode == 0, done.stderr
         return json.loads(done.stdout)
+
+    def apply(self, yes=False, host="PH-BEAST"):
+        return self.run(*(["-Yes"] if yes else []), "-NoFetch", "-HostName", host)
+
+    def records(self):
+        path = self.work / "logs" / "lab_setup.jsonl"
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text("utf-8").splitlines()]
+
+    def marker_order(self):
+        path = self.work / "markers" / APPLIED_ORDER
+        return path.read_text("utf-8").split() if path.exists() else []
 
 
 @pytest.fixture
@@ -196,3 +215,38 @@ def test_a_throwing_check_is_reported_as_error(lab_repo):
     lab_repo.add_change("good")
     states = {c["id"]: c["state"] for c in lab_repo.check()["changes"]}
     assert states == {"bad": "error", "good": "pending"}
+
+
+def test_apply_applies_pending_in_order_and_records(lab_repo):
+    lab_repo.add_change("2026-01-01-a")
+    lab_repo.add_change("2026-01-02-b")
+    lab_repo.apply(yes=True)
+    assert lab_repo.marker_order() == ["2026-01-01-a", "2026-01-02-b"]
+    records = lab_repo.records()
+    assert [(r["change"], r["result"]) for r in records] == [
+        ("2026-01-01-a", "done"),
+        ("2026-01-02-b", "done"),
+    ]
+    assert {c["state"] for c in lab_repo.check()["changes"]} == {"done"}
+
+
+def test_apply_stops_at_the_first_failure(lab_repo):
+    lab_repo.add_change("2026-01-01-a", apply='throw "disk full"')
+    lab_repo.add_change("2026-01-02-b")
+    lab_repo.apply(yes=True)
+    (record,) = lab_repo.records()
+    assert record["result"] == "failed" and "disk full" in record["error"]
+    assert lab_repo.marker_order() == []
+
+
+def test_apply_that_does_not_satisfy_its_check_is_failed(lab_repo):
+    lab_repo.add_change("a", apply="Write-Host 'did nothing'")
+    lab_repo.apply(yes=True)
+    assert lab_repo.records()[0]["result"] == "failed"
+
+
+def test_apply_skips_changes_already_done(lab_repo):
+    lab_repo.add_change("a")
+    lab_repo.mark_done("a")
+    lab_repo.apply(yes=True)
+    assert lab_repo.records() == []
