@@ -69,6 +69,15 @@ MEASUREMENT_COLUMNS = (
     "active",
     "updated",
 )
+MACHINE_CHANGE_COLUMNS = (
+    "host",
+    "change",
+    "state",
+    "checked_at",
+    "applied_at",
+    "commit",
+    "error",
+)
 _JSON_COLUMNS = {"arguments", "scan", "scan_values", "scalars", "limits"}
 
 
@@ -89,6 +98,9 @@ SQL = {
     "runs": _upsert("runs", RUN_COLUMNS, ("rid",)),
     "points": _upsert("points", POINT_COLUMNS, ("rid", "point_index")),
     "measurements": _upsert("measurements", MEASUREMENT_COLUMNS, ("measurement",)),
+    "machine_changes": _upsert(
+        "machine_changes", MACHINE_CHANGE_COLUMNS, ("host", "change")
+    ),
 }
 
 
@@ -242,6 +254,13 @@ class DBWriter:
             datetime.now(UTC),
         )
         self._enqueue([("measurements", row)])
+
+    def record_machine_change(
+        self, host, change, state, checked_at, applied_at, commit, error
+    ):
+        """Queue an insert-or-update of one ``machine_changes`` row."""
+        row = (host, change, state, checked_at, applied_at, commit, error)
+        self._enqueue([("machine_changes", row)])
 
     def flush(self, timeout=5.0):
         """Wait until every queued row is written; returns False on timeout."""

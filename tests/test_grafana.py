@@ -110,3 +110,10 @@ def test_alert_rules_query_the_provisioned_datasource_or_expressions():
         sources = {query["datasourceUid"] for query in rule["data"]}
         assert sources <= {"pytweezer", "__expr__"}, rule["title"]
         assert rule["condition"] in {query["refId"] for query in rule["data"]}
+
+
+def test_health_dashboard_shows_lab_setup_per_machine():
+    health = _dashboards()["pytweezer-health.json"]
+    (panel,) = [p for p in health["panels"] if p.get("title") == "Lab setup"]
+    sql = panel["targets"][0]["rawSql"]
+    assert "FROM machine_changes" in sql

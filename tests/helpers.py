@@ -30,6 +30,7 @@ class RecordingDB:
         self.points = []
         self.writes = []
         self.measurements = []
+        self.machine_changes = []
         self.closed = False
 
     def record_run(self, run):
@@ -52,6 +53,13 @@ class RecordingDB:
 
     def record_measurement(self, measurement, logger, interval_s, limits, active):
         self.measurements.append((measurement, logger, interval_s, limits, active))
+
+    def record_machine_change(
+        self, host, change, state, checked_at, applied_at, commit, error
+    ):
+        self.machine_changes.append(
+            (host, change, state, checked_at, applied_at, commit, error)
+        )
 
     def close(self):
         self.closed = True

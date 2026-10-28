@@ -23,7 +23,7 @@ def conn():
     with psycopg.connect(DSN, autocommit=True) as conn:
         ensure_schema(conn)
         ensure_schema(conn)  # idempotent
-        conn.execute("TRUNCATE readings, runs, points, measurements")
+        conn.execute("TRUNCATE readings, runs, points, measurements, machine_changes")
         yield conn
 
 

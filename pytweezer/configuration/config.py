@@ -35,6 +35,11 @@ DATABASE = {
         "PYTWEEZER_DB_DSN",
         f"postgresql://pytweezer:pytweezer@{SERVER_HOST}:5432/pytweezer",
     ),
+    # Ignores simulation: machine reports always go to PH-BEAST.
+    "server_dsn": os.environ.get(
+        "PYTWEEZER_DB_DSN",
+        f"postgresql://pytweezer:pytweezer@{HOSTS[SERVER_PC]}:5432/pytweezer",
+    ),
 }
 
 # Grafana on the server PC, for the GUI's "Open in Grafana" buttons.

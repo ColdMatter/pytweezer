@@ -208,3 +208,22 @@ def test_a_failed_schema_setup_is_retried_on_a_fresh_connection(
 
     assert attempts[0].closed and not attempts[1].closed
     assert len(db.sent["readings"]) == 1
+
+
+def test_record_machine_change_upserts_on_host_and_change(db, writer):
+    checked = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
+    writer.record_machine_change(
+        "PH-BEAST", "2026-10-28-install-uv", "pending", checked, None, "abc123", None
+    )
+    assert writer.flush(2)
+    (row,) = db.sent["machine_changes"]
+    assert row == (
+        "PH-BEAST",
+        "2026-10-28-install-uv",
+        "pending",
+        checked,
+        None,
+        "abc123",
+        None,
+    )
+    assert "ON CONFLICT (host, change)" in writer_module.SQL["machine_changes"]

@@ -62,3 +62,17 @@ CREATE TABLE IF NOT EXISTS measurements (
     active      boolean NOT NULL DEFAULT false,
     updated     timestamptz
 );
+
+-- One row per (machine, lab-setup change): what pytweezer on that PC last
+-- found when it checked lab_setup/changes/ on main. state is pending, done,
+-- failed or error.
+CREATE TABLE IF NOT EXISTS machine_changes (
+    host       text        NOT NULL,
+    change     text        NOT NULL,
+    state      text        NOT NULL,
+    checked_at timestamptz NOT NULL,
+    applied_at timestamptz,
+    commit     text,
+    error      text,
+    PRIMARY KEY (host, change)
+);

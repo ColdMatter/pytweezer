@@ -77,3 +77,42 @@ def test_launcher_imports_no_pytweezer_code():
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == "False"
+
+
+@pytest.mark.parametrize(
+    "role, hostname, override",
+    [
+        ("server", "someones-laptop", None),  # simulating
+        (None, "IC-CZC4287H3W", None),
+        (None, "IC-CZC4287H3W", "postgresql://u:p@elsewhere:5432/db"),
+    ],
+)
+def test_server_dsn_points_at_the_server_pc_even_when_simulating(
+    role, hostname, override
+):
+    code = (
+        "import socket, sys, json\n"
+        "socket.gethostname = lambda: sys.argv[1]\n"
+        "from pytweezer.configuration import config\n"
+        "print(json.dumps([config.DATABASE['server_dsn'], config.HOSTS[config.SERVER_PC]]))"
+    )
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PYTWEEZER_ROLE", "PYTWEEZER_DB_DSN")
+    }
+    if role:
+        env["PYTWEEZER_ROLE"] = role
+    if override:
+        env["PYTWEEZER_DB_DSN"] = override
+    result = subprocess.run(
+        [sys.executable, "-c", code, hostname],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    server_dsn, server_ip = json.loads(result.stdout.strip().splitlines()[-1])
+    assert server_dsn == (
+        override or f"postgresql://pytweezer:pytweezer@{server_ip}:5432/pytweezer"
+    )
