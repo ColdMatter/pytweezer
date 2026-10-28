@@ -146,7 +146,7 @@ Load a skill when you need more than that:
 | Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Running or screenshotting the GUI | `run-pytweezer` |
-| Rolling out a setup change to the lab PCs (install a tool, a share login, a setting) | add-lab-change |
+| Rolling out a setup change to the lab PCs (install a tool, a share login, a setting) | `add-lab-change` |
 | Writing, reviewing or deleting tests | `write-tests` |
 | MOTMaster channels (which board/port/line a signal is on), scripts, the C# side | Read `../EDMSuite/.claude/skills/motmaster-controller/SKILL.md` — EDMSuite skills don't load from here. Channel maps: `../EDMSuite/DAQ/MoleculeMOTHardware.cs` (CaF), `../EDMSuite/DAQ/RbTweezerHardware.cs` (Rb) |
 

@@ -27,7 +27,7 @@ files as ANSI.
 | `title`, `description` | Shown in the popup. Say what it does and why. |
 | `systems` | Any of `windows`, `macos`, `linux`. Windows needs `check.ps1` and `apply.ps1`. |
 | `hosts` | Optional; exactly one of `{"only": [...]}` or `{"except": [...]}` of PC names (e.g. `PH-BEAST`; compared case-insensitively). Omit for every PC. |
-| `admin` | `true` if apply needs elevation. Admin changes run together in one elevated window. |
+| `admin` | `true` if apply needs elevation. If any pending change needs admin, *all* pending changes, admin or not, run in order in the one elevated window. |
 | `secrets` | Optional list of `{"name", "prompt", "ask"}`: a value the user is asked to type (`prompt`), and who to ask for it (`ask`). |
 
 ### Scripts
@@ -38,15 +38,34 @@ Both take `param([string]$Repo, [hashtable]$Secrets)`.
   `$PSScriptRoot`**: the scripts run from a temporary copy.
 - `check.ps1` runs in a separate PowerShell with only `-Repo`. Exit 0 = in
   place, 1 = pending; a thrown error or any other exit code is reported as
-  `error`. It must have no side effects and need no admin.
+  `error`. It must have no side effects and need no admin. A change whose
+  check errors is left alone; later changes are still checked and applied.
+  `$Repo` may be any clone or worktree, so don't make a check depend on which
+  one pytweezer was started from.
 - `apply.ps1` is safe to run again and **throws on failure**. A change counts
   as done only if apply did not throw and `check.ps1` then exits 0.
 - Secrets arrive as `$Secrets["NAME"]` (plain strings). Never echo, log,
   transform or write them anywhere: recorded errors mask a secret only if it
-  appears verbatim.
+  appears verbatim. **Never pass a secret on a native command line**
+  (`cmdkey /pass:`, `net user ... <password>`): process auditing records
+  command lines, and PowerShell 5.1 mangles quotes in them. Use an in-process
+  API instead (a cmdlet taking a `SecureString`, or P/Invoke through
+  `Add-Type`, as `2026-10-28-data-share-login` does with `CredWrite`).
+- pytweezer exits before applying, but a change that touches the venv or
+  anything else pytweezer holds open must first check that no pytweezer
+  process is still running, and throw if one is.
 
 A change on `main` is not edited once it has been rolled out, except to fix
 it; for a new behaviour, add a new change.
+
+## Changing the tool itself
+
+Every branch's pytweezer runs `origin/main`'s `lab-setup.ps1` (through its
+own copy as a bootstrap) and parses the `-Check` JSON with its own Python. So
+the `-Check` JSON fields (`commit`, `host`, `changes[]` with `id`, `title`,
+`description`, `admin`, `state`, `error`) and the bootstrap parameters
+(`-Check`, `-Yes`, `-Relaunch`, `-Repo`, `-Ref`, `-NoFetch`) may only be
+added to, never renamed or removed.
 
 ## Trying it before merging
 
@@ -64,5 +83,11 @@ well formed.
 
 ## A new PC
 
-It needs git and a clone of pytweezer. Run `lab_setup\lab-setup.ps1` by hand
-once; after that the startup popup takes over.
+It needs git and a clone of pytweezer. From the clone, run
+
+```powershell
+powershell -ExecutionPolicy Bypass -File lab_setup\lab-setup.ps1
+```
+
+once by hand (the default execution policy blocks a bare
+`lab_setup\lab-setup.ps1`); after that the startup popup takes over.

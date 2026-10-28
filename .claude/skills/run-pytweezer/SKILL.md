@@ -91,6 +91,16 @@ ssh 10.59.3.1 "cd /d C:\Users\tweez\ColdMatter\pytweezer && git checkout <branch
 ssh 10.59.3.1 "schtasks /run /tn pytweezer-server"               # start on the desktop
 ```
 
+If that PC has lab setup changes pending, pytweezer first shows the
+pending-changes popup on the desktop and waits up to 2 minutes for someone to
+answer before starting normally, so a `schtasks /run` launch can take that
+long to show the GUI. `PYTWEEZER_SKIP_LAB_SETUP=1` in pytweezer's environment
+skips the check altogether (no popup, and nothing reported to the
+`machine_changes` table). A scheduled task does not inherit the SSH session's
+environment, so it would have to be a user environment variable, which turns
+the check off for every launch on that PC: set it only with the user's
+agreement, and prefer getting the pending changes applied.
+
 `pytweezer-client` is the client-PC equivalent. Do not create scheduled tasks
 yourself; if `schtasks /run` says the task does not exist, ask the user to run
 the `launch-tasks` change on that PC (`lab_setup\lab-setup.ps1`). SSH hosts: `10.59.3.1` (PH-BEAST, user
