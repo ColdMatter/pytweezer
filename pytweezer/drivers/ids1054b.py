@@ -100,7 +100,10 @@ class IDS1054B:
         self.write(":FORCe")
 
     def trigger_state(self) -> str:
-        """One of ``ARMED``, ``READY``, ``AUTO``, ``TRIGGERED`` or ``STOP``."""
+        """One of ``ARMED``, ``READY``, ``AUTO``, ``TRIGGERED``, ``STOP`` or ``SAVE``.
+
+        A completed :meth:`single` acquisition reads ``SAVE``, not ``STOP``.
+        """
         return self.query(":TRIGger:STATe?")
 
     # ------------------------------------------------------------------ #
@@ -168,7 +171,9 @@ class IDS1054B:
         Args:
             scale: Seconds per division.
             position: Trigger offset in seconds.
-            record_length: Points per record: 1e3, 1e4, 1e5, 1e6 or 1e7.
+            record_length: Points per record: 1e3, 1e4, 1e5, 1e6 or 1e7. After
+                changing it to 1e6 or more the scope can stop answering for
+                longer than a 30 s timeout, so the read-back here may time out.
         """
         if scale is not None:
             self.write(f":TIMebase:SCALe {float(scale):.3E}")
