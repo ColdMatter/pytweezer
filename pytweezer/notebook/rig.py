@@ -15,8 +15,10 @@ the frames are added to the zip MOTMaster wrote for the run (see
 :mod:`pytweezer.notebook.zips`), so ``analysis3.readFromZip`` keeps working.
 """
 
+import functools
 import json
 import re
+import sys
 import time
 import warnings
 from collections.abc import Sequence
@@ -55,6 +57,32 @@ class Shot:
         if not self.zips:
             return None
         return int(re.search(r"_(\d+)\.zip$", next(iter(self.zips.values())).name)[1])
+
+
+def _caller_stacklevel() -> int:
+    """``warnings.warn`` stacklevel of the first frame outside this module."""
+    frame, level = sys._getframe(1), 1
+    while frame is not None and frame.f_code.co_filename == __file__:
+        frame, level = frame.f_back, level + 1
+    return level
+
+
+def _reconnect_if_interrupted(method):
+    # sipyco reads a call's reply after sending it; an interrupt in between leaves
+    # the reply queued, and every later call on that client gets the one before's.
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except BaseException as error:
+            if not isinstance(error, Exception) and not getattr(
+                error, "_rig_reconnected", False
+            ):
+                self._reconnect()
+                error._rig_reconnected = True
+            raise
+
+    return wrapper
 
 
 def _motmaster_file_config(name: str) -> dict[str, Any]:
@@ -96,10 +124,18 @@ class Rig:
         frame_poll_s: float = 0.05,
     ) -> None:
         self._owned: list[Any] = []
+        self._motmaster_name = motmaster if isinstance(motmaster, str) else None
+        self._camera_names = {
+            key: camera
+            for key, camera in (cameras or {}).items()
+            if isinstance(camera, str)
+        }
+        self.simulated = False
         if isinstance(motmaster, str):
             file_config = _motmaster_file_config(motmaster)
             element = element or file_config["data_prefix"]
             data_root = data_root or file_config["data_root_path"]
+            self.simulated = bool(get_device_config(motmaster).get("simulate"))
             motmaster = self._connect(motmaster)
         if element is None or data_root is None:
             raise ValueError(
@@ -113,12 +149,15 @@ class Rig:
             for key, camera in (cameras or {}).items()
         }
         self.linked = linked
+        self.buffer_frames = buffer_frames
         self.frame_settle_s = frame_settle_s
         self.frame_timeout_s = frame_timeout_s
         self.frame_poll_s = frame_poll_s
         self.last_shots: list[Shot] = []
         self._linked_set: bool | None = None
         self._last_counts: dict[tuple[str, str], int] = {}
+        self._shots_run = 0
+        self._warned_simulated = False
         for camera in self.cameras.values():
             camera.arm(buffer_frames)
 
@@ -127,6 +166,20 @@ class Rig:
         self._owned.append(client)
         return client
 
+    def _reconnect(self) -> None:
+        for client in self._owned:
+            try:
+                client.close_rpc()
+            except Exception:
+                logger.warning("Could not close a stale client", exc_info=True)
+        self._owned = []
+        if self._motmaster_name is not None:
+            self.motmaster = self._connect(self._motmaster_name)
+            self._linked_set = None
+        for key, name in self._camera_names.items():
+            self.cameras[key] = self._connect(name)
+
+    @_reconnect_if_interrupted
     def run(
         self, script: str, *, save: bool = True, iterations: int = 1, **params: Any
     ) -> Shot:
@@ -141,6 +194,7 @@ class Rig:
         self.last_shots = []
         return self._run(script, save, iterations, params)
 
+    @_reconnect_if_interrupted
     def scan(
         self,
         script: str,
@@ -161,6 +215,7 @@ class Rig:
             for value in values
         ]
 
+    @_reconnect_if_interrupted
     def scan_laser(
         self,
         script: str,
@@ -189,6 +244,7 @@ class Rig:
             shots.append(shot)
         return shots
 
+    @_reconnect_if_interrupted
     def auto_mot(
         self,
         script: str,
@@ -257,7 +313,7 @@ class Rig:
                     else float("nan")
                 )
             set_point = scan_range[int(np.argmax(numbers))]
-            self.motmaster.set_laser_set_point_wml(laser, set_point)
+            self.motmaster.ramp_laser_set_point_wml(laser, set_point)
             results[laser] = {
                 "scan_range": scan_range,
                 "numbers": numbers,
@@ -269,6 +325,7 @@ class Rig:
             plot_auto_mot_results(results)
         return results
 
+    @_reconnect_if_interrupted
     def laser_set_points(self) -> dict[str, float]:
         """Every laser's wavemeter-lock set point, in THz."""
         return self.motmaster.laser_set_points_wml()
@@ -282,7 +339,17 @@ class Rig:
             name: value.item() if isinstance(value, np.generic) else value
             for name, value in params.items()
         }
-        if self._linked_set != self.linked:
+        if save and self.simulated:
+            if not self._warned_simulated:
+                warnings.warn(
+                    "The simulated MOTMaster writes no zips; running with save=False",
+                    stacklevel=_caller_stacklevel(),
+                )
+                self._warned_simulated = True
+            save = False
+        # Re-claimed every run: MOTMaster drops the link if the secondary takes
+        # back control, and a linked script must not then run on one machine.
+        if self.linked or self._linked_set is not False:
             mm.set_linked(self.linked)
             self._linked_set = self.linked
         mm.set_motmaster_experiment(script)
@@ -291,6 +358,9 @@ class Rig:
         mm.set_iterations(int(iterations))
         mm.set_save_toggle(save)
 
+        # Another user of a shared camera may have stopped it since the last shot.
+        for camera in self.cameras.values():
+            camera.arm(self.buffer_frames)
         marks = {key: camera.frames_acquired() for key, camera in self.cameras.items()}
         today = date.today()
         folders = [
@@ -299,6 +369,7 @@ class Rig:
         ]
         before = zips.snapshot(folders, self.element) if save else set()
 
+        self._shots_run += 1
         t_start = time.time()
         mm.start_motmaster_experiment(params)
         t_end = time.time()
@@ -344,10 +415,13 @@ class Rig:
             count = len(stack)
             previous = self._last_counts.get((script, key))
             if previous is not None and previous != count:
-                warnings.warn(
-                    f"{key}: {count} frames from {script!r}, {previous} last time",
-                    stacklevel=4,
+                # The shot number keeps Python from showing a repeat only once.
+                message = (
+                    f"{key}: {count} frames from {script!r}, {previous} last time "
+                    f"(shot {self._shots_run})"
                 )
+                logger.warning(message)
+                warnings.warn(message, stacklevel=_caller_stacklevel())
             self._last_counts[(script, key)] = count
 
     def _save(self, main_zip: Path, images: dict[str, np.ndarray]) -> dict[str, Path]:

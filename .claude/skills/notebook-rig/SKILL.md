@@ -36,18 +36,23 @@ images, parameters_dict = CaF.readFromZip(fileno)` loop with
 `for shot in shots: images, parameters_dict = shot.images["CaF"], shot.params`.
 The maths (`images[skip*3::3]` across iterations included) is unchanged: one
 shot is one `Go` and holds all its iterations' frames in order. An interrupted
-scan leaves its finished shots in `rig.last_shots`.
+scan leaves its finished shots in `rig.last_shots`. An interrupt (Ctrl-C/stop
+button) reconnects the rig's own device clients, since sipyco would otherwise
+hand every later call the previous call's reply. With `rig.linked = True` the
+link is re-claimed before every shot.
 
 ## How frames are collected
 
-Cameras are armed once (`Camera.arm`) and run free on hardware triggers. `run`
+Cameras run free on hardware triggers; `Camera.arm` is called before every shot
+(idempotent), so a shared camera another task stopped comes back. `run`
 notes each camera's `frames_acquired()` before `Go`, waits until every count has
 been still for `frame_settle_s` (up to `frame_timeout_s`), then reads
 `read_frames_from(mark)`. Nothing configures frames per shot; a count that
 differs from the previous shot of the same script raises a `UserWarning`
 (usually a missed trigger). A camera left on internal trigger never settles:
 every shot waits `frame_timeout_s` and returns whatever streamed in. Simulated
-cameras free-run the same way.
+cameras free-run the same way, and a simulated MOTMaster writes no zips, so the
+rig runs it with `save=False` (and says so once).
 
 The camera side is the frame-index protocol on `Camera` (`camera_base.py`):
 `arm`, `frames_acquired`, `read_frames_from`, `settings`, `start_live`/`stop_live`.

@@ -1,3 +1,4 @@
+import warnings
 from datetime import date
 
 import numpy as np
@@ -37,10 +38,15 @@ class FakeCamera:
         self.late = 0
         self.polls_until_late = 0
         self.armed_with = None
+        self.arms = 0
         self.value = lambda index: index
 
     def arm(self, buffer_frames=1000):
         self.armed_with = buffer_frames
+        self.arms += 1
+
+    def close_rpc(self):
+        self.closed = True
 
     def trigger(self, iterations):
         n = self.frames_per_iteration * iterations
@@ -105,6 +111,9 @@ class FakeMotMaster:
 
     def set_linked(self, value):
         self.linked_calls.append(value)
+
+    def close_rpc(self):
+        self.closed = True
 
     def get_params(self):
         return {"dummy": 0.0, "tLoad": 100}
@@ -222,10 +231,17 @@ def test_linked_mode_is_set_and_released(rig_parts):
     rig, motmaster, _ = rig_parts()
     rig.linked = True
     rig.run("S", save=False)
-    rig.run("S", save=False)
     assert motmaster.linked_calls == [True]
     rig.close()
     assert motmaster.linked_calls == [True, False]
+
+
+def test_a_dropped_link_is_claimed_again_before_the_next_run(rig_parts):
+    rig, motmaster, _ = rig_parts()
+    rig.linked = True
+    rig.run("S", save=False)
+    rig.run("S", save=False)
+    assert motmaster.linked_calls == [True, True]
 
 
 def test_an_unlinked_rig_clears_a_stale_link_and_leaves_it_on_close(rig_parts):
@@ -295,8 +311,8 @@ def test_auto_mot_parks_each_laser_on_its_brightest_point(rig_parts):
     results = rig.auto_mot("S", {"v0": values})
     assert results["v0"]["set_point"] == values[1]
     assert results["v0"]["start_set_point"] == 494.43
-    last_set = [call for call in motmaster.calls if call[:2] == ("set", "v0")][-1]
-    assert last_set == ("set", "v0", values[1])
+    moves = [call for call in motmaster.calls if call[1:2] == ("v0",)]
+    assert moves[-1] == ("ramp", "v0", values[1])
 
 
 @pytest.mark.parametrize(
@@ -324,3 +340,82 @@ def test_auto_mot_names_the_known_lasers_for_an_unknown_one(rig_parts):
     rig, _, _ = rig_parts()
     with pytest.raises(KeyError, match="BX"):
         rig.auto_mot("S", {"v00": [1.0]})
+
+
+def test_every_changed_frame_count_warns_from_the_callers_line(rig_parts):
+    rig, motmaster, cameras = rig_parts()
+    counts = iter([3, 2, 3, 2])
+    camera = cameras["CaF"]
+    original_trigger = camera.trigger
+
+    def alternating(iterations):
+        camera.frames_per_iteration = next(counts)
+        original_trigger(iterations)
+
+    camera.trigger = alternating
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("default")
+        rig.scan("S", "dummy", [1, 2, 3, 4], save=False)
+    count_warnings = [w for w in caught if "frames from" in str(w.message)]
+    assert len(count_warnings) == 3
+    assert {w.filename for w in count_warnings} == {__file__}
+
+
+def test_a_camera_is_armed_again_before_every_shot(rig_parts):
+    rig, _, cameras = rig_parts()
+    rig.run("S", save=False)
+    rig.run("S", save=False)
+    assert cameras["Rb"].arms == 3
+
+
+def connect_by_name(monkeypatch, tmp_path, simulate=False):
+    """Make the rig's get_device hand out fakes, keeping every one it made."""
+    made = []
+
+    def get_device(name):
+        if name == "MM":
+            device = FakeMotMaster(
+                tmp_path,
+                [
+                    made_camera
+                    for made_camera in made
+                    if isinstance(made_camera, FakeCamera)
+                ],
+            )
+        else:
+            device = FakeCamera(1)
+        made.append(device)
+        return device
+
+    monkeypatch.setattr("pytweezer.notebook.rig.get_device", get_device)
+    monkeypatch.setattr(
+        "pytweezer.notebook.rig._motmaster_file_config",
+        lambda name: {"data_prefix": "CaF", "data_root_path": str(tmp_path)},
+    )
+    monkeypatch.setattr(
+        "pytweezer.notebook.rig.get_device_config",
+        lambda name: {"simulate": simulate},
+    )
+    return made
+
+
+def test_an_interrupted_call_reconnects_the_rigs_own_clients(monkeypatch, tmp_path):
+    made = connect_by_name(monkeypatch, tmp_path)
+    rig = Rig("MM", {"CaF": "CaF cam"}, frame_settle_s=0.0)
+    first_motmaster = rig.motmaster
+    first_motmaster.fail_on_go = 1
+    with pytest.raises(KeyboardInterrupt):
+        rig.run("S", save=False)
+    assert first_motmaster.closed
+    assert rig.motmaster is not first_motmaster
+    assert rig.cameras["CaF"] is not made[1]
+    assert rig.run("S", save=False).params["tLoad"] == 100
+
+
+def test_a_simulated_motmaster_runs_without_saving(monkeypatch, tmp_path):
+    connect_by_name(monkeypatch, tmp_path, simulate=True)
+    rig = Rig("MM", {}, frame_settle_s=0.0)
+    with pytest.warns(UserWarning, match="simulated"):
+        shot = rig.run("S")
+    assert shot.zips == {}
+    assert ("save", False) in rig.motmaster.calls
