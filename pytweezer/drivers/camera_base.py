@@ -326,6 +326,7 @@ class SimulatedCamera(Camera):
         image_dir: str | None = None,
         timeout: float = 5.0,
         stream_name: str | None = None,
+        live: bool = False,
     ):
         self._shape = (256, 256)
         self._nframes = 1
@@ -333,6 +334,9 @@ class SimulatedCamera(Camera):
         self._started = 0.0
         self._rng = np.random.default_rng()
         super().__init__(image_dir=image_dir, timeout=timeout, stream_name=stream_name)
+        if live:
+            self.arm()
+            self.start_live()
 
     def _connect(self) -> None:
         # No hardware; a non-None sentinel marks the camera as "connected".

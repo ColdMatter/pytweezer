@@ -70,3 +70,17 @@ def test_live_broadcast_sends_each_new_frame_once(camera, clock):
     time.sleep(0.05)
     camera.stop_live()
     assert recorder.indices == [0, 1, 2]
+
+
+def test_caf_thorcam_builds_simulated_and_streams_live():
+    from pytweezer.configuration.config import get_config
+    from pytweezer.servers.device_server import build_spec
+
+    conf = get_config()["Devices"]["CaF ThorCam"] | {"simulate": True}
+    camera = build_spec("CaF ThorCam", conf).target
+    try:
+        assert camera._acquisition_in_progress()
+        assert camera._live_thread.is_alive()
+    finally:
+        camera.close()
+    assert camera._live_thread is None

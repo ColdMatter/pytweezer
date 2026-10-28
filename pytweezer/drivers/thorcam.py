@@ -35,12 +35,43 @@ class ThorCam(Camera):
         image_dir: str | None = None,
         timeout: float = 5.0,
         stream_name: str | None = None,
+        serial_number: str | None = "32148",
+        trigger_mode: str | None = None,
+        trigger_polarity: str = "rise",
+        binning: int | None = None,
+        gain_db: float | None = None,
+        buffer_frames: int = 1000,
+        live: bool = False,
     ):
+        """Open the camera and apply whichever settings are given.
+
+        Args:
+            serial_number: Camera to open; ``None`` opens the first one found.
+            trigger_mode: pylablib's ``"int"``, ``"ext"`` or ``"bulb"`` (the trigger
+                pulse sets each exposure); ``None`` leaves the camera's own.
+            trigger_polarity: ``"rise"`` (active high) or ``"fall"``; applied only
+                with a ``trigger_mode``.
+            binning: Square binning over the full sensor.
+            gain_db: Analogue gain in dB.
+            buffer_frames: Ring-buffer size for :meth:`arm`.
+            live: Arm now and broadcast every frame on the image stream.
+        """
+        self.serial_number = serial_number
         super().__init__(
             image_dir=image_dir or IMAGE_DIRECTORY,
             timeout=timeout,
             stream_name=stream_name,
         )
+        if trigger_mode is not None:
+            self._backend.set_trigger_mode(trigger_mode)
+            self._backend.setup_ext_trigger(trigger_polarity)
+        if binning is not None:
+            self._backend.set_roi(hbin=int(binning), vbin=int(binning))
+        if gain_db is not None:
+            self._backend.set_gain(float(gain_db))
+        if live:
+            self.arm(buffer_frames)
+            self.start_live()
 
     # ------------------------------------------------------------------ #
     # Camera hooks
@@ -48,8 +79,10 @@ class ThorCam(Camera):
 
     def _connect(self) -> None:
         try:
-            thorcam.list_cameras_tlcam()
-            camera = thorcam.ThorlabsTLCamera(serial="32148")
+            serial = self.serial_number
+            if serial is None:
+                serial = thorcam.list_cameras_tlcam()[0]
+            camera = thorcam.ThorlabsTLCamera(serial=serial)
             camera.open()
         except Exception as exc:
             self._backend = None
@@ -91,6 +124,19 @@ class ThorCam(Camera):
     @requires_camera
     def stop_acquisition(self):
         self._backend.stop_acquisition()
+
+    @requires_camera
+    def settings(self) -> dict:
+        backend = self._backend
+        return {
+            "serial_number": self.serial_number,
+            "trigger_mode": backend.get_trigger_mode(),
+            "trigger_polarity": backend.get_ext_trigger_parameters(),
+            "binning": list(backend.get_roi()[4:6]),
+            "gain_db": backend.get_gain(),
+            "exposure_s": backend.get_exposure(),
+            "roi": list(backend.get_roi()[:4]),
+        }
 
     @requires_camera
     def _read_frames(self, nframes: int, start_frame: int):
