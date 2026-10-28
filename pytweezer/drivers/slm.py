@@ -18,6 +18,7 @@ hardware applies its own voltage LUT on top.
 
 from __future__ import annotations
 
+import atexit
 import time
 
 import numpy as np
@@ -32,11 +33,22 @@ DEFAULT_SDK_DLL = (
     "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\SDK\\Blink_C_wrapper"
 )
 DEFAULT_LUT_FILE = (
-    "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\LUT Files\\slm40_at852.LUT"
+    "C:\\Program Files\\Meadowlark Optics\\Blink Plus\\LUT Files\\slm_40deg_at852.lut"
 )
 
 #: Frames the 1024x1024 board's on-board memory holds (manual S4.3.9).
 MAX_PRELOAD_FRAMES = 752
+
+
+def _load_blink_sdk(sdk_dll: str):
+    from ctypes import CDLL, c_char_p, c_double, c_int, cdll
+
+    cdll.LoadLibrary(sdk_dll)
+    lib = CDLL("Blink_C_wrapper")
+    lib.Read_SLM_temperature.argtypes = [c_int]
+    lib.Read_SLM_temperature.restype = c_double
+    lib.Get_last_error_message.restype = c_char_p
+    return lib
 
 
 class SLM:
@@ -44,7 +56,13 @@ class SLM:
 
     The live hardware handle (the loaded DLL) lives on :attr:`_lib`; ``None`` means
     disconnected. One board only (board number defaults to 1).
+
+    The SDK is a single global inside the DLL, so only one ``SLM`` may be open per
+    process; a second raises until the first is closed. A failed construction
+    releases the SDK, and an open SLM is closed at interpreter exit.
     """
+
+    _sdk_owner: SLM | None = None
 
     def __init__(
         self,
@@ -77,51 +95,69 @@ class SLM:
     def _connect(self) -> None:
         # Imported lazily: ctypes is stdlib, but loading the Blink DLL is what
         # actually requires the SDK to be installed on this machine.
-        from ctypes import CDLL, POINTER, byref, c_double, c_int, c_ubyte, c_uint, cdll
+        from ctypes import POINTER, byref, c_int, c_ubyte, c_uint
 
-        cdll.LoadLibrary(self.sdk_dll)
-        lib = CDLL("Blink_C_wrapper")
-        lib.Read_SLM_temperature.argtypes = [c_int]
-        lib.Read_SLM_temperature.restype = c_double
-
-        num_boards_found = c_uint(0)
-        constructed_okay = c_uint(-1)
-        lib.Create_SDK(byref(num_boards_found), byref(constructed_okay))
-        if constructed_okay.value == 0:
-            raise RuntimeError("Blink SDK did not construct successfully")
-        if num_boards_found.value != 1:
+        if SLM._sdk_owner is not None:
             raise RuntimeError(
-                f"Expected exactly one SLM board, found {num_boards_found.value}"
+                "An SLM is already open in this process; close() it before "
+                "opening another"
+            )
+        lib = _load_blink_sdk(self.sdk_dll)
+        num_boards_found = c_uint(0)
+        constructed_okay = c_int(-1)
+        lib.Create_SDK(byref(num_boards_found), byref(constructed_okay))
+        # The SDK now needs Delete_SDK even if construction failed: a leaked one
+        # has left the board reporting "No PCIe hardware found" to every later
+        # process until the device was disabled and re-enabled in Device Manager.
+        self._lib = lib
+        SLM._sdk_owner = self
+        try:
+            if constructed_okay.value == 0:
+                raise RuntimeError(
+                    f"Blink SDK did not construct successfully: {self._sdk_error()}"
+                )
+            if num_boards_found.value != 1:
+                raise RuntimeError(
+                    f"Expected exactly one SLM board, found {num_boards_found.value}"
+                )
+
+            self.width = lib.Get_image_width(self.board_number)
+            self.height = lib.Get_image_height(self.board_number)
+            self.depth = lib.Get_image_depth(self.board_number)  # bits per pixel
+            serial = lib.Read_Serial_Number(self.board_number)
+            LOGGER.info(
+                "SLM board %d: %dx%d @ %d-bit, serial %s, %.3f degC",
+                self.board_number,
+                self.width,
+                self.height,
+                self.depth,
+                serial,
+                lib.Read_SLM_temperature(self.board_number),
             )
 
-        self.width = lib.Get_image_width(self.board_number)
-        self.height = lib.Get_image_height(self.board_number)
-        self.depth = lib.Get_image_depth(self.board_number)  # bits per pixel
-        serial = lib.Read_Serial_Number(self.board_number)
-        LOGGER.info(
-            "SLM board %d: %dx%d @ %d-bit, serial %s, %.3f degC",
-            self.board_number,
-            self.width,
-            self.height,
-            self.depth,
-            serial,
-            lib.Read_SLM_temperature(self.board_number),
-        )
+            lib.SetWaitForTrigger(self.board_number, int(self.wait_for_trigger))
+            lib.SetFlipImmediate(self.board_number, int(self.flip_immediate))
+            lib.SetOutputPulse(self.board_number, int(self.output_pulse))
 
-        lib.SetWaitForTrigger(self.board_number, int(self.wait_for_trigger))
-        lib.SetFlipImmediate(self.board_number, int(self.flip_immediate))
-        lib.SetOutputPulse(self.board_number, int(self.output_pulse))
+            if self.lut_file:
+                status = lib.Load_LUT_file(self.board_number, self.lut_file.encode())
+                if status != 1:
+                    raise RuntimeError(
+                        f"Failed to load LUT file {self.lut_file!r}: {self._sdk_error()}"
+                    )
+                LOGGER.info("Loaded LUT %s", self.lut_file)
 
-        if self.lut_file:
-            status = lib.Load_LUT_file(self.board_number, self.lut_file.encode())
-            if status != 1:
-                raise RuntimeError(f"Failed to load LUT file {self.lut_file!r}")
-            LOGGER.info("Loaded LUT %s", self.lut_file)
+            self._poi = POINTER(c_ubyte)  # cached for hot-path mask writes
+            # Start from a blank (zero-phase) frame.
+            self.update_mask(np.zeros((self.height, self.width), dtype=np.uint8))
+        except BaseException:
+            self.close()
+            raise
+        atexit.register(self.close)
 
-        self._lib = lib
-        self._poi = POINTER(c_ubyte)  # cached for hot-path mask writes
-        # Start from a blank (zero-phase) frame.
-        self.update_mask(np.zeros((self.height, self.width), dtype=np.uint8))
+    def _sdk_error(self) -> str:
+        message = self._lib.Get_last_error_message()
+        return message.decode(errors="replace") if message else "no SDK error message"
 
     def is_connected(self) -> bool:
         return self._lib is not None
@@ -131,12 +167,15 @@ class SLM:
             raise RuntimeError("SLM connection has been relinquished")
 
     def close(self) -> None:
+        atexit.unregister(self.close)
         if self._lib is not None:
             try:
                 self._lib.Delete_SDK()
             except Exception:
                 LOGGER.exception("Failed to close Blink SDK cleanly")
         self._lib = None
+        if SLM._sdk_owner is self:
+            SLM._sdk_owner = None
 
     # ------------------------------------------------------------------ #
     # Mask / sequence operations
