@@ -18,7 +18,20 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-_MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+_MONTHS = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+]
 #: Entries ``analysis3.readFromZip`` recognises by suffix; a sibling needs copies.
 _MOTMASTER_TEXT_SUFFIXES = ("parameters.txt", "hardwareReport.txt")
 
