@@ -1,0 +1,50 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      # Scratch database for tests/test_db_integration.py, which skips without one.
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PYTWEEZER_TEST_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      # PyQt6 links against these even on the offscreen platform.
+      - name: Install Qt system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libxkbcommon0
+
+      - name: Install project
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest tests/ -q -rs
