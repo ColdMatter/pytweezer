@@ -565,6 +565,66 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
 }
 
+/* NI Cards tab (pytweezer.GUI.ni_cards). */
+QScrollArea#NICardsScroll,
+QScrollArea#NICardsScroll > QWidget,
+QWidget#NICardsContent {
+    background: transparent;
+    border: none;
+}
+QFrame#ChannelCell {
+    background-color: #30313b;
+    border: 1px solid #44454f;
+    border-radius: 5px;
+}
+QFrame#ChannelCell[state="high"] {
+    background-color: #1f3a2b;
+    border-color: #2ecc71;
+}
+QFrame#ChannelCell[state="watching"] {
+    border-color: #5b8def;
+}
+QFrame#ChannelCell[state="held"] {
+    background: transparent;
+    border-color: #2c2d35;
+}
+QFrame#ChannelCell QLabel {
+    background: transparent;
+}
+QFrame#ChannelCell QLabel[role="cellName"] {
+    color: #e6e6e6;
+    font-weight: 600;
+}
+QFrame#ChannelCell QLabel[role="cellAddress"],
+QFrame#ChannelCell[state="held"] QLabel {
+    color: #8d8e99;
+    font-size: 8pt;
+}
+QFrame#ChannelCell QLabel[role="cellValue"] {
+    color: #e6e6e6;
+    font-weight: 600;
+}
+QLabel[role="cellSection"] {
+    color: #8d8e99;
+    font-weight: 600;
+}
+QLabel#CardBanner {
+    color: #f5a623;
+    background-color: #3a2f1c;
+    border: 1px solid #f5a623;
+    border-radius: 4px;
+    padding: 3px 8px;
+}
+QToolButton#SectionToggle {
+    color: #8d8e99;
+    background: transparent;
+    border: none;
+    font-weight: 600;
+}
+QToolButton#SectionToggle:hover {
+    color: #e6e6e6;
+}
+
 QScrollBar:horizontal {
     background: #1b1c22;
     height: 10px;

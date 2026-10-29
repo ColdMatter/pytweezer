@@ -168,6 +168,7 @@ def build_gui(server: bool) -> TabbedGUI:
     from pytweezer.GUI.experiments.feed import ExperimentFeed
     from pytweezer.GUI.experiments.panel import ExperimentsPanel
     from pytweezer.GUI.experiments.results import ResultsPanel
+    from pytweezer.GUI.ni_cards.panel import NICardsPanel
     from pytweezer.GUI.property_editor import PropEdit
 
     name = "Server" if server else "Client"
@@ -214,6 +215,7 @@ def build_gui(server: bool) -> TabbedGUI:
             ("Analysis", _safe_panel("Analysis", lambda: AnalysisManager("Analysis"))),
             ("Experiments", experiments),
             ("Results", _safe_panel("Results", make_results)),
+            ("NI Cards", _safe_panel("NI Cards", NICardsPanel)),
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],
     )
