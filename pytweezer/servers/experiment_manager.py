@@ -321,10 +321,15 @@ class ExperimentManager:
 
         Raises:
             RecipeError: If the module fails to import or the class is not in
-                the catalogue; :class:`_CatalogueBusy` if it may yet appear.
+                the catalogue; :class:`_CatalogueBusy` if it may yet appear, or
+                the module is being re-read.
         """
         # Starts reading any module not yet described, so ``busy`` is accurate.
         self._catalogue_changed(self.catalogue.refresh())
+        if self.catalogue.pending(module):
+            raise _CatalogueBusy(
+                f"the manager is still reading {module}, so try again shortly"
+            )
         for entry in self.catalogue.entries():
             if entry["module"] != module:
                 continue
@@ -344,7 +349,8 @@ class ExperimentManager:
     def _reservation(self, module: str, class_name: str) -> list[str] | None:
         """The canonical device names ``module.class_name`` reserves.
 
-        ``None`` while the class is missing from a catalogue still being read.
+        ``None`` while the class is missing from a catalogue still being read,
+        or its module is being re-read.
 
         Raises:
             RecipeError: If the class can't be found, or a declared device
@@ -711,7 +717,7 @@ def _log_failure(future) -> None:
 
 
 class _CatalogueBusy(RecipeError):
-    """A class is missing from the catalogue, but it is still being read."""
+    """A class is missing from, or out of date in, a catalogue still being read."""
 
 
 def _adoptable(record: WorkerRecord) -> psutil.Process | None:

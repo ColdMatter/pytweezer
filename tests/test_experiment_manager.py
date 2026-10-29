@@ -44,6 +44,7 @@ class StaticCatalogue:
     def __init__(self, entries):
         self._entries = entries
         self.busy = False
+        self.rereading = set()
 
     def refresh(self):
         return False
@@ -53,6 +54,9 @@ class StaticCatalogue:
 
     def entries(self):
         return self._entries
+
+    def pending(self, module):
+        return module in self.rereading
 
     def close(self):
         pass
@@ -226,6 +230,30 @@ def test_unresolvable_reservation_fails_the_task(make_manager, workers):
     assert task.status == "failed"
     assert "not in the catalogue" in task.error
     assert workers == {}
+
+
+def test_a_module_being_reread_is_not_reserved_from_its_old_description(
+    make_manager, workers
+):
+    manager = make_manager()
+    save(manager)
+    manager.catalogue.rereading = {DEMO}
+    rid = submit_to(manager)
+    assert manager.queue.get(rid).devices is None
+    reply = manager.handle(
+        {
+            "command": "submit_recipe",
+            "experiment": DEMO,
+            "class_name": "RabiDemo",
+            "name": "check",
+        }
+    )
+    assert not reply["ok"] and "try again shortly" in reply["error"]
+
+    manager.catalogue.entries()[0]["classes"][0]["reserves"] = ["Rb HamCam"]
+    manager.catalogue.rereading = set()
+    manager.tick()
+    assert manager.queue.get(rid).devices == ["Rb HamCam"]
 
 
 def test_abort_kills_only_that_worker(make_manager, workers):
