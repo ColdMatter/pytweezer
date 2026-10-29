@@ -116,7 +116,7 @@ class Experiment:
 
         Clients are not thread-safe: pass ``fresh=True`` for an extra client
         to use from another thread, e.g. with
-        :func:`pytweezer.parallel.run_parallel`. In simulation every call
+        :func:`pytweezer.helper_scripts.parallel.run_parallel`. In simulation every call
         returns the same in-process simulated backend.
         """
         if self.simulated_devices is not None:

@@ -86,7 +86,7 @@ return img0, img1
 
 The JV pairing, linear interpolation profile, and `fresnel + blaze + zernike`
 static background all live in `generate_rearrangement_sequence`
-(`pytweezer/phasemask.py`) — verified equivalent to the old inline kernel loop
+(`pytweezer/helper_scripts/phasemask.py`) — verified equivalent to the old inline kernel loop
 (same linear profile; `superimpose([pm, fresnel, blaze, zernike])` equals the old
 `superimpose([pm, static_background])` because `superimpose` is mod-2π-idempotent).
 The occupancy high-pass uses `analysis.morphological_tophat_high_pass` (a
