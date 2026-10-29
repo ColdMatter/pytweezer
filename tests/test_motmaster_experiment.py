@@ -353,9 +353,7 @@ def test_script_parameters_leaves_the_selected_script_unchanged():
     driver.set_motmaster_experiment("A")
     assert driver.script_parameters("B") == {"tDelay1": 5, "tPulse": 20e-6}
     assert driver.motmaster.paths[1:] == [
-        "/scripts/A.cs",
-        "/scripts/B.cs",
-        "/scripts/A.cs",
+        str(Path("/scripts") / f"{script}.cs") for script in "ABA"
     ]
     assert driver.script == "A"
 
