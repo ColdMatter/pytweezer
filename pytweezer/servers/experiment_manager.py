@@ -5,7 +5,10 @@ worker) and starts each due task in a fresh worker subprocess
 (:mod:`pytweezer.experiment.worker`). Its state is published as the sipyco
 notifier ``"experiment"`` on ``sync_port`` (see :data:`NOTIFIER_NAME` for the
 layout), so every GUI holds a live copy of the queue and of the points the
-current task has measured so far.
+current task has measured so far. The measurement files are served to other
+PCs on ``results_port`` (:mod:`pytweezer.experiment.archive`), and each is
+copied to ``copy_root`` once its task finishes
+(:mod:`pytweezer.experiment.copier`).
 
 The queue state is saved after every change: on Windows the GUI stops this
 process with ``TerminateProcess``, so nothing can rely on a clean shutdown. A
@@ -31,8 +34,10 @@ from sipyco.sync_struct import Notifier
 from pytweezer.configuration.config import get_config
 from pytweezer.configuration.paths import tweezerpath
 from pytweezer.database.writer import DBWriter
+from pytweezer.experiment.archive import RPC_TARGET, ArchiveTarget, ResultsArchive
 from pytweezer.experiment.catalogue import Catalogue
 from pytweezer.experiment.client import NOTIFIER_NAME, connect_host
+from pytweezer.experiment.copier import FileCopier
 from pytweezer.experiment.queue import (
     ExperimentQueue,
     QueueError,
@@ -103,6 +108,12 @@ class ExperimentManager:
         self.catalogue = catalogue or Catalogue()
         #: Receives a ``runs`` row per start/finish and a ``points`` row per point.
         self.db = db if db is not None else DBWriter()
+        self.copier = None
+        if bind and self.conf.get("copy_root"):
+            copy_root = Path(self.conf["copy_root"])
+            if self.simulate:
+                copy_root /= "simulated"
+            self.copier = FileCopier(self.root, copy_root)
 
         self.process: psutil.Process | None = None
         self._abort_requested: int | None = None
@@ -115,7 +126,8 @@ class ExperimentManager:
         self._last_rescan = 0.0
         self.started = now().isoformat()
 
-        #: Without ``bind`` nothing is published and mutations apply directly.
+        #: Without ``bind`` nothing is published, mutations apply directly and
+        #: no files are copied.
         self.notifier = Notifier(
             {**self._snapshot(), "points": {"rid": None, "rows": []}}
         )
@@ -126,7 +138,11 @@ class ExperimentManager:
             self.rep.setsockopt(zmq.LINGER, 0)
             self.rep.bind(self.rep_address)
             self.sync = SyncServer(
-                {NOTIFIER_NAME: self.notifier}, host, self.conf["sync_port"]
+                {NOTIFIER_NAME: self.notifier},
+                host,
+                self.conf["sync_port"],
+                rpc_targets={RPC_TARGET: ArchiveTarget(ResultsArchive(self.root))},
+                rpc_port=self.conf["results_port"],
             )
 
         self._reconcile_worker()
@@ -152,6 +168,8 @@ class ExperimentManager:
             # Deliberately leave a running worker alone: the next manager adopts it.
             self.catalogue.close()
             self.db.close()
+            if self.copier is not None:
+                self.copier.close()
             self.rep.close(linger=0)
             self.sync.close()
 
@@ -513,8 +531,11 @@ class ExperimentManager:
         self._finish(rid, status, error)
 
     def _finish(self, rid: int, status: TaskStatus, error: str | None) -> None:
-        self.queue.finish(rid, status, error)
+        task = self.queue.finish(rid, status, error)
         self._record_run(rid)
+        path = self.root / task.h5_path if task.h5_path else None
+        if self.copier is not None and path is not None and path.exists():
+            self.copier.add(task.h5_path)
         logger.info("Task %s %s", rid, status)
         if error:
             logger.warning("Task %s error: %s", rid, error.strip().splitlines()[-1])

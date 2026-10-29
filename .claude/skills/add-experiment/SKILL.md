@@ -130,9 +130,9 @@ not by re-reading its file; see "The manager and its workers".
 From a notebook or script:
 
 ```python
-from pytweezer.experiment import LinearAxis, ListAxis, Scan, load_measurement, run_local
+from pytweezer.experiment import LinearAxis, ListAxis, Scan, run_local
+from pytweezer.experiment.archive import fetch_measurement
 from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
-from pytweezer.experiment.storage import data_root
 
 scan = Scan(
     axes=[LinearAxis(argument="load_time", start=0, stop=2e-3, n=21)],
@@ -141,7 +141,7 @@ scan = Scan(
 )  # nested | snake | shuffle
 rid = submit(LoadingCurve, scan, shots=2, label="after realignment")
 task = wait(rid)  # Task: status, error, h5_path
-m = load_measurement(data_root() / task.h5_path)  # results=[...] to load a subset
+m = fetch_measurement(rid)  # any PC; results=[...] to load a subset
 m.results["atom_number"], m.points["load_time"], m.arguments, m.constants
 
 m = run_local(LoadingCurve, scan)  # in-process, no queue, in memory
@@ -159,9 +159,11 @@ rid (or path) and passes attribute access through to its `Measurement`:
 ```python
 from pytweezer.experiment import Dataset
 
-ds = Dataset(rid)  # root=... for another data dir; results=[...] to load a subset
+# Works on any PC; root=... for another data dir, results=[...] to load a subset.
+ds = Dataset(rid)
 ds.summarise()  # same text as the Results tab's metadata pane
-df = ds.get_data()  # "dataframe" (default) | "dict" | "array"; or get_dataframe/get_dict/get_array
+# "dataframe" (default) | "dict" | "array"; or get_dataframe/get_dict/get_array
+df = ds.get_data()
 ax = ds.plot_scan("atom_number")  # mean ± SEM over repetitions; x, series, ax optional
 ```
 
@@ -185,12 +187,18 @@ recipe…** stores the form (asks before replacing a name), right-click → *Sub
 now* queues it unchanged, *Delete…* removes it for everyone.
 
 ```python
-from pytweezer.experiment.client import delete_recipe, recipes, save_recipe, submit_recipe
+from pytweezer.experiment.client import (
+    delete_recipe,
+    recipes,
+    save_recipe,
+    submit_recipe,
+)
 
 save_recipe(LoadingCurve, "nightly", scan, shots=2, label="nightly check")
 rid = submit_recipe(LoadingCurve, "nightly", shots=3)  # overrides fixed arguments
 save_recipe(LoadingCurve, "nightly", shots=4, overwrite=True)  # a taken name is refused
-recipes(LoadingCurve); delete_recipe(LoadingCurve, "nightly")
+recipes(LoadingCurve)
+delete_recipe(LoadingCurve, "nightly")
 ```
 
 A recipe stores every argument value, not just changed ones, except those its
@@ -210,10 +218,27 @@ commit/dirty. Groups: `/arguments` (effective values; `__schema__` attr),
 planned points in execution order; only the first `n_done` ran. Files are
 never overwritten (mode `"x"`) and readable mid-run (`locking=False`).
 
-`data_root` = `$PYTWEEZER_DATA_DIR`; else, on a PC other than the manager's,
-`CONFIG["Servers"]["Experiment Manager"]["client_data_root"]` (the manager's
-data share as mounted there) if set; else that entry's `data_root`; else
-`<repo>/data`. The queue state lives in `{data_root}/queue_state.json`.
+`data_root` = `$PYTWEEZER_DATA_DIR`; else
+`CONFIG["Servers"]["Experiment Manager"]["data_root"]`; else `<repo>/data`.
+The queue state lives in `{data_root}/queue_state.json`.
+
+When a task finishes, the manager copies its file to the same path under
+`CONFIG[...]["copy_root"]` (the router's USB drive, `\\10.59.0.1\g\pytweezer-data`;
+`<copy_root>/simulated` when simulating) on a background thread
+(`pytweezer/experiment/copier.py`). Runs never write to the network: a failed
+copy is retried every minute, and the paths still to copy are kept in
+`{data_root}/pending_copies.json` across restarts. Only a manager that binds its
+sockets copies, so tests building one with `bind=False` never touch the drive.
+
+Other PCs never read the manager's disk: it serves the files as sipyco RPC
+target `"results"` on `results_port` (`pytweezer/experiment/archive.py`).
+`ResultsArchive(root)` reads files directly and `RemoteArchive` is the same
+interface over RPC (`days`, `runs(day)`, `find(rid)`, `load(path, results)`,
+`planned_points(path)`, paths relative to `data_root`). `default_archive()` is
+local on the manager's PC or with `PYTWEEZER_DATA_DIR` set, remote elsewhere;
+the Results tab, `Dataset(rid)`, `fetch_measurement` and
+`points_with_readings(rid, ...)` all go through it. Its reads run in threads, so
+they never stall the notifier on the same event loop.
 
 The manager also writes each run into the database (`pytweezer.database`): a
 `runs` row on start and finish (git commit/dirty included), and a `points` row per point, holding its times,
@@ -237,9 +262,9 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
   shared by the Experiments and Results tabs): `queue_changed`,
   `point_received`, `connection_changed` and `points(rid)`. The Results tab
   reads a running file once for metadata and the planned `/points` table
-  (`read_planned_points`), plots from the feed, and reloads the file when the
+  (`archive.planned_points`), plots from the feed, and reloads the file when the
   task finishes; HDF5 cannot safely be re-read while it is written. Without a
-  connected feed it falls back to polling the files.
+  connected feed it falls back to polling the archive.
 
 - One task runs at a time; order is priority (high first), then rid; a
   `due_time` holds a task back.

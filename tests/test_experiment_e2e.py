@@ -8,6 +8,7 @@ import time
 import pytest
 
 from pytweezer.experiment import ListAxis, Scan, load_measurement
+from pytweezer.experiment.archive import RemoteArchive
 from pytweezer.experiment.catalogue import Catalogue
 from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
 from pytweezer.servers import experiment_manager as em
@@ -68,6 +69,8 @@ class Harness:
             "host": "127.0.0.1",
             "port": free_port(),
             "sync_port": free_port(),
+            "results_port": free_port(),
+            "copy_root": str(tmp_path / "network"),
             "orphan_timeout": 5.0,
         }
         monkeypatch.setattr(
@@ -239,3 +242,29 @@ def test_guis_see_the_queue_and_each_point_live(harness):
         assert [row["scalars"]["index"] for row in rows] == [0, 1, 2, 3, 4]
     finally:
         mirror.close()
+
+
+def test_other_pcs_fetch_a_finished_measurement_from_the_manager(harness):
+    rid = harness.submit(five_points())
+    task = wait(rid, client=harness.client, poll_s=0.1, timeout_s=30)
+    archive = RemoteArchive(("127.0.0.1", harness.conf["results_port"]))
+    try:
+        assert archive.find(rid) == task.h5_path
+        day = task.h5_path.rsplit("/", 1)[0]
+        assert archive.days() == [day]
+        assert archive.runs(day) == [
+            {"path": task.h5_path, "status": "completed", "label": ""}
+        ]
+        measurement = archive.load(task.h5_path)
+        assert list(measurement.results["index"]) == [0, 1, 2, 3, 4]
+        assert list(measurement.points["step"]) == [1, 2, 3, 4, 5]
+    finally:
+        archive.close()
+
+
+def test_a_finished_measurement_is_copied_to_the_network_drive(harness, tmp_path):
+    rid = harness.submit(five_points())
+    task = wait(rid, client=harness.client, poll_s=0.1, timeout_s=30)
+    copy = tmp_path / "network" / task.h5_path
+    assert until(copy.exists)
+    assert load_measurement(copy).n_done == 5
