@@ -6,6 +6,7 @@ from functools import wraps
 import pytest
 
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera, SimulatedImagEMX2Camera
+from pytweezer.drivers.ni_cards import NICards, SimulatedNICards
 from pytweezer.drivers.orca import ORCACamera, SimulatedORCACamera
 from pytweezer.drivers.slm import SLM, SimulatedSLM
 from pytweezer.servers.simulated_device import public_methods, simulate
@@ -87,6 +88,7 @@ def test_simulate_defaults_and_exclude():
         (ImagEMX2Camera, SimulatedImagEMX2Camera),
         (ORCACamera, SimulatedORCACamera),
         (SLM, SimulatedSLM),
+        (NICards, SimulatedNICards),
     ],
 )
 def test_simulated_backend_covers_real_interface(real, simulated):

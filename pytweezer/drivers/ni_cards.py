@@ -20,14 +20,19 @@ Config entry shape (``CONFIG["Devices"][name]``)::
     }
 """
 
+import math
+import os
+import random
 import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from pytweezer.configuration.paths import tweezerpath
 from pytweezer.drivers.ni_hardware_file import HardwareFile, read_hardware_file
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers.simulated_device import simulate
 
 logger = get_logger("pytweezer.drivers.ni_cards")
 
@@ -109,7 +114,7 @@ class NICards:
         io: CardIO | None = None,
     ):
         if io is None:
-            raise NotImplementedError("NI-DAQmx access is not written yet")
+            io = DaqmxIO()
         self._io = io
         self._error = None
         self._cards: list[dict] = []
@@ -271,3 +276,157 @@ class NICards:
             readings = self._io.read_di([c["physical"] for c in di])
             values.update(zip([c["physical"] for c in di], readings))
         return {p: values[p] for p in physicals}
+
+
+_TERMINALS = {
+    "Rse": "RSE",
+    "Nrse": "NRSE",
+    "Differential": "DIFF",
+    "PseudoDifferential": "PSEUDO_DIFF",
+}
+
+
+def _by_device(physicals: list[str]) -> dict[str, list[int]]:
+    """Indices of ``physicals`` grouped by device, in first-seen order."""
+    groups: dict[str, list[int]] = {}
+    for index, physical in enumerate(physicals):
+        groups.setdefault(physical.split("/", 1)[0], []).append(index)
+    return groups
+
+
+def _as_list(reading) -> list:
+    # nidaqmx returns a bare value for a single channel, else a list.
+    return list(reading) if isinstance(reading, (list, tuple)) else [reading]
+
+
+class DaqmxIO:
+    """NI-DAQmx on this PC. Every call opens a task and closes it before returning."""
+
+    def card(self, device: str) -> CardInfo | None:
+        import nidaqmx.system
+
+        if device not in nidaqmx.system.System.local().devices.device_names:
+            return None
+        info = nidaqmx.system.Device(device)
+        voltages = list(info.ao_voltage_rngs)
+        pairs = list(zip(voltages[::2], voltages[1::2]))
+        ao_range = max(pairs, key=lambda p: p[1] - p[0]) if pairs else (0.0, 0.0)
+        lines = info.do_lines.channel_names or info.di_lines.channel_names
+        return CardInfo(
+            model=info.product_type,
+            ao=list(info.ao_physical_chans.channel_names),
+            ai=list(info.ai_physical_chans.channel_names),
+            lines=list(lines),
+            ao_range=(float(ao_range[0]), float(ao_range[1])),
+        )
+
+    def write_do(self, physical: str, high: bool) -> None:
+        import nidaqmx
+
+        with nidaqmx.Task() as task:
+            task.do_channels.add_do_chan(physical)
+            task.write(high)
+
+    def write_ao(self, physical: str, volts: float, low: float, high: float) -> None:
+        import nidaqmx
+
+        with nidaqmx.Task() as task:
+            task.ao_channels.add_ao_voltage_chan(physical, min_val=low, max_val=high)
+            task.write(volts)
+
+    def read_ai(self, physicals: list[str], terminals: list[str | None]) -> list[float]:
+        import nidaqmx
+        from nidaqmx.constants import TerminalConfiguration
+
+        values: list[float] = [0.0] * len(physicals)
+        for indices in _by_device(physicals).values():
+            with nidaqmx.Task() as task:
+                for i in indices:
+                    terminal = _TERMINALS.get(terminals[i] or "", "DEFAULT")
+                    task.ai_channels.add_ai_voltage_chan(
+                        physicals[i], terminal_config=TerminalConfiguration[terminal]
+                    )
+                for i, value in zip(indices, _as_list(task.read())):
+                    values[i] = float(value)
+        return values
+
+    def read_di(self, physicals: list[str]) -> list[bool]:
+        import nidaqmx
+
+        values: list[bool] = [False] * len(physicals)
+        for indices in _by_device(physicals).values():
+            with nidaqmx.Task() as task:
+                for i in indices:
+                    task.di_channels.add_di_chan(physicals[i])
+                for i, value in zip(indices, _as_list(task.read())):
+                    values[i] = bool(value)
+        return values
+
+
+class SimulatedIO:
+    """Every board present, with a full set of channels and plausible readings."""
+
+    def __init__(self, extra: list[str] = ()):
+        self._extra = list(extra)
+        self._written: dict[str, float | bool] = {}
+        self._t0 = time.time()
+
+    def card(self, device: str) -> CardInfo:
+        def mine(prefix):
+            return [p for p in self._extra if p.startswith(f"{device}/{prefix}")]
+
+        def merged(standard, prefix):
+            return list(dict.fromkeys(standard + mine(prefix)))
+
+        return CardInfo(
+            model="Simulated",
+            ao=merged([f"{device}/ao{i}" for i in range(8)], "ao"),
+            ai=merged([f"{device}/ai{i}" for i in range(8)], "ai"),
+            lines=merged(
+                [f"{device}/port{p}/line{n}" for p in range(4) for n in range(8)],
+                "port",
+            ),
+            ao_range=(-10.0, 10.0),
+        )
+
+    def write_do(self, physical: str, high: bool) -> None:
+        self._written[physical] = high
+
+    def write_ao(self, physical: str, volts: float, low: float, high: float) -> None:
+        self._written[physical] = volts
+
+    def read_ai(self, physicals: list[str], terminals: list[str | None]) -> list[float]:
+        t = time.time() - self._t0
+        return [
+            math.sin(2 * math.pi * 0.1 * t + index) + random.gauss(0.0, 0.01)
+            for index, _ in enumerate(physicals)
+        ]
+
+    def read_di(self, physicals: list[str]) -> list[bool]:
+        return [bool(self._written.get(p, False)) for p in physicals]
+
+
+@simulate(NICards)
+class SimulatedNICards(NICards):
+    """``NICards`` on simulated cards.
+
+    A lab-PC path to the hardware file that does not exist here falls back to the
+    same file in a sibling EDMSuite checkout (``<repo>/../EDMSuite/DAQ/``).
+    """
+
+    def __init__(
+        self,
+        hardware_file: str,
+        reserved: dict | None = None,
+        protected: list[str] | None = None,
+    ):
+        if not os.path.exists(hardware_file):
+            name = re.split(r"[\\/]", hardware_file)[-1]
+            sibling = os.path.join(tweezerpath, "..", "EDMSuite", "DAQ", name)
+            if os.path.exists(sibling):
+                hardware_file = os.path.realpath(sibling)
+        try:
+            aliased = [a.physical for a in read_hardware_file(hardware_file).aliases]
+        except OSError:
+            aliased = []
+        super().__init__(hardware_file, reserved, protected, io=SimulatedIO(aliased))

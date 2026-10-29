@@ -86,7 +86,7 @@ def test_caf_thorcam_builds_simulated_and_streams_live():
     assert camera._live_thread is None
 
 
-def test_the_caf_thorcam_entry_comes_last_so_no_existing_port_moves():
+def test_the_caf_thorcam_and_ni_cards_entries_come_last_so_no_existing_port_moves():
     from pytweezer.configuration.config import get_config
 
     ports = {
@@ -94,4 +94,5 @@ def test_the_caf_thorcam_entry_comes_last_so_no_existing_port_moves():
         for name, entry in get_config()["Devices"].items()
         if "port" in entry
     }
-    assert ports["CaF ThorCam"] == max(ports.values())
+    newest = ["CaF ThorCam", "CaF NI Cards", "Rb NI Cards"]
+    assert sorted(ports, key=ports.get)[-3:] == newest
