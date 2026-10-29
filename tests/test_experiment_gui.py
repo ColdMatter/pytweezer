@@ -232,6 +232,42 @@ def test_load_request_round_trips(editor):
     assert editor.rows["shots"].scan.values.text() == "1, 2"
 
 
+def test_form_submits_the_chosen_or_typed_pipeline(editor):
+    assert editor.request().pipeline == "main"
+    editor.pipeline.setCurrentText("CaF")
+    assert editor.request().pipeline == "CaF"
+
+
+def test_load_request_restores_the_pipeline(editor):
+    request = editor.request().model_copy(update={"pipeline": "Rb"})
+    editor.load_request(request)
+    assert editor.pipeline.currentText() == "Rb"
+    assert editor.request().pipeline == "Rb"
+
+
+def test_set_pipelines_sorts_keeps_main_and_keeps_the_typed_name(editor):
+    editor.pipeline.setCurrentText("custom")
+    editor.set_pipelines(["Rb", "CaF"])
+    items = [editor.pipeline.itemText(i) for i in range(editor.pipeline.count())]
+    assert items == ["CaF", "Rb", "main"]
+    assert editor.pipeline.currentText() == "custom"
+
+
+def test_panel_offers_pipelines_seen_in_the_queue(qapp):
+    panel = ExperimentsPanel(client=FakeClient(), feed=FakeFeed())
+    panel._queue_changed(
+        {
+            "running": [task(1, "running", pipeline="CaF")],
+            "queue": [task(2, "queued", pipeline="Rb")],
+            "history": [task(3, "done", pipeline="old")],
+            "catalogue_version": 1,
+        }
+    )
+    combo = panel.editor.pipeline
+    items = [combo.itemText(i) for i in range(combo.count())]
+    assert items == ["CaF", "Rb", "main", "old"]
+
+
 def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     opened = []
     monkeypatch.setattr(queue_view, "open_in_browser", opened.append)

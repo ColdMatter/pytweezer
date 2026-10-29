@@ -151,6 +151,12 @@ class ExperimentsPanel(QWidget):
         self._simulated = bool(snapshot.get("simulated"))
         self.simulation_banner.setVisible(bool(snapshot.get("simulated")))
         self.queue_view.set_snapshot(snapshot)
+        tasks = [
+            *(snapshot.get("running") or []),
+            *snapshot.get("queue", []),
+            *snapshot.get("history", []),
+        ]
+        self.editor.set_pipelines([entry["pipeline"] for entry in tasks])
         self.queue_region.set_hint(queue_summary(snapshot))
         version = snapshot.get("catalogue_version")
         if version is not None and version != self._catalogue_version:

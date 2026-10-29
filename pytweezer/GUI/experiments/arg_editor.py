@@ -400,6 +400,11 @@ class ArgumentEditor(QWidget):
         self.priority = QSpinBox()
         self.priority.setRange(-1000, 1000)
         self.priority.setToolTip("higher runs first")
+        self.pipeline = QComboBox()
+        self.pipeline.setEditable(True)
+        self.pipeline.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.pipeline.setToolTip("tasks in one pipeline run one at a time, in order")
+        self.set_pipelines([])
         self.label = QLineEdit()
         self.label.setPlaceholderText("note saved with the measurement")
         self.label.setMinimumWidth(300)
@@ -409,7 +414,9 @@ class ArgumentEditor(QWidget):
         self.start_at.setEnabled(False)
         self.start_at_enabled.toggled.connect(self.start_at.setEnabled)
         self.priority.setMinimumWidth(140)
+        self.pipeline.setMinimumWidth(140)
         queue_form.addRow("Priority", self.priority)
+        queue_form.addRow("Pipeline", self.pipeline)
         queue_form.addRow("Label", self.label)
         queue_form.addRow(self.start_at_enabled, self.start_at)
         settings.addWidget(queue_box, 1)
@@ -514,6 +521,13 @@ class ArgumentEditor(QWidget):
         self.order.setCurrentText("nested")
         self.repeat.setCurrentText("point")
 
+    def set_pipelines(self, names):
+        """Offer ``names`` (plus ``main``) in the pipeline drop-down, keeping the typed text."""
+        current = self.pipeline.currentText() or "main"
+        self.pipeline.clear()
+        self.pipeline.addItems(sorted({"main", *names}))
+        self.pipeline.setCurrentText(current)
+
     def load_request(self, request):
         """Fill the form from ``request``; arguments the experiment no longer has are ignored."""
         self.reset_to_defaults()
@@ -547,6 +561,7 @@ class ArgumentEditor(QWidget):
         self.order.setCurrentText(request.scan.order)
         self.repeat.setCurrentText(request.scan.repeat)
         self.priority.setValue(request.priority)
+        self.pipeline.setCurrentText(request.pipeline)
         self.label.setText(request.label)
 
     # -- MOTMaster script parameters -------------------------------------
@@ -741,6 +756,7 @@ class ArgumentEditor(QWidget):
             },
             scan=self.scan(),
             priority=self.priority.value(),
+            pipeline=self.pipeline.currentText(),
             due_time=due,
             label=self.label.text(),
             submitter=submitter,
