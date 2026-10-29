@@ -62,6 +62,12 @@ def sync_address(server_name: str = SERVER_NAME) -> tuple[str, int]:
     return connect_host(conf["host"]), conf["sync_port"]
 
 
+def results_address(server_name: str = SERVER_NAME) -> tuple[str, int]:
+    """``(host, port)`` where the manager serves its measurement files (sipyco RPC)."""
+    conf = manager_conf(server_name)
+    return connect_host(conf["host"]), conf["results_port"]
+
+
 class ReqClient:
     """REQ socket that recovers from a lost reply by recreating itself (the
     ZMQ "lazy pirate" pattern), so a dead server never wedges the caller.

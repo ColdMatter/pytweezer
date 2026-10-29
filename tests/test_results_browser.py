@@ -45,6 +45,10 @@ def make_file(root, rid=1, day=("2026", "10", "07")):
     return path
 
 
+def relpath(root, path):
+    return path.relative_to(root).as_posix()
+
+
 def test_aggregate_means_and_standard_errors():
     curves = aggregate([1, 1, 2, 2, 2], [1.0, 3.0, 4.0, np.nan, 4.0])
     xs, means, sems, counts = curves[0.0]
@@ -94,7 +98,7 @@ def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
     path = make_file(tmp_path)
     panel = ResultsPanel(root=tmp_path)
     panel.refresh()
-    assert panel.select_path(path)
+    assert panel.select_path(relpath(tmp_path, path))
     text = panel.metadata.toPlainText()
     assert (
         "Status: completed" in text and "gain = 3" in text and "x = (scanned)" in text
@@ -129,9 +133,9 @@ def test_open_in_grafana_only_for_queued_runs(qapp, tmp_path, monkeypatch):
     panel = ResultsPanel(root=tmp_path)
     panel.refresh()
 
-    panel.load(local)
+    panel.load(relpath(tmp_path, local))
     assert not panel.grafana_button.isEnabled()
-    panel.load(queued)
+    panel.load(relpath(tmp_path, queued))
     panel.grafana_button.click()
     assert len(opened) == 1 and "var-rid=12" in opened[0]
 
@@ -144,7 +148,7 @@ def test_panel_reports_an_unreadable_file(qapp, tmp_path):
     panel.refresh()
     day = panel.tree.topLevelItem(0)
     assert day.child(0).text(1) == "unreadable"
-    panel.load(bad)
+    panel.load(relpath(tmp_path, bad))
     assert "Could not read" in panel.metadata.toPlainText()
 
 
@@ -153,7 +157,7 @@ def test_tree_updates_in_place_without_a_click(qapp, tmp_path):
     panel = ResultsPanel(root=tmp_path)
     panel.refresh()
     first = panel.tree.topLevelItem(0)
-    assert panel.select_path(tmp_path / "2026" / "10" / "07" / "000001_Sweep.h5")
+    assert panel.select_path("2026/10/07/000001_Sweep.h5")
 
     make_file(tmp_path, 2)
     make_file(tmp_path, 3, day=("2026", "10", "08"))
@@ -173,7 +177,7 @@ def test_selected_running_measurement_reloads_and_keeps_choices(qapp, tmp_path):
     panel = ResultsPanel(root=tmp_path)
     panel.show_unfinished.setChecked(True)
     panel.refresh()
-    assert panel.select_path(path)
+    assert panel.select_path(relpath(tmp_path, path))
     panel.x_choice.setCurrentText("mode")
     assert "points 2/12" in panel.metadata.toPlainText()
 
@@ -198,15 +202,13 @@ def test_live_running_measurement_plots_from_the_feed(qapp, tmp_path, monkeypatc
     panel = ResultsPanel(root=tmp_path, feed=feed)
     panel.show_unfinished.setChecked(True)
     panel.refresh()
-    assert panel.select_path(path)
+    assert panel.select_path(relpath(tmp_path, path))
     panel.x_choice.setCurrentText("point index")
 
     reads = []
-    real_load = results.load_measurement
+    real_load = panel.archive.load
     monkeypatch.setattr(
-        results,
-        "load_measurement",
-        lambda *a, **k: reads.append(a) or real_load(*a, **k),
+        panel.archive, "load", lambda *a, **k: reads.append(a) or real_load(*a, **k)
     )
     feed.rows[1] = [
         {"index": 0, "values": {}, "scalars": {"y": 10.0}},

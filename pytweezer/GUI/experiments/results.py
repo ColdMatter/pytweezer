@@ -1,20 +1,20 @@
 """The Results tab: browse measurement files, inspect them, quick-plot a result.
 
-Reads files directly from :func:`~pytweezer.experiment.storage.data_root`,
-which on a client PC is the server's data share. With an
-:class:`~pytweezer.GUI.experiments.feed.ExperimentFeed` connected, a running
-measurement is plotted from the points the manager publishes rather than by
-re-reading its file (which HDF5 does not support while it is being written,
-least of all over a network share); its file is read once for its metadata,
-and again when the manager reports it finished. The tree updates whenever the
-queue changes, with a slow poll for files written outside the manager.
+Reads files through an archive (:mod:`pytweezer.experiment.archive`): on the
+Experiment Manager's PC directly, elsewhere fetched from the manager over RPC.
+With an :class:`~pytweezer.GUI.experiments.feed.ExperimentFeed` connected, a
+running measurement is plotted from the points the manager publishes rather
+than by re-reading its file (which HDF5 does not support while it is being
+written); its file is read once for its metadata, and again when the manager
+reports it finished. The tree updates whenever the queue changes, with a slow
+poll for files written outside the manager.
 
-Without a connected feed the tab polls the data root every couple of seconds
+Without a connected feed the tab polls the archive every couple of seconds
 while visible, re-reading a selected running measurement each time.
 """
 
 import time
-from pathlib import Path
+from pathlib import PurePosixPath
 
 import numpy as np
 import pyqtgraph as pg
@@ -33,11 +33,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pytweezer.experiment.storage import (
-    data_root,
-    load_measurement,
-    read_header,
-    read_planned_points,
+from pytweezer.experiment.archive import (
+    ArchiveUnavailable,
+    ResultsArchive,
+    default_archive,
 )
 from pytweezer.experiment.summary import aggregate, describe, display_value
 from pytweezer.experiment.task import TaskRequest, TaskStatus
@@ -53,8 +52,6 @@ _FILLED = QtCore.Qt.ItemDataRole.UserRole + 1
 _POLL_MS = 2000
 #: With a connected feed, how often to look for files the manager didn't write.
 _FALLBACK_POLL_S = 30.0
-#: Statuses a file can still move on from; finished files are read once.
-_UNSETTLED = {"running", "unreadable", ""}
 _NONE = "(none)"
 _POINT_INDEX = "point index"
 _CURVE_COLOURS = ["#5b8def", "#f5a623", "#2ecc71", "#c678dd", "#e5c07b", "#56b6c2"]
@@ -72,17 +69,8 @@ def resubmission(measurement):
     )
 
 
-def _header_summary(path):
-    try:
-        header = read_header(path)
-    except OSError:
-        # Also what a file being created looks like; it is retried.
-        return "unreadable", ""
-    return str(header.get("status", "?")), str(header.get("label", ""))
-
-
 def _show_file(item, path, status, label):
-    item.setText(0, path.stem.replace("_", "  ", 1))
+    item.setText(0, PurePosixPath(path).stem.replace("_", "  ", 1))
     item.setText(1, status)
     item.setText(2, label)
     failed = status in ("failed", "crashed", "unreadable")
@@ -97,9 +85,11 @@ def _show_file(item, path, status, label):
 class ResultsPanel(QWidget):
     resubmit_requested = QtCore.pyqtSignal(object)
 
-    def __init__(self, root=None, feed=None, parent=None):
+    def __init__(self, root=None, feed=None, archive=None, parent=None):
         super().__init__(parent)
-        self.root = Path(root) if root is not None else None
+        if archive is None:
+            archive = ResultsArchive(root) if root is not None else default_archive()
+        self.archive = archive
         self.feed = feed
         self.measurement = None
         self.path = None
@@ -198,7 +188,7 @@ class ResultsPanel(QWidget):
         splitter.setStretchFactor(1, 3)
         splitter.setSizes([480, 1000])
 
-        #: Every measurement file seen: path -> (status, label, tree item or None if hidden).
+        #: Every measurement seen: path -> (status, label, tree item or None if hidden).
         self._files = {}
         self._poll = QtCore.QTimer(self)
         self._poll.timeout.connect(self._poll_tick)
@@ -208,10 +198,6 @@ class ResultsPanel(QWidget):
             feed.point_received.connect(self._point_received)
         QtCore.QTimer.singleShot(0, self.refresh)
 
-    @property
-    def data_root(self):
-        return self.root if self.root is not None else data_root()
-
     # -- browsing ----------------------------------------------------------
 
     @property
@@ -220,7 +206,7 @@ class ResultsPanel(QWidget):
         return self.feed is not None and self.feed.connected
 
     def _poll_tick(self):
-        # Hidden behind another tab: skip, the data root may be a network share.
+        # Hidden behind another tab: skip, each refresh may be a round trip.
         if not self.isVisible():
             return
         if self.measurement is None and self._wanted is not None:
@@ -262,28 +248,29 @@ class ResultsPanel(QWidget):
         self.refresh()
 
     def refresh(self):
-        """Bring the tree up to date with the files on disk, in place."""
+        """Bring the tree up to date with the archive, in place."""
         self._last_refresh = time.monotonic()
-        root = self.data_root
         try:
-            days = sorted((p for p in root.glob("*/*/*") if p.is_dir()), reverse=True)
-            found = root.is_dir()
-        except OSError:
-            logger.debug("Cannot list %s", root, exc_info=True)
-            days, found = [], False
-        if not found:
-            self.browser.set_hint(f"{root} not found")
+            days = self.archive.days()
+        except ArchiveUnavailable:
+            logger.debug("Cannot list %s", self.archive.location, exc_info=True)
+            self.browser.set_hint("Experiment Manager not reachable")
             self.browser.hint.setToolTip(
-                "On a PC other than the Experiment Manager's, set client_data_root "
-                "in CONFIG (or PYTWEEZER_DATA_DIR) to the data share"
+                f"Measurements are fetched from {self.archive.location}; "
+                "check it is running in the Servers tab"
             )
+            return
+        except OSError:
+            logger.debug("Cannot list %s", self.archive.location, exc_info=True)
+            self.browser.set_hint(f"{self.archive.location} not found")
+            self.browser.hint.setToolTip("")
             return
         self.browser.set_hint("newest first")
         self.browser.hint.setToolTip("")
         newest_was_open = self._newest_day_open()
         for day in days:
             item = self._day_item(day)
-            if item is None and any(day.glob("*.h5")):
+            if item is None:
                 item = self._add_day(day)
             if item is not None and item.data(0, _FILLED):
                 self._sync_day(item)
@@ -299,18 +286,19 @@ class ResultsPanel(QWidget):
     def _day_item(self, day):
         for i in range(self.tree.topLevelItemCount()):
             item = self.tree.topLevelItem(i)
-            if item.data(0, _PATH) == str(day):
+            if item.data(0, _PATH) == day:
                 return item
         return None
 
     def _add_day(self, day):
-        item = QTreeWidgetItem(["-".join(day.parts[-3:])])
-        item.setData(0, _PATH, str(day))
+        item = QTreeWidgetItem([day.replace("/", "-")])
+        item.setData(0, _PATH, day)
         item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
         index = 0
-        while index < self.tree.topLevelItemCount() and self.tree.topLevelItem(
-            index
-        ).data(0, _PATH) > str(day):
+        while (
+            index < self.tree.topLevelItemCount()
+            and self.tree.topLevelItem(index).data(0, _PATH) > day
+        ):
             index += 1
         self.tree.insertTopLevelItem(index, item)
         return item
@@ -321,11 +309,14 @@ class ResultsPanel(QWidget):
             self._sync_day(day_item)
 
     def _sync_day(self, day_item):
-        for path in Path(day_item.data(0, _PATH)).glob("*.h5"):
+        try:
+            runs = self.archive.runs(day_item.data(0, _PATH))
+        except OSError:
+            logger.debug("Cannot list %s", day_item.text(0), exc_info=True)
+            return
+        for run in runs:
+            path, status, label = run["path"], run["status"], run["label"]
             known = self._files.get(path)
-            if known is not None and known[0] not in _UNSETTLED:
-                continue  # a finished file never changes
-            status, label = _header_summary(path)
             item = known[2] if known else None
             if item is not None and (status, label) == known[:2]:
                 continue
@@ -341,11 +332,12 @@ class ResultsPanel(QWidget):
 
     def _add_file_item(self, day_item, path):
         item = QTreeWidgetItem()
-        item.setData(0, _PATH, str(path))
+        item.setData(0, _PATH, path)
         index = 0
-        while index < day_item.childCount() and day_item.child(index).data(
-            0, _PATH
-        ) > str(path):
+        while (
+            index < day_item.childCount()
+            and day_item.child(index).data(0, _PATH) > path
+        ):
             index += 1
         day_item.insertChild(index, item)
         return item
@@ -358,8 +350,8 @@ class ResultsPanel(QWidget):
         self.refresh()
 
     def select_path(self, path):
-        path = Path(path)
-        day = self._day_item(path.parent)
+        """Select the measurement at data-root-relative ``path``, if it is listed."""
+        day = self._day_item(PurePosixPath(path).parent.as_posix())
         if day is None:
             return False
         day.setExpanded(True)
@@ -371,16 +363,16 @@ class ResultsPanel(QWidget):
         return True
 
     def _selected(self, item, _previous):
-        path = Path(item.data(0, _PATH)) if item else None
-        if path is None or path.suffix != ".h5":
+        path = item.data(0, _PATH) if item else None
+        if path is None or not path.endswith(".h5"):
             return
         self.load(path)
 
     def load(self, path):
         try:
-            measurement = load_measurement(path, results=[])
+            measurement = self.archive.load(path, results=[])
         except (OSError, KeyError, ValueError) as error:
-            self._wanted = Path(path)
+            self._wanted = path
             self.metadata.setPlainText(f"Could not read {path}:\n{error}")
             self.detail_region.set_hint("unreadable")
             self.simulation_banner.setVisible(False)
@@ -388,15 +380,15 @@ class ResultsPanel(QWidget):
             self.resubmit_button.setEnabled(False)
             self.grafana_button.setEnabled(False)
             return
-        first_load = self.path != Path(path)
+        first_load = self.path != path
         self._wanted = None
         self._planned = None
         if measurement.status == "running":
             try:
-                self._planned = read_planned_points(path)
+                self._planned = self.archive.planned_points(path)
             except (OSError, KeyError):
                 pass
-        self.path = Path(path)
+        self.path = path
         self.measurement = measurement
         self.metadata.setPlainText(describe(measurement))
         attrs = measurement.attrs
@@ -474,8 +466,11 @@ class ResultsPanel(QWidget):
                 y[row["index"]] = row["scalars"].get(y_name, np.nan)
         else:
             try:
-                y = load_measurement(self.path, results=[y_name]).results[y_name]
+                y = self.archive.load(self.path, results=[y_name]).results[y_name]
                 y = np.asarray(y, dtype=float)
+            except ArchiveUnavailable:
+                self.plot_message.setText("Experiment Manager not reachable.")
+                return
             except (OSError, ValueError, TypeError):
                 self.plot_message.setText(f"{y_name} is not numeric.")
                 return

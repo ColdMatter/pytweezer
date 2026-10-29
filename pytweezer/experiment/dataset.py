@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from pytweezer.experiment.archive import fetch_measurement
 from pytweezer.experiment.storage import Measurement, find_measurement, load_measurement
 from pytweezer.experiment.summary import aggregate, describe, display_value
 
@@ -13,9 +14,10 @@ from pytweezer.experiment.summary import aggregate, describe, display_value
 class Dataset:
     """One measurement file, read once, with helpers for extracting and plotting it.
 
-    ``source`` is a rid (looked up under ``root``, default
-    :func:`~pytweezer.experiment.storage.data_root`) or a file path; ``results``
-    limits which results are loaded (default all). Any other attribute is the
+    ``source`` is a rid or a file path; ``results`` limits which results are
+    loaded (default all). A rid is looked up under ``root`` if given, and
+    otherwise fetched by :func:`~pytweezer.experiment.archive.fetch_measurement`,
+    which works from any PC. Any other attribute is the
     underlying :class:`~pytweezer.experiment.storage.Measurement`'s, so
     ``ds.arguments``, ``ds.results``, ``ds.constants``, ``ds.status`` work as there.
 
@@ -30,9 +32,13 @@ class Dataset:
         results: Iterable[str] | None = None,
         root: str | Path | None = None,
     ):
-        if isinstance(source, (int, np.integer)):
-            source = find_measurement(int(source), root)
-        self.measurement: Measurement = load_measurement(source, results)
+        if not isinstance(source, (int, np.integer)):
+            measurement = load_measurement(source, results)
+        elif root is None:
+            measurement = fetch_measurement(int(source), results)
+        else:
+            measurement = load_measurement(find_measurement(int(source), root), results)
+        self.measurement: Measurement = measurement
 
     def __getattr__(self, name: str) -> Any:
         if name == "measurement":

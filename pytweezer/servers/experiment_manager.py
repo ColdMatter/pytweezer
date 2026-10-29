@@ -5,7 +5,8 @@ worker) and starts each due task in a fresh worker subprocess
 (:mod:`pytweezer.experiment.worker`). Its state is published as the sipyco
 notifier ``"experiment"`` on ``sync_port`` (see :data:`NOTIFIER_NAME` for the
 layout), so every GUI holds a live copy of the queue and of the points the
-current task has measured so far.
+current task has measured so far. The measurement files are served to other
+PCs on ``results_port`` (:mod:`pytweezer.experiment.archive`).
 
 The queue state is saved after every change: on Windows the GUI stops this
 process with ``TerminateProcess``, so nothing can rely on a clean shutdown. A
@@ -31,6 +32,7 @@ from sipyco.sync_struct import Notifier
 from pytweezer.configuration.config import get_config
 from pytweezer.configuration.paths import tweezerpath
 from pytweezer.database.writer import DBWriter
+from pytweezer.experiment.archive import RPC_TARGET, ArchiveTarget, ResultsArchive
 from pytweezer.experiment.catalogue import Catalogue
 from pytweezer.experiment.client import NOTIFIER_NAME, connect_host
 from pytweezer.experiment.queue import (
@@ -126,7 +128,11 @@ class ExperimentManager:
             self.rep.setsockopt(zmq.LINGER, 0)
             self.rep.bind(self.rep_address)
             self.sync = SyncServer(
-                {NOTIFIER_NAME: self.notifier}, host, self.conf["sync_port"]
+                {NOTIFIER_NAME: self.notifier},
+                host,
+                self.conf["sync_port"],
+                rpc_targets={RPC_TARGET: ArchiveTarget(ResultsArchive(self.root))},
+                rpc_port=self.conf["results_port"],
             )
 
         self._reconcile_worker()
