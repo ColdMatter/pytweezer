@@ -31,13 +31,18 @@ def _level(value: bool) -> str:
 
 
 def last_set_text(entry: dict | None, kind: str) -> str:
-    """``"last set 1.25 V at 14:02"``, ``"last set high at 14:02"`` or ``"unknown"``."""
+    """``"last set 1.25 V at 14:02"``, ``"last set high at 14:02"`` or ``"unknown"``.
+
+    A MOTMaster entry reads ``"end of LoadTweezer: 1.25 V at 14:02"``. An entry
+    without a ``source`` (from an older server) reads as a panel write.
+    """
     if entry is None:
         return "unknown"
     value = _volts(entry["value"]) if kind == "ao" else _level(entry["value"])
-    return (
-        f"last set {value} at {time.strftime('%H:%M', time.localtime(entry['time']))}"
-    )
+    clock = time.strftime("%H:%M", time.localtime(entry["time"]))
+    if entry.get("source") == "motmaster":
+        return f"end of {entry['script']}: {value} at {clock}"
+    return f"last set {value} at {clock}"
 
 
 def address_text(channel: dict) -> str:
@@ -154,6 +159,7 @@ class ChannelCell(QFrame):
         layout.addLayout(row)
         self.detail = QLabel()
         self.detail.setProperty("role", "cellAddress")
+        self.detail.setWordWrap(True)
         layout.addWidget(self.detail)
         if self.kind in ("ai", "di"):
             self.setToolTip("Click to watch: read live while selected")

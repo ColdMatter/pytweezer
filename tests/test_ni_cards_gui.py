@@ -54,11 +54,12 @@ LAYOUT = {
 }
 
 
-def state(holds=None, card_holds=None, last_set=None):
+def state(holds=None, card_holds=None, last_set=None, notices=None):
     return {
         "holds": holds or {},
         "card_holds": card_holds or {},
         "last_set": last_set or {},
+        "notices": notices or [],
     }
 
 
@@ -122,6 +123,16 @@ def test_ni_card_devices_picks_entries_by_class():
         (None, "ao", "unknown"),
         ({"value": 1.25, "time": 1793300000.0}, "ao", "last set 1.25 V at {}"),
         ({"value": True, "time": 1793300000.0}, "do", "last set high at {}"),
+        (
+            {
+                "value": 1.25,
+                "time": 1793300000.0,
+                "source": "motmaster",
+                "script": "LoadTweezer",
+            },
+            "ao",
+            "end of LoadTweezer: 1.25 V at {}",
+        ),
     ],
 )
 def test_last_set_text(entry, kind, expected):
@@ -160,9 +171,23 @@ def test_panel_builds_offscreen_with_a_layout(view):
 
 
 def test_state_marks_held_cells_and_card_banner(view, client):
+    notice = "CaF MotMaster is not reachable: its runs are not greyed out"
+    assert view.notices.isHidden()
     client.state_received.emit(
         state(
-            holds={AO: "Wavemeter Lock"}, card_holds={"/PXI1Slot4": "Hardware Control"}
+            holds={AO: "Wavemeter Lock"},
+            card_holds={"/PXI1Slot4": "Hardware Control"},
+            notices=[notice],
+        )
+    )
+    assert not view.notices.isHidden()
+    assert view.notices.text() == notice
+    client.state_received.emit({k: v for k, v in state().items() if k != "notices"})
+    assert view.notices.isHidden()
+    client.state_received.emit(
+        state(
+            holds={AO: "Wavemeter Lock"},
+            card_holds={"/PXI1Slot4": "Hardware Control"},
         )
     )
     assert not view.cells[AO].isEnabled()

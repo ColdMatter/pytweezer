@@ -108,7 +108,12 @@ class DeviceView(QWidget):
             self, singleShot=True, interval=_ERROR_SHOWN_MS
         )
         self._error_timer.timeout.connect(self.error.hide)
+        self.notices = QLabel()
+        self.notices.setProperty("role", "regionHint")
+        self.notices.setWordWrap(True)
+        self.notices.hide()
         layout.addWidget(self.message)
+        layout.addWidget(self.notices)
         layout.addWidget(self.error)
 
         self.content = QWidget()
@@ -252,6 +257,9 @@ class DeviceView(QWidget):
             holder = state["card_holds"].get(address)
             banner.setText(f"Held by {holder}" if holder else "")
             banner.setVisible(holder is not None)
+        notices = state.get("notices", [])
+        self.notices.setText("\n".join(notices))
+        self.notices.setVisible(bool(notices))
         self.watched -= set(holds)
         self._update_timers()
 
