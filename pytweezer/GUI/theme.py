@@ -372,6 +372,23 @@ QToolButton#ScanToggle:checked {
     border-color: #5b8def;
 }
 
+QToolButton#PipelineChip {
+    background: transparent;
+    color: #8d8e99;
+    border: 1px solid #44454f;
+    border-radius: 11px;
+    padding: 2px 12px;
+}
+QToolButton#PipelineChip:hover {
+    color: #e6e6e6;
+    border-color: #5b8def;
+}
+QToolButton#PipelineChip:checked {
+    background-color: #5b8def;
+    color: #ffffff;
+    border-color: #5b8def;
+}
+
 QLabel#StatusLabel {
     font-weight: 600;
 }

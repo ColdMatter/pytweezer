@@ -154,6 +154,7 @@ CONFIG = {
             "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
             "config_file": "caf_mm_config.json",
+            "linked_partner": "Rb MotMaster",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
             "simulate": SIMULATING,

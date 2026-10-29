@@ -124,7 +124,9 @@ thread, so they work from threaded and Qt code; mutate a notifier only through
   locally then go to the server. While the server is unreachable, writes stay
   local and are dropped, and the server's tree replaces them on reconnect. The
   tree rules (addressing, option properties) are in `property_tree.py`.
-- **Experiment Manager** — publishes the queue and the running task's points as
+- **Experiment Manager** — runs queued tasks, one worker process each (one at
+  a time per pipeline, in parallel across pipelines unless they reserve a
+  common device), and publishes the queue and the running tasks' points as
   notifier `"experiment"` on `sync_port`; see `add-experiment`.
 
 ## Logging

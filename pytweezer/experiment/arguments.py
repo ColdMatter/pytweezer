@@ -208,6 +208,12 @@ class Device:
         obj.__dict__[self.name] = client
         return client
 
+    def reserves(self) -> set[str]:
+        """Canonical names of every CONFIG device this declaration occupies."""
+        from pytweezer.experiment.reservations import device_reservation
+
+        return device_reservation(self.device_name)
+
     def to_schema(self) -> dict[str, Any]:
         return {"device": self.device_name, "timeout": self.timeout}
 

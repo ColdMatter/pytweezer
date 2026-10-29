@@ -53,6 +53,12 @@ Rules that matter:
 - `Device("<CONFIG name>")` gives a lazily created RPC client, closed when the
   task ends. For `run_parallel`, take extra clients with
   `self.device(name, fresh=True)` — one sipyco client per thread.
+- **Declare every device you use.** `self.device(name)` (also `fresh=True`)
+  raises `UndeclaredDeviceError` for a name outside the task's reserved set
+  (a member of a declared composite and a linked partner are in it), and a
+  queued task's worker also refuses a bare `get_device()` of anything outside
+  it (`device_client.restrict_devices`). The declarations are what the
+  manager reserves (see "Pipelines and device reservations").
 - `record(name, value, unit="")`: in `run_point` it stores into
   `/results/<name>` row `point.index`; in `prepare`/`finish` into
   `/constants/<name>`. Each name's shape and dtype are fixed by its first
@@ -139,7 +145,7 @@ scan = Scan(
     repetitions=3,
     order="shuffle",
 )  # nested | snake | shuffle
-rid = submit(LoadingCurve, scan, shots=2, label="after realignment")
+rid = submit(LoadingCurve, scan, shots=2, label="after realignment", pipeline="main")
 task = wait(rid)  # Task: status, error, h5_path
 m = fetch_measurement(rid)  # any PC; results=[...] to load a subset
 m.results["atom_number"], m.points["load_time"], m.arguments, m.constants
@@ -148,7 +154,12 @@ m = run_local(LoadingCurve, scan)  # in-process, no queue, in memory
 ```
 
 `submit` needs a class importable by the manager — **not one defined in a
-notebook**; use `run_local` for those (pass `path=` to keep a file).
+notebook**; use `run_local` for those (pass `path=` to keep a file). A plain
+`submit()` is refused at once if the class is not in the catalogue, its module
+fails to import, or its devices can't be reserved (unknown or inactive device,
+or `linked=True` on a MOTMaster with no `linked_partner`). While the catalogue
+is still being read the task is queued and resolved later, failing if it then
+can't be.
 `ExperimentManagerClient` has `pause/resume/terminate/abort/hold/release/
 delete/set_priority/snapshot/history/catalogue/recipes/save_recipe/
 delete_recipe/submit_recipe`.
@@ -254,10 +265,11 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
 `pytweezer/experiment/{queue,worker,catalogue,introspect,client}.py`.
 
 - **Published state:** the manager serves sipyco notifier `"experiment"` on
-  `sync_port` (layout in the module): the queue snapshot (`running`, `queue`,
-  `history`, `catalogue_version`, `simulated`, `alive`) and `points`, every
-  point the current (or last) task has measured, with its scanned values and
-  0-d numeric results. Only changes are sent; a GUI connecting late gets it all.
+  `sync_port` (layout in the module): the queue snapshot (`running`, a list,
+  `queue`, `history`, `catalogue_version`, `simulated`, `alive`; waiting tasks
+  carry `waiting_for`) and `points`, keyed by rid, every point each running (or
+  last finished) task has measured, with its scanned values and 0-d numeric
+  results. Only changes are sent; a GUI connecting late gets it all.
   `GUI/experiments/feed.py`'s `ExperimentFeed` is the Qt side (one per GUI,
   shared by the Experiments and Results tabs): `queue_changed`,
   `point_received`, `connection_changed` and `points(rid)`. The Results tab
@@ -266,14 +278,38 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
   task finishes; HDF5 cannot safely be re-read while it is written. Without a
   connected feed it falls back to polling the archive.
 
-- One task runs at a time; order is priority (high first), then rid; a
-  `due_time` holds a task back.
+- **Pipelines and device reservations** (`reservations.py`, `queue.py`).
+  A pipeline is a named lane (`TaskRequest.pipeline`, default `"main"`, created
+  by submitting a new name; `Recipe`s keep theirs). Within one it is strictly
+  one task at a time, in order: priority (high first), then rid; a `due_time`
+  or hold passes a task over. Each worker is its own process, so pipelines run
+  in parallel, but a task starts only if no running or paused task holds a
+  device it reserves. A blocked head keeps its pipeline waiting while heads in
+  other pipelines may start, even at lower priority; the remedy for a stuck
+  task is `set_priority` (queue-view +/− buttons). Reservations are computed at
+  submit and stored as `Task.devices`: a plain device reserves itself, a
+  composite (CONFIG `"devices"`) itself and its sub-devices, a sub-device only
+  itself, and `MotMaster(linked=True)` also its CONFIG `linked_partner` (`"CaF
+  MotMaster"` names `"Rb MotMaster"`). `Device.reserves()` is the hook for other
+  hidden dependencies. Names match as `get_device()` does. Only queued tasks are subject to reservations: `Rig`, `run_local` and GUI
+  panels can drive a device another task holds, though `run_local` still
+  refuses devices the class doesn't declare.
+- The queue view has a Pipeline column and filter chips (a dot if one is
+  running, a count of waiting tasks). A task blocked by a device shows amber
+  `waiting: <device> (RID n)` (`all devices` while a running task's
+  reservation is unknown); a pipeline's next task whose reservation awaits the
+  catalogue's (re-)read of its module shows amber `waiting: reading
+  experiments`; one only behind its own pipeline shows `queued`.
+  The submit form's Pipeline box defaults to `main`; type a new name to create
+  one. `"points"` is per RID, and each pipeline shows its latest task's.
 - **Terminate** stops at the next point boundary (finish() runs). **Abort**
-  kills the worker immediately: a device call in flight (`Go()`, a frame grab)
-  still completes on the device, so the next task may wait behind it.
-- Pause keeps the task's devices open; hold only applies to waiting tasks.
+  kills that task's worker immediately: a device call in flight (`Go()`, a
+  frame grab) still completes on the device. Devices are released the moment a
+  task ends however it ended (a `TODO` in `ExperimentQueue.finish`), so a task
+  in another pipeline can start on a sequencer that is not yet idle.
+- Pause keeps the task's devices open and reserved; hold only applies to waiting tasks.
 - State is saved on every change, because on Windows the GUI stops the manager
-  with `TerminateProcess`. Workers outlive the manager: on restart a running
+  with `TerminateProcess`. Workers outlive the manager: on restart each running
   worker is adopted again (pid + create time), otherwise its task is settled
   from its h5 status (`interrupted`/`crashed`). A worker that can't reach the
   manager for `orphan_timeout` s stops and marks itself `interrupted`.

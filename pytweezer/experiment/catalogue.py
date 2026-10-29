@@ -40,6 +40,7 @@ class Catalogue:
         self._entries: dict[str, dict[str, Any]] = {}
         self._stamps: dict[str, tuple[int, int]] = {}
         self._pending: dict[str, _Pending] = {}
+        self._due: set[str] = set()
 
     def modules(self) -> dict[str, tuple[Path, tuple[int, int]]]:
         """``{module name: (file, (mtime_ns, size))}`` for every experiment module."""
@@ -56,6 +57,11 @@ class Catalogue:
     def refresh(self) -> bool:
         """Start describing new or changed modules; forget deleted ones. Returns whether anything was dropped."""
         modules = self.modules()
+        self._due = {
+            module
+            for module, (_path, stamp) in modules.items()
+            if self._stamps.get(module) != stamp
+        }
         dropped = False
         for module in set(self._entries) - set(modules):
             del self._entries[module]
@@ -103,6 +109,7 @@ class Catalogue:
                     )
             pending.output.close()
             del self._pending[module]
+            self._due.discard(module)
             entry["stamp"] = list(pending.stamp)
             self._entries[module] = entry
             self._stamps[module] = pending.stamp
@@ -112,6 +119,10 @@ class Catalogue:
     @property
     def busy(self) -> bool:
         return bool(self._pending)
+
+    def pending(self, module: str) -> bool:
+        """Whether ``module`` is new or changed, as of the last :meth:`refresh`, and not yet read."""
+        return module in self._due or module in self._pending
 
     def entries(self) -> list[dict[str, Any]]:
         return [self._entries[name] for name in sorted(self._entries)]

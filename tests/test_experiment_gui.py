@@ -5,6 +5,7 @@ import threading
 import pytest
 from PyQt6 import QtCore
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QMessageBox
 
 from pytweezer.experiment import (
     Choice,
@@ -21,6 +22,7 @@ from pytweezer.experiment.motmaster import (
     MotMasterExperiment,
     MotMasterNumber,
 )
+from pytweezer.experiment.queue import UNKNOWN_DEVICES
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.experiments import queue_view
@@ -28,7 +30,11 @@ from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
 from pytweezer.GUI.experiments.motmaster_params import ParameterFetcher
 from pytweezer.GUI.experiments.panel import ExperimentsPanel
-from pytweezer.GUI.experiments.queue_view import QueueView
+from pytweezer.GUI.experiments.queue_view import (
+    COLUMNS,
+    QueueView,
+    queue_summary,
+)
 from tests.helpers import FakeFeed, until
 
 Left, Right = QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton
@@ -101,6 +107,8 @@ def task(rid, status, **kwargs):
         "scan": {"axes": []},
         "priority": 0,
         "label": "",
+        "pipeline": "main",
+        "devices": None,
         "submitter": "me",
         "t_submit": "2026-10-07T12:00:00+01:00",
         "points_done": 1,
@@ -225,19 +233,65 @@ def test_load_request_round_trips(editor):
     assert editor.rows["shots"].scan.values.text() == "1, 2"
 
 
+def test_form_submits_the_chosen_or_typed_pipeline(editor):
+    assert editor.request().pipeline == "main"
+    editor.pipeline.setCurrentText("CaF")
+    assert editor.request().pipeline == "CaF"
+
+
+def test_load_request_restores_the_pipeline(editor):
+    request = editor.request().model_copy(update={"pipeline": "Rb"})
+    editor.load_request(request)
+    assert editor.pipeline.currentText() == "Rb"
+    assert editor.request().pipeline == "Rb"
+
+
+def test_set_pipelines_sorts_keeps_main_and_keeps_the_typed_name(editor):
+    editor.pipeline.setCurrentText("custom")
+    editor.set_pipelines(["Rb", "CaF"])
+    items = [editor.pipeline.itemText(i) for i in range(editor.pipeline.count())]
+    assert items == ["CaF", "Rb", "main"]
+    assert editor.pipeline.currentText() == "custom"
+
+
+def test_set_pipelines_with_unchanged_names_leaves_the_typing_alone(editor):
+    editor.set_pipelines(["Rb"])
+    line = editor.pipeline.lineEdit()
+    line.setText("CaF2")
+    line.setCursorPosition(2)
+    editor.set_pipelines(["Rb", "main"])
+    assert (line.text(), line.cursorPosition()) == ("CaF2", 2)
+
+
+def test_panel_offers_pipelines_seen_in_the_queue(qapp):
+    panel = ExperimentsPanel(client=FakeClient(), feed=FakeFeed())
+    panel._queue_changed(
+        {
+            "running": [task(1, "running", pipeline="CaF")],
+            "queue": [task(2, "queued", pipeline="Rb")],
+            "history": [task(3, "done", pipeline="old")],
+            "catalogue_version": 1,
+        }
+    )
+    combo = panel.editor.pipeline
+    items = [combo.itemText(i) for i in range(combo.count())]
+    assert items == ["CaF", "Rb", "main", "old"]
+
+
 def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     opened = []
     monkeypatch.setattr(queue_view, "open_in_browser", opened.append)
     view = QueueView()
     view.set_snapshot(
         {
-            "running": task(3, "running", t_start="2026-10-07T12:01:00+01:00"),
+            "running": [task(3, "running", t_start="2026-10-07T12:01:00+01:00")],
             "queue": [task(4, "queued"), task(5, "held")],
             "history": [task(2, "failed", error="Traceback\nValueError: bad")],
         }
     )
     assert [view.table.item(r, 0).text() for r in range(4)] == ["3", "4", "5", "2"]
-    assert "ValueError: bad" in view.table.item(3, 3).toolTip()
+    status = COLUMNS.index("Status")
+    assert "ValueError: bad" in view.table.item(3, status).toolTip()
 
     actions = []
     view.action_requested.connect(
@@ -264,8 +318,136 @@ def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     ]
 
     # selection survives a refresh
-    view.set_snapshot({"running": None, "queue": [task(4, "queued")], "history": []})
+    view.set_snapshot({"running": [], "queue": [task(4, "queued")], "history": []})
     assert view.selected_task()["rid"] == 4
+
+
+PIPELINE_SNAPSHOT = {
+    "running": [
+        task(43, "running", pipeline="background", devices=["Rb Camera"]),
+        task(41, "running", pipeline="CaF", devices=["Rb MotMaster"]),
+    ],
+    "queue": [
+        task(44, "queued", pipeline="Rb", waiting_for={"Rb MotMaster": 41}),
+        task(45, "queued", pipeline="CaF"),
+    ],
+    "history": [],
+}
+
+
+def column_texts(view, name):
+    column = COLUMNS.index(name)
+    return [view.table.item(r, column).text() for r in range(view.table.rowCount())]
+
+
+def visible_rids(view):
+    return [
+        view.table.item(r, 0).text()
+        for r in range(view.table.rowCount())
+        if not view.table.isRowHidden(r)
+    ]
+
+
+def test_queue_view_shows_pipeline_and_why_a_task_waits(qapp):
+    view = QueueView()
+    view.set_snapshot(PIPELINE_SNAPSHOT)
+    assert column_texts(view, "RID") == ["41", "43", "44", "45"]
+    assert column_texts(view, "Pipeline") == ["CaF", "background", "Rb", "CaF"]
+    assert column_texts(view, "Status")[2:] == [
+        "waiting: Rb MotMaster (RID 41)",
+        "queued",
+    ]
+    status = COLUMNS.index("Status")
+    blocked, free = (view.table.item(r, status).background() for r in (2, 3))
+    assert blocked != free
+
+
+def test_queue_view_says_when_a_head_waits_for_its_reservation(qapp):
+    view = QueueView()
+    view.set_snapshot(
+        {
+            "running": [],
+            "queue": [
+                task(50, "queued", pipeline="CaF"),
+                task(51, "queued", pipeline="CaF"),
+            ],
+        }
+    )
+    assert column_texts(view, "Status") == ["waiting: reading experiments", "queued"]
+    status = COLUMNS.index("Status")
+    shade = view.table.item(0, status).background().color()
+    assert shade == queue_view._ROW_SHADES["blocked"]
+
+    view.set_snapshot(
+        {
+            "running": [task(41, "running", pipeline="Rb")],
+            "queue": [task(52, "queued", waiting_for={UNKNOWN_DEVICES: 41})],
+        }
+    )
+    assert column_texts(view, "Status")[1] == "waiting: all devices (RID 41)"
+
+
+def test_pipeline_chips_count_and_filter(qapp):
+    view = QueueView()
+    view.set_snapshot(PIPELINE_SNAPSHOT)
+    chips = view.chips
+    assert [b.text() for b in chips.buttons.values()] == [
+        "All",
+        "background ●",
+        "CaF ● 1",
+        "Rb 1",
+    ]
+    assert chips.selected() is None
+    assert visible_rids(view) == ["41", "43", "44", "45"]
+
+    chips.buttons["CaF"].click()
+    assert chips.selected() == "CaF"
+    assert visible_rids(view) == ["41", "45"]
+
+    view.set_snapshot(
+        {**PIPELINE_SNAPSHOT, "running": [PIPELINE_SNAPSHOT["running"][0]]}
+    )
+    assert chips.selected() == "CaF", "45 still waits in CaF"
+    view.set_snapshot({"running": [], "queue": [PIPELINE_SNAPSHOT["queue"][0]]})
+    assert chips.selected() is None
+    assert visible_rids(view) == ["44"]
+
+
+def test_hiding_a_row_drops_its_selection(qapp):
+    view = QueueView()
+    view.set_snapshot(PIPELINE_SNAPSHOT)
+    view.table.selectRow(0)
+    view.chips.buttons["Rb"].click()
+    assert view.selected_task() is None
+
+
+def test_snapshot_without_running_list_renders(qapp):
+    view = QueueView()
+    snapshot = {"running": None, "queue": [task(4, "queued")], "history": []}
+    view.set_snapshot(snapshot)
+    assert column_texts(view, "RID") == ["4"]
+    assert queue_summary(snapshot) == "nothing running, 1 waiting"
+
+
+def test_details_list_pipeline_and_devices(qapp):
+    view = QueueView()
+    view.set_snapshot(PIPELINE_SNAPSHOT)
+    view._show_details(0, 0)
+    view._show_details(3, 0)
+    texts = [box.text() for box in view.findChildren(QMessageBox)]
+    assert any("Pipeline: CaF" in t and "Devices: Rb MotMaster" in t for t in texts)
+    assert any("Devices: not yet known" in t for t in texts)
+    view.set_snapshot({"queue": [task(46, "queued", devices=[])]})
+    view._show_details(0, 0)
+    assert any("Devices: none" in box.text() for box in view.findChildren(QMessageBox))
+
+
+def test_queue_summary_counts_running_tasks():
+    snapshot = {"running": [{"rid": 41}, {"rid": 43}], "queue": [{}] * 3}
+    assert queue_summary(snapshot) == "2 running (41, 43), 3 waiting"
+    assert queue_summary({"running": [], "queue": []}) == (
+        "nothing running, nothing waiting"
+    )
 
 
 def test_queue_view_selects_nothing_when_the_selected_task_disappears(qapp):
@@ -292,7 +474,7 @@ def test_panel_submits_and_forwards_actions(qapp):
 
     feed.queue_changed.emit(
         {
-            "running": task(12, "running"),
+            "running": [task(12, "running")],
             "queue": [],
             "history": [],
             "catalogue_version": 1,
@@ -303,7 +485,7 @@ def test_panel_submits_and_forwards_actions(qapp):
     assert ("terminate", {"rid": 12}) in client.calls
     catalogue_fetches = len(commands(client, "catalogue"))
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [], "catalogue_version": 2}
+        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
     )
     assert len(commands(client, "catalogue")) == catalogue_fetches + 1
 
@@ -337,6 +519,63 @@ def test_panel_resubmit_selects_the_experiment(qapp):
     assert "not in the catalogue" in panel.status.text()
 
 
+class OldManagerMirror:
+    """Holds the state a manager from before pipelines publishes."""
+
+    def __init__(self, host, port, name, keep_mods=False):
+        old_task = {
+            key: value
+            for key, value in task(3, "running").items()
+            if key not in ("pipeline", "devices")
+        }
+        self.state = {
+            "alive": 1.0,
+            "running": old_task,
+            "queue": [{**old_task, "rid": 4, "status": "queued"}],
+            "history": [],
+            "points": {"rid": 3, "rows": [{"index": 0}]},
+        }
+        self.mods = [
+            {"action": "init", "struct": self.state},
+            {"action": "append", "path": ["points", "rows"], "x": {"index": 1}},
+        ]
+        self.connected = True
+
+    def drain(self):
+        mods, self.mods = self.mods, []
+        return mods
+
+    def read(self, fn):
+        return fn(self.state)
+
+    def close(self):
+        pass
+
+
+def test_a_snapshot_from_an_older_manager_still_shows(qapp, monkeypatch):
+    from pytweezer.GUI.experiments import feed as feed_module
+
+    monkeypatch.setattr(feed_module, "SyncMirror", OldManagerMirror)
+    feed = feed_module.ExperimentFeed(address=("old", 0), poll_interval_ms=10_000)
+    snapshots, points = [], []
+    feed.queue_changed.connect(snapshots.append)
+    feed.point_received.connect(points.append)
+    try:
+        feed.poll()
+        [snapshot] = snapshots
+        assert points == [] and feed.points(3) == []
+        assert [t["pipeline"] for t in snapshot["running"]] == ["main"]
+
+        view = QueueView()
+        view.set_snapshot(snapshot)
+        assert column_texts(view, "RID") == ["3", "4"]
+        panel = ExperimentsPanel(client=FakeClient(), feed=FakeFeed())
+        panel._queue_changed(snapshot)
+        assert column_texts(panel.queue_view, "Pipeline") == ["main", "main"]
+    finally:
+        feed.close()
+
+
 def test_real_feed_signals_queue_changes_and_points(qapp):
     from sipyco.sync_struct import Notifier
 
@@ -346,10 +585,10 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
     notifier = Notifier(
         {
             "alive": 0.0,
-            "running": None,
+            "running": [],
             "queue": [],
             "history": [],
-            "points": {"rid": 3, "rows": [{"index": 0, "scalars": {"n": 1.0}}]},
+            "points": {"3": [{"index": 0, "scalars": {"n": 1.0}}]},
         }
     )
     server = SyncServer({"experiment": notifier}, "127.0.0.1", 0)
@@ -367,19 +606,19 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
 
         snapshots.clear()
         server.call(notifier.__setitem__, "alive", 1.0).result()
-        server.call(
-            notifier["points"]["rows"].append, {"index": 1, "scalars": {"n": 2.0}}
-        ).result()
-        assert until(lambda: points, qapp=qapp)
-        assert points == [{"rid": 3, "index": 1, "scalars": {"n": 2.0}}]
-        assert snapshots == [], "an alive bump alone is not a queue change"
+        server.call(notifier["points"]["3"].append, {"index": 1}).result()
+        server.call(notifier["points"].__setitem__, "4", []).result()
+        server.call(notifier["points"]["4"].append, {"index": 0}).result()
+        server.call(notifier["points"].__delitem__, "3").result()
+        assert until(lambda: len(points) == 2, qapp=qapp)
+        assert until(lambda: feed.points(3) == [], qapp=qapp)
+        assert points == [{"rid": 3, "index": 1}, {"rid": 4, "index": 0}]
+        assert snapshots == [], "alive bumps and points are not queue changes"
+        assert feed.points(4) == [{"index": 0}]
 
-        server.call(notifier.__setitem__, "points", {"rid": 4, "rows": []}).result()
-        server.call(notifier["points"]["rows"].append, {"index": 0}).result()
         server.call(notifier.__setitem__, "queue", [{"rid": 5}]).result()
-        assert until(lambda: len(points) == 2 and snapshots, qapp=qapp)
-        assert points[1]["rid"] == 4
-        assert snapshots[-1]["queue"] == [{"rid": 5}]
+        assert until(lambda: snapshots, qapp=qapp)
+        assert snapshots[-1]["queue"] == [{"rid": 5, "pipeline": "main"}]
     finally:
         feed.close()
         server.close()
@@ -549,7 +788,7 @@ def test_the_panel_reads_simulated_sequencers_when_the_manager_simulates(qapp):
     feed = FakeFeed()
     panel = ExperimentsPanel(client=FakeClient(), feed=feed)
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [], "simulated": True}
+        {"running": [], "queue": [], "history": [], "simulated": True}
     )
     parameters = panel.editor.fetcher.source("Rb MotMaster", "RbTweezerBasic")
     assert "tDelay1" in parameters
@@ -679,7 +918,7 @@ def test_panel_lists_recipes_and_refetches_when_they_change(qapp):
     panel, client, feed = recipe_panel(recipe_dict("a"))
     assert [r["name"] for r in panel.catalogue.recipes] == ["a"]
     fetches = len(commands(client, "recipes"))
-    snapshot = {"running": None, "queue": [], "history": [], "recipes_version": 0}
+    snapshot = {"running": [], "queue": [], "history": [], "recipes_version": 0}
     feed.queue_changed.emit(snapshot)
     assert len(commands(client, "recipes")) == fetches
     client.recipes = [recipe_dict("a"), recipe_dict("b")]
@@ -700,7 +939,7 @@ def test_selecting_a_recipe_fills_the_form_and_a_list_refresh_keeps_edits(qapp):
     panel.editor.rows["shots"].value.widget.setValue(8)
     client.recipes = [recipe, recipe_dict("new")]
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [], "recipes_version": 1}
+        {"running": [], "queue": [], "history": [], "recipes_version": 1}
     )
     assert panel.editor.rows["shots"].value.value() == 8
     assert panel.catalogue.tree.currentItem().text(0) == "check"

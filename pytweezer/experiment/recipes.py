@@ -44,9 +44,13 @@ class Recipe(TaskRequest):
         *,
         priority: int | None = None,
         label: str | None = None,
+        pipeline: str | None = None,
         submitter: str = "",
     ) -> TaskRequest:
-        """A request to run this recipe, ``args`` replacing its fixed arguments."""
+        """A request to run this recipe, ``args`` replacing its fixed arguments.
+
+        ``priority``, ``label`` and ``pipeline`` are the recipe's own unless given.
+        """
         args = args or {}
         scanned = sorted(set(args) & {axis.argument for axis in self.scan.axes})
         if scanned:
@@ -61,6 +65,7 @@ class Recipe(TaskRequest):
             scan=self.scan,
             priority=self.priority if priority is None else priority,
             label=self.label if label is None else label,
+            pipeline=self.pipeline if pipeline is None else pipeline,
             submitter=submitter,
         )
 

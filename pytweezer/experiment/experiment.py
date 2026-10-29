@@ -9,6 +9,7 @@ from pytweezer.experiment.arguments import (
     coerce_arguments,
     collect,
 )
+from pytweezer.experiment.reservations import canonical_device
 from pytweezer.experiment.scan import Point
 from pytweezer.logging_utils import get_logger
 
@@ -50,6 +51,9 @@ class Experiment:
         #: A :class:`~pytweezer.experiment.simulation.SimulatedDevices` when
         #: running in simulation; devices then come from it instead of RPC.
         self.simulated_devices: Any = None
+        #: Canonical names of the devices :meth:`device` may open; ``None``
+        #: means unrestricted.
+        self.allowed_devices: frozenset[str] | None = None
 
     @classmethod
     def arguments(cls) -> dict[str, Argument]:
@@ -58,6 +62,19 @@ class Experiment:
     @classmethod
     def devices(cls) -> dict[str, Device]:
         return collect(cls, Device)
+
+    @classmethod
+    def reserved_devices(cls) -> list[str]:
+        """Sorted canonical names of every CONFIG device this experiment occupies.
+
+        Raises:
+            ReservationError: If a declared device is unknown, inactive or
+                mis-configured.
+        """
+        reserved: set[str] = set()
+        for device in cls.devices().values():
+            reserved |= device.reserves()
+        return sorted(reserved)
 
     @classmethod
     def schema(cls) -> dict[str, Any]:
@@ -118,7 +135,21 @@ class Experiment:
         to use from another thread, e.g. with
         :func:`pytweezer.helper_scripts.parallel.run_parallel`. In simulation every call
         returns the same in-process simulated backend.
+
+        Raises:
+            UndeclaredDeviceError: If :attr:`allowed_devices` is set and ``name``
+                is not among the devices this experiment declares.
         """
+        if (
+            self.allowed_devices is not None
+            and canonical_device(name) not in self.allowed_devices
+        ):
+            from pytweezer.servers.device_client import UndeclaredDeviceError
+
+            raise UndeclaredDeviceError(
+                f"{type(self).__name__} uses device {name!r} without declaring it; "
+                f"declare it as a class attribute, e.g. camera = Device({name!r})"
+            )
         if self.simulated_devices is not None:
             return self.simulated_devices.get(name)
         if not fresh and name in self._shared_clients:

@@ -199,7 +199,7 @@ def test_live_running_measurement_plots_from_the_feed(qapp, tmp_path, monkeypatc
     with h5py.File(path, "r+") as f:
         f.attrs.update(status="completed", n_done=12)
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [{"rid": 1, "status": "completed"}]}
+        {"running": [], "queue": [], "history": [{"rid": 1, "status": "completed"}]}
     )
     assert panel.measurement.status == "completed"
     assert "12/12 points" in panel.detail_region.hint.text()
@@ -212,7 +212,11 @@ def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeyp
     calls = []
     real_refresh = panel.refresh
     monkeypatch.setattr(panel, "refresh", lambda: calls.append(1) or real_refresh())
-    snapshot = {"running": {"rid": 2, "status": "running"}, "queue": [], "history": []}
+    snapshot = {
+        "running": [{"rid": 2, "status": "running"}],
+        "queue": [],
+        "history": [],
+    }
     feed.queue_changed.emit(snapshot)
     feed.queue_changed.emit(snapshot)
     assert calls == [1], "only a change of task status refreshes"
@@ -225,3 +229,12 @@ def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeyp
     panel.hide()
     panel._poll_tick()
     assert calls == [1, 1], "a hidden tab is not polled"
+
+
+def test_queue_snapshot_without_running_list_is_tolerated(qapp, tmp_path):
+    feed = FakeFeed()
+    panel = ResultsPanel(root=tmp_path, feed=feed)
+    feed.queue_changed.emit(
+        {"running": None, "queue": [{"rid": 3, "status": "queued"}], "history": []}
+    )
+    assert panel._task_statuses == {3: "queued"}

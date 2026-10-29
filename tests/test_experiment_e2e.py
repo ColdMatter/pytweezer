@@ -123,8 +123,7 @@ def harness(tmp_path, monkeypatch, recording_db):
     harness = Harness(tmp_path, monkeypatch, recording_db)
     harness.start()
     yield harness
-    running = harness.manager.queue.running
-    if running is not None:
+    for running in harness.manager.queue.running:
         harness.client.abort(running.rid)
     harness.stop()
     harness.client.close()
@@ -202,7 +201,7 @@ def test_worker_survives_a_manager_restart(harness):
     harness.stop()
     time.sleep(0.5)
     harness.start()
-    assert harness.manager.process is not None  # adopted
+    assert rid in harness.manager.processes  # adopted
     task = harness.wait_until(rid, lambda t: t.status.finished)
     assert task.status == "completed"
     assert harness.measurement(task).n_done == 5
@@ -235,9 +234,8 @@ def test_guis_see_the_queue_and_each_point_live(harness):
 
         until(lambda: mirror.read(finished))
         state = mirror.snapshot()
-        assert finished(state) and state["running"] is None
-        rows = state["points"]["rows"]
-        assert state["points"]["rid"] == rid
+        assert finished(state) and state["running"] == []
+        rows = state["points"][str(rid)]
         assert [row["values"]["step"] for row in rows] == [1, 2, 3, 4, 5]
         assert [row["scalars"]["index"] for row in rows] == [0, 1, 2, 3, 4]
     finally:

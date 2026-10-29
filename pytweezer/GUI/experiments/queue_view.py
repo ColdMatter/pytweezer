@@ -5,21 +5,26 @@ from datetime import datetime
 from PyQt6 import QtCore, QtGui
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QHBoxLayout,
     QHeaderView,
     QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from pytweezer.experiment.queue import UNKNOWN_DEVICES
 from pytweezer.GUI.components import status_icon
 from pytweezer.GUI.grafana import open_in_browser, run_url
+from pytweezer.GUI.theme import STATE_STYLE
 
 COLUMNS = [
     "RID",
+    "Pipeline",
     "Experiment",
     "Label",
     "Status",
@@ -44,6 +49,66 @@ _STATUS_STATE = {
 }
 
 _TASK = QtCore.Qt.ItemDataRole.UserRole
+_STATUS_COLUMN = COLUMNS.index("Status")
+
+
+class PipelineChips(QWidget):
+    """One checkable chip per pipeline, after "All"; exactly one is checked."""
+
+    selection_changed = QtCore.pyqtSignal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(6)
+        self._layout.addStretch(1)
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        #: Chip for each pipeline, keyed by name; ``None`` is the "All" chip.
+        self.buttons = {}
+        self._add_chip(None, "All").setChecked(True)
+
+    def selected(self):
+        """The selected pipeline's name, or ``None`` for All."""
+        return next(name for name, b in self.buttons.items() if b.isChecked())
+
+    def set_pipelines(self, counts):
+        """Show a chip per pipeline; ``counts`` maps name to (running, waiting)."""
+        selected = self.selected()
+        for name in [n for n in self.buttons if n is not None and n not in counts]:
+            chip = self.buttons.pop(name)
+            self._group.removeButton(chip)
+            self._layout.removeWidget(chip)
+            chip.setParent(None)
+            chip.deleteLater()
+        order = sorted(counts, key=str.casefold)
+        for name in order:
+            if name not in self.buttons:
+                self._add_chip(name, name)
+        for name in order:
+            self._layout.removeWidget(self.buttons[name])
+        for index, name in enumerate(order, start=1):
+            self._layout.insertWidget(index, self.buttons[name])
+            running, waiting = counts[name]
+            text = name + (" ●" if running else "") + (f" {waiting}" if waiting else "")
+            self.buttons[name].setText(text)
+        self.buttons[selected if selected in self.buttons else None].setChecked(True)
+        if self.selected() != selected:
+            self.selection_changed.emit(self.selected())
+
+    def _add_chip(self, name, text):
+        chip = QToolButton()
+        chip.setObjectName("PipelineChip")
+        chip.setCheckable(True)
+        chip.setText(text)
+        chip.clicked.connect(
+            lambda _checked: self.selection_changed.emit(self.selected())
+        )
+        self._group.addButton(chip)
+        self.buttons[name] = chip
+        self._layout.insertWidget(len(self.buttons) - 1, chip)
+        return chip
 
 
 class QueueView(QWidget):
@@ -57,6 +122,10 @@ class QueueView(QWidget):
         self.snapshot = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        self.chips = PipelineChips()
+        self.chips.selection_changed.connect(self._apply_filter)
+        layout.addWidget(self.chips)
 
         self.table = QTableWidget(0, len(COLUMNS))
         self.table.setObjectName("QueueTable")
@@ -118,32 +187,52 @@ class QueueView(QWidget):
         self.snapshot = snapshot
         selected = self.selected_task()
         selected_rid = selected["rid"] if selected else None
-        rows = []
-        if snapshot.get("running"):
-            rows.append(snapshot["running"])
-        rows += snapshot.get("queue", [])
-        rows += snapshot.get("history", [])
+        running = sorted(snapshot.get("running") or [], key=lambda t: t["rid"])
+        queue = snapshot.get("queue", [])
+        rows = running + queue + snapshot.get("history", [])
+        self.chips.set_pipelines(_pipeline_counts(running, queue, rows))
+        unresolved_heads = {
+            task["rid"]
+            for task in _heads(running, queue)
+            if task.get("devices") is None
+        }
         self.table.setRowCount(len(rows))
         reselect = None
         for row, task in enumerate(rows):
-            shade = _ROW_SHADES.get(_row_kind(task))
-            for column, text in enumerate(_cells(task)):
+            reading = task["rid"] in unresolved_heads
+            blocked = reading or _blocked(task)
+            shade = _ROW_SHADES.get("blocked" if blocked else _row_kind(task))
+            for column, text in enumerate(_cells(task, reading)):
                 item = QTableWidgetItem(text)
                 item.setData(_TASK, task)
                 if shade is not None:
                     item.setBackground(shade)
-                if column == 3 and task["status"] in _STATUS_STATE:
-                    item.setIcon(status_icon(_STATUS_STATE[task["status"]]))
+                if column == _STATUS_COLUMN and task["status"] in _STATUS_STATE:
+                    state = "starting" if blocked else _STATUS_STATE[task["status"]]
+                    item.setIcon(status_icon(state))
                 if task.get("error"):
                     item.setToolTip(task["error"].strip().splitlines()[-1])
                 self.table.setItem(row, column, item)
             if task["rid"] == selected_rid:
                 reselect = row
+        self._apply_filter()
         # Qt keeps the selected row index, which may now hold a different task.
         if reselect is None:
             self.table.clearSelection()
         else:
             self.table.selectRow(reselect)
+        self._update_buttons()
+
+    def _apply_filter(self):
+        pipeline = self.chips.selected()
+        for row in range(self.table.rowCount()):
+            task = self.table.item(row, 0).data(_TASK)
+            self.table.setRowHidden(
+                row, pipeline is not None and _pipeline(task) != pipeline
+            )
+        selected = self.selected_task()
+        if selected is not None and pipeline not in (None, _pipeline(selected)):
+            self.table.clearSelection()
         self._update_buttons()
 
     def selected_task(self):
@@ -201,6 +290,8 @@ class QueueView(QWidget):
         text = (
             f"Task {task['rid']}: {task['experiment']}.{task['class_name']}\n"
             f"Status: {task['status']}\n"
+            f"Pipeline: {_pipeline(task)}\n"
+            f"Devices: {_devices_text(task.get('devices'))}\n"
             f"File: {task.get('h5_path') or '—'}\n"
         )
         if task.get("error"):
@@ -212,12 +303,66 @@ class QueueView(QWidget):
         box.open()
 
 
+def _amber_shade():
+    """The theme's warning colour, dimmed into the dark rows so text stays legible."""
+    amber = QtGui.QColor(STATE_STYLE["starting"][0])
+    base = QtGui.QColor("#141519")
+    mix = 0.3
+    return QtGui.QColor(
+        *(
+            round(a * mix + b * (1 - mix))
+            for a, b in zip(amber.getRgb()[:3], base.getRgb()[:3])
+        )
+    )
+
+
 # Row backgrounds by lifecycle: the running task stands out, finished ones
 # recede. (Text colour can't vary per item: the theme's ::item rule sets it.)
 _ROW_SHADES = {
     "running": QtGui.QColor("#1f2c45"),
     "finished": QtGui.QColor("#111215"),
+    "blocked": _amber_shade(),
 }
+
+
+def _pipeline(task):
+    return task.get("pipeline") or "main"
+
+
+def _blocked(task):
+    return bool(task.get("waiting_for"))
+
+
+def _devices_text(devices):
+    if devices is None:
+        return "not yet known"
+    return ", ".join(devices) or "none"
+
+
+def _heads(running, queue):
+    """Each idle pipeline's next due task, as the manager picks them."""
+    busy = {_pipeline(task) for task in running}
+    heads = {}
+    at = datetime.now().astimezone()
+    for task in queue:
+        pipeline = _pipeline(task)
+        if pipeline in busy or pipeline in heads:
+            continue
+        due = task.get("due_time")
+        if task["status"] == "queued" and (
+            due is None or datetime.fromisoformat(due) <= at
+        ):
+            heads[pipeline] = task
+    return list(heads.values())
+
+
+def _pipeline_counts(running, queue, tasks):
+    counts = {_pipeline(task): [False, 0] for task in tasks}
+    for task in running:
+        counts[_pipeline(task)][0] = True
+    for task in queue:
+        counts[_pipeline(task)][1] += 1
+    return {name: tuple(count) for name, count in counts.items()}
 
 
 def _row_kind(task):
@@ -230,24 +375,36 @@ def _row_kind(task):
 
 def queue_summary(snapshot):
     """One line for the queue's title: what's running and how much is waiting."""
-    parts = []
-    running = snapshot.get("running")
-    if running:
-        parts.append(f"task {running['rid']} {running['status']}")
+    running = snapshot.get("running") or []
     waiting = len(snapshot.get("queue", []))
-    parts.append(f"{waiting} waiting" if waiting else "nothing waiting")
-    return ", ".join(parts)
+    rids = ", ".join(
+        str(task["rid"]) for task in sorted(running, key=lambda t: t["rid"])
+    )
+    return ", ".join(
+        [
+            f"{len(running)} running ({rids})" if running else "nothing running",
+            f"{waiting} waiting" if waiting else "nothing waiting",
+        ]
+    )
 
 
-def _cells(task):
+def _cells(task, reading=False):
     total = task.get("points_total")
     progress = f"{task['points_done']}/{total}" if total else ""
     when = task.get("t_start") or task.get("due_time") or task.get("t_submit")
     status = task["status"]
     if task.get("requested") and status in ("running", "paused"):
         status = f"{status} ({task['requested']} requested)"
+    if _blocked(task):
+        status = "waiting: " + ", ".join(
+            f"{'all devices' if device == UNKNOWN_DEVICES else device} (RID {rid})"
+            for device, rid in task["waiting_for"].items()
+        )
+    elif reading:
+        status = "waiting: reading experiments"
     return [
         str(task["rid"]),
+        _pipeline(task),
         f"{task['class_name']}  ({task['experiment'].rsplit('.', 1)[-1]})",
         task.get("label", ""),
         status,
