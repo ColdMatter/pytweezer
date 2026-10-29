@@ -114,10 +114,9 @@ cloned at `~/CaFMOT-LabBook`; read its own `CLAUDE.md` before writing to it.
 
 ### Git branching conventions
 
-- Small, tested fixes may be committed and pushed straight to main, no branch or merge request needed
-- Features, and anything that needs review, go on a feature branch
+- main is protected: every change, however small, goes on a branch and merges through a PR once `pytest` and `dependencies` pass
+- A line `Depends on owner/repo#N` (or `#N`) in a PR description holds it until that PR merges or that issue closes
 - Commit and push as you go: after each coherent, tested step (e.g. one tab restyled), not in one batch at the end. Stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
-- Every feature branch should have an associated merge request
 - **The main branch should always be deployable** - no broken code or failing tests allowed
 
 
