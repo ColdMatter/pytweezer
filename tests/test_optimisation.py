@@ -1,5 +1,5 @@
-"""MOT resonance and loading scans, against a simulated MOT whose brightness
-peaks at known settings."""
+"""MOT resonance, loading and shim optimisation, against a simulated MOT and
+tweezer array that respond best to known settings."""
 
 import json
 
@@ -126,3 +126,152 @@ def test_each_mot_number_scan_runs_at_the_earlier_scans_optima(rig):
             if other != scanned:
                 sent = [shot[other] for shot in shots]
                 assert sent == pytest.approx([expected] * len(shots)), (scanned, other)
+
+
+SHIMS = {
+    "MOT": ("tMOTShimXccValue", "tMOTShimYccValue", "tMOTShimZccValue"),
+    "molasses": (
+        "tMolassesShimXccValue",
+        "tMolassesShimYccValue",
+        "tMolassesShimZccValue",
+    ),
+}
+#: The shim currents that load (MOT) or keep (molasses) the most atoms.
+BEST_SHIMS = {"MOT": (6.0, -2.0, 0.3), "molasses": (4.4, -3.6, 0.2)}
+SHIM_RANGES = ((0.0, 10.0), (-5.0, 5.0), (-1.0, 1.0))
+SITES = {i: (10 + 10 * (i // 8), 10 + 10 * (i % 8)) for i in range(64)}
+SHOTS_PER_POINT = 20
+
+
+def best_shim_fraction(kind, shot):
+    """1 at ``BEST_SHIMS[kind]``, falling off over half of each shim's range."""
+    offsets = [
+        (shot[name] - best) / (high - low)
+        for name, best, (low, high) in zip(SHIMS[kind], BEST_SHIMS[kind], SHIM_RANGES)
+    ]
+    return float(np.exp(-sum(offset**2 for offset in offsets) / (2 * 0.5**2)))
+
+
+def atoms_per_image(fraction, n_images, n_sites):
+    total = round(fraction * n_images * n_sites)
+    return [total // n_images + (k < total % n_images) for k in range(n_images)]
+
+
+def loaded_fraction(shot):
+    """Of all sites in all first images: the MOT shims set the loading, up to 80 %."""
+    return 0.8 * best_shim_fraction("MOT", shot)
+
+
+def surviving_fraction(shot):
+    """Of the loaded atoms: the molasses shims set how many survive to the second image."""
+    return best_shim_fraction("molasses", shot)
+
+
+def loading_imaged(shot):
+    """The loading probability the camera's images show for this shot."""
+    loaded = atoms_per_image(loaded_fraction(shot), SHOTS_PER_POINT, len(SITES))
+    return sum(loaded) / (SHOTS_PER_POINT * len(SITES))
+
+
+def survival_imaged(shot):
+    """The survival probability the camera's image pairs show for this shot."""
+    loaded = atoms_per_image(loaded_fraction(shot), SHOTS_PER_POINT, len(SITES))
+    return np.mean([round(surviving_fraction(shot) * n) / n for n in loaded])
+
+
+class FakeTweezerCamera:
+    """Images the last shot as pairs of tweezer-array frames: the first with
+    ``loaded_fraction`` of the sites filled, the second with ``surviving_fraction``
+    of those atoms still there, on a flat background with a little fixed noise."""
+
+    def __init__(self, motmaster):
+        self.motmaster = motmaster
+        y, x = np.mgrid[0:90, 0:90]
+        self.spots = {
+            i: 200.0 * np.exp(-((x - sx) ** 2 + (y - sy) ** 2) / 2.0)
+            for i, (sy, sx) in SITES.items()
+        }
+        self.noise = np.random.default_rng(0).normal(
+            0.0, 1.0, (2 * SHOTS_PER_POINT, 90, 90)
+        )
+
+    def acquire_n_frames(self, nframes):
+        shot = self.motmaster.shots[-1]
+        loaded = atoms_per_image(loaded_fraction(shot), nframes // 2, len(SITES))
+        frames = []
+        for k, n_loaded in enumerate(loaded):
+            atoms = [(i + 5 * k) % len(SITES) for i in range(n_loaded)]
+            kept = atoms[: round(surviving_fraction(shot) * n_loaded)]
+            for sites in (atoms, kept):
+                frames.append(
+                    50.0 + sum((self.spots[i] for i in sites), np.zeros((90, 90)))
+                )
+        return np.array(frames) + self.noise[:nframes]
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+@pytest.fixture
+def tweezer_rig(tmp_path, monkeypatch):
+    """A MOTMaster and tweezer camera, the saved parameters in a scratch file, and
+    the array's analysis settings set in this session as after a calibration."""
+    shims = {name: 0.0 for names in SHIMS.values() for name in names}
+    saved_settings = {
+        "motmaster_parameters": {
+            **STARTING_PARAMETERS["motmaster_parameters"],
+            **dict.fromkeys(
+                ["tMolCoolVCO1", "tMolRepVCO1", "tMolCoolVVA1", "tMolRepVVA1"], 1.0
+            ),
+            **dict.fromkeys(
+                ["tMolCoolVCO2", "tMolRepVCO2", "tMolCoolVVA2", "tMolRepVVA2"], 1.0
+            ),
+            "tImgCoolVCO": 4.0,
+            "tImgCoolVVA": 1.0,
+            **shims,
+        },
+        "emccd_parameters": {"conversion_factor": 0.01, "conversion_offset": 0.0},
+    }
+    parameters_file = tmp_path / "parameters.json"
+    parameters_file.write_text(json.dumps(saved_settings))
+    parameters = ExpParameterManager(parameters_file)
+    for name, value in {
+        "site_positions": SITES,
+        "feature_size": 5,
+        "sum_window": 3,
+        "threshold": 5.0,
+    }.items():
+        parameters.add_parameter(name, value)
+    monkeypatch.setattr(optimisation, "ExpParams", parameters)
+    monkeypatch.setattr(
+        "pytweezer.analysis.analysis.ExpParameterManager", lambda: parameters
+    )
+    motmaster = FakeMotMaster()
+    return motmaster, FakeTweezerCamera(motmaster), parameters
+
+
+@pytest.mark.parametrize(
+    "kind, optimise, score",
+    [
+        ("MOT", optimisation.OptimiseMOTShimParameters, loading_imaged),
+        ("molasses", optimisation.OptimiseMolassesShimParameters, survival_imaged),
+    ],
+    ids=["MOT", "molasses"],
+)
+def test_shim_optimisation_keeps_the_best_shims_it_tried(
+    tweezer_rig, kind, optimise, score
+):
+    motmaster, camera, parameters = tweezer_rig
+    if kind == "molasses":
+        # Survival is only scored once loading reaches 50 %.
+        for name, best in zip(SHIMS["MOT"], BEST_SHIMS["MOT"]):
+            parameters.set_parameter(name, best)
+    optimise(camera, motmaster, n_it_per_exp=SHOTS_PER_POINT, n_calls=6, init_calls=4)
+
+    kept = {name: parameters.get_parameter(name) for name in SHIMS[kind]}
+    (kept_shot,) = [
+        shot
+        for shot in motmaster.shots
+        if {name: shot[name] for name in SHIMS[kind]} == pytest.approx(kept)
+    ]
+    assert score(kept_shot) == max(score(shot) for shot in motmaster.shots)
