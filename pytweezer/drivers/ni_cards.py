@@ -339,6 +339,9 @@ class DaqmxIO:
     def card(self, device: str) -> CardInfo | None:
         import nidaqmx.system
 
+        # TODO: an unplugged USB card that is still configured in MAX is listed
+        # here, so it shows as present and fails only on a write. Fine for the
+        # PXIe cards this is for; check presence properly if USB cards matter.
         if device not in nidaqmx.system.System.local().devices.device_names:
             return None
         info = nidaqmx.system.Device(device)
