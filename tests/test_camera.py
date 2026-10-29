@@ -70,7 +70,7 @@ def test_save_tiff_never_overwrites_an_earlier_image(tmp_path):
 
 
 class FakeVendorCamera:
-    """The pylablib camera at the SDK edge; records the frame range asked for."""
+    """The pylablib camera at the SDK edge; records the frame range and ROI asked for."""
 
     def __init__(self):
         self.calls = {}
@@ -81,6 +81,9 @@ class FakeVendorCamera:
     def read_multiple_images(self, frame_range, return_info):
         self.calls["frames"] = frame_range
         return FRAMES[slice(*frame_range)], None
+
+    def set_roi(self, hstart, hend, vstart, vend):
+        self.calls["roi"] = (hstart, hend, vstart, vend)
 
 
 DRIVERS = [ImagEMX2Camera, ORCACamera, thorcam.ThorCam, tweezermonitorcam.ThorCam]
@@ -98,3 +101,11 @@ def test_drivers_read_exactly_the_requested_frames(cls):
     driver = _driver(cls)
     np.testing.assert_array_equal(driver._read_frames(2, 3), FRAMES[3:5])
     assert driver._backend.calls["frames"] == (3, 5)
+
+
+@pytest.mark.parametrize("cls", DRIVERS, ids=DRIVER_IDS)
+def test_drivers_ask_pylablib_for_the_requested_roi(cls):
+    # pylablib ROI ends are exclusive: hend - hstart is the width.
+    driver = _driver(cls)
+    driver.set_roi(110, 256, 220, 64)
+    assert driver._backend.calls["roi"] == (110, 366, 220, 284)
