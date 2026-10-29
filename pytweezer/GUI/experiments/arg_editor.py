@@ -523,9 +523,12 @@ class ArgumentEditor(QWidget):
 
     def set_pipelines(self, names):
         """Offer ``names`` (plus ``main``) in the pipeline drop-down, keeping the typed text."""
+        items = sorted({"main", *names})
+        if items == [self.pipeline.itemText(i) for i in range(self.pipeline.count())]:
+            return
         current = self.pipeline.currentText() or "main"
         self.pipeline.clear()
-        self.pipeline.addItems(sorted({"main", *names}))
+        self.pipeline.addItems(items)
         self.pipeline.setCurrentText(current)
 
     def load_request(self, request):

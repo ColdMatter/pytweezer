@@ -253,6 +253,15 @@ def test_set_pipelines_sorts_keeps_main_and_keeps_the_typed_name(editor):
     assert editor.pipeline.currentText() == "custom"
 
 
+def test_set_pipelines_with_unchanged_names_leaves_the_typing_alone(editor):
+    editor.set_pipelines(["Rb"])
+    line = editor.pipeline.lineEdit()
+    line.setText("CaF2")
+    line.setCursorPosition(2)
+    editor.set_pipelines(["Rb", "main"])
+    assert (line.text(), line.cursorPosition()) == ("CaF2", 2)
+
+
 def test_panel_offers_pipelines_seen_in_the_queue(qapp):
     panel = ExperimentsPanel(client=FakeClient(), feed=FakeFeed())
     panel._queue_changed(
