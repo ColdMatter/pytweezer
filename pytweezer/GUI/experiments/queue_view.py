@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from pytweezer.experiment.queue import UNKNOWN_DEVICES
 from pytweezer.GUI.components import status_icon
 from pytweezer.GUI.grafana import open_in_browser, run_url
 from pytweezer.GUI.theme import STATE_STYLE
@@ -190,19 +191,24 @@ class QueueView(QWidget):
         queue = snapshot.get("queue", [])
         rows = running + queue + snapshot.get("history", [])
         self.chips.set_pipelines(_pipeline_counts(running, queue, rows))
+        unresolved_heads = {
+            task["rid"]
+            for task in _heads(running, queue)
+            if task.get("devices") is None
+        }
         self.table.setRowCount(len(rows))
         reselect = None
         for row, task in enumerate(rows):
-            shade = _ROW_SHADES.get(_row_kind(task))
-            for column, text in enumerate(_cells(task)):
+            reading = task["rid"] in unresolved_heads
+            blocked = reading or _blocked(task)
+            shade = _ROW_SHADES.get("blocked" if blocked else _row_kind(task))
+            for column, text in enumerate(_cells(task, reading)):
                 item = QTableWidgetItem(text)
                 item.setData(_TASK, task)
                 if shade is not None:
                     item.setBackground(shade)
                 if column == _STATUS_COLUMN and task["status"] in _STATUS_STATE:
-                    state = (
-                        "starting" if _blocked(task) else _STATUS_STATE[task["status"]]
-                    )
+                    state = "starting" if blocked else _STATUS_STATE[task["status"]]
                     item.setIcon(status_icon(state))
                 if task.get("error"):
                     item.setToolTip(task["error"].strip().splitlines()[-1])
@@ -285,7 +291,7 @@ class QueueView(QWidget):
             f"Task {task['rid']}: {task['experiment']}.{task['class_name']}\n"
             f"Status: {task['status']}\n"
             f"Pipeline: {_pipeline(task)}\n"
-            f"Devices: {', '.join(task.get('devices') or []) or 'not yet known'}\n"
+            f"Devices: {_devices_text(task.get('devices'))}\n"
             f"File: {task.get('h5_path') or '—'}\n"
         )
         if task.get("error"):
@@ -327,6 +333,29 @@ def _blocked(task):
     return bool(task.get("waiting_for"))
 
 
+def _devices_text(devices):
+    if devices is None:
+        return "not yet known"
+    return ", ".join(devices) or "none"
+
+
+def _heads(running, queue):
+    """Each idle pipeline's next due task, as the manager picks them."""
+    busy = {_pipeline(task) for task in running}
+    heads = {}
+    at = datetime.now().astimezone()
+    for task in queue:
+        pipeline = _pipeline(task)
+        if pipeline in busy or pipeline in heads:
+            continue
+        due = task.get("due_time")
+        if task["status"] == "queued" and (
+            due is None or datetime.fromisoformat(due) <= at
+        ):
+            heads[pipeline] = task
+    return list(heads.values())
+
+
 def _pipeline_counts(running, queue, tasks):
     counts = {_pipeline(task): [False, 0] for task in tasks}
     for task in running:
@@ -337,8 +366,6 @@ def _pipeline_counts(running, queue, tasks):
 
 
 def _row_kind(task):
-    if _blocked(task):
-        return "blocked"
     if task["status"] in ("running", "paused"):
         return "running"
     if task["status"] in ("queued", "held"):
@@ -361,7 +388,7 @@ def queue_summary(snapshot):
     )
 
 
-def _cells(task):
+def _cells(task, reading=False):
     total = task.get("points_total")
     progress = f"{task['points_done']}/{total}" if total else ""
     when = task.get("t_start") or task.get("due_time") or task.get("t_submit")
@@ -370,8 +397,11 @@ def _cells(task):
         status = f"{status} ({task['requested']} requested)"
     if _blocked(task):
         status = "waiting: " + ", ".join(
-            f"{device} (RID {rid})" for device, rid in task["waiting_for"].items()
+            f"{'all devices' if device == UNKNOWN_DEVICES else device} (RID {rid})"
+            for device, rid in task["waiting_for"].items()
         )
+    elif reading:
+        status = "waiting: reading experiments"
     return [
         str(task["rid"]),
         _pipeline(task),

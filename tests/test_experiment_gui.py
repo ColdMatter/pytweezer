@@ -22,6 +22,7 @@ from pytweezer.experiment.motmaster import (
     MotMasterExperiment,
     MotMasterNumber,
 )
+from pytweezer.experiment.queue import UNKNOWN_DEVICES
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.experiments import queue_view
@@ -361,6 +362,31 @@ def test_queue_view_shows_pipeline_and_why_a_task_waits(qapp):
     assert blocked != free
 
 
+def test_queue_view_says_when_a_head_waits_for_its_reservation(qapp):
+    view = QueueView()
+    view.set_snapshot(
+        {
+            "running": [],
+            "queue": [
+                task(50, "queued", pipeline="CaF"),
+                task(51, "queued", pipeline="CaF"),
+            ],
+        }
+    )
+    assert column_texts(view, "Status") == ["waiting: reading experiments", "queued"]
+    status = COLUMNS.index("Status")
+    shade = view.table.item(0, status).background().color()
+    assert shade == queue_view._ROW_SHADES["blocked"]
+
+    view.set_snapshot(
+        {
+            "running": [task(41, "running", pipeline="Rb")],
+            "queue": [task(52, "queued", waiting_for={UNKNOWN_DEVICES: 41})],
+        }
+    )
+    assert column_texts(view, "Status")[1] == "waiting: all devices (RID 41)"
+
+
 def test_pipeline_chips_count_and_filter(qapp):
     view = QueueView()
     view.set_snapshot(PIPELINE_SNAPSHOT)
@@ -411,6 +437,9 @@ def test_details_list_pipeline_and_devices(qapp):
     texts = [box.text() for box in view.findChildren(QMessageBox)]
     assert any("Pipeline: CaF" in t and "Devices: Rb MotMaster" in t for t in texts)
     assert any("Devices: not yet known" in t for t in texts)
+    view.set_snapshot({"queue": [task(46, "queued", devices=[])]})
+    view._show_details(0, 0)
+    assert any("Devices: none" in box.text() for box in view.findChildren(QMessageBox))
 
 
 def test_queue_summary_counts_running_tasks():
