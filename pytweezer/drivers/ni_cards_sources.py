@@ -35,6 +35,16 @@ class LastRun:
     values: dict[str, float | bool]
 
 
+def _unwrapped(error: BaseException) -> BaseException:
+    # Reflection wraps what a .NET getter throws, and pythonnet unwraps only one level.
+    while type(error).__name__ == "TargetInvocationException":
+        inner = getattr(error, "InnerException", None)
+        if inner is None:
+            break
+        error = inner
+    return error
+
+
 def _as_dict(mapping: Any) -> dict:
     # A .NET dictionary is iterated as key-value pairs, so go through Keys.
     if hasattr(mapping, "Keys"):
@@ -81,10 +91,10 @@ class RemotingMotMasterStatus:
 
     The proxy is built on the first call; any failure to build it counts as
     MOTMaster being unreachable, and is logged as a warning the first time so a
-    configuration error does not pass for a closed MOTMaster. Each call runs on a worker thread and
-    is abandoned after ``timeout_s``; while an abandoned call is still stuck,
-    further calls raise `MotMasterNotAnswering` at once rather than pile up
-    threads.
+    configuration error does not pass for a closed MOTMaster. Each call runs on
+    a worker thread and is abandoned after ``timeout_s``; while an abandoned
+    call is still stuck, further calls raise `MotMasterNotAnswering` at once
+    rather than pile up threads.
 
     Args:
         device_name: The MOTMaster's key in ``CONFIG["Devices"]``.
@@ -168,6 +178,7 @@ class RemotingMotMasterStatus:
             if error is None:
                 self._warned = False
                 return outcome["result"]
+            error = _unwrapped(error)
             if isinstance(error, OSError) or (
                 type(error).__name__ in _UNREACHABLE_DOTNET_ERRORS
             ):

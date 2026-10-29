@@ -108,10 +108,13 @@ _referenced: set[str] = set()
 
 
 def _add_reference(path: str) -> None:
-    # Once per process: a poller that rebuilds its proxy must not grow sys.path.
+    # Once per process: a poller that rebuilds its proxy must not grow sys.path,
+    # even while a DLL is missing and clr.AddReference keeps failing.
     if path in _referenced:
         return
-    sys.path.append(pathlib.Path(path).parent)
+    parent = str(pathlib.Path(path).parent)
+    if parent not in sys.path:
+        sys.path.append(parent)
     clr.AddReference(path)
     _referenced.add(path)
 
@@ -120,8 +123,8 @@ def motmaster_controller(config_file: str) -> Any:
     """The remoting proxy for the MOTMaster ``Controller`` named by ``config_file``.
 
     ``config_file`` is resolved against ``CONFIG_DIR`` as `MotMasterInterface`
-    does. The references are added once per process. Building the proxy does not start MOTMaster or contact it; the first
-    call through the proxy does.
+    does. The references are added once per process. Building the proxy does
+    not start MOTMaster or contact it; the first call through the proxy does.
 
     Args:
         config_file: JSON config naming the ``"motmaster"`` entry and ``dll_paths``.

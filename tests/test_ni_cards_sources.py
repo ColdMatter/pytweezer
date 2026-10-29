@@ -38,7 +38,12 @@ class _Reflected:
         return self
 
     def GetValue(self, proxy, index):
-        return self._read()
+        try:
+            return self._read()
+        except Exception as error:
+            wrapper = type("TargetInvocationException", (Exception,), {})()
+            wrapper.InnerException = error
+            raise wrapper from error
 
 
 class FakeController:
@@ -223,3 +228,20 @@ def test_motmaster_controller_adds_references_once_per_process(monkeypatch, tmp_
 
     assert added == ["C:/mm/A.dll", "C:/mm/MOTMaster.exe"]
     assert len(sys.path) == path_length
+
+
+def test_missing_dll_does_not_grow_sys_path_on_every_attempt(monkeypatch):
+    def missing(path):
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(motmaster, "_referenced", set())
+    monkeypatch.setattr(
+        motmaster, "clr", types.SimpleNamespace(AddReference=missing), raising=False
+    )
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    for _ in range(3):
+        with pytest.raises(FileNotFoundError):
+            motmaster._add_reference("C:/mm/Missing.dll")
+
+    assert sys.path.count("C:/mm") == 1
