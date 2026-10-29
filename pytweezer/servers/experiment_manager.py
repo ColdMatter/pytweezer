@@ -533,9 +533,9 @@ class ExperimentManager:
     def _finish(self, rid: int, status: TaskStatus, error: str | None) -> None:
         task = self.queue.finish(rid, status, error)
         self._record_run(rid)
-        if self.copier is not None and task.h5_path:
-            if (self.root / task.h5_path).exists():
-                self.copier.add(task.h5_path)
+        path = self.root / task.h5_path if task.h5_path else None
+        if self.copier is not None and path is not None and path.exists():
+            self.copier.add(task.h5_path)
         logger.info("Task %s %s", rid, status)
         if error:
             logger.warning("Task %s error: %s", rid, error.strip().splitlines()[-1])
