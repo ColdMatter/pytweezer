@@ -159,9 +159,11 @@ rid (or path) and passes attribute access through to its `Measurement`:
 ```python
 from pytweezer.experiment import Dataset
 
-ds = Dataset(rid)  # any PC; root=... for another data dir; results=[...] to load a subset
+# Works on any PC; root=... for another data dir, results=[...] to load a subset.
+ds = Dataset(rid)
 ds.summarise()  # same text as the Results tab's metadata pane
-df = ds.get_data()  # "dataframe" (default) | "dict" | "array"; or get_dataframe/get_dict/get_array
+# "dataframe" (default) | "dict" | "array"; or get_dataframe/get_dict/get_array
+df = ds.get_data()
 ax = ds.plot_scan("atom_number")  # mean ± SEM over repetitions; x, series, ax optional
 ```
 
@@ -185,12 +187,18 @@ recipe…** stores the form (asks before replacing a name), right-click → *Sub
 now* queues it unchanged, *Delete…* removes it for everyone.
 
 ```python
-from pytweezer.experiment.client import delete_recipe, recipes, save_recipe, submit_recipe
+from pytweezer.experiment.client import (
+    delete_recipe,
+    recipes,
+    save_recipe,
+    submit_recipe,
+)
 
 save_recipe(LoadingCurve, "nightly", scan, shots=2, label="nightly check")
 rid = submit_recipe(LoadingCurve, "nightly", shots=3)  # overrides fixed arguments
 save_recipe(LoadingCurve, "nightly", shots=4, overwrite=True)  # a taken name is refused
-recipes(LoadingCurve); delete_recipe(LoadingCurve, "nightly")
+recipes(LoadingCurve)
+delete_recipe(LoadingCurve, "nightly")
 ```
 
 A recipe stores every argument value, not just changed ones, except those its
@@ -215,7 +223,7 @@ never overwritten (mode `"x"`) and readable mid-run (`locking=False`).
 The queue state lives in `{data_root}/queue_state.json`.
 
 When a task finishes, the manager copies its file to the same path under
-`CONFIG[...]["copy_root"]` (the router's USB drive, `\\10.59.0.1\pytweezer-data`;
+`CONFIG[...]["copy_root"]` (the router's USB drive, `\\10.59.0.1\g\pytweezer-data`;
 `<copy_root>/simulated` when simulating) on a background thread
 (`pytweezer/experiment/copier.py`). Runs never write to the network: a failed
 copy is retried every minute, and the paths still to copy are kept in

@@ -122,9 +122,9 @@ CONFIG = {
             # None means <repo>/data.
             "data_root": None,
             # Each finished measurement file is copied here, at the same path
-            # (the router's USB drive, see the labbook's Lab network overview).
-            # None means no copy.
-            "copy_root": r"\\10.59.0.1\pytweezer-data",
+            # (a folder on the router's USB drive, which it shares as "g" -
+            # see the labbook's Lab network overview). None means no copy.
+            "copy_root": r"\\10.59.0.1\g\pytweezer-data",
             # Seconds a worker keeps running without reaching the manager.
             "orphan_timeout": 30.0,
         },
