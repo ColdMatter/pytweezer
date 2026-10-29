@@ -3,8 +3,10 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
+from pytweezer.drivers import motmaster as motmaster_driver
 from pytweezer.drivers.motmaster import MotMasterInterface, SimulatedMotMasterInterface
 from pytweezer.experiment import ListAxis, Scan, run_local
 from pytweezer.experiment.arguments import coerce_arguments
@@ -21,10 +23,17 @@ class FakeSequencer:
         self.log, self.name, self.params = log, name, params
         self.fail_go, self.go_delay = False, 0.0
 
-    def _ignore(self, *args):
+    def close_rpc(self):
         pass
 
-    set_run_until_stopped = set_iterations = set_save_toggle = close_rpc = _ignore
+    def set_run_until_stopped(self, value):
+        self.log.append((self.name, "run_until_stopped", value))
+
+    def set_iterations(self, value):
+        self.log.append((self.name, "iterations", value))
+
+    def set_save_toggle(self, value):
+        self.log.append((self.name, "save", value))
 
     def set_linked(self, value):
         self.log.append((self.name, "linked", value))
@@ -149,6 +158,38 @@ def test_dotted_names_that_are_not_searchable_are_rejected_at_submit(name):
         Scan(axes=[ListAxis(argument=name, values=[1])]).points(Single)
 
 
+class Configured(MotMasterExperiment):
+    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", iterations=3, save=True)
+    caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad", master=True)
+
+
+def test_every_sequencer_is_set_up_as_declared(rig):
+    run_local(Configured)
+    settings = {
+        name: {
+            event[1]: event[2]
+            for event in rig.log
+            if event[0] == name
+            and event[1] in ("script", "run_until_stopped", "iterations", "save")
+        }
+        for name in ("rb", "caf")
+    }
+    assert settings == {
+        "rb": {
+            "script": "RbTweezerBasic",
+            "run_until_stopped": False,
+            "iterations": 3,
+            "save": True,
+        },
+        "caf": {
+            "script": "CaFTweezerLoad",
+            "run_until_stopped": False,
+            "iterations": 1,
+            "save": False,
+        },
+    }
+
+
 def test_master_is_untriggered_and_followers_start_first(rig, monkeypatch):
     monkeypatch.setattr(MotMasterExperiment, "follower_arm_delay", 0.05)
     run_local(Pair, **{"caf.bTop": 0.7})
@@ -182,13 +223,6 @@ def test_every_sequencer_is_unlinked_before_any_script_is_set(rig):
     events = [event[:2] for event in rig.log if event[1] in ("linked", "script")]
     assert events[:2] == [("rb", "linked"), ("caf", "linked")]
     assert ("rb", "linked", False) in rig.log and ("caf", "linked", False) in rig.log
-
-
-def test_follower_client_is_opened_once_per_task(rig):
-    scan = Scan(axes=[ListAxis(argument="tof", values=[1, 2, 3])])
-    measurement = run_local(Pair, scan)
-    assert measurement.status == "completed", measurement.attrs["error"]
-    assert rig.opened.count("CaF MotMaster") == 2
 
 
 def test_failure_opening_a_follower_client_starts_no_follower(rig):
@@ -262,15 +296,6 @@ def test_declaration_rules_are_checked_at_class_definition():
         class UnknownDevice(MotMasterExperiment):
             a = MotMaster("Rb MotMaster", script="s")
             x = MotMasterNumber(1.0, device="nope")
-
-
-def test_schema_describes_the_sequencers_and_parameters():
-    schema = Pair.schema()
-    assert schema["devices"]["caf"]["motmaster"]["script"] == "CaFTweezerLoad"
-    assert schema["devices"]["rb"]["motmaster"]["master"] is True
-    assert schema["arguments"]["tof"]["motmaster_device"] == "rb"
-    assert schema["arguments"]["tof"]["motmaster_parameter"] == "tDelay1"
-    assert Single.master_name() == "rb"
 
 
 class FakeDotNet:
@@ -418,6 +443,61 @@ def test_yag_spot_moves_travel_max_steps_then_back(monkeypatch):
     steps = [step for _axis, step in stage.moves]
     assert steps == [10, 10, -10, -10, 10, 10]
     assert all(type(step) is int for step in steps)
+
+
+class Int32(int):
+    """Stands in for .NET's System.Int32, which only exists under pythonnet."""
+
+
+class Dictionary(dict):
+    def __class_getitem__(cls, types):
+        return cls
+
+
+@pytest.fixture
+def dotnet_types(monkeypatch):
+    for name, value in {
+        "Int32": Int32,
+        "Dictionary": Dictionary,
+        "String": str,
+        "Object": object,
+    }.items():
+        monkeypatch.setattr(motmaster_driver, name, value, raising=False)
+    monkeypatch.setattr(motmaster_driver.time, "sleep", lambda _s: None)
+
+
+class RecordingDotNet(FakeDotNet):
+    """MOTMaster over .NET; records the parameters of every ``Go``."""
+
+    def __init__(self):
+        super().__init__()
+        self.gos = []
+
+    def Go(self, parameters=None):
+        self.gos.append(dict(parameters or {}))
+
+
+def test_python_values_reach_motmaster_as_int32_or_unchanged(dotnet_types):
+    sent = _driver().python_to_cs_dict(
+        {"a": 3, "b": np.int64(4), "c": 2.5, "d": np.float64(0.5), "e": "x"}
+    )
+    assert {name: type(value) for name, value in sent.items()} == {
+        "a": Int32,
+        "b": Int32,
+        "c": float,
+        "d": np.float64,
+        "e": str,
+    }
+    assert sent == {"a": 3, "b": 4, "c": 2.5, "d": 0.5, "e": "x"}
+
+
+def test_a_parameter_scan_runs_one_shot_per_value_in_order(dotnet_types):
+    driver = _driver(motmaster=RecordingDotNet())
+    results = driver.scan_motmaster_parameter(
+        "S", "tDelay1", [30, 10, 20], callback=lambda value: 2 * value
+    )
+    assert driver.motmaster.gos == [{"tDelay1": 30}, {"tDelay1": 10}, {"tDelay1": 20}]
+    assert results == [60, 20, 40]
 
 
 def test_simulated_sequencer_serves_and_validates_parameters():

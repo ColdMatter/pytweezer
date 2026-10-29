@@ -49,15 +49,27 @@ def test_readings_round_trip(conn, writer):
     assert list(table["power"]) == [0.0, 1.0, 2.0]
 
 
-def test_upserts_keep_one_row_per_key(conn, writer):
-    writer.record_run({"rid": 1, "status": "running", "arguments": {"a": 1}})
-    writer.record_run({"rid": 1, "status": "completed", "arguments": {"a": 2}})
+def test_a_run_recorded_at_start_and_finish_is_one_row_with_its_points(conn, writer):
+    writer.record_run({"rid": 1, "status": "running", "points_done": 0})
+    for index in range(3):
+        writer.record_point(1, index, 10.0 * index, 10.0 * index + 5, {"x": index}, {})
+    writer.record_run({"rid": 1, "status": "completed", "points_done": 3})
+    assert writer.flush(10)
+
+    runs = conn.execute("SELECT rid, status, points_done FROM runs").fetchall()
+    assert runs == [(1, "completed", 3)]
+    points = conn.execute(
+        "SELECT point_index, scan_values->>'x' FROM points WHERE rid = 1 "
+        "ORDER BY point_index"
+    ).fetchall()
+    assert points == [(0, "0"), (1, "1"), (2, "2")]
+
+
+def test_a_measurement_registered_twice_is_one_row_with_the_latest_limits(conn, writer):
     writer.record_measurement("ni_adc", "NI ADC Logger", 1.0, {"ai0": [0, None]}, True)
     writer.record_measurement("ni_adc", "NI ADC Logger", 1.0, {"ai0": [0, 5]}, False)
     assert writer.flush(10)
 
-    runs = conn.execute("SELECT status, arguments->>'a' FROM runs").fetchall()
-    assert runs == [("completed", "2")]
     limits = conn.execute(
         "SELECT m.active, l.key, (l.value->>0)::float, (l.value->>1)::float "
         "FROM measurements m, jsonb_each(m.limits) l"
@@ -89,20 +101,33 @@ def test_a_row_the_database_rejects_is_dropped_and_the_rest_are_written(conn, wr
     assert conn.execute("SELECT count(*) FROM runs").fetchone() == (0,)
 
 
-def test_backfilled_run_joins_with_readings(conn, writer, tmp_path, monkeypatch):
+def test_a_backfilled_run_joins_each_point_with_its_own_readings(
+    conn, writer, tmp_path, monkeypatch
+):
     from pytweezer.database import analysis
     from pytweezer.database.backfill import backfill
     from pytweezer.experiment.storage import load_measurement
 
-    path = write_run(tmp_path / "m.h5")
+    path = write_run(tmp_path / "m.h5", point_s=0.02)
     assert backfill(tmp_path, writer=writer) == 1
-    t_start = load_measurement(path).points["t_start"]
-    writer.write(
-        "ni_adc", {"ai0": 1.25}, time=datetime.fromtimestamp(t_start[0] - 1, UTC)
-    )
+    points = load_measurement(path).points
+    for i, (start, end) in enumerate(zip(points["t_start"], points["t_end"])):
+        middle = datetime.fromtimestamp((start + end) / 2, UTC)
+        writer.write("ni_adc", {"ai0": float(i)}, time=middle)
     assert writer.flush(10)
 
     monkeypatch.setattr(analysis, "data_root", lambda: tmp_path)
     table = analysis.points_with_readings(7, "ni_adc", dsn=DSN)
-    assert list(table["ni_adc/ai0"]) == [1.25, 1.25, 1.25]
+    assert list(table["ni_adc/ai0"]) == [0.0, 1.0, 2.0]
+
+
+def test_backfilling_twice_leaves_one_row_per_run_and_point(conn, writer, tmp_path):
+    from pytweezer.database.backfill import backfill
+
+    write_run(tmp_path / "m.h5")
+    for _ in range(2):
+        backfill(tmp_path, writer=writer)
+    assert writer.flush(10)
+
+    assert conn.execute("SELECT count(*) FROM runs").fetchone() == (1,)
     assert conn.execute("SELECT count(*) FROM points WHERE rid = 7").fetchone() == (3,)

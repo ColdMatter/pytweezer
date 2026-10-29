@@ -33,6 +33,8 @@ Code is linted and formatted with ruff. There is a pre-commit hook to run ruff o
 There is a pytest suite under `tests/` — run it after
 touching code it covers, and add cases there instead of writing one-off
 verification scripts when the change fits its scope.
+`.github/workflows/tests.yml` runs the suite (against a scratch TimescaleDB) on
+every push to main and every PR.
 
 ```bash
 uv sync                         # install deps, rebuild the C++ extensions and console scripts

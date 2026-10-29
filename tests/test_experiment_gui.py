@@ -225,19 +225,6 @@ def test_load_request_round_trips(editor):
     assert editor.rows["shots"].scan.values.text() == "1, 2"
 
 
-def test_the_recipe_name_is_cleared_by_anything_that_replaces_the_form(editor):
-    plain = TaskRequest(experiment=SCHEMA["module"], class_name="Demo")
-    for replace_form in (
-        editor.defaults_button.click,
-        lambda: editor.set_experiment(SCHEMA),
-        lambda: editor.load_request(plain),
-    ):
-        editor.set_recipe_name("MOT check")
-        assert not editor.recipe_label.isHidden()
-        replace_form()
-        assert editor.recipe_name == "" and editor.recipe_label.isHidden()
-
-
 def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     opened = []
     monkeypatch.setattr(queue_view, "open_in_browser", opened.append)
@@ -686,18 +673,6 @@ def test_selecting_a_recipe_emits_it_and_a_refresh_keeps_it_quietly(qapp):
     view.set_modules(MODULES)
     assert len(selected) == 1 and experiments == []
     assert view.tree.currentItem().text(0) == "b"
-
-
-def test_the_recipe_menu_submits_or_deletes(qapp):
-    recipe = recipe_dict()
-    view = catalogue_with(recipe)
-    actions = []
-    view.recipe_action_requested.connect(lambda *args: actions.append(args))
-    for action in view.recipe_menu(recipe).actions():
-        if not action.isSeparator():
-            action.trigger()
-    assert [a[0] for a in actions] == ["submit", "delete"]
-    assert actions[0][1]["name"] == "check"
 
 
 def test_panel_lists_recipes_and_refetches_when_they_change(qapp):

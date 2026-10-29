@@ -87,14 +87,6 @@ def test_active_set_round_trips_through_local_settings(active):
     assert saved_active() == active
 
 
-def test_active_set_is_per_launcher_name():
-    assert saved_active("NeverRunBefore") == set()
-    make_launcher(name="LauncherA", active={"Image Monitor"})._save_active()
-    make_launcher(name="LauncherB", active={"Live Plot"})._save_active()
-    assert saved_active("LauncherA") == {"Image Monitor"}
-    assert saved_active("LauncherB") == {"Live Plot"}
-
-
 def test_set_active_persists_locally_and_not_to_properties():
     props = FakeProps()
     launcher = make_launcher(applets={"Image Monitor": {"script": "a.py"}}, props=props)

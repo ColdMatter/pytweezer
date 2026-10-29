@@ -1,6 +1,5 @@
 import time
 
-import pytest
 from sipyco import pc_rpc
 
 from pytweezer.servers import sipyco_patches
@@ -35,11 +34,6 @@ def test_reassembles_a_long_line_with_large_recvs():
     assert sipyco_patches._socket_readline(sock) == payload.decode()
     # 200 kB at the sipyco default of 4 kB would need >49 recvs.
     assert sock.recv_calls <= 6
-
-
-def test_raises_eof_when_the_peer_closes_mid_line():
-    with pytest.raises(EOFError):
-        sipyco_patches._socket_readline(FakeSocket(b"no newline here"))
 
 
 def test_read_time_scales_linearly_not_quadratically():

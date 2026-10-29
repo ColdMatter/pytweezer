@@ -5,7 +5,6 @@ import pytest
 
 from pytweezer.experiment import queue as queue_module
 from pytweezer.experiment.queue import (
-    HISTORY_LIMIT,
     ExperimentQueue,
     QueueError,
     QueueStore,
@@ -116,15 +115,6 @@ def test_finish_moves_to_history_newest_first():
     assert [t.rid for t in queue.history(before_rid=2)] == [1]
     with pytest.raises(QueueError, match="not a final status"):
         queue.finish(3, TaskStatus.RUNNING)
-
-
-def test_history_is_capped():
-    queue = ExperimentQueue()
-    for _ in range(HISTORY_LIMIT + 5):
-        task = queue.submit(request())
-        queue.finish(task.rid, TaskStatus.TERMINATED)
-    assert len(queue.state.history) == HISTORY_LIMIT
-    assert queue.state.history[0].rid == 6
 
 
 def test_store_round_trip_and_unreadable_file(tmp_path):

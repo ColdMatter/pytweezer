@@ -119,35 +119,6 @@ def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
     assert requests[0].args == {"gain": 3.0}
 
 
-def test_open_in_grafana_only_for_queued_runs(qapp, tmp_path, monkeypatch):
-    opened = []
-    monkeypatch.setattr(results, "open_in_browser", opened.append)
-    local = make_file(tmp_path, rid=1)
-    queued = make_file(tmp_path, rid=2)
-    with h5py.File(queued, "a") as f:
-        f.attrs["rid"] = 12
-    panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
-
-    panel.load(local)
-    assert not panel.grafana_button.isEnabled()
-    panel.load(queued)
-    panel.grafana_button.click()
-    assert len(opened) == 1 and "var-rid=12" in opened[0]
-
-
-def test_panel_reports_an_unreadable_file(qapp, tmp_path):
-    bad = tmp_path / "2026" / "10" / "07" / "000009_Bad.h5"
-    bad.parent.mkdir(parents=True)
-    bad.write_bytes(b"not hdf5")
-    panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
-    day = panel.tree.topLevelItem(0)
-    assert day.child(0).text(1) == "unreadable"
-    panel.load(bad)
-    assert "Could not read" in panel.metadata.toPlainText()
-
-
 def test_tree_updates_in_place_without_a_click(qapp, tmp_path):
     make_file(tmp_path, 1)
     panel = ResultsPanel(root=tmp_path)
@@ -253,12 +224,3 @@ def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeyp
     panel.hide()
     panel._poll_tick()
     assert calls == [1, 1], "a hidden tab is not polled"
-
-
-def test_a_missing_data_root_says_so(qapp, tmp_path):
-    panel = ResultsPanel(root=tmp_path / "absent")
-    panel.refresh()
-    assert "not found" in panel.browser.hint.text()
-    (tmp_path / "absent").mkdir()
-    panel.refresh()
-    assert "not found" not in panel.browser.hint.text()

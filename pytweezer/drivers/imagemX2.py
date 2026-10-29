@@ -66,7 +66,7 @@ class ImagEMX2Camera(Camera):
 
     @requires_camera
     def set_roi(self, x0: int, width: int, y0: int, height: int):
-        self._backend.set_roi(x0, x0 + width - 1, y0, y0 + height - 1)
+        self._backend.set_roi(x0, x0 + width, y0, y0 + height)
 
     @requires_camera
     def set_trigger_source(self, source: str):
