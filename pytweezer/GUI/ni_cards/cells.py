@@ -33,15 +33,16 @@ def _level(value: bool) -> str:
 def last_set_text(entry: dict | None, kind: str) -> str:
     """``"last set 1.25 V at 14:02"``, ``"last set high at 14:02"`` or ``"unknown"``.
 
-    A MOTMaster entry reads ``"end of LoadTweezer: 1.25 V at 14:02"``. An entry
-    without a ``source`` (from an older server) reads as a panel write.
+    A MOTMaster entry reads ``"end of LoadTweezer: 1.25 V at 14:02"``, or
+    ``"end of MOTMaster run: …"`` without a script. An entry without a
+    ``source`` (from an older server) reads as a panel write.
     """
     if entry is None:
         return "unknown"
     value = _volts(entry["value"]) if kind == "ao" else _level(entry["value"])
     clock = time.strftime("%H:%M", time.localtime(entry["time"]))
     if entry.get("source") == "motmaster":
-        return f"end of {entry['script']}: {value} at {clock}"
+        return f"end of {entry.get('script') or 'MOTMaster run'}: {value} at {clock}"
     return f"last set {value} at {clock}"
 
 

@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from pytweezer.configuration.config import get_config
-from pytweezer.drivers.motmaster import motmaster_controller
 from pytweezer.experiment.client import NOTIFIER_NAME, sync_address
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers.sync import SyncMirror
@@ -78,6 +77,17 @@ def last_run_from_report(report: Mapping[str, Any] | None) -> LastRun | None:
     )
 
 
+def motmaster_controller(config_file: str) -> Any:
+    """`pytweezer.drivers.motmaster.motmaster_controller`, imported on first use.
+
+    Importing that module without .NET prints pythonnet's errors, so it is
+    left until a proxy is actually built.
+    """
+    from pytweezer.drivers.motmaster import motmaster_controller as build
+
+    return build(config_file)
+
+
 class MotMasterNotAnswering(Exception):
     """MOTMaster did not answer within the timeout."""
 
@@ -89,16 +99,21 @@ class MotMasterTooOld(Exception):
 class RemotingMotMasterStatus:
     """Read-only view of a MOTMaster over .NET remoting.
 
-    The proxy is built on the first call; any failure to build it counts as
-    MOTMaster being unreachable, and is logged as a warning the first time so a
-    configuration error does not pass for a closed MOTMaster. Each call runs on
-    a worker thread and is abandoned after ``timeout_s``; while an abandoned
-    call is still stuck, further calls raise `MotMasterNotAnswering` at once
-    rather than pile up threads.
+    The proxy is built on the first call; a failure to build it counts as
+    MOTMaster being unreachable, and is logged as a warning the first time and
+    flagged in `setup_error` so a configuration error does not pass for a
+    closed MOTMaster. Each call runs on a worker thread and is abandoned after
+    ``timeout_s``; while an abandoned call is still stuck, further calls raise
+    `MotMasterNotAnswering` at once rather than pile up threads.
 
     Args:
         device_name: The MOTMaster's key in ``CONFIG["Devices"]``.
         timeout_s: How long to wait for MOTMaster to answer.
+
+    Attributes:
+        setup_error: Whether the last call that returned failed because the
+            proxy could not be built (missing DLL or exe, bad config, no
+            pythonnet).
     """
 
     def __init__(self, device_name: str, timeout_s: float = 2.0):
@@ -108,6 +123,7 @@ class RemotingMotMasterStatus:
         self._lock = threading.Lock()
         self._stuck: threading.Thread | None = None
         self._warned = False
+        self.setup_error = False
 
     def is_running(self) -> bool | None:
         """Whether MOTMaster is running a sequence; ``None`` if unreachable.
@@ -171,7 +187,8 @@ class RemotingMotMasterStatus:
             if worker.is_alive():
                 self._stuck = worker
                 raise MotMasterNotAnswering(f"no answer in {self._timeout_s} s")
-            if "unbuildable" in outcome:
+            self.setup_error = "unbuildable" in outcome
+            if self.setup_error:
                 self._unreachable(outcome["unbuildable"], warn=True)
                 return None
             error = outcome.get("error")
@@ -203,6 +220,8 @@ class RemotingMotMasterStatus:
 class SimulatedMotMasterStatus:
     """Stands in for a MOTMaster that never runs and has no last run."""
 
+    setup_error = False
+
     def is_running(self) -> bool | None:
         return False
 
@@ -217,6 +236,8 @@ def _devices_by_rid(state: Any) -> dict[str, int]:
         running = [running]
     held = {}
     for task in running or ():
+        # The manager treats unresolved devices (None) as holding everything,
+        # but it never starts such a task, so none is running here.
         for device in task.get("devices") or ():
             held[device] = task["rid"]
     return held

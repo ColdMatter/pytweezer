@@ -138,6 +138,7 @@ def test_unreachable_motmaster_reads_as_none_and_warns_once(monkeypatch, error):
     assert status.is_running() is None
     assert status.last_run() is None
     assert len(warnings) == 1
+    assert status.setup_error
 
 
 @pytest.mark.parametrize(
@@ -155,6 +156,7 @@ def test_dotnet_connection_failure_drops_the_proxy_and_reconnects(monkeypatch, n
 
     status = status_with(monkeypatch, FakeController(is_running=flaky))
     assert status.is_running() is None
+    assert not status.setup_error
     assert status.is_running() is True
 
 

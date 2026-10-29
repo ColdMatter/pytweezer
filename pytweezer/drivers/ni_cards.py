@@ -9,7 +9,8 @@ because most of these cards cannot read an output back.
 
 With ``motmaster`` set, MOTMaster's pattern boards are held whole while that
 MOTMaster runs a sequence or a running queued task reserves it, and after each
-run the analogue outputs show the values its pattern ended on.
+run the analogue outputs show the values its pattern ended on. The run
+MOTMaster reports as its last when the driver starts is not shown.
 
 Config entry shape (``CONFIG["Devices"][name]``)::
 
@@ -77,6 +78,8 @@ class CardInfo:
 
 
 class MotMasterStatus(Protocol):
+    setup_error: bool
+
     def is_running(self) -> bool | None: ...
     def last_run(self) -> LastRun | None: ...
 
@@ -213,9 +216,10 @@ class NICards:
         self._queue = queue
         self._closed = False
         self._motmaster_reachable = True
+        self._motmaster_setup_error = False
         self._manager_reachable = True
         self._motmaster_too_old = False
-        self._last_applied_finished = -math.inf
+        self._last_seen_finished = -math.inf
         self._logged_errors: set[str] = set()
         sources = [lambda: static]
         if motmaster is not None and self._pattern_boards:
@@ -228,7 +232,10 @@ class NICards:
                 self._queue = ManagerQueue()
             sources += [self._running_holds, self._queued_holds]
         self.reservations = Reservations(sources)
-        self._sync_end_of_run()
+        # Panel writes since MOTMaster's last run went with the previous server,
+        # so that run's values may be stale: pattern channels stay unknown until
+        # the next run finishes.
+        self._sync_end_of_run(apply=False)
 
     def _build_layout(self, hardware: HardwareFile) -> None:
         for board in hardware.boards.values():
@@ -358,9 +365,10 @@ class NICards:
             return self._hold_pattern_boards("not answering")
         except Exception as error:
             self._log_once(f"{self._motmaster} is_running", error)
-            return self._hold_pattern_boards("not answering")
+            return self._hold_pattern_boards("status error, see log")
         if running is None:
             self._motmaster_reachable = False
+            self._motmaster_setup_error = self._status.setup_error
         if running:
             return self._hold_pattern_boards("running a sequence")
         return Holds()
@@ -376,8 +384,13 @@ class NICards:
             return self._hold_pattern_boards(f"queued run {devices[self._motmaster]}")
         return Holds()
 
-    def _sync_end_of_run(self) -> None:
-        """Apply MOTMaster's last run if it finished after the last one applied."""
+    def _sync_end_of_run(self, apply: bool = True) -> None:
+        """Apply MOTMaster's last run if it finished after the last one seen.
+
+        Args:
+            apply: If false, only mark the run as seen, leaving its values
+                unapplied.
+        """
         if self._status is None:
             return
         try:
@@ -393,9 +406,11 @@ class NICards:
         self._motmaster_too_old = False
         # A restarted MOTMaster numbers its runs from 1 again, so only a later
         # finish time counts as a new run.
-        if last is None or last.finished <= self._last_applied_finished:
+        if last is None or last.finished <= self._last_seen_finished:
             return
-        self._last_applied_finished = last.finished
+        self._last_seen_finished = last.finished
+        if not apply:
+            return
         for physical in self._pattern_channels & self._last_set.keys():
             if self._last_set[physical]["time"] < last.finished:
                 del self._last_set[physical]
@@ -426,7 +441,12 @@ class NICards:
                 return []
             return [NO_PATTERN_BOARDS]
         notices = []
-        if not self._motmaster_reachable:
+        if not self._motmaster_reachable and self._motmaster_setup_error:
+            notices.append(
+                f"Cannot connect to {self._motmaster} (setup error, see log): "
+                "its runs are not greyed out"
+            )
+        elif not self._motmaster_reachable:
             notices.append(
                 f"{self._motmaster} is not reachable: its runs are not greyed out"
             )

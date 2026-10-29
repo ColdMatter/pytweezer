@@ -1,5 +1,6 @@
 """The NI Cards driver while MOTMaster runs, or a queued task reserves it."""
 
+import re
 import time
 
 import pytest
@@ -21,6 +22,10 @@ Info.Add("AnalogBoards", analogBoards);
 
 RUNNING = "CaF MotMaster (running a sequence)"
 UNREACHABLE = "CaF MotMaster is not reachable: its runs are not greyed out"
+SETUP_ERROR = (
+    "Cannot connect to CaF MotMaster (setup error, see log): "
+    "its runs are not greyed out"
+)
 TOO_OLD = (
     "CaF MotMaster does not report end-of-run values: it needs a newer MOTMaster build"
 )
@@ -36,6 +41,7 @@ class FakeStatus:
     def __init__(self):
         self.running = False
         self.last = None
+        self.setup_error = False
 
     @staticmethod
     def _answer(value):
@@ -126,25 +132,36 @@ def test_write_checks_motmaster_fresh_not_from_the_last_poll(cards, io, status):
 
 
 @pytest.mark.parametrize(
-    "error", [MotMasterNotAnswering("no answer in 2.0 s"), RuntimeError("bad proxy")]
+    "error, holder",
+    [
+        (MotMasterNotAnswering("no answer in 2.0 s"), "CaF MotMaster (not answering)"),
+        (RuntimeError("bad proxy"), "CaF MotMaster (status error, see log)"),
+    ],
 )
-def test_not_answering_motmaster_holds_and_refuses(cards, io, status, error, caplog):
+def test_not_answering_motmaster_holds_and_refuses(
+    cards, io, status, error, holder, caplog
+):
     status.running = error
     cards.state()
     state = cards.state()
-    holder = "CaF MotMaster (not answering)"
     assert state["card_holds"] == {"/PXI1Slot4": holder, "/PXI1Slot2": holder}
-    with pytest.raises(ChannelHeld, match="not answering"):
+    with pytest.raises(ChannelHeld, match=re.escape(holder)):
         cards.read(["PXI1Slot2/ai0"])
     assert io.calls == []
     logged = [r for r in caplog.records if "bad proxy" in str(r.exc_info)]
     assert len(logged) == (1 if isinstance(error, RuntimeError) else 0)
 
 
-def test_unreachable_motmaster_holds_nothing_and_says_so(cards, io, status):
+@pytest.mark.parametrize(
+    "setup_error, notice", [(False, UNREACHABLE), (True, SETUP_ERROR)]
+)
+def test_unreachable_motmaster_holds_nothing_and_says_so(
+    cards, io, status, setup_error, notice
+):
     status.running = None
+    status.setup_error = setup_error
     state = cards.state()
-    assert UNREACHABLE in state["notices"]
+    assert [n for n in state["notices"] if n in (UNREACHABLE, SETUP_ERROR)] == [notice]
     assert state["card_holds"] == {}
     cards.write_ao(V21_LOCK, 0.5)
     assert io.calls == [("write_ao", V21_LOCK, 0.5, 0.0, 1.0)]
@@ -208,16 +225,19 @@ def test_unknown_outputs_reset_pattern_channels(cards, status):
     assert list(cards.state()["last_set"]) == [TCL_AO]
 
 
-def test_restarted_motmaster_does_not_roll_values_back(
+def test_restarts_neither_show_stale_values_nor_roll_them_back(
     hardware_file, io, status, queue
 ):
     finished = time.time()
     status.last = run(5, finished, values={"v21Lock": 0.4})
     cards = make_cards(hardware_file, io, status, queue)
+    assert V21_LOCK not in cards.state()["last_set"]
+    status.last = run(6, finished + 60.0, values={"v21Lock": 0.6})
+    assert cards.state()["last_set"][V21_LOCK]["value"] == 0.6
     status.last = run(1, finished - 600.0, values={"v21Lock": 0.1})
-    assert cards.state()["last_set"][V21_LOCK]["value"] == 0.4
+    assert cards.state()["last_set"][V21_LOCK]["value"] == 0.6
     status.last = None
-    assert cards.state()["last_set"][V21_LOCK]["value"] == 0.4
+    assert cards.state()["last_set"][V21_LOCK]["value"] == 0.6
 
 
 def test_too_old_build_says_so_but_still_holds_while_running(cards, status):

@@ -133,6 +133,11 @@ def test_ni_card_devices_picks_entries_by_class():
             "ao",
             "end of LoadTweezer: 1.25 V at {}",
         ),
+        (
+            {"value": 1.25, "time": 1793300000.0, "source": "motmaster"},
+            "ao",
+            "end of MOTMaster run: 1.25 V at {}",
+        ),
     ],
 )
 def test_last_set_text(entry, kind, expected):

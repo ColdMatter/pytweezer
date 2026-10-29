@@ -183,8 +183,10 @@ Whichever is newer wins between a panel write and a MOTMaster end value. That
 falls out naturally: a panel write on those boards can only happen after the
 run.
 
-When the NI device server starts, it reads the last-run record once, so a
-restart shows the previous run's end values rather than "unknown" everywhere.
+When the NI device server starts, it reads the last-run record once and marks
+that run as seen without applying its values: panel writes made since that run
+were lost with the previous server, so its values may be stale. Pattern
+channels read "unknown" until the next run finishes.
 
 ### Config
 
@@ -201,7 +203,13 @@ entry without it has no MOTMaster holds.
   reachable: its runs are not greyed out", which the tab shows as a hint line.
   A closed MOTMaster cannot run a sequence, so failing open there is safe.
   Writes still check `IsRunning` and go ahead only when the answer is "not
-  running" or MOTMaster can't be reached.
+  running" or MOTMaster can't be reached. If the remoting proxy cannot be built
+  at all (missing DLL or exe, bad config, no pythonnet) the notice instead
+  reads "Cannot connect to CaF MotMaster (setup error, see log): its runs are
+  not greyed out".
+- **MOTMaster not answering** within the timeout holds the boards as "CaF
+  MotMaster (not answering)"; any other error from `IsRunning` holds them as
+  "CaF MotMaster (status error, see log)".
 - **Experiment Manager not reachable**: no queued-run holds, and a similar
   notice. MOTMaster's own `IsRunning` still greys the boards during each shot.
 - The NI device server always starts. Neither MOTMaster nor the manager being
