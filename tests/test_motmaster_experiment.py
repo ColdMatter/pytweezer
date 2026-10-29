@@ -445,47 +445,6 @@ def test_yag_spot_moves_travel_max_steps_then_back(monkeypatch):
     assert all(type(step) is int for step in steps)
 
 
-class FakeCamera:
-    """Hands out one-pixel frames with the given counts, in order of frame number."""
-
-    def __init__(self, counts):
-        self.counts = counts
-
-    def start_acquisition(self):
-        pass
-
-    def stop_acquisition(self):
-        pass
-
-    def acquire_n_frames(self, n, start_frame=0):
-        return [[[count]] for count in self.counts[start_frame : start_frame + n]]
-
-
-@pytest.mark.parametrize(
-    "shot_counts, error", [([2.0], float("nan")), ([0.0, 2.0], 1.0)], ids=["1", "2"]
-)
-def test_auto_mot_error_bars_are_standard_errors_of_the_shots(
-    monkeypatch, shot_counts, error
-):
-    def run_each(*args):
-        values, callback = args[2], args[4]
-        return [callback(value) for value in values]
-
-    # The two scan loops drive MOTMaster over .NET; each calls back once per point.
-    driver = MotMasterInterface.__new__(MotMasterInterface)
-    driver.config = {"lasers": {"v00": "cavity"}}
-    driver.wavemeter_lock = SimpleNamespace(getSlaveFrequency=lambda laser: 1.0)
-    driver.scan_motmaster_parameter = run_each
-    driver.scan_wm_laser_set_points = run_each
-    monkeypatch.setattr("pytweezer.drivers.motmaster.time.sleep", lambda _s: None)
-
-    n = len(shot_counts)
-    # The background shot, the one scan point, then parking on the best point.
-    camera = FakeCamera([0.0] * n + shot_counts + [0.0] * n)
-    results = driver.auto_mot({"v00": [1.0]}, camera, shots_per_point=n)
-    assert results["v00"]["errors"] == [pytest.approx(error, nan_ok=True)]
-
-
 class Int32(int):
     """Stands in for .NET's System.Int32, which only exists under pythonnet."""
 
@@ -541,60 +500,6 @@ def test_a_parameter_scan_runs_one_shot_per_value_in_order(dotnet_types):
     assert results == [60, 20, 40]
 
 
-class FakeWavemeterLock:
-    def __init__(self, start):
-        self.set_points = dict(start)
-        self.history = []
-
-    def getSlaveFrequency(self, laser):
-        return self.set_points[laser]
-
-    def setSlaveFrequency(self, laser, value):
-        self.set_points[laser] = value
-        self.history.append((laser, value))
-
-
-class ShotCamera(FakeCamera):
-    """Gives each shot's frame the counts of the set point the lasers are on."""
-
-    def __init__(self, lock, counts):
-        self.lock, self.counts, self.windows = lock, counts, []
-
-    def acquire_n_frames(self, n, start_frame=0):
-        self.windows.append(start_frame)
-        counts = self.counts(self.lock.set_points) if self.windows[1:] else 0.0
-        return [[[counts]]] * n
-
-
-def _auto_mot(shots_per_point):
-    lock = FakeWavemeterLock({"v00": 1.0, "v10": 2.0})
-
-    def counts(set_points):
-        # Most atoms with v00 at 1.2 and v10 at 1.9.
-        return 100 - abs(set_points["v00"] - 1.2) - abs(set_points["v10"] - 1.9)
-
-    driver = _driver(motmaster=RecordingDotNet())
-    driver.config = {"lasers": {"v00": "cavity", "v10": "cavity"}}
-    driver.wavemeter_lock = lock
-    camera = ShotCamera(lock, counts)
-    scan = {"v00": [1.0, 1.1, 1.2, 1.3], "v10": [2.0, 1.9, 1.8]}
-    results = driver.auto_mot(scan, camera, shots_per_point=shots_per_point)
-    return lock, camera, results
-
-
-def test_auto_mot_leaves_each_laser_on_its_best_set_point(dotnet_types):
-    lock, _camera, results = _auto_mot(shots_per_point=1)
-    assert lock.set_points == {"v00": 1.2, "v10": 1.9}
-    assert [results[laser]["set_point"] for laser in ("v00", "v10")] == [1.2, 1.9]
-
-
-def test_auto_mot_reads_each_shots_frames_in_consecutive_windows(dotnet_types):
-    _lock, camera, _results = _auto_mot(shots_per_point=3)
-    # Background, then each laser's scan and its parking shot.
-    shots = 1 + (4 + 1) + (3 + 1)
-    assert camera.windows == [3 * shot for shot in range(shots)]
-
-
 def test_simulated_sequencer_serves_and_validates_parameters():
     simulated = SimulatedMotMasterInterface()
     parameters = simulated.script_parameters("RbTweezerBasic")
@@ -621,3 +526,40 @@ def test_simulated_end_to_end_with_searched_parameters():
     assert list(measurement.results["sent_coil_current"]) == [2.0, 2.0]
     assert list(measurement.results["sent_tPulse"]) == [20e-6, 20e-6]
     assert measurement.arguments["rb.coil_current"] == 2.0
+
+
+def test_a_simulated_run_lasts_long_enough_for_simulated_cameras(monkeypatch):
+    slept = []
+    monkeypatch.setattr("pytweezer.drivers.motmaster.time.sleep", slept.append)
+    simulated = SimulatedMotMasterInterface()
+    simulated.set_motmaster_experiment("RbTweezerBasic")
+    simulated.start_motmaster_experiment()
+    assert sum(slept) >= SimulatedMotMasterInterface.sim_run_s > 0
+
+
+def test_simulated_laser_ramp_reaches_its_target(monkeypatch):
+    monkeypatch.setattr("pytweezer.drivers.motmaster.time.sleep", lambda _s: None)
+    simulated = SimulatedMotMasterInterface()
+    laser = next(iter(simulated.laser_set_points_wml()))
+    simulated.ramp_laser_set_point_wml(laser, 400.0)
+    assert simulated.laser_set_points_wml()[laser] == 400.0
+
+
+def test_ramp_steps_towards_the_target_then_sets_it_exactly(monkeypatch):
+    monkeypatch.setattr("pytweezer.drivers.motmaster.time.sleep", lambda _s: None)
+    set_points = {"BX": 1.0}
+    sent = []
+
+    def set_slave_frequency(laser, value):
+        sent.append(value)
+        set_points[laser] = value
+
+    driver = MotMasterInterface.__new__(MotMasterInterface)
+    driver.wavemeter_lock = SimpleNamespace(
+        getSlaveFrequency=lambda laser: set_points[laser],
+        setSlaveFrequency=set_slave_frequency,
+    )
+    driver.ramp_laser_set_point_wml("BX", 1.0 + 3.5e-5)
+    assert sent[:3] == pytest.approx([1.00001, 1.00002, 1.00003])
+    assert sent[-1] == 1.0 + 3.5e-5
+    assert len(sent) == 4

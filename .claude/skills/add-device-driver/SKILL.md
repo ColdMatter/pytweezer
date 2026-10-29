@@ -63,6 +63,15 @@ Decorate any method that touches `self._backend` with `@requires_camera`, so a
 call after `relinquish_camera()` raises a clear error rather than an
 `AttributeError` on `None`.
 
+The base also gives every camera a frame-index protocol, which notebooks' `Rig`
+relies on (see `notebook-rig`): `arm(buffer_frames)` starts a continuous
+ring-buffer acquisition, `frames_acquired()` counts frames since it started,
+`read_frames_from(start)` returns every frame since `start`, `settings()` is
+saved beside frames in zips, and `start_live()` broadcasts every new frame. The
+defaults assume a pylablib backend; otherwise implement
+`_acquisition_in_progress`, `_count_frames` and `_read_range`. Take
+`self._lock` around backend calls the live thread could race.
+
 **Match the base class signatures exactly.** `setup_acquisition(self, acq_mode,
 nframes)` takes both arguments. A shim that narrows this to `(self, nframes)`
 will `TypeError` the moment a caller uses the documented interface — note that

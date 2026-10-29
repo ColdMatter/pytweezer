@@ -43,7 +43,7 @@
                 }
         },
   "script_root_path": "C:\\ControlPrograms\\EDMSuite\\MoleculeMOTMasterScripts",
-  "data_root_path": "C:\\Users\\cafmot\\OneDrive - Imperial College London\\cafmot\\datasync\\mot_master_data",
+  "data_root_path": "C:\\Users\\cafmot\\Box\\Working folder\\cafmot\\datasync\\mot_master_data",
   "temp_image_path": "C:\\Users\\cafmot\\Documents\\TempCameraImages",
   "temp_tof_path": "C:\\Users\\cafmot\\Documents\\ToF_Data",
   "data_prefix": "CaF"
