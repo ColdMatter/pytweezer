@@ -604,6 +604,14 @@ QFrame#ChannelCell QLabel[role="cellValue"] {
     color: #e6e6e6;
     font-weight: 600;
 }
+QFrame#ChannelCell:disabled {
+    background: transparent;
+    border-color: #2c2d35;
+}
+QFrame#ChannelCell QLabel[role="cellName"]:disabled,
+QFrame#ChannelCell QLabel[role="cellValue"]:disabled {
+    color: #8d8e99;
+}
 QLabel[role="cellSection"] {
     color: #8d8e99;
     font-weight: 600;

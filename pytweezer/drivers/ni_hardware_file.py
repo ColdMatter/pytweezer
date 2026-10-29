@@ -65,7 +65,13 @@ _STATEMENT = re.compile(
     r"|\bBoards\.Add\("
     r"|\bAdd(?P<signal>Analog|Digital)(?P<direction>Input|Output)Channel\("
 )
+_CHAR_LITERAL = re.compile(r"'(?:\\.|[^'\\])'")
 _LOOKUP = re.compile(r'\(\s*string\s*\)\s*Boards\s*\[\s*"([^"]*)"\s*\]')
+
+
+def _number(literal: str) -> float:
+    """A C# numeric literal, with any ``f``/``d``/``m`` suffix."""
+    return float(literal.rstrip("fFdDmM"))
 
 
 def strip_comments(source: str) -> str:
@@ -73,12 +79,21 @@ def strip_comments(source: str) -> str:
     out = []
     i, n = 0, len(source)
     while i < n:
-        if source[i] == '"':
+        if source.startswith('@"', i):
+            end = i + 2
+            while end < n and (source[end] != '"' or source.startswith('""', end)):
+                end += 2 if source[end] == '"' else 1
+            out.append(source[i : end + 1])
+            i = end + 1
+        elif source[i] == '"':
             end = i + 1
             while end < n and source[end] != '"':
                 end += 2 if source[end] == "\\" else 1
             out.append(source[i : end + 1])
             i = end + 1
+        elif char := _CHAR_LITERAL.match(source, i):
+            out.append(char.group())
+            i = char.end()
         elif source.startswith("//", i):
             end = source.find("\n", i)
             i = n if end < 0 else end
@@ -98,6 +113,8 @@ def _call_arguments(source: str, start: int) -> tuple[list[str], int]:
         char = source[i]
         if char == '"':
             end = source.find('"', i + 1)
+            if end < 0:
+                end = len(source) - 1
             current.append(source[i : end + 1])
             i = end + 1
             continue
@@ -165,7 +182,10 @@ def parse_hardware_file(source: str) -> HardwareFile:
         if alias is None:
             continue
         if kind in ("do", "di"):
-            address = evaluate(args[1]) if len(args) == 4 else None
+            if len(args) != 4 or not (args[2].isdigit() and args[3].isdigit()):
+                logger.warning("Skipping %r: its port and line are not literals", alias)
+                continue
+            address = evaluate(args[1])
             board = board_at(address) if address else None
             physical = board and f"{board.device}/port{args[2]}/line{args[3]}"
         else:
@@ -180,7 +200,10 @@ def parse_hardware_file(source: str) -> HardwareFile:
         ao_range = None
         terminal = None
         if kind == "ao" and len(args) == 4:
-            ao_range = (float(args[2]), float(args[3]))
+            try:
+                ao_range = (_number(args[2]), _number(args[3]))
+            except ValueError:
+                logger.warning("%r: range %s, %s is not literal", alias, *args[2:])
         if kind == "ai" and len(args) >= 3:
             terminal = args[2].rpartition(".")[2]
         aliases.append(Alias(alias, kind, physical, board.name, ao_range, terminal))

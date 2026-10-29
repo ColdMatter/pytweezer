@@ -26,7 +26,7 @@ import random
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from pytweezer.configuration.paths import tweezerpath
@@ -50,6 +50,7 @@ class CardInfo:
     ai: list[str]
     lines: list[str]
     ao_range: tuple[float, float]
+    input_lines: list[str] = field(default_factory=list)
 
 
 class CardIO(Protocol):
@@ -85,6 +86,16 @@ class Reservations:
         return merged
 
 
+def _ao_range(declared: tuple | None, info: CardInfo | None) -> list[float]:
+    """The declared range, clipped to what the card can output."""
+    card = info.ao_range if info else (0.0, 0.0)
+    if declared is None:
+        return list(card)
+    if card == (0.0, 0.0):
+        return list(declared)
+    return [max(declared[0], card[0]), min(declared[1], card[1])]
+
+
 def _natural_key(physical: str):
     return [
         int(part) if part.isdigit() else part for part in re.split(r"(\d+)", physical)
@@ -102,14 +113,17 @@ class NICards:
         hardware_file: Path to the PC's ``*Hardware.cs``.
         reserved: ``{holder: {"channels": [alias, ...], "cards": [board, ...]}}``.
         protected: Aliases that are never written or read.
+
+    ``reserved`` and ``protected`` have no defaults, so a misspelt config key
+    fails construction instead of leaving channels unprotected.
         io: NI-DAQmx access; the real hardware when omitted.
     """
 
     def __init__(
         self,
         hardware_file: str,
-        reserved: dict | None = None,
-        protected: list[str] | None = None,
+        reserved: dict,
+        protected: list[str],
         *,
         io: CardIO | None = None,
     ):
@@ -129,12 +143,17 @@ class NICards:
             logger.error(self._error)
             hardware = HardwareFile({}, [])
         self._build_layout(hardware)
-        static = self._static_holds(hardware, reserved or {}, protected or [])
+        static = self._static_holds(hardware, reserved, protected)
         self.reservations = Reservations([lambda: static])
 
     def _build_layout(self, hardware: HardwareFile) -> None:
         for board in hardware.boards.values():
-            info = self._io.card(board.device)
+            try:
+                info = self._io.card(board.device)
+                error = None if info else NOT_FOUND
+            except Exception as exc:
+                logger.exception("Cannot query %s (%s)", board.name, board.address)
+                info, error = None, f"unreadable by NI-DAQmx: {exc}"
             aliased: dict[str, dict] = {}
             for alias in hardware.aliases:
                 if alias.board != board.name:
@@ -151,15 +170,14 @@ class NICards:
                 )
                 channel["aliases"].append(alias.name)
                 if alias.kind == "ao":
-                    channel["range"] = list(
-                        alias.ao_range or (info.ao_range if info else (0.0, 0.0))
-                    )
+                    channel["range"] = _ao_range(alias.ao_range, info)
             unaliased = []
             if info is not None:
                 for kind, physicals in (
                     ("ao", info.ao),
                     ("ai", info.ai),
                     ("do", info.lines),
+                    ("di", info.input_lines),
                 ):
                     for physical in physicals:
                         if physical not in aliased:
@@ -178,7 +196,7 @@ class NICards:
                 "board": board.name,
                 "address": board.address,
                 "model": info.model if info else None,
-                "error": None if info else NOT_FOUND,
+                "error": error,
                 "channels": sorted(aliased.values(), key=_channel_key),
                 "unaliased": sorted(unaliased, key=_channel_key),
             }
@@ -190,6 +208,12 @@ class NICards:
     def _static_holds(
         self, hardware: HardwareFile, reserved: dict, protected: list[str]
     ) -> dict[str, str]:
+        for holder, held in reserved.items():
+            if unknown := set(held) - {"channels", "cards"}:
+                raise ValueError(
+                    f"{holder}'s reservation has unknown keys {sorted(unknown)}; "
+                    "expected 'channels' and/or 'cards'"
+                )
         if self._error:
             return {}
         by_alias = {alias.name: alias.physical for alias in hardware.aliases}
@@ -299,8 +323,18 @@ def _as_list(reading) -> list:
     return list(reading) if isinstance(reading, (list, tuple)) else [reading]
 
 
+def _widest(voltages: list[float]) -> tuple[float, float]:
+    """The widest ``(low, high)`` of NI-DAQmx's flat list of range pairs."""
+    pairs = list(zip(voltages[::2], voltages[1::2]))
+    low, high = max(pairs, key=lambda p: p[1] - p[0]) if pairs else (0.0, 0.0)
+    return float(low), float(high)
+
+
 class DaqmxIO:
     """NI-DAQmx on this PC. Every call opens a task and closes it before returning."""
+
+    def __init__(self):
+        self._ai_ranges: dict[str, tuple[float, float]] = {}
 
     def card(self, device: str) -> CardInfo | None:
         import nidaqmx.system
@@ -308,16 +342,20 @@ class DaqmxIO:
         if device not in nidaqmx.system.System.local().devices.device_names:
             return None
         info = nidaqmx.system.Device(device)
-        voltages = list(info.ao_voltage_rngs)
-        pairs = list(zip(voltages[::2], voltages[1::2]))
-        ao_range = max(pairs, key=lambda p: p[1] - p[0]) if pairs else (0.0, 0.0)
-        lines = info.do_lines.channel_names or info.di_lines.channel_names
+        ao = list(info.ao_physical_chans.channel_names)
+        ai = list(info.ai_physical_chans.channel_names)
+        outputs = list(info.do_lines.channel_names)
+        if ai:
+            self._ai_ranges[device] = _widest(list(info.ai_voltage_rngs))
         return CardInfo(
             model=info.product_type,
-            ao=list(info.ao_physical_chans.channel_names),
-            ai=list(info.ai_physical_chans.channel_names),
-            lines=list(lines),
-            ao_range=(float(ao_range[0]), float(ao_range[1])),
+            ao=ao,
+            ai=ai,
+            lines=outputs,
+            ao_range=_widest(list(info.ao_voltage_rngs)) if ao else (0.0, 0.0),
+            input_lines=[
+                line for line in info.di_lines.channel_names if line not in outputs
+            ],
         )
 
     def write_do(self, physical: str, high: bool) -> None:
@@ -339,12 +377,17 @@ class DaqmxIO:
         from nidaqmx.constants import TerminalConfiguration
 
         values: list[float] = [0.0] * len(physicals)
-        for indices in _by_device(physicals).values():
+        for device, indices in _by_device(physicals).items():
+            # Without explicit limits DAQmx reads ±5 V and saturates above it.
+            low, high = self._ai_ranges.get(device, (-10.0, 10.0))
             with nidaqmx.Task() as task:
                 for i in indices:
                     terminal = _TERMINALS.get(terminals[i] or "", "DEFAULT")
                     task.ai_channels.add_ai_voltage_chan(
-                        physicals[i], terminal_config=TerminalConfiguration[terminal]
+                        physicals[i],
+                        terminal_config=TerminalConfiguration[terminal],
+                        min_val=low,
+                        max_val=high,
                     )
                 for i, value in zip(indices, _as_list(task.read())):
                     values[i] = float(value)
@@ -417,8 +460,8 @@ class SimulatedNICards(NICards):
     def __init__(
         self,
         hardware_file: str,
-        reserved: dict | None = None,
-        protected: list[str] | None = None,
+        reserved: dict,
+        protected: list[str],
     ):
         if not os.path.exists(hardware_file):
             name = re.split(r"[\\/]", hardware_file)[-1]

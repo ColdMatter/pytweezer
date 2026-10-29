@@ -6,7 +6,9 @@ import pytest
 from PyQt6 import QtCore
 from PyQt6.QtTest import QTest
 
+from pytweezer.GUI.ni_cards import panel as panel_module
 from pytweezer.GUI.ni_cards.cells import last_set_text
+from pytweezer.GUI.ni_cards.client import CardsClient
 from pytweezer.GUI.ni_cards.flow_grid import CELL_WIDTH, FlowGrid
 from pytweezer.GUI.ni_cards.panel import NICardsPanel, ni_card_devices
 
@@ -64,7 +66,7 @@ class FakeClient(QtCore.QObject):
     layout_received = QtCore.pyqtSignal(dict)
     state_received = QtCore.pyqtSignal(dict)
     values_received = QtCore.pyqtSignal(dict)
-    failed = QtCore.pyqtSignal(str)
+    failed = QtCore.pyqtSignal(str, str)
     connection_changed = QtCore.pyqtSignal(bool)
 
     def __init__(self):
@@ -201,8 +203,42 @@ def test_do_click_requests_write_of_opposite_state(view, client):
     assert ("write_do", DO, False) in client.calls
 
 
-def test_ao_value_box_shows_no_value_until_one_is_known(view, client):
+def test_ao_value_box_never_invents_or_keeps_a_stale_value(view, client):
     spin = view.cells[AO].spin
     assert spin.text() == "—"
+    spin.setFocus()
+    QTest.keyClick(spin, QtCore.Qt.Key.Key_Return)
+    assert not [call for call in client.calls if call[0] == "write_ao"]
     client.state_received.emit(state(last_set={AO: {"value": 0.5, "time": 0.0}}))
     assert spin.text() == "0.5 V"
+
+
+def test_tab_recovers_when_the_device_server_comes_up_late(qapp, monkeypatch):
+    monkeypatch.setattr(panel_module, "RECONNECT_MS", 50)
+
+    class Device:
+        def layout(self):
+            return LAYOUT
+
+        def state(self):
+            return state()
+
+    attempts = []
+
+    def connect():
+        attempts.append(None)
+        if len(attempts) == 1:
+            raise ConnectionRefusedError("not listening yet")
+        return Device()
+
+    panel = NICardsPanel(
+        devices=["CaF NI Cards"], make_client=lambda name: CardsClient(name, connect)
+    )
+    panel.show()
+    view = panel.views["CaF NI Cards"]
+    deadline = time.monotonic() + 5
+    while not view.cells and time.monotonic() < deadline:
+        QTest.qWait(20)
+    panel.close()
+    assert AO in view.cells
+    assert view.message.isHidden()

@@ -20,6 +20,7 @@ from pytweezer.GUI.ni_cards.flow_grid import CELL_WIDTH, FlowGrid
 
 NI_CARDS_CLASS = "pytweezer.drivers.ni_cards:NICards"
 STATE_POLL_MS = 1000
+RECONNECT_MS = 3000
 READ_POLL_MS = 200
 _ERROR_SHOWN_MS = 8000
 #: A Region's left and right content margins plus its border.
@@ -74,7 +75,11 @@ class Collapsible(QWidget):
 
 
 class DeviceView(QWidget):
-    """One PC's cards, kept live from its ``NICards`` device while visible."""
+    """One PC's cards, kept live from its ``NICards`` device while visible.
+
+    While the device is unreachable the state poll carries on, slower, as the
+    reconnection attempt.
+    """
 
     def __init__(self, name: str, client, parent=None):
         super().__init__(parent)
@@ -154,6 +159,10 @@ class DeviceView(QWidget):
         self._clear_cards()
         if layout["error"]:
             self.message.setText(layout["error"])
+            self.message.show()
+            return
+        if not layout["cards"]:
+            self.message.setText(f"{self.name}'s hardware file declares no boards.")
             self.message.show()
             return
         self.message.hide()
@@ -252,8 +261,16 @@ class DeviceView(QWidget):
             if physical in self.cells:
                 self.cells[physical].set_reading(value)
 
-    def on_failed(self, message: str) -> None:
-        self._state_pending = self._read_pending = False
+    def on_failed(self, method: str, message: str) -> None:
+        if method == "state":
+            self._state_pending = False
+        elif method == "read":
+            self._read_pending = False
+            for physical in self.watched:
+                self.cells[physical].set_watching(False)
+            self.watched.clear()
+            self._update_timers()
+            message = f"Stopped watching: {message}"
         self.error.setText(message)
         set_state(self.error, "crashed")
         self.error.show()
@@ -273,7 +290,7 @@ class DeviceView(QWidget):
         self._update_timers()
 
     def poll_state(self) -> None:
-        if self._connected and not self._state_pending:
+        if self._connected is not None and not self._state_pending:
             self._state_pending = True
             self.client.fetch_state()
 
@@ -287,12 +304,16 @@ class DeviceView(QWidget):
             self.client.read(sorted(self.watched))
 
     def _update_timers(self) -> None:
-        live = self._connected and self.isVisible()
-        if live and not self.state_timer.isActive():
-            self.state_timer.start()
-        elif not live:
+        visible = self.isVisible()
+        interval = STATE_POLL_MS if self._connected else RECONNECT_MS
+        if self.state_timer.interval() != interval:
+            self.state_timer.setInterval(interval)
+        if visible and self._connected is not None:
+            if not self.state_timer.isActive():
+                self.state_timer.start()
+        else:
             self.state_timer.stop()
-        if live and self.watched:
+        if visible and self._connected and self.watched:
             if not self.read_timer.isActive():
                 self.read_timer.start()
         else:

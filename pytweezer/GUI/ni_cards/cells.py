@@ -92,6 +92,9 @@ class ChannelCell(QFrame):
     DO cells toggle on click, AO cells take a value (committed on Enter), and
     AI/DI cells toggle watching on click. A held cell is disabled and says who
     holds it.
+
+    An AO box follows the last value set unless something has been typed into
+    it; leaving the box without pressing Enter discards the typing.
     """
 
     write_requested = QtCore.pyqtSignal(str, object)
@@ -106,6 +109,7 @@ class ChannelCell(QFrame):
         self.holder: str | None = None
         self.last: dict | None = None
         self.watching = False
+        self._typed = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -136,9 +140,10 @@ class ChannelCell(QFrame):
             self.spin.setSuffix(" V")
             self.spin.setRange(*(channel["range"] or (0.0, 0.0)))
             self.spin.setKeyboardTracking(False)
-            self.spin.setSpecialValueText("—")
-            self.spin.setValue(self.spin.minimum())
+            self.spin.lineEdit().textEdited.connect(self._on_typed)
             self.spin.lineEdit().returnPressed.connect(self._commit)
+            self.spin.editingFinished.connect(self._on_editing_finished)
+            self._sync_spin()
             row.addWidget(self.spin)
         elif self.kind != "do":
             row.addWidget(self.value)
@@ -172,10 +177,8 @@ class ChannelCell(QFrame):
         if entry == self.last:
             return
         self.last = entry
-        if self.spin is not None and not self.spin.hasFocus():
-            # The special text shows at the minimum, standing in for "unknown".
-            self.spin.setSpecialValueText("—" if entry is None else "")
-            self.spin.setValue(self.spin.minimum() if entry is None else entry["value"])
+        if self.spin is not None and not self._typed:
+            self._sync_spin()
         self._refresh()
 
     def set_watching(self, watching: bool) -> None:
@@ -193,8 +196,24 @@ class ChannelCell(QFrame):
         else:
             self.value.setText(_level(value))
 
+    def _sync_spin(self) -> None:
+        # The special text shows at the minimum, standing in for "unknown".
+        unknown = self.last is None
+        self.spin.setSpecialValueText("—" if unknown else "")
+        self.spin.setValue(self.spin.minimum() if unknown else self.last["value"])
+
+    def _on_typed(self) -> None:
+        self._typed = True
+
     def _commit(self) -> None:
-        self.write_requested.emit(self.physical, self.spin.value())
+        if self._typed or self.last is not None:
+            self.write_requested.emit(self.physical, self.spin.value())
+        self._typed = False
+
+    def _on_editing_finished(self) -> None:
+        if not self.spin.hasFocus():
+            self._typed = False
+            self._sync_spin()
 
     def _refresh(self) -> None:
         if self.holder is not None:

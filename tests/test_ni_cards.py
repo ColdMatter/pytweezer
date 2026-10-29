@@ -63,7 +63,10 @@ class FakeIO:
         }
 
     def card(self, device):
-        return self.cards.get(device)
+        card = self.cards.get(device)
+        if isinstance(card, Exception):
+            raise card
+        return card
 
     def write_do(self, physical, high):
         self.calls.append(("write_do", physical, high))
@@ -92,8 +95,8 @@ def io():
     return FakeIO()
 
 
-def make_cards(hardware_file, io, **kwargs):
-    return NICards(hardware_file, io=io, **kwargs)
+def make_cards(hardware_file, io, reserved=None, protected=None):
+    return NICards(hardware_file, reserved or {}, protected or [], io=io)
 
 
 def card(layout, board):
@@ -114,17 +117,24 @@ def test_layout_merges_shared_aliases_and_lists_unaliased_lines(hardware_file, i
 
 def test_missing_hardware_file_reports_error_instead_of_raising(tmp_path, io):
     missing = str(tmp_path / "nowhere" / "MoleculeMOTHardware.cs")
-    layout = NICards(missing, io=io).layout()
+    layout = make_cards(missing, io).layout()
     assert missing in layout["error"]
     assert layout["cards"] == []
 
 
-def test_card_not_on_this_pc_is_listed_and_rejects_writes(hardware_file, io):
+@pytest.mark.parametrize(
+    "reported, error",
+    [(None, "not found on this PC"), (OSError("-200220"), "unreadable by NI-DAQmx")],
+)
+def test_card_not_on_this_pc_is_listed_and_rejects_writes(
+    hardware_file, io, reported, error
+):
+    io.cards["Dev3"] = reported
     cards = make_cards(hardware_file, io)
     usb = card(cards.layout(), "usbBoard2")
-    assert usb["error"] == "not found on this PC"
+    assert usb["error"].startswith(error)
     assert [c["aliases"] for c in usb["channels"]] == [["v10Lock"]]
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(ValueError, match=error):
         cards.write_ao("Dev3/ao1", 1.0)
     assert io.calls == []
 
@@ -135,6 +145,7 @@ def test_card_not_on_this_pc_is_listed_and_rejects_writes(hardware_file, io):
         ({"reserved": {"Wavemeter Lock": {"channels": ["v21Lok"]}}}, "v21Lok"),
         ({"reserved": {"Hardware Control": {"cards": ["tclBord2"]}}}, "tclBord2"),
         ({"protected": ["MOTCoilCurrent"]}, "MOTCoilCurrent"),
+        ({"reserved": {"Wavemeter Lock": {"channel": ["v21Lock"]}}}, "channel"),
     ],
 )
 def test_unknown_reserved_or_protected_name_fails_construction(
