@@ -215,7 +215,7 @@ class ResultsPanel(QWidget):
             self.refresh()
 
     def _queue_changed(self, snapshot):
-        tasks = [*snapshot.get("running", []), *snapshot.get("queue", [])]
+        tasks = [*(snapshot.get("running") or []), *snapshot.get("queue", [])]
         tasks += snapshot.get("history", [])
         statuses = {task["rid"]: task["status"] for task in tasks}
         if statuses == self._task_statuses:

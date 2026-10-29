@@ -229,3 +229,12 @@ def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeyp
     panel.hide()
     panel._poll_tick()
     assert calls == [1, 1], "a hidden tab is not polled"
+
+
+def test_queue_snapshot_without_running_list_is_tolerated(qapp, tmp_path):
+    feed = FakeFeed()
+    panel = ResultsPanel(root=tmp_path, feed=feed)
+    feed.queue_changed.emit(
+        {"running": None, "queue": [{"rid": 3, "status": "queued"}], "history": []}
+    )
+    assert panel._task_statuses == {3: "queued"}
