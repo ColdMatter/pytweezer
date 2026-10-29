@@ -291,9 +291,7 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
   composite (CONFIG `"devices"`) itself and its sub-devices, a sub-device only
   itself, and `MotMaster(linked=True)` also its CONFIG `linked_partner` (`"CaF
   MotMaster"` names `"Rb MotMaster"`). `Device.reserves()` is the hook for other
-  hidden dependencies. Names match as `get_device()` does. If the class
-  reserves more by the time the task starts, the worker fails it; resubmit.
-  Only queued tasks are subject to reservations: `Rig`, `run_local` and GUI
+  hidden dependencies. Names match as `get_device()` does. Only queued tasks are subject to reservations: `Rig`, `run_local` and GUI
   panels can drive a device another task holds, though `run_local` still
   refuses devices the class doesn't declare.
 - The queue view has a Pipeline column and filter chips (a dot if one is
