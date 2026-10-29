@@ -297,7 +297,8 @@ CONFIG = {
             "simulate": SIMULATING,
             "hardware_file": r"C:\ControlPrograms\EDMSuite\DAQ\RbTweezerHardware.cs",
             "reserved": {"Wavemeter Lock": {"channels": ["tRbD1Lock"]}},
-            "protected": [],
+            # Coil currents.
+            "protected": ["tMOTcc", "tMagneticTrapcc"],
         },
     },
     # Background database loggers. Each entry runs pytweezer/servers/logger_server.py,
