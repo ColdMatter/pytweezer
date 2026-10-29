@@ -10,7 +10,13 @@ from pytweezer.experiment.experiment import Experiment
 from pytweezer.experiment.introspect import describe
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.experiment.reservations import ReservationError, device_reservation
-from pytweezer.servers import device_server
+from pytweezer.experiment.runner import run_local
+from pytweezer.servers import device_client, device_server
+from pytweezer.servers.device_client import (
+    AutoTarget,
+    UndeclaredDeviceError,
+    restrict_devices,
+)
 
 _DEVICES = {
     "Devices": {
@@ -133,3 +139,48 @@ def test_describe_reports_reservations_and_errors(fake_config, monkeypatch):
     assert schemas["Good"]["reserve_error"] is None
     assert schemas["Bad"]["reserves"] is None
     assert "inactive" in schemas["Bad"]["reserve_error"]
+
+
+class Sneaky(Experiment):
+    cam = Device("Cam")
+
+    def run_point(self):
+        self.device("Rig Dac")
+
+
+def test_undeclared_device_is_refused_in_run_local(fake_config, fake_devices):
+    measurement = run_local(Sneaky)
+
+    assert measurement.status == "failed"
+    assert "without declaring it" in measurement.attrs["error"]
+    assert [client.name for client in fake_devices] == []
+
+
+def test_declared_and_composite_member_devices_are_allowed(fake_config, fake_devices):
+    class Declared(Experiment):
+        rig = Device("Rig")
+        cam = Device("Cam")
+
+        def run_point(self):
+            self.device("Rig Cam")
+            self.device("cam", fresh=True)
+
+    assert run_local(Declared).status == "completed"
+    assert sorted(client.name for client in fake_devices) == ["Rig Cam", "cam"]
+
+
+def test_undeclared_device_is_refused_in_simulation(fake_config):
+    measurement = run_local(Sneaky, simulate=True)
+
+    assert measurement.status == "failed"
+    assert "without declaring it" in measurement.attrs["error"]
+
+
+def test_restrict_devices_blocks_direct_get_device(fake_config):
+    restrict_devices({"Cam"})
+    try:
+        with pytest.raises(UndeclaredDeviceError):
+            device_client._resolve_endpoint("Rig Dac", None, None, AutoTarget)
+        device_client._resolve_endpoint("cam", None, None, AutoTarget)
+    finally:
+        restrict_devices(None)

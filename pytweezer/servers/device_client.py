@@ -44,6 +44,8 @@ counterpart if you want to drive the servers with coroutines directly::
     asyncio.run(main())
 """
 
+from collections.abc import Iterable
+
 from sipyco.pc_rpc import AsyncioClient, AutoTarget
 from sipyco.pc_rpc import Client as RPCClient
 
@@ -51,6 +53,23 @@ from pytweezer.logging_utils import get_logger
 from pytweezer.servers.device_server import resolve_address
 
 logger = get_logger("device client")
+
+
+class UndeclaredDeviceError(PermissionError):
+    """A device was requested that this process is not allowed to use."""
+
+
+_allowed_devices: frozenset[str] | None = None
+
+
+def restrict_devices(names: Iterable[str] | None) -> None:
+    """Limit this process to the canonical device ``names``; ``None`` lifts the limit.
+
+    While set, :func:`get_device` and :func:`get_device_async` raise
+    :class:`UndeclaredDeviceError` for any other device.
+    """
+    global _allowed_devices
+    _allowed_devices = None if names is None else frozenset(names)
 
 
 def get_device_config(name):
@@ -75,6 +94,11 @@ def _resolve_endpoint(name, host, port, target_name):
     ``host``/``port`` plus the target that selects it.
     """
     address = resolve_address(name)
+    if _allowed_devices is not None and address.name not in _allowed_devices:
+        raise UndeclaredDeviceError(
+            f"Device {address.name!r} is not one this process may use; "
+            f"allowed: {', '.join(sorted(_allowed_devices)) or '(none)'}"
+        )
     owner = address.owner_conf
 
     host = host or owner.get("host", "127.0.0.1")

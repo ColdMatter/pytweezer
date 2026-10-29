@@ -6,7 +6,7 @@ process and by :func:`run_local` for interactive use.
 
 import inspect
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -47,12 +47,16 @@ def open_writer(
     header: dict[str, Any],
     *,
     simulate: bool = False,
+    allowed_devices: Iterable[str] | None = None,
 ) -> tuple[Experiment, list[Point], MeasurementWriter]:
     """Instantiate the experiment, expand the scan and create its measurement file.
 
-    With ``simulate`` the experiment's devices are simulated in-process.
+    With ``simulate`` the experiment's devices are simulated in-process. With
+    ``allowed_devices`` the experiment may only open those canonical device names.
     """
     experiment = experiment_cls(args)
+    if allowed_devices is not None:
+        experiment.allowed_devices = frozenset(allowed_devices)
     if simulate:
         experiment.simulated_devices = SimulatedDevices()
     points = scan.points(experiment_cls)
@@ -174,6 +178,7 @@ def run_local(
         scan or Scan(),
         {"rid": -1, "label": label},
         simulate=simulate,
+        allowed_devices=experiment_cls.reserved_devices(),
     )
     try:
         run_points(experiment, points, writer)

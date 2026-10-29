@@ -16,6 +16,7 @@ from pytweezer.experiment.motmaster import (
     MotMasterInteger,
     MotMasterNumber,
 )
+from pytweezer.servers import device_server
 
 
 class FakeSequencer:
@@ -78,6 +79,15 @@ def rig(monkeypatch):
             raise ConnectionError(f"{name} unreachable")
         return fakes[name]
 
+    real_config = device_server.get_config()
+    config = {
+        **real_config,
+        "Devices": {
+            **real_config["Devices"],
+            "K MotMaster": {"class": "pkg:MM", "host": "127.0.0.1", "port": 1},
+        },
+    }
+    monkeypatch.setattr(device_server, "get_config", lambda: config)
     monkeypatch.setattr("pytweezer.experiment.experiment._get_device", get_device)
     monkeypatch.setattr(MotMasterExperiment, "follower_arm_delay", 0.0)
     return SimpleNamespace(log=log, fakes=fakes, opened=opened, unreachable=unreachable)
