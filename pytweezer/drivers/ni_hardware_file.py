@@ -7,10 +7,14 @@ The C# constructor of a ``DAQ.HAL.Hardware`` subclass declares its boards with
 the file is ignored. Board addresses are usually bound to a local string first
 (``string aoBoard = (string)Boards["aoBoard"];``), so string variables and
 ``Boards[...]`` lookups are followed in source order.
+
+The boards MOTMaster drives as pattern generators are named by three ``Info``
+entries: ``PatternGeneratorBoard``, ``AdditionalPatternGeneratorBoards`` and
+``AnalogBoards``. The last two are dictionaries built with ``<variable>.Add``.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from pytweezer.logging_utils import get_logger
@@ -47,10 +51,15 @@ class Alias:
 
 @dataclass(frozen=True)
 class HardwareFile:
-    """The boards (in ``Boards.Add`` order) and aliases (in declaration order)."""
+    """The boards (in ``Boards.Add`` order) and aliases (in declaration order).
+
+    ``pattern_boards`` holds the addresses of the boards MOTMaster drives as
+    pattern generators, without duplicates.
+    """
 
     boards: dict[str, Board]
     aliases: list[Alias]
+    pattern_boards: list[str] = field(default_factory=list)
 
 
 _KINDS = {
@@ -60,9 +69,16 @@ _KINDS = {
     ("Digital", "Input"): "di",
 }
 
+_PATTERN_BOARD_KEYS = (
+    "PatternGeneratorBoard",
+    "AdditionalPatternGeneratorBoards",
+    "AnalogBoards",
+)
+
 _STATEMENT = re.compile(
     r"\b[Ss]tring\s+(?P<var>\w+)\s*=\s*(?P<value>[^;]*);"
     r"|\bBoards\.Add\("
+    r"|\b(?P<target>\w+)\.Add\("
     r"|\bAdd(?P<signal>Analog|Digital)(?P<direction>Input|Output)Channel\("
 )
 _CHAR_LITERAL = re.compile(r"'(?:\\.|[^'\\])'")
@@ -141,6 +157,8 @@ def parse_hardware_file(source: str) -> HardwareFile:
     variables: dict[str, str] = {}
     boards: dict[str, Board] = {}
     aliases: list[Alias] = []
+    dictionary_values: dict[str, list[str]] = {}
+    pattern_expressions: dict[str, str] = {}
 
     def evaluate(expression: str) -> str | None:
         parts = []
@@ -170,6 +188,17 @@ def parse_hardware_file(source: str) -> HardwareFile:
                 variables[match.group("var")] = value
             continue
         args, position = _call_arguments(source, match.end())
+        if match.group("target"):
+            if len(args) != 2:
+                continue
+            if match.group("target") != "Info":
+                if (value := evaluate(args[1])) is not None:
+                    dictionary_values.setdefault(match.group("target"), []).append(
+                        value
+                    )
+            elif (key := evaluate(args[0])) in _PATTERN_BOARD_KEYS:
+                pattern_expressions[key] = args[1]
+            continue
         if not match.group("signal"):
             if len(args) == 2:
                 name, address = evaluate(args[0]), evaluate(args[1])
@@ -208,7 +237,21 @@ def parse_hardware_file(source: str) -> HardwareFile:
             terminal = args[2].rpartition(".")[2]
         aliases.append(Alias(alias, kind, physical, board.name, ao_range, terminal))
 
-    return HardwareFile(boards, aliases)
+    pattern_boards: list[str] = []
+    for key in _PATTERN_BOARD_KEYS:
+        if (expression := pattern_expressions.get(key)) is None:
+            continue
+        if key == "PatternGeneratorBoard":
+            addresses = [evaluate(expression)]
+        else:
+            addresses = dictionary_values.get(expression, [])
+        for address in addresses:
+            if address is None:
+                logger.debug("Skipping %s: %s is not a known address", key, expression)
+            elif address not in pattern_boards:
+                pattern_boards.append(address)
+
+    return HardwareFile(boards, aliases, pattern_boards)
 
 
 def read_hardware_file(path: str) -> HardwareFile:
