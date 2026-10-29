@@ -54,9 +54,10 @@ Rules that matter:
   task ends. For `run_parallel`, take extra clients with
   `self.device(name, fresh=True)` — one sipyco client per thread.
 - **Declare every device you use.** `self.device(name)` (also `fresh=True`)
-  raises `UndeclaredDeviceError` for a name that is not a declared attribute,
-  and a queued task's worker also refuses a bare `get_device()` of anything
-  undeclared (`device_client.restrict_devices`). The declarations are what the
+  raises `UndeclaredDeviceError` for a name outside the task's reserved set
+  (a member of a declared composite and a linked partner are in it), and a
+  queued task's worker also refuses a bare `get_device()` of anything outside
+  it (`device_client.restrict_devices`). The declarations are what the
   manager reserves (see "Pipelines and device reservations").
 - `record(name, value, unit="")`: in `run_point` it stores into
   `/results/<name>` row `point.index`; in `prepare`/`finish` into
@@ -290,12 +291,17 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
   composite (CONFIG `"devices"`) itself and its sub-devices, a sub-device only
   itself, and `MotMaster(linked=True)` also its CONFIG `linked_partner` (`"CaF
   MotMaster"` names `"Rb MotMaster"`). `Device.reserves()` is the hook for other
-  hidden dependencies. Names match as `get_device()` does. Reservations only
-  cover queued tasks: `Rig`, `run_local` and GUI panels can still drive any
-  device.
+  hidden dependencies. Names match as `get_device()` does. If the class
+  reserves more by the time the task starts, the worker fails it; resubmit.
+  Only queued tasks are subject to reservations: `Rig`, `run_local` and GUI
+  panels can drive a device another task holds, though `run_local` still
+  refuses devices the class doesn't declare.
 - The queue view has a Pipeline column and filter chips (a dot if one is
   running, a count of waiting tasks). A task blocked by a device shows amber
-  `waiting: <device> (RID n)`; one only behind its own pipeline shows `queued`.
+  `waiting: <device> (RID n)` (`all devices` while a running task's
+  reservation is unknown); a pipeline's next task whose reservation awaits the
+  catalogue's (re-)read of its module shows amber `waiting: reading
+  experiments`; one only behind its own pipeline shows `queued`.
   The submit form's Pipeline box defaults to `main`; type a new name to create
   one. `"points"` is per RID, and each pipeline shows its latest task's.
 - **Terminate** stops at the next point boundary (finish() runs). **Abort**
