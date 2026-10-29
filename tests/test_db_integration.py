@@ -106,6 +106,7 @@ def test_a_backfilled_run_joins_each_point_with_its_own_readings(
 ):
     from pytweezer.database import analysis
     from pytweezer.database.backfill import backfill
+    from pytweezer.experiment.archive import ResultsArchive
     from pytweezer.experiment.storage import load_measurement
 
     path = write_run(tmp_path / "m.h5", point_s=0.02)
@@ -116,7 +117,7 @@ def test_a_backfilled_run_joins_each_point_with_its_own_readings(
         writer.write("ni_adc", {"ai0": float(i)}, time=middle)
     assert writer.flush(10)
 
-    monkeypatch.setattr(analysis, "data_root", lambda: tmp_path)
+    monkeypatch.setattr(analysis, "default_archive", lambda: ResultsArchive(tmp_path))
     table = analysis.points_with_readings(7, "ni_adc", dsn=DSN)
     assert list(table["ni_adc/ai0"]) == [0.0, 1.0, 2.0]
 
