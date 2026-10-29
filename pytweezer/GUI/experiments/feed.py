@@ -50,7 +50,11 @@ class ExperimentFeed(QtCore.QObject):
             if mod["action"] == "init":
                 queue_changed = True
             elif path[:1] == ["points"]:
-                if mod["action"] == "append" and len(path) == 2:
+                if (
+                    mod["action"] == "append"
+                    and len(path) == 2
+                    and str(path[1]).isdigit()
+                ):
                     rows.append({"rid": int(path[1]), **mod["x"]})
             elif not (path == [] and mod.get("key") in ("alive", "points")):
                 queue_changed = True
@@ -64,22 +68,22 @@ class ExperimentFeed(QtCore.QObject):
             self.point_received.emit(row)
 
     def snapshot(self):
-        """The latest queue snapshot, or ``{}`` before the first connection."""
-        return self._mirror.read(
-            lambda state: {
-                key: copy.deepcopy(value)
-                for key, value in (state or {}).items()
-                if key != "points"
-            }
-        )
+        """The latest queue snapshot, or ``{}`` before the first connection.
+
+        ``"running"`` is always a list and every task has a ``"pipeline"``,
+        also when the manager predates pipelines.
+        """
+        return self._mirror.read(_normalise)
 
     def points(self, rid):
         """Every point held for task ``rid``: a running task, or its pipeline's last."""
-        return self._mirror.read(
-            lambda state: (
-                copy.deepcopy(state["points"].get(str(rid), [])) if state else []
-            )
-        )
+
+        def read(state):
+            points = (state or {}).get("points")
+            held = points.get(str(rid)) if isinstance(points, dict) else None
+            return copy.deepcopy(held) if isinstance(held, list) else []
+
+        return self._mirror.read(read)
 
     def _set_connected(self, connected):
         if connected != self.connected:
@@ -89,3 +93,22 @@ class ExperimentFeed(QtCore.QObject):
     def close(self):
         self._timer.stop()
         self._mirror.close()
+
+
+def _normalise(state):
+    snapshot = {
+        key: copy.deepcopy(value)
+        for key, value in (state or {}).items()
+        if key != "points"
+    }
+    if not snapshot:
+        return snapshot
+    running = snapshot.get("running")
+    if isinstance(running, dict):
+        snapshot["running"] = [running]
+    elif running is None:
+        snapshot["running"] = []
+    for key in ("running", "queue", "history"):
+        for task in snapshot.get(key) or []:
+            task["pipeline"] = task.get("pipeline") or "main"
+    return snapshot
