@@ -48,7 +48,8 @@ def test_dataframe_has_a_row_per_point_run_in_run_order(dataset):
     assert list(frame["index"]) == list(range(POINTS_RUN))
     assert list(frame["x"]) == list(frame["seen_x"])
     assert list(frame["count"]) == [0, 10, 20, 30]
-    assert (frame["t_start"].diff().dropna() > 0).all()
+    # >= because Windows' clock can stamp consecutive points identically.
+    assert (frame["t_start"].diff().dropna() >= 0).all()
 
 
 def test_dict_stacks_each_points_array_result_in_run_order(dataset):

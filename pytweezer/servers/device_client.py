@@ -24,7 +24,7 @@ sipyco targets exist::
 the config doesn't name.
 
 For driving two or more device servers concurrently (e.g. starting two MotMaster
-sequences in parallel), prefer :func:`pytweezer.parallel.run_parallel` — it runs
+sequences in parallel), prefer :func:`pytweezer.helper_scripts.parallel.run_parallel` — it runs
 blocking :func:`get_device` clients in threads with no ``async``/``await`` and
 works from the GUI. :func:`get_device_async` is the lower-level ``asyncio``
 counterpart if you want to drive the servers with coroutines directly::

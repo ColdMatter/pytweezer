@@ -6,8 +6,8 @@ import json
 import numpy as np
 import pytest
 
-from pytweezer import optimisation
 from pytweezer.experiment.experiment_parameter_manager import ExpParameterManager
+from pytweezer.helper_scripts import optimisation
 
 COOL_VCO_GRID = np.linspace(3.0, 5.0, 20)
 REP_VCO_GRID = np.linspace(0.0, 5.0, 20)
