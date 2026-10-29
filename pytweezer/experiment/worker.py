@@ -4,9 +4,10 @@
 
 The worker asks the manager for its task, runs it, and reports after every
 point; the reply says whether to continue, pause or terminate. It may open
-only the devices the task reserves. If the manager stays unreachable for
-``orphan_timeout`` seconds the worker stops at the next point and marks the
-measurement ``interrupted``.
+only the devices the task reserves, and fails the task before opening any if
+the class now reserves a device that was not reserved when it was queued. If
+the manager stays unreachable for ``orphan_timeout`` seconds the worker stops
+at the next point and marks the measurement ``interrupted``.
 
 Workers bind no ports, so ``pytweezer-kill-stale`` doesn't look for them; the
 manager finds and reconciles its workers itself.
@@ -20,6 +21,7 @@ import traceback
 from typing import Any
 
 from pytweezer.experiment.client import ManagerUnavailable, ReqClient
+from pytweezer.experiment.reservations import ReservationError
 from pytweezer.experiment.runner import Progress, open_writer, run_points
 from pytweezer.experiment.task import Action, Task, TaskStatus
 from pytweezer.logging_utils import get_logger
@@ -112,8 +114,28 @@ def run(link: ManagerLink) -> int:
         return 1
     restrict_devices(task.devices)
 
+    def fail(error: str) -> int:
+        logger.error("Task %s could not start:\n%s", task.rid, error)
+        link.send("finished", status=TaskStatus.FAILED, error=error)
+        return 1
+
     try:
         experiment_cls = resolve_class(task.experiment, task.class_name)
+    except Exception:
+        return fail(traceback.format_exc())
+    try:
+        unreserved = set(experiment_cls.reserved_devices()) - set(task.devices)
+    except ReservationError as error:
+        return fail(str(error))
+    if unreserved:
+        names = ", ".join(repr(name) for name in sorted(unreserved))
+        verb = "was" if len(unreserved) == 1 else "were"
+        return fail(
+            f"{experiment_cls.__name__} now reserves {names}, which {verb} not "
+            "reserved when it was queued; resubmit it"
+        )
+
+    try:
         experiment, points, writer = open_writer(
             reply["h5_path"],
             experiment_cls,
@@ -129,10 +151,7 @@ def run(link: ManagerLink) -> int:
             allowed_devices=task.devices,
         )
     except Exception:
-        error = traceback.format_exc()
-        logger.error("Task %s could not start:\n%s", task.rid, error)
-        link.send("finished", status=TaskStatus.FAILED, error=error)
-        return 1
+        return fail(traceback.format_exc())
 
     try:
         status, error = run_points(experiment, points, writer, link.control)

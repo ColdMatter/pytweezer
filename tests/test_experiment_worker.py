@@ -5,11 +5,12 @@ from datetime import datetime
 import pytest
 
 from pytweezer.experiment import worker
+from pytweezer.experiment.arguments import Device
 from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiment.experiment import Experiment
 from pytweezer.experiment.runner import Progress
 from pytweezer.experiment.task import Action, Task
-from pytweezer.servers import device_client
+from pytweezer.servers import device_client, device_server
 
 
 class FakeManager:
@@ -86,3 +87,57 @@ def test_worker_restricts_devices_to_the_reservation(
     finished = manager.sent[-1]
     assert (finished["event"], finished["status"]) == ("finished", "failed")
     assert error in finished["error"]
+
+
+class DeclaresTwoDevices(Experiment):
+    """Edited after it was queued to declare a second device."""
+
+    cam = Device("Cam")
+    mm = Device("Rb MotMaster")
+
+    def run_point(self):
+        pass
+
+
+class DeclaresAnUnknownDevice(Experiment):
+    nope = Device("Nope")
+
+    def run_point(self):
+        pass
+
+
+@pytest.mark.parametrize(
+    "experiment_cls, error",
+    [
+        (
+            DeclaresTwoDevices,
+            (
+                "DeclaresTwoDevices now reserves 'Rb MotMaster', which was not "
+                "reserved when it was queued; resubmit it"
+            ),
+        ),
+        (DeclaresAnUnknownDevice, "Nope"),
+    ],
+)
+def test_worker_fails_a_task_whose_class_now_reserves_more(
+    tmp_path, monkeypatch, experiment_cls, error
+):
+    devices = {
+        "Cam": {"class": "pkg:Cam", "host": "1.2.3.4", "port": 5000},
+        "Rb MotMaster": {"class": "pkg:MM", "host": "1.2.3.7", "port": 5004},
+    }
+    monkeypatch.setattr(device_server, "get_config", lambda: {"Devices": devices})
+    monkeypatch.setattr(device_client, "_allowed_devices", None)
+    task = Task(
+        experiment=experiment_cls.__module__,
+        class_name=experiment_cls.__qualname__,
+        rid=8,
+        t_submit=datetime.now().astimezone(),
+        devices=["Cam"],
+    )
+    manager = StartedManager(task, tmp_path / "8.h5")
+    worker.run(worker.ManagerLink(manager, rid=8, token="t"))
+    finished = manager.sent[-1]
+    assert (finished["event"], finished["status"]) == ("finished", "failed")
+    assert error in finished["error"]
+    assert not (tmp_path / "8.h5").exists()
