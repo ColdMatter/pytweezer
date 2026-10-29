@@ -21,7 +21,7 @@ from pytweezer.servers.sync import SyncMirror
 logger = get_logger("pytweezer.drivers.ni_cards_sources")
 
 # pythonnet may not be installed, so the .NET exceptions are matched by name.
-_UNREACHABLE_DOTNET_ERRORS = {"SocketException", "RemotingException"}
+_UNREACHABLE_DOTNET_ERRORS = {"SocketException", "RemotingException", "IOException"}
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,9 @@ class MotMasterTooOld(Exception):
 class RemotingMotMasterStatus:
     """Read-only view of a MOTMaster over .NET remoting.
 
-    The proxy is built on the first call. Each call runs on a worker thread and
+    The proxy is built on the first call; any failure to build it counts as
+    MOTMaster being unreachable, and is logged as a warning the first time so a
+    configuration error does not pass for a closed MOTMaster. Each call runs on a worker thread and
     is abandoned after ``timeout_s``; while an abandoned call is still stuck,
     further calls raise `MotMasterNotAnswering` at once rather than pile up
     threads.
@@ -95,6 +97,7 @@ class RemotingMotMasterStatus:
         self._proxy = None
         self._lock = threading.Lock()
         self._stuck: threading.Thread | None = None
+        self._warned = False
 
     def is_running(self) -> bool | None:
         """Whether MOTMaster is running a sequence; ``None`` if unreachable.
@@ -102,10 +105,19 @@ class RemotingMotMasterStatus:
         Raises:
             MotMasterNotAnswering: MOTMaster did not answer in time.
         """
-        return self._call(lambda proxy: bool(proxy.IsRunning))
+        return self._call(self._read_is_running)
+
+    @staticmethod
+    def _read_is_running(proxy) -> bool:
+        # pythonnet holds the GIL during a .NET property read but not during a
+        # method call, so a blocked read must go through reflection for the
+        # timeout to be able to fire.
+        return bool(proxy.GetType().GetProperty("IsRunning").GetValue(proxy, None))
 
     def last_run(self) -> LastRun | None:
-        """MOTMaster's last finished run; ``None`` if unreachable or none yet.
+        """MOTMaster's last finished run.
+
+        ``None`` means MOTMaster is unreachable or has not finished a run yet.
 
         Raises:
             MotMasterNotAnswering: MOTMaster did not answer in time.
@@ -134,7 +146,11 @@ class RemotingMotMasterStatus:
             def work():
                 try:
                     if self._proxy is None:
-                        self._proxy = motmaster_controller(self._config_file)
+                        try:
+                            self._proxy = motmaster_controller(self._config_file)
+                        except Exception as error:
+                            outcome["unbuildable"] = error
+                            return
                     outcome["result"] = fn(self._proxy)
                 except BaseException as error:
                     outcome["error"] = error
@@ -145,16 +161,32 @@ class RemotingMotMasterStatus:
             if worker.is_alive():
                 self._stuck = worker
                 raise MotMasterNotAnswering(f"no answer in {self._timeout_s} s")
+            if "unbuildable" in outcome:
+                self._unreachable(outcome["unbuildable"], warn=True)
+                return None
             error = outcome.get("error")
             if error is None:
+                self._warned = False
                 return outcome["result"]
             if isinstance(error, OSError) or (
                 type(error).__name__ in _UNREACHABLE_DOTNET_ERRORS
             ):
-                logger.debug("MOTMaster unreachable: %s", error)
-                self._proxy = None
+                self._unreachable(error, warn=False)
                 return None
             raise error
+
+    def _unreachable(self, error: BaseException, warn: bool) -> None:
+        self._proxy = None
+        if warn and not self._warned:
+            logger.warning(
+                "Cannot reach MOTMaster (%s): %s: %s",
+                self._config_file,
+                type(error).__name__,
+                error,
+            )
+        else:
+            logger.debug("MOTMaster unreachable: %r", error)
+        self._warned = self._warned or warn
 
 
 class SimulatedMotMasterStatus:
@@ -165,6 +197,18 @@ class SimulatedMotMasterStatus:
 
     def last_run(self) -> LastRun | None:
         return None
+
+
+def _devices_by_rid(state: Any) -> dict[str, int]:
+    # An older manager sends "running" as one task or None, not a list.
+    running = (state or {}).get("running")
+    if isinstance(running, dict):
+        running = [running]
+    held = {}
+    for task in running or ():
+        for device in task.get("devices") or ():
+            held[device] = task["rid"]
+    return held
 
 
 class ManagerQueue:
@@ -180,11 +224,7 @@ class ManagerQueue:
         """
         if not self._mirror.connected:
             return None
-        held = {}
-        for task in self._mirror.snapshot()["running"]:
-            for device in task["devices"] or ():
-                held[device] = task["rid"]
-        return held
+        return self._mirror.read(_devices_by_rid)
 
     def close(self) -> None:
         self._mirror.close()

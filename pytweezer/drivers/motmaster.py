@@ -104,16 +104,23 @@ def _ensure_motmaster_running(
     )
 
 
+_referenced: set[str] = set()
+
+
 def _add_reference(path: str) -> None:
+    # Once per process: a poller that rebuilds its proxy must not grow sys.path.
+    if path in _referenced:
+        return
     sys.path.append(pathlib.Path(path).parent)
     clr.AddReference(path)
+    _referenced.add(path)
 
 
 def motmaster_controller(config_file: str) -> Any:
     """The remoting proxy for the MOTMaster ``Controller`` named by ``config_file``.
 
     ``config_file`` is resolved against ``CONFIG_DIR`` as `MotMasterInterface`
-    does. Building the proxy does not start MOTMaster or contact it; the first
+    does. The references are added once per process. Building the proxy does not start MOTMaster or contact it; the first
     call through the proxy does.
 
     Args:

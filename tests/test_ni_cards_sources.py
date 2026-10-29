@@ -1,8 +1,11 @@
+import json
+import sys
 import time
+import types
 
 import pytest
 
-from pytweezer.drivers import ni_cards_sources
+from pytweezer.drivers import motmaster, ni_cards_sources
 from pytweezer.drivers.ni_cards_sources import (
     LastRun,
     ManagerQueue,
@@ -21,21 +24,44 @@ FULL_REPORT = {
 }
 
 
+class _Reflected:
+    """The reflection path to a .NET property: ``GetType().GetProperty(name).GetValue``."""
+
+    def __init__(self, read):
+        self._read = read
+
+    def GetType(self):
+        return self
+
+    def GetProperty(self, name):
+        assert name == "IsRunning"
+        return self
+
+    def GetValue(self, proxy, index):
+        return self._read()
+
+
 class FakeController:
+    """A remoting proxy whose ``IsRunning`` may only be read by reflection."""
+
     def __init__(self, is_running=lambda: False, report=None):
-        self._is_running = is_running
+        self._reflected = _Reflected(is_running)
         self._report = report
+
+    def GetType(self):
+        return self._reflected.GetType()
 
     @property
     def IsRunning(self):
-        return self._is_running()
+        raise AssertionError("a property read holds the GIL under pythonnet")
 
     def GetLastRunOutputs(self):
         return self._report
 
 
 class NoLastRunController:
-    IsRunning = True
+    def GetType(self):
+        return _Reflected(lambda: True)
 
 
 def status_with(monkeypatch, controller=None, error=None, timeout_s=2.0):
@@ -94,22 +120,32 @@ def test_build_without_last_run_method_raises_too_old(monkeypatch):
     assert status.is_running() is True
 
 
-def test_unreachable_motmaster_reads_as_none(monkeypatch):
-    status = status_with(monkeypatch, error=ConnectionRefusedError())
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionRefusedError(), NameError("clr"), KeyError("motmaster"), ValueError()],
+)
+def test_unreachable_motmaster_reads_as_none_and_warns_once(monkeypatch, error):
+    warnings = []
+    monkeypatch.setattr(
+        ni_cards_sources.logger, "warning", lambda *args: warnings.append(args)
+    )
+    status = status_with(monkeypatch, error=error)
     assert status.is_running() is None
     assert status.last_run() is None
+    assert len(warnings) == 1
 
 
-def test_dotnet_connection_failure_drops_the_proxy_and_reconnects(monkeypatch):
-    class SocketException(Exception):
-        pass
-
+@pytest.mark.parametrize(
+    "name", ["SocketException", "RemotingException", "IOException"]
+)
+def test_dotnet_connection_failure_drops_the_proxy_and_reconnects(monkeypatch, name):
+    error_class = type(name, (Exception,), {})
     calls = []
 
     def flaky():
         calls.append(1)
         if len(calls) == 1:
-            raise SocketException("No connection could be made")
+            raise error_class("connection broke")
         return True
 
     status = status_with(monkeypatch, FakeController(is_running=flaky))
@@ -117,32 +153,73 @@ def test_dotnet_connection_failure_drops_the_proxy_and_reconnects(monkeypatch):
     assert status.is_running() is True
 
 
-def test_running_devices_maps_reserved_devices_to_rid(monkeypatch):
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        (
+            {
+                "running": [
+                    {"rid": 42, "devices": ["CaF MotMaster", "Rb MotMaster"]},
+                    {"rid": 43, "devices": ["CaF ThorCam"]},
+                    {"rid": 44, "devices": None},
+                ]
+            },
+            {"CaF MotMaster": 42, "Rb MotMaster": 42, "CaF ThorCam": 43},
+        ),
+        ({"running": {"rid": 5, "devices": ["CaF MotMaster"]}}, {"CaF MotMaster": 5}),
+        ({"running": None}, {}),
+        ({}, {}),
+    ],
+    ids=["list", "older-manager-dict", "older-manager-none", "key-missing"],
+)
+def test_running_devices_maps_reserved_devices_to_rid(monkeypatch, state, expected):
     class StubMirror:
         connected = True
 
         def __init__(self, *args, **kwargs):
             pass
 
-        def snapshot(self):
-            return {
-                "running": [
-                    {"rid": 42, "devices": ["CaF MotMaster", "Rb MotMaster"]},
-                    {"rid": 43, "devices": ["CaF ThorCam"]},
-                    {"rid": 44, "devices": None},
-                ]
-            }
+        def read(self, fn):
+            return fn(state)
 
         def close(self):
             pass
 
     monkeypatch.setattr(ni_cards_sources, "SyncMirror", StubMirror)
     queue = ManagerQueue()
-    assert queue.running_devices() == {
-        "CaF MotMaster": 42,
-        "Rb MotMaster": 42,
-        "CaF ThorCam": 43,
-    }
+    assert queue.running_devices() == expected
     StubMirror.connected = False
     assert queue.running_devices() is None
     queue.close()
+
+
+def test_motmaster_controller_adds_references_once_per_process(monkeypatch, tmp_path):
+    (tmp_path / "mm.json").write_text(
+        json.dumps(
+            {
+                "dll_paths": {"a": "C:/mm/A.dll"},
+                "motmaster": {
+                    "exe_path": "C:/mm/MOTMaster.exe",
+                    "remote_path": "tcp://x",
+                },
+            }
+        )
+    )
+    added = []
+    fake_clr = types.SimpleNamespace(AddReference=added.append)
+    fake_activator = types.SimpleNamespace(GetObject=lambda cls, url: (cls, url))
+    monkeypatch.setattr(motmaster, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(motmaster, "_referenced", set())
+    monkeypatch.setattr(motmaster, "clr", fake_clr, raising=False)
+    monkeypatch.setattr(motmaster, "Activator", fake_activator, raising=False)
+    monkeypatch.setitem(
+        sys.modules, "MOTMaster", types.SimpleNamespace(Controller="Controller")
+    )
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    assert motmaster.motmaster_controller("mm.json") == ("Controller", "tcp://x")
+    path_length = len(sys.path)
+    motmaster.motmaster_controller("mm.json")
+
+    assert added == ["C:/mm/A.dll", "C:/mm/MOTMaster.exe"]
+    assert len(sys.path) == path_length
