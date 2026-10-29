@@ -168,8 +168,12 @@ def run_local(
 
     For notebooks and debugging. The measurement is kept in memory unless
     ``path`` is given. ``simulate=True`` uses in-process simulated devices.
-    A failure doesn't raise: check ``.status`` and ``.attrs["error"]`` on the
-    returned measurement.
+    A failure while running doesn't raise: check ``.status`` and
+    ``.attrs["error"]`` on the returned measurement.
+
+    Raises:
+        ReservationError: Before anything is created, if a declared device is
+            unknown or inactive in ``CONFIG["Devices"]``.
     """
     experiment, points, writer = open_writer(
         path,
