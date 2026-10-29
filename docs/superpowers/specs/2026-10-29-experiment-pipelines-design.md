@@ -6,11 +6,17 @@ Date: 2026-10-29. Status: design, agreed in conversation; not yet planned.
 
 The Experiment Manager (`pytweezer/servers/experiment_manager.py`) runs one
 task at a time. We want several tasks running at once, without two of them
-ever driving the same hardware. Two concrete cases, both real:
+ever driving the same hardware. Two realistic cases (neither exists yet;
+they illustrate the need):
 
 - a CaF sequence and an Rb sequence, each on its own hardware;
-- a slow background job (e.g. a laser calibration) running during a main
-  measurement.
+- a slow background job running during a main measurement, on hardware the
+  measurement doesn't use.
+
+Note that the wavemeter lock, and for CaF the transfer-cavity lock and
+picomotors, are only reachable through the MOTMaster driver, so anything
+using them reserves that MOTMaster. Splitting them into their own CONFIG
+devices is out of scope.
 
 Two mechanisms, with separate jobs:
 
@@ -47,6 +53,10 @@ on and which the lab knows. Unlike ARTIQ, there is no overlap of one task's
 - **Device reservation fairness.** A waiting task does not reserve devices
   ahead of time (see Scheduling).
 - **Overlapping `prepare`** with a running task, ARTIQ-style.
+- **Aliases for one physical device.** Reservations are keyed by CONFIG name.
+  `"Rb ORCA"` and `"CaF ORCA"` are the same camera (shared serial), but only
+  one is ever active, and declaring an inactive device fails at submit (see
+  below). That covers today's case; a general alias mechanism is out of scope.
 
 ## Anti-goals (would make this a failure even if it "works")
 
@@ -94,6 +104,15 @@ has finished:
 
 A paused task keeps its devices reserved: it is mid-sequence.
 
+A task's reservations are released as soon as it finishes, however it ends,
+including abort, crash and interrupted. **The user chose this, for now.** The
+known risk: after an abort, a device call already in flight still completes;
+a killed linked primary can leave its secondary claimed; and a timed-out
+follower is left waiting for its trigger. So a task in another pipeline may
+start on a sequencer that is not yet idle. Leave a `TODO` at the release
+point in the code saying so, so it can be revisited if it causes trouble
+(e.g. holding devices after a bad ending until the user releases them).
+
 ### Device reservations
 
 Each declared device attribute reports the set of CONFIG device names it
@@ -134,8 +153,17 @@ stable even if the experiment's source changes before the task runs.
 - In a worker, the allowed set is the task's stored reservation set. An
   experiment edited after submission to use a new device therefore fails
   loudly rather than clashing.
-- `run_local()` enforces the same rule (allowed set = the class's
-  declarations, expanded as above), so mistakes surface before queueing.
+- In a worker process, direct `get_device()` / `get_device_async()` calls
+  (bypassing `Experiment.device`) are held to the same allowed set, via a
+  process-wide allow-list the worker installs in `device_client`. *Builder's
+  call, made during review:* the worker runs nothing but the task, so a
+  process-wide rule is safe there.
+- `run_local()` enforces the rule in `Experiment.device` only (allowed set =
+  the class's declarations, expanded as above), so mistakes surface before
+  queueing. It does not install the process-wide allow-list, because a
+  notebook process legitimately opens other devices (e.g. through `Rig`).
+- Declaring a device whose CONFIG entry is inactive (`"active": False`) fails
+  at submit, like an unknown name.
 - Existing experiments in `pytweezer/experiments/` and
   `pytweezer/experiment/motmaster.py` must still pass. The `MotMaster`
   followers are already opened through declared attributes; a linked
@@ -166,6 +194,11 @@ stable even if the experiment's source changes before the task runs.
 - `snapshot()` changes shape: `"running"` becomes a list. Update all
   consumers (the GUI queue view, `client.py`'s waiting helpers, notebooks via
   the client).
+- The published `"points"` notifier slot holds one RID's rows, and
+  `_add_point` resets it whenever the RID changes, so two running tasks would
+  wipe each other's live plots. Make it per-RID, and update its readers
+  (`pytweezer/GUI/experiments/feed.py`, the Results tab's live plot in
+  `results.py`).
 - A waiting task's snapshot entry includes why it is waiting, when that is a
   device clash: the device(s) and the RID(s) holding them. Compute this in the
   queue with the same function the scheduler uses, so the GUI never disagrees
