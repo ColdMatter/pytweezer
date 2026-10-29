@@ -656,6 +656,8 @@ class ExperimentManager:
     def _save(self) -> None:
         self.store.save(self.queue.state)
 
+    # TODO: a way for the manager (and other servers) to raise popup messages on
+    # every connected client's GUI.
     def _snapshot(self) -> dict[str, Any]:
         return {
             "started": self.started,

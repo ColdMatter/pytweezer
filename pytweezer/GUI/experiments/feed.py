@@ -95,6 +95,9 @@ class ExperimentFeed(QtCore.QObject):
         self._mirror.close()
 
 
+# TODO: warn when this PC is not on the manager's git commit: a popup on
+# startup and a warning in the GUI's Servers tab. Until then a mismatch is only
+# tolerated, as far as this normalisation can.
 def _normalise(state):
     snapshot = {
         key: copy.deepcopy(value)
