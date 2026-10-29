@@ -89,6 +89,12 @@ def test_replay_applies_overrides_and_keeps_the_rest():
         saved.replay({"pulse_time": 2e-6})
 
 
+def test_replay_keeps_the_recipes_pipeline_unless_overridden():
+    saved = recipe(pipeline="CaF")
+    assert saved.replay().pipeline == "CaF"
+    assert saved.replay(pipeline="Rb").pipeline == "Rb"
+
+
 def test_unknown_arguments_lists_names_the_experiment_lacks():
     schema = {
         "arguments": {"atoms": {}},

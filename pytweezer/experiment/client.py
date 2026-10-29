@@ -187,6 +187,7 @@ class ExperimentManagerClient:
         args: dict[str, Any] | None = None,
         priority: int | None = None,
         label: str | None = None,
+        pipeline: str | None = None,
         submitter: str = "",
     ) -> int:
         return self.call(
@@ -197,6 +198,7 @@ class ExperimentManagerClient:
             args=args or {},
             priority=priority,
             label=label,
+            pipeline=pipeline,
             submitter=submitter,
         )["rid"]
 
@@ -258,6 +260,7 @@ def submit(
     priority: int = 0,
     label: str = "",
     due_time: datetime | None = None,
+    pipeline: str = "main",
     client: ExperimentManagerClient | None = None,
     **args: Any,
 ) -> int:
@@ -265,7 +268,9 @@ def submit(
 
     ``experiment`` is an Experiment subclass importable by the manager (so not
     one defined in a notebook: use :func:`~pytweezer.experiment.run_local` for
-    those) or a ``"module:ClassName"`` string.
+    those) or a ``"module:ClassName"`` string. Tasks in one ``pipeline`` run
+    one at a time; tasks in different pipelines may run together when they
+    reserve no device in common.
     """
     scan = scan or Scan()
     module, class_name = _resolve(experiment, scan, args)
@@ -277,6 +282,7 @@ def submit(
         priority=priority,
         label=label,
         due_time=due_time,
+        pipeline=pipeline,
         submitter=submitter_name(),
     )
     client = client or ExperimentManagerClient()
@@ -291,6 +297,7 @@ def save_recipe(
     *,
     priority: int = 0,
     label: str = "",
+    pipeline: str = "main",
     overwrite: bool = False,
     client: ExperimentManagerClient | None = None,
     **args: Any,
@@ -318,6 +325,7 @@ def save_recipe(
         scan=scan,
         priority=priority,
         label=label,
+        pipeline=pipeline,
         submitter=submitter_name(),
     )
     (client or ExperimentManagerClient()).save_recipe(recipe, overwrite)
@@ -330,10 +338,14 @@ def submit_recipe(
     *,
     priority: int | None = None,
     label: str | None = None,
+    pipeline: str | None = None,
     client: ExperimentManagerClient | None = None,
     **args: Any,
 ) -> int:
-    """Queue recipe ``name`` with ``args`` overriding it; return the rid."""
+    """Queue recipe ``name`` with ``args`` overriding it; return the rid.
+
+    ``priority``, ``label`` and ``pipeline`` default to the recipe's own.
+    """
     module, class_name = _resolve(experiment, args=args)
     return (client or ExperimentManagerClient()).submit_recipe(
         module,
@@ -342,6 +354,7 @@ def submit_recipe(
         args=args,
         priority=priority,
         label=label,
+        pipeline=pipeline,
         submitter=submitter_name(),
     )
 

@@ -231,7 +231,10 @@ class ExperimentManager:
         return {"request": last.model_dump(mode="json") if last else None}
 
     def _cmd_submit(self, request):
-        task = self.queue.submit(TaskRequest.model_validate(request["request"]))
+        # FIXME: reserves no devices until submit resolves them from the experiment.
+        task = self.queue.submit(
+            TaskRequest.model_validate(request["request"]), devices=[]
+        )
         logger.info("Queued task %s: %s.%s", task.rid, task.experiment, task.class_name)
         self._changed()
         return {"rid": task.rid}
@@ -290,6 +293,7 @@ class ExperimentManager:
             overrides,
             priority=request.get("priority"),
             label=request.get("label"),
+            pipeline=request.get("pipeline"),
             submitter=request.get("submitter", ""),
         )
         unknown = unknown_arguments(
@@ -302,7 +306,8 @@ class ExperimentManager:
                 f"{recipe.class_name} no longer has argument(s) {unknown}; load "
                 f"recipe {recipe.name!r} into the form, check it and save it again"
             )
-        task = self.queue.submit(task_request)
+        # FIXME: reserves no devices until submit resolves them from the experiment.
+        task = self.queue.submit(task_request, devices=[])
         logger.info("Queued task %s from recipe %r", task.rid, recipe.name)
         self._changed()
         return {"rid": task.rid}
@@ -355,8 +360,7 @@ class ExperimentManager:
     def _cmd_abort(self, request):
         """Kill the worker now. A device call already in flight still completes on the device."""
         rid = int(request["rid"])
-        task = self.queue.running
-        if task is None or task.rid != rid:
+        if rid not in {task.rid for task in self.queue.running}:
             raise QueueError(f"cannot abort task {rid}: it is not running")
         if self.process is None:
             self._settle_unreported(rid, TaskStatus.ABORTED, None)
@@ -371,8 +375,8 @@ class ExperimentManager:
 
     def _cmd_worker(self, request):
         rid, token = int(request["rid"]), request.get("token")
-        record = self.queue.state.worker
-        if record is None or record.rid != rid or record.token != token:
+        record = self.queue.worker(rid)
+        if record is None or record.token != token:
             # A worker this manager no longer recognises: stop it.
             return {"action": Action.TERMINATE}
         event = request.get("event")
@@ -421,11 +425,12 @@ class ExperimentManager:
     # -- workers -------------------------------------------------------------
 
     def _start_next(self) -> None:
-        if self.process is not None:
-            return  # the previous worker is still exiting
-        task = self.queue.next_due()
-        if task is None:
+        if self.process is not None or self.queue.running:
+            return  # one worker at a time; the previous one may still be exiting
+        startable = self.queue.startable()
+        if not startable:
             return
+        task = startable[0]
         token = secrets.token_hex(8)
         relpath = measurement_relpath(task.rid, task.class_name, now())
         try:
@@ -478,7 +483,7 @@ class ExperimentManager:
             return
         returncode = getattr(self.process, "returncode", None)
         self.process = None
-        record = self.queue.state.worker
+        record = next(iter(self.queue.state.workers), None)
         if record is None:
             return  # the worker reported its own end
         aborted = self._abort_requested == record.rid
@@ -493,7 +498,7 @@ class ExperimentManager:
 
     def _reconcile_worker(self) -> None:
         """After a restart: adopt a still-running worker, or settle its task."""
-        record = self.queue.state.worker
+        record = next(iter(self.queue.state.workers), None)
         if record is not None:
             try:
                 process = psutil.Process(record.pid)

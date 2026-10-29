@@ -118,9 +118,7 @@ class QueueView(QWidget):
         self.snapshot = snapshot
         selected = self.selected_task()
         selected_rid = selected["rid"] if selected else None
-        rows = []
-        if snapshot.get("running"):
-            rows.append(snapshot["running"])
+        rows = list(snapshot.get("running", []))
         rows += snapshot.get("queue", [])
         rows += snapshot.get("history", [])
         self.table.setRowCount(len(rows))
@@ -230,10 +228,9 @@ def _row_kind(task):
 
 def queue_summary(snapshot):
     """One line for the queue's title: what's running and how much is waiting."""
-    parts = []
-    running = snapshot.get("running")
-    if running:
-        parts.append(f"task {running['rid']} {running['status']}")
+    parts = [
+        f"task {task['rid']} {task['status']}" for task in snapshot.get("running", [])
+    ]
     waiting = len(snapshot.get("queue", []))
     parts.append(f"{waiting} waiting" if waiting else "nothing waiting")
     return ", ".join(parts)

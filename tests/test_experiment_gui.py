@@ -231,7 +231,7 @@ def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     view = QueueView()
     view.set_snapshot(
         {
-            "running": task(3, "running", t_start="2026-10-07T12:01:00+01:00"),
+            "running": [task(3, "running", t_start="2026-10-07T12:01:00+01:00")],
             "queue": [task(4, "queued"), task(5, "held")],
             "history": [task(2, "failed", error="Traceback\nValueError: bad")],
         }
@@ -264,7 +264,7 @@ def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     ]
 
     # selection survives a refresh
-    view.set_snapshot({"running": None, "queue": [task(4, "queued")], "history": []})
+    view.set_snapshot({"running": [], "queue": [task(4, "queued")], "history": []})
     assert view.selected_task()["rid"] == 4
 
 
@@ -292,7 +292,7 @@ def test_panel_submits_and_forwards_actions(qapp):
 
     feed.queue_changed.emit(
         {
-            "running": task(12, "running"),
+            "running": [task(12, "running")],
             "queue": [],
             "history": [],
             "catalogue_version": 1,
@@ -303,7 +303,7 @@ def test_panel_submits_and_forwards_actions(qapp):
     assert ("terminate", {"rid": 12}) in client.calls
     catalogue_fetches = len(commands(client, "catalogue"))
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [], "catalogue_version": 2}
+        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
     )
     assert len(commands(client, "catalogue")) == catalogue_fetches + 1
 
@@ -346,7 +346,7 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
     notifier = Notifier(
         {
             "alive": 0.0,
-            "running": None,
+            "running": [],
             "queue": [],
             "history": [],
             "points": {"rid": 3, "rows": [{"index": 0, "scalars": {"n": 1.0}}]},
@@ -549,7 +549,7 @@ def test_the_panel_reads_simulated_sequencers_when_the_manager_simulates(qapp):
     feed = FakeFeed()
     panel = ExperimentsPanel(client=FakeClient(), feed=feed)
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [], "simulated": True}
+        {"running": [], "queue": [], "history": [], "simulated": True}
     )
     parameters = panel.editor.fetcher.source("Rb MotMaster", "RbTweezerBasic")
     assert "tDelay1" in parameters
@@ -679,7 +679,7 @@ def test_panel_lists_recipes_and_refetches_when_they_change(qapp):
     panel, client, feed = recipe_panel(recipe_dict("a"))
     assert [r["name"] for r in panel.catalogue.recipes] == ["a"]
     fetches = len(commands(client, "recipes"))
-    snapshot = {"running": None, "queue": [], "history": [], "recipes_version": 0}
+    snapshot = {"running": [], "queue": [], "history": [], "recipes_version": 0}
     feed.queue_changed.emit(snapshot)
     assert len(commands(client, "recipes")) == fetches
     client.recipes = [recipe_dict("a"), recipe_dict("b")]
@@ -700,7 +700,7 @@ def test_selecting_a_recipe_fills_the_form_and_a_list_refresh_keeps_edits(qapp):
     panel.editor.rows["shots"].value.widget.setValue(8)
     client.recipes = [recipe, recipe_dict("new")]
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [], "recipes_version": 1}
+        {"running": [], "queue": [], "history": [], "recipes_version": 1}
     )
     assert panel.editor.rows["shots"].value.value() == 8
     assert panel.catalogue.tree.currentItem().text(0) == "check"

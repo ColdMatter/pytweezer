@@ -123,8 +123,7 @@ def harness(tmp_path, monkeypatch, recording_db):
     harness = Harness(tmp_path, monkeypatch, recording_db)
     harness.start()
     yield harness
-    running = harness.manager.queue.running
-    if running is not None:
+    for running in harness.manager.queue.running:
         harness.client.abort(running.rid)
     harness.stop()
     harness.client.close()
@@ -235,7 +234,7 @@ def test_guis_see_the_queue_and_each_point_live(harness):
 
         until(lambda: mirror.read(finished))
         state = mirror.snapshot()
-        assert finished(state) and state["running"] is None
+        assert finished(state) and state["running"] == []
         rows = state["points"]["rows"]
         assert state["points"]["rid"] == rid
         assert [row["values"]["step"] for row in rows] == [1, 2, 3, 4, 5]

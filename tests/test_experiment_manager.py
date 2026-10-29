@@ -164,7 +164,7 @@ def test_worker_events_drive_the_task_and_reach_the_database(
     manager.handle(base | {"event": "finished", "status": "completed"})
     task = manager.queue.get(1)
     assert task.status == "completed" and task.points_done == 1
-    assert manager.queue.state.worker is None
+    assert manager.queue.state.workers == []
 
     assert recording_db.points == [
         {
