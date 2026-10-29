@@ -18,7 +18,7 @@ class ExperimentFeed(QtCore.QObject):
     A timer drains the mirror's modifications on the Qt thread.
     ``queue_changed`` carries the queue snapshot (without the points) when any
     of it changes, and always after a (re)connect; ``point_received`` carries
-    each point the running task measures, as ``{"rid", "index", "values",
+    each point a running task measures, as ``{"rid", "index", "values",
     "scalars", "t_start", "t_end"}``. Points measured before this feed connected
     are in :meth:`points`.
 
@@ -35,7 +35,6 @@ class ExperimentFeed(QtCore.QObject):
         super().__init__(parent)
         host, port = address or sync_address()
         self._mirror = SyncMirror(host, port, NOTIFIER_NAME, keep_mods=True)
-        self._points_rid = None
         self._last_heard = 0.0
         self.connected = False
         self._timer = QtCore.QTimer(self)
@@ -47,14 +46,13 @@ class ExperimentFeed(QtCore.QObject):
         rows = []
         for mod in self._mirror.drain():
             self._last_heard = time.monotonic()
+            path = mod.get("path", [])
             if mod["action"] == "init":
                 queue_changed = True
-                self._points_rid = mod["struct"]["points"]["rid"]
-            elif mod["path"] == ["points", "rows"] and mod["action"] == "append":
-                rows.append({"rid": self._points_rid, **mod["x"]})
-            elif mod["path"] == [] and mod["key"] == "points":
-                self._points_rid = mod["value"]["rid"]
-            elif not (mod["path"] == [] and mod["key"] == "alive"):
+            elif path[:1] == ["points"]:
+                if mod["action"] == "append" and len(path) == 2:
+                    rows.append({"rid": int(path[1]), **mod["x"]})
+            elif not (path == [] and mod.get("key") in ("alive", "points")):
                 queue_changed = True
         self._set_connected(
             self._mirror.connected
@@ -76,12 +74,10 @@ class ExperimentFeed(QtCore.QObject):
         )
 
     def points(self, rid):
-        """Every point held for task ``rid``: the running or last-run task only."""
+        """Every point held for task ``rid``: a running task, or its pipeline's last."""
         return self._mirror.read(
             lambda state: (
-                copy.deepcopy(state["points"]["rows"])
-                if state and state["points"]["rid"] == rid
-                else []
+                copy.deepcopy(state["points"].get(str(rid), [])) if state else []
             )
         )
 

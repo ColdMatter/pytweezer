@@ -349,7 +349,7 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
             "running": [],
             "queue": [],
             "history": [],
-            "points": {"rid": 3, "rows": [{"index": 0, "scalars": {"n": 1.0}}]},
+            "points": {"3": [{"index": 0, "scalars": {"n": 1.0}}]},
         }
     )
     server = SyncServer({"experiment": notifier}, "127.0.0.1", 0)
@@ -367,18 +367,17 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
 
         snapshots.clear()
         server.call(notifier.__setitem__, "alive", 1.0).result()
-        server.call(
-            notifier["points"]["rows"].append, {"index": 1, "scalars": {"n": 2.0}}
-        ).result()
-        assert until(lambda: points, qapp=qapp)
-        assert points == [{"rid": 3, "index": 1, "scalars": {"n": 2.0}}]
-        assert snapshots == [], "an alive bump alone is not a queue change"
+        server.call(notifier["points"]["3"].append, {"index": 1}).result()
+        server.call(notifier["points"].__setitem__, "4", []).result()
+        server.call(notifier["points"]["4"].append, {"index": 0}).result()
+        server.call(notifier["points"].__delitem__, "3").result()
+        assert until(lambda: len(points) == 2, qapp=qapp)
+        assert points == [{"rid": 3, "index": 1}, {"rid": 4, "index": 0}]
+        assert snapshots == [], "alive bumps and points are not queue changes"
+        assert feed.points(4) == [{"index": 0}]
 
-        server.call(notifier.__setitem__, "points", {"rid": 4, "rows": []}).result()
-        server.call(notifier["points"]["rows"].append, {"index": 0}).result()
         server.call(notifier.__setitem__, "queue", [{"rid": 5}]).result()
-        assert until(lambda: len(points) == 2 and snapshots, qapp=qapp)
-        assert points[1]["rid"] == 4
+        assert until(lambda: snapshots, qapp=qapp)
         assert snapshots[-1]["queue"] == [{"rid": 5}]
     finally:
         feed.close()

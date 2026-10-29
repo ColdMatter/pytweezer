@@ -197,6 +197,17 @@ def test_one_tick_never_double_books_a_device():
     assert rids(q.startable()) == [2]
 
 
+def test_a_paused_task_keeps_its_devices():
+    q = ExperimentQueue()
+    submit(q, ["X"], pipeline="A")
+    submit(q, ["X"], pipeline="B")
+    start(q, 1)
+    q.pause(1)
+    q.mark_paused(1)
+    assert q.get(1).status == TaskStatus.PAUSED
+    assert q.startable() == []
+
+
 def test_raising_priority_changes_who_gets_a_freed_device():
     q = ExperimentQueue()
     submit(q, ["X"], pipeline="A")

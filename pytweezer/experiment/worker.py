@@ -3,12 +3,13 @@
 ``python -m pytweezer.experiment.worker --endpoint tcp://host:port --rid N --token T``
 
 The worker asks the manager for its task, runs it, and reports after every
-point; the reply says whether to continue, pause or terminate. If the manager
-stays unreachable for ``orphan_timeout`` seconds the worker stops at the next
-point and marks the measurement ``interrupted``.
+point; the reply says whether to continue, pause or terminate. It may open
+only the devices the task reserves. If the manager stays unreachable for
+``orphan_timeout`` seconds the worker stops at the next point and marks the
+measurement ``interrupted``.
 
 Workers bind no ports, so ``pytweezer-kill-stale`` doesn't look for them; the
-manager finds and reconciles its worker itself.
+manager finds and reconciles its workers itself.
 """
 
 import argparse
@@ -22,6 +23,7 @@ from pytweezer.experiment.client import ManagerUnavailable, ReqClient
 from pytweezer.experiment.runner import Progress, open_writer, run_points
 from pytweezer.experiment.task import Action, Task, TaskStatus
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers.device_client import restrict_devices
 
 logger = get_logger("pytweezer.experiment.worker")
 
@@ -102,6 +104,13 @@ def run(link: ManagerLink) -> int:
         return 1
     link.orphan_timeout = float(reply.get("orphan_timeout", link.orphan_timeout))
     task = Task.model_validate(reply["task"])
+    if task.devices is None:
+        logger.error("Task %s has no device reservation", task.rid)
+        link.send(
+            "finished", status=TaskStatus.FAILED, error="task has no device reservation"
+        )
+        return 1
+    restrict_devices(task.devices)
 
     try:
         experiment_cls = resolve_class(task.experiment, task.class_name)
@@ -117,6 +126,7 @@ def run(link: ManagerLink) -> int:
                 "t_submit": task.t_submit.isoformat(),
             },
             simulate=bool(reply.get("simulate", False)),
+            allowed_devices=task.devices,
         )
     except Exception:
         error = traceback.format_exc()
