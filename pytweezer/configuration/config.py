@@ -263,6 +263,43 @@ CONFIG = {
             "stream_name": "caf_thorcam",
             "timeout": 5.0,
         },
+        # The NI Cards tab: channels by MOTMaster alias, from each PC's hardware file.
+        "CaF NI Cards": {
+            "active": True,
+            "class": "pytweezer.drivers.ni_cards:NICards",
+            "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
+            "host": HOSTS["ph-bonesaw"],
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "hardware_file": r"C:\ControlPrograms\EDMSuite\DAQ\MoleculeMOTHardware.cs",
+            "reserved": {
+                "Wavemeter Lock": {
+                    "channels": [
+                        "v00Lock",
+                        "v10Lock",
+                        "v21Lock",
+                        "v32Lock",
+                        "bXLock",
+                        "bXBeastLock",
+                    ]
+                },
+                "Hardware Control": {"cards": ["tclBoard2"]},
+            },
+            # MOTMaster's safe-state channels (DAQMxAnalogSafeState).
+            "protected": ["MOTCoilsCurrent", "transferCoils", "TweezerCoils"],
+        },
+        "Rb NI Cards": {
+            "active": True,
+            "class": "pytweezer.drivers.ni_cards:NICards",
+            "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
+            "host": HOSTS["IC-CZC221CCHS"],
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "hardware_file": r"C:\ControlPrograms\EDMSuite\DAQ\RbTweezerHardware.cs",
+            "reserved": {"Wavemeter Lock": {"channels": ["tRbD1Lock"]}},
+            # Coil currents.
+            "protected": ["tMOTcc", "tMagneticTrapcc"],
+        },
     },
     # Background database loggers. Each entry runs pytweezer/servers/logger_server.py,
     # which builds the Logger subclass named by "logger" and polls it on "interval".

@@ -8,7 +8,9 @@ description: How the pytweezer PyQt6 shell is built — TabbedGUI's dock-based t
 `pytweezer-server` and `pytweezer-client` are the same window built by
 `build_gui(server: bool)` in `bin/gui.py`, differing only in whether the
 Servers/Loggers tabs are controllable. Tabs: Servers, Devices, Loggers, Streams,
-Applets, Analysis, Experiments, Results, Properties. Experiments and Results
+Applets, Analysis, Experiments, Results, NI Cards, Properties. NI Cards
+(`pytweezer/GUI/ni_cards/`) drives single NI channels by MOTMaster alias through
+each PC's `NICards` device (`pytweezer/drivers/ni_cards.py`). Experiments and Results
 (`pytweezer/GUI/experiments/`) are covered by the `add-experiment` skill; they
 are built before the list so Results can hand "resubmit" to Experiments.
 
