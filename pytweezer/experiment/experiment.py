@@ -60,6 +60,19 @@ class Experiment:
         return collect(cls, Device)
 
     @classmethod
+    def reserved_devices(cls) -> list[str]:
+        """Sorted canonical names of every CONFIG device this experiment occupies.
+
+        Raises:
+            ReservationError: If a declared device is unknown, inactive or
+                mis-configured.
+        """
+        reserved: set[str] = set()
+        for device in cls.devices().values():
+            reserved |= device.reserves()
+        return sorted(reserved)
+
+    @classmethod
     def schema(cls) -> dict[str, Any]:
         """JSON-serialisable description of the class, for argument editors."""
         return {
