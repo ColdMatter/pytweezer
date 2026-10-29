@@ -214,6 +214,14 @@ never overwritten (mode `"x"`) and readable mid-run (`locking=False`).
 `CONFIG["Servers"]["Experiment Manager"]["data_root"]`; else `<repo>/data`.
 The queue state lives in `{data_root}/queue_state.json`.
 
+When a task finishes, the manager copies its file to the same path under
+`CONFIG[...]["copy_root"]` (the router's USB drive, `\\10.59.0.1\pytweezer-data`;
+`<copy_root>/simulated` when simulating) on a background thread
+(`pytweezer/experiment/copier.py`). Runs never write to the network: a failed
+copy is retried every minute, and the paths still to copy are kept in
+`{data_root}/pending_copies.json` across restarts. Only a manager that binds its
+sockets copies, so tests building one with `bind=False` never touch the drive.
+
 Other PCs never read the manager's disk: it serves the files as sipyco RPC
 target `"results"` on `results_port` (`pytweezer/experiment/archive.py`).
 `ResultsArchive(root)` reads files directly and `RemoteArchive` is the same

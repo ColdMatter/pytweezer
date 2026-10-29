@@ -70,6 +70,7 @@ class Harness:
             "port": free_port(),
             "sync_port": free_port(),
             "results_port": free_port(),
+            "copy_root": str(tmp_path / "network"),
             "orphan_timeout": 5.0,
         }
         monkeypatch.setattr(
@@ -259,3 +260,11 @@ def test_other_pcs_fetch_a_finished_measurement_from_the_manager(harness):
         assert list(measurement.points["step"]) == [1, 2, 3, 4, 5]
     finally:
         archive.close()
+
+
+def test_a_finished_measurement_is_copied_to_the_network_drive(harness, tmp_path):
+    rid = harness.submit(five_points())
+    task = wait(rid, client=harness.client, poll_s=0.1, timeout_s=30)
+    copy = tmp_path / "network" / task.h5_path
+    assert until(copy.exists)
+    assert load_measurement(copy).n_done == 5
