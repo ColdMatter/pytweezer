@@ -4,7 +4,14 @@ import time
 
 import pytest
 
-from pytweezer.drivers.ni_cards import PROTECTED, CardInfo, ChannelHeld, NICards
+from pytweezer.drivers.ni_cards import (
+    PROTECTED,
+    CardInfo,
+    ChannelHeld,
+    Holds,
+    NICards,
+    Reservations,
+)
 
 HARDWARE = """
 string dio = "/PXI1Slot4";
@@ -169,6 +176,16 @@ def test_reserved_card_holds_every_channel_including_unaliased(hardware_file, io
         "PXI1Slot8/port0/line0",
     }
     assert {state["holds"][p] for p in on_card} == {"Hardware Control"}
+
+
+def test_earlier_source_wins_for_channels_and_cards():
+    first = Holds({"A/ao0": "first"}, {"/A": "first"})
+    second = Holds(
+        {"A/ao0": "second", "B/ao0": "second"}, {"/A": "second", "/B": "second"}
+    )
+    merged = Reservations([lambda: first, lambda: second]).current()
+    assert merged.channels == {"A/ao0": "first", "B/ao0": "second"}
+    assert merged.cards == {"/A": "first", "/B": "second"}
 
 
 @pytest.mark.parametrize("operation", ["write", "read"])

@@ -69,21 +69,33 @@ class ChannelHeld(Exception):
     """A write or read on a channel that is reserved or protected."""
 
 
-class Reservations:
-    """Who holds which physical channel, merged from several sources.
+@dataclass(frozen=True)
+class Holds:
+    """What is held: channels by physical name, whole cards by address.
 
-    Each source returns ``{physical: holder}``; earlier sources win.
+    A source that holds a card also lists every physical on it in ``channels``.
     """
 
-    def __init__(self, sources: list[Callable[[], dict[str, str]]]):
+    channels: dict[str, str] = field(default_factory=dict)
+    cards: dict[str, str] = field(default_factory=dict)
+
+
+class Reservations:
+    """Who holds what, merged from several sources; earlier sources win."""
+
+    def __init__(self, sources: list[Callable[[], Holds]]):
         self.sources = sources
 
-    def holds(self) -> dict[str, str]:
-        merged: dict[str, str] = {}
+    def current(self) -> Holds:
+        channels: dict[str, str] = {}
+        cards: dict[str, str] = {}
         for source in self.sources:
-            for physical, holder in source().items():
-                merged.setdefault(physical, holder)
-        return merged
+            held = source()
+            for physical, holder in held.channels.items():
+                channels.setdefault(physical, holder)
+            for address, holder in held.cards.items():
+                cards.setdefault(address, holder)
+        return Holds(channels, cards)
 
 
 def _ao_range(declared: tuple | None, info: CardInfo | None) -> list[float]:
@@ -135,7 +147,6 @@ class NICards:
         self._channels: dict[str, dict] = {}
         self._card_of: dict[str, dict] = {}
         self._last_set: dict[str, dict] = {}
-        self._card_holds: dict[str, str] = {}
         try:
             hardware = read_hardware_file(hardware_file)
         except OSError as error:
@@ -207,7 +218,7 @@ class NICards:
 
     def _static_holds(
         self, hardware: HardwareFile, reserved: dict, protected: list[str]
-    ) -> dict[str, str]:
+    ) -> Holds:
         for holder, held in reserved.items():
             if unknown := set(held) - {"channels", "cards"}:
                 raise ValueError(
@@ -215,33 +226,42 @@ class NICards:
                     "expected 'channels' and/or 'cards'"
                 )
         if self._error:
-            return {}
+            return Holds()
         by_alias = {alias.name: alias.physical for alias in hardware.aliases}
-        holds = {}
+        channels: dict[str, str] = {}
+        cards: dict[str, str] = {}
         for name in protected:
             if name not in by_alias:
                 raise ValueError(
                     f"Protected channel {name!r} is not in the hardware file"
                 )
-            holds[by_alias[name]] = PROTECTED
+            channels[by_alias[name]] = PROTECTED
         for holder, held in reserved.items():
             for name in held.get("channels", []):
                 if name not in by_alias:
                     raise ValueError(
                         f"{holder} reserves {name!r}, which is not in the hardware file"
                     )
-                holds.setdefault(by_alias[name], holder)
+                channels.setdefault(by_alias[name], holder)
             for board_name in held.get("cards", []):
                 board = hardware.boards.get(board_name)
                 if board is None:
                     raise ValueError(
                         f"{holder} reserves card {board_name!r}, which is not in the hardware file"
                     )
-                self._card_holds[board.address] = holder
-                for physical, card in self._card_of.items():
-                    if card["address"] == board.address:
-                        holds.setdefault(physical, holder)
-        return holds
+                cards.setdefault(board.address, holder)
+                for physical in self._card_channels(board.address):
+                    channels.setdefault(physical, holder)
+        return Holds(channels, cards)
+
+    def _card_channels(self, address: str) -> list[str]:
+        """The physicals of the card at ``address``, aliased and unaliased."""
+        return [
+            channel["physical"]
+            for card in self._cards
+            if card["address"] == address
+            for channel in card["channels"] + card["unaliased"]
+        ]
 
     def layout(self) -> dict:
         """Every card with its aliased and unaliased channels, or the file error."""
@@ -249,14 +269,15 @@ class NICards:
 
     def state(self) -> dict:
         """What is held and by whom, and the last value written to each output."""
+        held = self.reservations.current()
         return {
-            "holds": self.reservations.holds(),
-            "card_holds": dict(self._card_holds),
+            "holds": held.channels,
+            "card_holds": held.cards,
             "last_set": dict(self._last_set),
         }
 
-    def _usable(self, physical: str, kinds: tuple[str, ...]) -> dict:
-        holder = self.reservations.holds().get(physical)
+    def _usable(self, physical: str, kinds: tuple[str, ...], held: Holds) -> dict:
+        holder = held.channels.get(physical)
         if holder is not None:
             raise ChannelHeld(f"{physical} is held by {holder}")
         channel = self._channels.get(physical)
@@ -273,13 +294,14 @@ class NICards:
 
     def write_do(self, physical: str, high: bool) -> None:
         """Set a digital output line high or low."""
-        self._usable(physical, ("do",))
+        self._usable(physical, ("do",), self.reservations.current())
         self._io.write_do(physical, bool(high))
         self._last_set[physical] = {"value": bool(high), "time": time.time()}
 
     def write_ao(self, physical: str, volts: float) -> None:
         """Set an analogue output, within its declared range or the card's."""
-        low, high = self._usable(physical, ("ao",))["range"]
+        channel = self._usable(physical, ("ao",), self.reservations.current())
+        low, high = channel["range"]
         if not low <= volts <= high:
             raise ValueError(f"{volts} V is outside {physical}'s range {low}…{high} V")
         self._io.write_ao(physical, float(volts), low, high)
@@ -287,7 +309,8 @@ class NICards:
 
     def read(self, physicals: list[str]) -> dict[str, float | bool]:
         """One reading from each analogue or digital input."""
-        channels = [self._usable(p, ("ai", "di")) for p in physicals]
+        held = self.reservations.current()
+        channels = [self._usable(p, ("ai", "di"), held) for p in physicals]
         ai = [c for c in channels if c["kind"] == "ai"]
         di = [c for c in channels if c["kind"] == "di"]
         values: dict[str, float | bool] = {}
