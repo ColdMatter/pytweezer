@@ -51,7 +51,7 @@ Entry points (`[project.scripts]` in `pyproject.toml`):
 
 ```bash
 uv run pytweezer-server         # full-control GUI; simulates on any PC but the server PC
-uv run pytweezer-client         # view-only GUI, run on client PCs
+uv run pytweezer-client         # client GUI, run on client PCs
 uv run pytweezer-device <name>  # start one device's RPC server standalone
 uv run pytweezer-logger <name>  # start one database logger standalone
 uv run pytweezer-experiment-manager <name>  # start the experiment queue manager standalone
