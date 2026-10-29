@@ -519,6 +519,63 @@ def test_panel_resubmit_selects_the_experiment(qapp):
     assert "not in the catalogue" in panel.status.text()
 
 
+class OldManagerMirror:
+    """Holds the state a manager from before pipelines publishes."""
+
+    def __init__(self, host, port, name, keep_mods=False):
+        old_task = {
+            key: value
+            for key, value in task(3, "running").items()
+            if key not in ("pipeline", "devices")
+        }
+        self.state = {
+            "alive": 1.0,
+            "running": old_task,
+            "queue": [{**old_task, "rid": 4, "status": "queued"}],
+            "history": [],
+            "points": {"rid": 3, "rows": [{"index": 0}]},
+        }
+        self.mods = [
+            {"action": "init", "struct": self.state},
+            {"action": "append", "path": ["points", "rows"], "x": {"index": 1}},
+        ]
+        self.connected = True
+
+    def drain(self):
+        mods, self.mods = self.mods, []
+        return mods
+
+    def read(self, fn):
+        return fn(self.state)
+
+    def close(self):
+        pass
+
+
+def test_a_snapshot_from_an_older_manager_still_shows(qapp, monkeypatch):
+    from pytweezer.GUI.experiments import feed as feed_module
+
+    monkeypatch.setattr(feed_module, "SyncMirror", OldManagerMirror)
+    feed = feed_module.ExperimentFeed(address=("old", 0), poll_interval_ms=10_000)
+    snapshots, points = [], []
+    feed.queue_changed.connect(snapshots.append)
+    feed.point_received.connect(points.append)
+    try:
+        feed.poll()
+        [snapshot] = snapshots
+        assert points == [] and feed.points(3) == []
+        assert [t["pipeline"] for t in snapshot["running"]] == ["main"]
+
+        view = QueueView()
+        view.set_snapshot(snapshot)
+        assert column_texts(view, "RID") == ["3", "4"]
+        panel = ExperimentsPanel(client=FakeClient(), feed=FakeFeed())
+        panel._queue_changed(snapshot)
+        assert column_texts(panel.queue_view, "Pipeline") == ["main", "main"]
+    finally:
+        feed.close()
+
+
 def test_real_feed_signals_queue_changes_and_points(qapp):
     from sipyco.sync_struct import Notifier
 
@@ -561,7 +618,7 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
 
         server.call(notifier.__setitem__, "queue", [{"rid": 5}]).result()
         assert until(lambda: snapshots, qapp=qapp)
-        assert snapshots[-1]["queue"] == [{"rid": 5}]
+        assert snapshots[-1]["queue"] == [{"rid": 5, "pipeline": "main"}]
     finally:
         feed.close()
         server.close()

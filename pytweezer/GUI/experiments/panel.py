@@ -156,7 +156,7 @@ class ExperimentsPanel(QWidget):
             *snapshot.get("queue", []),
             *snapshot.get("history", []),
         ]
-        self.editor.set_pipelines([entry["pipeline"] for entry in tasks])
+        self.editor.set_pipelines([entry.get("pipeline") or "main" for entry in tasks])
         self.queue_region.set_hint(queue_summary(snapshot))
         version = snapshot.get("catalogue_version")
         if version is not None and version != self._catalogue_version:
