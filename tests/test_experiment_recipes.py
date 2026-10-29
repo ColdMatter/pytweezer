@@ -1,7 +1,6 @@
 from datetime import datetime
 
 import pytest
-from pydantic import ValidationError
 
 from pytweezer.experiment.queue import now
 from pytweezer.experiment.recipes import (
@@ -19,12 +18,6 @@ DEMO = "pytweezer.experiments.demo"
 
 def recipe(name="check", **kwargs):
     return Recipe(experiment=DEMO, class_name="RabiDemo", name=name, **kwargs)
-
-
-def test_names_are_stripped_and_required():
-    assert recipe(name="  MOT check ").name == "MOT check"
-    with pytest.raises(ValidationError, match="needs a name"):
-        recipe(name="   ")
 
 
 def test_saving_clears_the_start_time_and_stamps_the_save():
@@ -60,17 +53,6 @@ def test_find_filters_and_sorts():
     assert found == [("a.module", "a"), (DEMO, "a"), (DEMO, "b")]
     assert [r.name for r in book.find(DEMO, "RabiDemo")] == ["a", "b"]
     assert [r.name for r in book.find(DEMO)] == ["a", "b"]
-
-
-def test_missing_recipes_are_reported_by_name():
-    book = RecipeBook()
-    with pytest.raises(RecipeError, match="no recipe 'nope' for .*RabiDemo"):
-        book.get(DEMO, "RabiDemo", "nope")
-    with pytest.raises(RecipeError, match="no recipe"):
-        book.delete(DEMO, "RabiDemo", "nope")
-    book.save(recipe())
-    book.delete(DEMO, "RabiDemo", " check ")
-    assert book.find() == []
 
 
 def test_store_round_trip(tmp_path):

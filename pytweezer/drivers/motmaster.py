@@ -18,10 +18,8 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
-import numpy as np
 from rich.progress import track
 
-from pytweezer.servers.device_client import get_device
 from pytweezer.servers.simulated_device import simulate
 
 # NOTE: these imports will only work with the pythonnet package
@@ -389,6 +387,27 @@ class MotMasterInterface:
             print(f"{laser}: set_point = {set_point}")
         return lasers
 
+    def laser_set_points_wml(self) -> dict[str, float]:
+        """``{laser: wavemeter-lock set point in THz}`` for every configured laser."""
+        return {
+            laser: float(self.wavemeter_lock.getSlaveFrequency(laser))
+            for laser in self.config["lasers"]
+        }
+
+    def set_laser_set_point_wml(self, laser: str, value: float) -> None:
+        self.wavemeter_lock.setSlaveFrequency(laser, float(value))
+
+    def ramp_laser_set_point_wml(
+        self, laser: str, target: float, step: float = 1e-5, pause_s: float = 0.05
+    ) -> None:
+        """Walk ``laser``'s set point to ``target`` in ``step`` THz so the lock follows."""
+        start = float(self.wavemeter_lock.getSlaveFrequency(laser))
+        direction = 1.0 if target > start else -1.0
+        for i in range(1, int(abs(target - start) // step) + 1):
+            self.wavemeter_lock.setSlaveFrequency(laser, start + direction * i * step)
+            time.sleep(pause_s)
+        self.wavemeter_lock.setSlaveFrequency(laser, float(target))
+
     def get_laser_frequencies_actual(self) -> dict[str, dict[str, float]]:
         lasers = {}
         for laser in self.config["lasers"]:
@@ -682,142 +701,6 @@ class MotMasterInterface:
             print(f"Error: {e} encountered")
         return results
 
-    def auto_mot(
-        self,
-        scan_ranges: dict[str, Sequence[float]],
-        camera: str | Any,
-        shots_per_point: int = 1,
-        script: str = "AMOTBasic",
-        field_parameter: str = "MOTCoilsCurrentValue",
-        bg_field_value: float = 0.0,
-        mot_field_value: float = 1.0,
-        display_results: bool = False,
-    ) -> dict[str, dict[str, Any]]:
-        """Tune the MOT by scanning wavemeter-lock set points laser by laser.
-
-        A background is taken first with the MOT coils at ``bg_field_value``, then
-        each laser named in ``scan_ranges`` is stepped over its set points (coils at
-        ``mot_field_value``) while ``shots_per_point`` fluorescence frames are read
-        off ``camera``. Background-subtracted counts pick the set point with the most
-        atoms, and the laser is left parked there before moving on to the next one —
-        so lasers are optimised in the order ``scan_ranges`` gives.
-
-        ``scan_ranges`` maps laser name (a key of the config's ``lasers`` block) to
-        the slave frequencies to try, in THz. ``camera`` is a device name resolved with
-        :func:`~pytweezer.servers.device_client.get_device`, or an already-connected
-        camera (a client, or the object itself for a camera in this process); a
-        client opened here is closed again on the way out. **Configure the camera
-        before calling** — exposure, ROI, external trigger, and a
-        ``setup_acquisition`` buffer holding at least the whole scan. ``auto_mot``
-        arms it once and then reads consecutive frames, so the camera must capture
-        exactly ``shots_per_point`` frames per MOTMaster shot.
-
-        Returns, per laser, the scan range, mean and standard-error counts at each
-        point (the error is NaN for one shot per point), the chosen set point and
-        the set point the laser started from; pass
-        that dict to :func:`plot_auto_mot_results` to see the scans.
-        """
-        client = get_device(camera) if isinstance(camera, str) else camera
-        try:
-            results = self._auto_mot(
-                scan_ranges,
-                client,
-                int(shots_per_point),
-                script,
-                field_parameter,
-                bg_field_value,
-                mot_field_value,
-            )
-        finally:
-            try:
-                client.stop_acquisition()
-            finally:
-                if isinstance(camera, str):
-                    client.close_rpc()
-        if display_results:
-            plot_auto_mot_results(results)
-        return results
-
-    def _auto_mot(
-        self,
-        scan_ranges: dict[str, Sequence[float]],
-        camera: Any,
-        shots_per_point: int,
-        script: str,
-        field_parameter: str,
-        bg_field_value: float,
-        mot_field_value: float,
-    ) -> dict[str, dict[str, Any]]:
-        """The body of :meth:`auto_mot`, with the camera already connected."""
-        # Frames are numbered from the arming below and read in consecutive
-        # windows, so every shot's frames are the ones that shot produced.
-        frames_read = 0
-
-        def grab(value: float) -> tuple[float, np.ndarray]:
-            nonlocal frames_read
-            images = camera.acquire_n_frames(shots_per_point, start_frame=frames_read)
-            frames_read += shots_per_point
-            return value, np.asarray(images, dtype=float)
-
-        camera.start_acquisition()
-        background = self.scan_motmaster_parameter(
-            script, field_parameter, [bg_field_value], False, grab
-        )
-        if not background or background[0][1].size == 0:
-            raise RuntimeError(
-                f"The camera returned no frames for the background shot — check "
-                f"that {script} triggers it {shots_per_point} time(s) per run."
-            )
-        images_bg = np.mean(background[0][1], axis=0)
-        time.sleep(1)
-
-        results: dict[str, dict[str, Any]] = {}
-        for laser, scan_range in scan_ranges.items():
-            if laser not in self.config["lasers"]:
-                raise KeyError(
-                    f"'{laser}' is not a laser in this MOTMaster config; known "
-                    f"lasers are {sorted(self.config['lasers'])}."
-                )
-            scan_range = [float(value) for value in scan_range]
-            # Where the laser sat before this scan: the reference the results are
-            # plotted as a detuning from.
-            start_set_point = float(self.wavemeter_lock.getSlaveFrequency(laser))
-            shots = self.scan_wm_laser_set_points(
-                script, laser, scan_range, False, grab, field_parameter, mot_field_value
-            )
-            if len(shots) != len(scan_range):
-                raise RuntimeError(
-                    f"Scan of {laser} returned {len(shots)} of "
-                    f"{len(scan_range)} points; the scan did not complete."
-                )
-            numbers, errors = [], []
-            for _, images in shots:
-                counts = np.sum(images - images_bg, axis=(1, 2))
-                numbers.append(float(np.mean(counts)))
-                if len(counts) > 1:
-                    errors.append(float(np.std(counts, ddof=1) / np.sqrt(len(counts))))
-                else:
-                    errors.append(float("nan"))  # one shot has no spread to measure
-            set_point = scan_range[int(np.argmax(numbers))]
-            # Leave the laser on its best set point before optimising the next.
-            self.scan_wm_laser_set_points(
-                script,
-                laser,
-                [set_point],
-                False,
-                grab,
-                field_parameter,
-                mot_field_value,
-            )
-            results[laser] = {
-                "scan_range": scan_range,
-                "numbers": numbers,
-                "errors": errors,
-                "set_point": set_point,
-                "start_set_point": start_set_point,
-            }
-        return results
-
 
 SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
     "RbTweezerBasic": {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5, "nShots": 1},
@@ -864,6 +747,14 @@ SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
     },
 }
 _SIMULATED_FALLBACK = {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5}
+SIMULATED_LASER_SET_POINTS = {
+    "v0": 494.431874,
+    "BX": 564.582340,
+    "v1": 476.958908,
+    "v2": 477.299380,
+    "v3": 477.627302,
+    "TCool": 494.431874,
+}
 
 
 @simulate(MotMasterInterface)
@@ -873,15 +764,30 @@ class SimulatedMotMasterInterface:
     Scripts missing from :data:`SIMULATED_SCRIPT_PARAMETERS` get a fallback parameter set.
     """
 
+    #: Seconds a simulated run takes, so simulated cameras catch some frames.
+    sim_run_s = 0.5
+
     def __init__(self, *args, **kwargs):
         self.script = None
         self.linked = False
+        self.set_points = dict(SIMULATED_LASER_SET_POINTS)
 
     def set_linked(self, value: bool) -> None:
         self.linked = value
 
     def is_linked(self) -> bool:
         return self.linked
+
+    def laser_set_points_wml(self) -> dict[str, float]:
+        return dict(self.set_points)
+
+    def set_laser_set_point_wml(self, laser: str, value: float) -> None:
+        self.set_points[laser] = float(value)
+
+    def ramp_laser_set_point_wml(
+        self, laser: str, target: float, step: float = 1e-5, pause_s: float = 0.05
+    ) -> None:
+        self.set_points[laser] = float(target)
 
     def script_parameters(self, script: str) -> dict[str, Any]:
         return dict(SIMULATED_SCRIPT_PARAMETERS.get(script, _SIMULATED_FALLBACK))
@@ -903,46 +809,4 @@ class SimulatedMotMasterInterface:
                 raise TypeError(
                     f"{name!r} is an Int32 in script {self.script!r}; got {value!r}"
                 )
-
-
-def plot_auto_mot_results(results: dict[str, dict[str, Any]]):
-    """Plot the scans returned by :meth:`MotMasterInterface.auto_mot`: one panel per
-    laser, normalised number against detuning from the set point the laser started
-    on, with an arrow marking the set point chosen. Returns the ``(figure, axes)``
-    pair."""
-    import matplotlib.pyplot as plt
-
-    n_cols = min(3, max(1, len(results)))
-    n_rows = max(1, -(-len(results) // n_cols))
-    fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharey=True, squeeze=False
-    )
-    flat_axes = axes.flatten()
-    for ax, (laser, scan) in zip(flat_axes, results.items()):
-        numbers = np.array(scan["numbers"])
-        errors = np.array(scan["errors"])
-        scale = np.max(numbers) if np.max(numbers) > 0 else 1.0
-        # THz set points shown as MHz detunings from where the laser started.
-        start = scan["start_set_point"]
-        detunings = (np.array(scan["scan_range"]) - start) * 1e6
-        ax.errorbar(detunings, numbers / scale, yerr=errors / scale, fmt="ok")
-        ax.arrow(
-            (scan["set_point"] - start) * 1e6,
-            1.15,
-            0,
-            -0.1,
-            head_width=2.0,
-            head_length=0.03,
-            width=1.0,
-            fc="r",
-            ec="r",
-        )
-        ax.set_title(f"{laser} set @ {scan['set_point']} THz")
-        ax.set_xlabel("Detuning to previous set point [MHz]")
-        ax.set_ylim((0, 1.2))
-    for ax in flat_axes[len(results) :]:
-        ax.set_visible(False)
-    for row in axes:
-        row[0].set_ylabel("Norm. number")
-    fig.tight_layout()
-    return fig, axes
+        time.sleep(self.sim_run_s)

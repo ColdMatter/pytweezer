@@ -26,6 +26,7 @@ its vendor SDK (dcam, Spinnaker, ...) and the abstract hooks below.
 from __future__ import annotations
 
 import os
+import threading
 import time
 from abc import ABC, abstractmethod
 from functools import wraps
@@ -78,6 +79,10 @@ class Camera(ABC):
         self.timeout = timeout
         self.stream_name = stream_name
         self.image_client = ImageClient(stream_name) if stream_name else None
+        # The live broadcast thread and RPC calls share the backend.
+        self._lock = threading.RLock()
+        self._live_thread: threading.Thread | None = None
+        self._live_stop = threading.Event()
         self._backend = None
         self._connect()
 
@@ -122,6 +127,18 @@ class Camera(ABC):
         """Grab ``nframes`` raw frames from the hardware and return them
         stacked as ``(nframes, H, W)``. May raise if not currently running."""
 
+    def _acquisition_in_progress(self) -> bool:
+        return bool(self._backend.acquisition_in_progress())
+
+    def _count_frames(self) -> int:
+        """Frames acquired since the acquisition started."""
+        return int(self._backend.get_frames_status()[0])
+
+    def _read_range(self, start: int, stop: int) -> np.ndarray:
+        """Frames ``start`` to ``stop - 1`` without marking them read."""
+        images = self._backend.read_multiple_images((start, stop), peek=True)
+        return np.asarray(images if images is not None else [])
+
     # ------------------------------------------------------------------ #
     # Connection lifecycle (generic).
     # ------------------------------------------------------------------ #
@@ -136,6 +153,7 @@ class Camera(ABC):
             )
 
     def close(self) -> None:
+        self.stop_live()
         try:
             self._disconnect()
         except Exception:
@@ -189,6 +207,87 @@ class Camera(ABC):
         )
         return images[0]
 
+    @requires_camera
+    def arm(self, buffer_frames: int = 1000) -> None:
+        """Start a continuous ring-buffer acquisition unless one is already running.
+
+        Frames are numbered from the start of that acquisition, which is what
+        :meth:`frames_acquired` and :meth:`read_frames_from` count in.
+        """
+        with self._lock:
+            if self._acquisition_in_progress():
+                return
+            self.setup_acquisition("sequence", int(buffer_frames))
+            self.start_acquisition()
+
+    @requires_camera
+    def frames_acquired(self) -> int:
+        """Frames acquired since the current acquisition started."""
+        with self._lock:
+            return self._count_frames()
+
+    @requires_camera
+    def read_frames_from(self, start: int) -> np.ndarray:
+        """Every frame from number ``start`` to the latest, as ``(n, H, W)``.
+
+        Raises:
+            RuntimeError: if some of those frames were already overwritten in the
+                ring buffer.
+        """
+        start = int(start)
+        with self._lock:
+            stop = self._count_frames()
+            if stop <= start:
+                return np.empty((0, 0, 0), dtype=np.uint16)
+            images = self._read_range(start, stop)
+        if len(images) != stop - start:
+            raise RuntimeError(
+                f"{type(self).__name__}: only {len(images)} of frames {start}-"
+                f"{stop - 1} were still in the buffer; arm() with more buffer_frames"
+            )
+        return images
+
+    def settings(self) -> dict:
+        """Camera settings worth keeping with saved frames (JSON-safe)."""
+        return {}
+
+    def start_live(self, poll_s: float = 0.05) -> None:
+        """Broadcast every new frame on the image stream from a background thread."""
+        if self._live_thread is not None and self._live_thread.is_alive():
+            return
+        self._live_stop.clear()
+        self._live_thread = threading.Thread(
+            target=self._broadcast_live,
+            args=(float(poll_s),),
+            name=f"{type(self).__name__}-live",
+            daemon=True,
+        )
+        self._live_thread.start()
+
+    def stop_live(self) -> None:
+        self._live_stop.set()
+        if self._live_thread is not None:
+            self._live_thread.join(timeout=2.0)
+            self._live_thread = None
+
+    def _broadcast_live(self, poll_s: float) -> None:
+        sent = 0
+        last_error = None
+        while not self._live_stop.wait(poll_s):
+            try:
+                if self.frames_acquired() < sent:  # acquisition restarted
+                    sent = 0
+                frames = self.read_frames_from(sent)
+            except Exception as error:
+                if repr(error) != last_error:
+                    LOGGER.warning("Live broadcast failed: %r", error)
+                    last_error = repr(error)
+                continue
+            last_error = None
+            for frame in frames:
+                self.broadcast_image(frame, {"timestamp": time.time(), "index": sent})
+                sent += 1
+
     def broadcast_image(self, image: np.ndarray, info) -> None:
         if self.image_client is None:
             LOGGER.error("tried to broadcast image but no client exists")
@@ -216,19 +315,28 @@ class SimulatedCamera(Camera):
     can stand in for any real camera in simulation mode. Driver-specific *extra*
     methods (beyond the :class:`Camera` interface) are not defined here; use
     :func:`simulated_camera_for` to auto-stub those for a particular driver.
+
+    While acquiring, frames "arrive" at :attr:`sim_frame_rate` per second.
     """
+
+    sim_frame_rate: float = 5.0
 
     def __init__(
         self,
         image_dir: str | None = None,
         timeout: float = 5.0,
         stream_name: str | None = None,
+        live: bool = False,
     ):
         self._shape = (256, 256)
         self._nframes = 1
         self._running = False
+        self._started = 0.0
         self._rng = np.random.default_rng()
         super().__init__(image_dir=image_dir, timeout=timeout, stream_name=stream_name)
+        if live:
+            self.arm()
+            self.start_live()
 
     def _connect(self) -> None:
         # No hardware; a non-None sentinel marks the camera as "connected".
@@ -251,9 +359,24 @@ class SimulatedCamera(Camera):
 
     def start_acquisition(self) -> None:
         self._running = True
+        self._started = time.monotonic()
 
     def stop_acquisition(self) -> None:
         self._running = False
+
+    def _acquisition_in_progress(self) -> bool:
+        return self._running
+
+    def _count_frames(self) -> int:
+        if not self._running:
+            return 0
+        return int((time.monotonic() - self._started) * self.sim_frame_rate)
+
+    def _read_range(self, start: int, stop: int) -> np.ndarray:
+        return np.stack([self._generate_frame() for _ in range(stop - start)])
+
+    def settings(self) -> dict:
+        return {"shape": list(self._shape)}
 
     def _generate_frame(self) -> np.ndarray:
         h, w = self._shape
