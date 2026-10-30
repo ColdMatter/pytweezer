@@ -102,6 +102,11 @@ experiments**.
    (the MOT centre) always name their key. Accept only updates keys that
    already exist (`ExpParameterManager.set_parameter` refuses others) and
    shows each key's current and new value, with rows the user can untick.
+7. **MOT counts reads the saved MOT centre** (`x_centre`, `y_centre`) in
+   `prepare()`, as `TweezerBaseline` reads its settings; arguments can
+   override it by hand. Finding the centre is a separate MOT Position run whose
+   result is accepted first. Runs stay short, at the cost of a manual step and
+   a wrong window if the MOT has moved since.
 
 ## Proposed, not yet confirmed
 
@@ -121,8 +126,7 @@ experiments**.
 
 ## Open questions
 
-- Where MOT counts gets the MOT centre: from saved parameters, or measured
-  at the start of each run.
+- The tab's layout.
 
 ## Still to cover
 
