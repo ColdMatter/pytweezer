@@ -102,8 +102,6 @@ experiments**.
 ## Still to cover
 
 - The tab's layout (offer the visual companion for mockups).
-- How an optimisation reuses a single-purpose experiment's measurement
-  (inheritance or a generic wrapper naming the experiment class).
 - Then the written design
   (`docs/superpowers/specs/2026-10-30-optimisers-design.md`), the builder check,
   and `superpowers:writing-plans`.
