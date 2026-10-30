@@ -135,6 +135,12 @@ experiments**.
    - Everything that reads `parameters.json` today moves to the manager:
      `TweezerBaseline`, `analysis.py` (reads `cool_vco_resonance` at import),
      notebooks.
+10. **Two specs, built in order.** (1) Saved parameters: the manager-owned
+    store and change log, get/set/accept commands, experiment arguments that
+    take their value from a saved key, and moving the current readers over.
+    (2) Optimisers: `measure()`, the `StagedScan` and `BayesianOptimisation`
+    mixins, the optimiser experiments, the `planned_scan()` hook and the
+    dashboard. Each gets its own spec, plan and PR.
 
 ## Proposed, not yet confirmed
 
@@ -154,7 +160,6 @@ experiments**.
 
 ## Open questions
 
-- Split into two specs (saved parameters first, then optimisers)?
 - How an experiment declares that an argument comes from a saved value, and
   whether it is resolved at submit or when the task starts.
 
