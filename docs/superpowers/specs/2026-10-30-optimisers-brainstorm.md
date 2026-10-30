@@ -107,6 +107,20 @@ experiments**.
    override it by hand. Finding the centre is a separate MOT Position run whose
    result is accepted first. Runs stay short, at the cost of a manual step and
    a wrong window if the MOT has moved since.
+8. **The tab is a calibration dashboard** (mockup A in
+   https://claude.ai/artifact/2E9MRytEvLUcr7AVahEcPJ):
+   - Top well: one row per optimiser with what it saves, its last run (state
+     as colour and text, including "completed, not accepted"), when it was
+     last accepted, a preset (recipe) picker and a Run button (disabled while
+     that optimiser is queued or running).
+   - Below, for the selected row: its latest run's plots (one per stage, the
+     chosen value marked; for a Bayesian run, objective per evaluation and best
+     so far) and, beside them, the Accept sheet: saved parameter, current, new,
+     a tick per row, Accept as the one primary button, and Discard.
+   - Arguments are edited in the Experiments tab (a link from the dashboard);
+     the run itself is also in Results. Rejected: a self-contained tab
+     duplicating the argument editor, and Accept living only in Results (no
+     view of which calibrations are stale).
 
 ## Proposed, not yet confirmed
 
@@ -126,11 +140,11 @@ experiments**.
 
 ## Open questions
 
-- The tab's layout.
+- Who writes `parameters.json` on Accept, and where "last accepted" is
+  recorded.
 
 ## Still to cover
 
-- The tab's layout (offer the visual companion for mockups).
 - Then the written design
   (`docs/superpowers/specs/2026-10-30-optimisers-design.md`), the builder check,
   and `superpowers:writing-plans`.
