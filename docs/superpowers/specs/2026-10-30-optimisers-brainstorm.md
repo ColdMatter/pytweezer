@@ -176,34 +176,12 @@ experiments**.
   nothing is designed in the tab.
 - Any PC can watch a run or accept its result.
 
-## Open questions
+## Status
 
-- Spec 1 design: sections 1 (store and commands), 2 (experiment API) and
-  3 (GUI) approved; migration and testing to go.
-  - GUI: a "Saved parameters" tab after Results (mockup on the canvas): a
-    live, filterable well grouped by the old categories (key, value, unit,
-    last changed by/when, why; today's acceptances in bold); a sheet to edit
-    the selected key (value with unit, a "why" saved in the log, Apply as the
-    primary, Revert); a well with that key's history. Editing only: keys are
-    created in code (`set_saved_parameters(..., create=True)`) or by the import. The
-    import fills obvious units (V for VCO/VVA, px for centres) and leaves the
-    rest blank.
-  - Store: `saved_parameters.py` with `SavedParameter` (key, value, group,
-    unit, updated_at, updated_by), `SavedParameterBook` (get, find, set,
-    accept; unknown keys refused unless `create=True`), `SavedParameterStore`
-    (`saved_parameters.json` in the manager's data directory) and an
-    append-only `saved_parameters_log.jsonl` (time, who, key, old, new,
-    reason). Values are JSON scalars and keep their type.
-  - Commands: `saved_parameters`, `set_saved_parameters`, `accept` (checks the run
-    exists, logs its RID), `saved_history`; `saved_parameters_version` in the
-    snapshot. `TweezerBaseline` reads its map through `get_saved_parameter` and loses
-    `parameters_file`; `ExpParameterManager` goes once unused.
-
-## Still to cover
-
-- Then the written design
-  (`docs/superpowers/specs/2026-10-30-optimisers-design.md`), the builder check,
-  and `superpowers:writing-plans`.
+- Spec 1 is written: `2026-10-30-saved-parameters-design.md`, awaiting
+  review.
+- Then spec 2 (`2026-10-30-optimisers-design.md`), most of whose decisions
+  are above, and `superpowers:writing-plans` for each.
 
 ## Relevant code and skills
 
