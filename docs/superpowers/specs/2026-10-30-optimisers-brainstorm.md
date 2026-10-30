@@ -121,6 +121,20 @@ experiments**.
      the run itself is also in Results. Rejected: a self-contained tab
      duplicating the argument editor, and Accept living only in Results (no
      view of which calibrations are stale).
+9. **Saved parameters move out of git and become a standard facility.**
+   `TweezerBaseline`'s behaviour (saved values feed MOTMaster parameters,
+   overridable per task) becomes the norm for new experiments, so it is built
+   properly now rather than copied:
+   - The Experiment Manager owns the saved values, in its data directory next
+     to `recipes.json`; the tracked `parameters.json` only seeds them. This
+     stops Accept dirtying the server PC's checkout (and breaking `git pull`)
+     and stops other PCs reading stale copies.
+   - Accept is a manager command; each acceptance is logged (time, who, run,
+     key, old, new) and the snapshot carries the latest per optimiser, so
+     every PC's dashboard updates live.
+   - Everything that reads `parameters.json` today moves to the manager:
+     `TweezerBaseline`, `analysis.py` (reads `cool_vco_resonance` at import),
+     notebooks.
 
 ## Proposed, not yet confirmed
 
@@ -140,8 +154,9 @@ experiments**.
 
 ## Open questions
 
-- Who writes `parameters.json` on Accept, and where "last accepted" is
-  recorded.
+- Split into two specs (saved parameters first, then optimisers)?
+- How an experiment declares that an argument comes from a saved value, and
+  whether it is resolved at submit or when the task starts.
 
 ## Still to cover
 
