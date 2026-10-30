@@ -11,6 +11,8 @@ the file is ignored. Board addresses are usually bound to a local string first
 The boards MOTMaster drives as pattern generators are named by three ``Info``
 entries: ``PatternGeneratorBoard``, ``AdditionalPatternGeneratorBoards`` and
 ``AnalogBoards``. The last two are dictionaries built with ``<variable>.Add``.
+The analogue values MOTMaster sets after every run are a dictionary initialiser
+under ``DAQMxAnalogSafeState.InfoKey``.
 """
 
 import re
@@ -54,12 +56,14 @@ class HardwareFile:
     """The boards (in ``Boards.Add`` order) and aliases (in declaration order).
 
     ``pattern_boards`` holds the addresses of the boards MOTMaster drives as
-    pattern generators, without duplicates.
+    pattern generators, without duplicates. ``safe_states`` maps an analogue
+    alias to the volts MOTMaster sets it to after every run.
     """
 
     boards: dict[str, Board]
     aliases: list[Alias]
     pattern_boards: list[str] = field(default_factory=list)
+    safe_states: dict[str, float] = field(default_factory=dict)
 
 
 _KINDS = {
@@ -82,6 +86,12 @@ _STATEMENT = re.compile(
     r"|\bAdd(?P<signal>Analog|Digital)(?P<direction>Input|Output)Channel\("
 )
 _CHAR_LITERAL = re.compile(r"'(?:\\.|[^'\\])'")
+_SAFE_STATE = re.compile(
+    r"DAQMxAnalogSafeState\.InfoKey\s*,\s*new\s+Dictionary\s*<[^>]*>\s*(?:\(\s*\))?"
+    r"\s*\{(?P<body>.*?)\}\s*\)\s*;",
+    re.DOTALL,
+)
+_SAFE_STATE_ENTRY = re.compile(r'\{\s*"([^"]+)"\s*,\s*([^\s}]+)\s*\}')
 _LOOKUP = re.compile(r'\(\s*string\s*\)\s*Boards\s*\[\s*"([^"]*)"\s*\]')
 
 
@@ -251,7 +261,15 @@ def parse_hardware_file(source: str) -> HardwareFile:
             elif address not in pattern_boards:
                 pattern_boards.append(address)
 
-    return HardwareFile(boards, aliases, pattern_boards)
+    safe_states = {}
+    if safe_state := _SAFE_STATE.search(source):
+        for name, volts in _SAFE_STATE_ENTRY.findall(safe_state.group("body")):
+            try:
+                safe_states[name] = _number(volts)
+            except ValueError:
+                logger.warning("Safe state of %r: %s is not literal", name, volts)
+
+    return HardwareFile(boards, aliases, pattern_boards, safe_states)
 
 
 def read_hardware_file(path: str) -> HardwareFile:

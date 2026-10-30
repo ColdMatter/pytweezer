@@ -146,3 +146,17 @@ def test_pattern_boards_are_read_from_info(declarations, expected):
         """
     )
     assert hardware.pattern_boards == expected
+
+
+def test_safe_state_values_are_read_from_info():
+    hardware = parse_hardware_file(
+        """
+        Info.Add(DAQ.Analog.DAQMxAnalogSafeState.InfoKey, new Dictionary<string, double>
+        {
+            { "MOTCoilsCurrent", 0.0 },
+            { "transferCoils", 1.5 }, // amps, not volts
+        });
+        Info.Add("PGType", "dedicated");
+        """
+    )
+    assert hardware.safe_states == {"MOTCoilsCurrent": 0.0, "transferCoils": 1.5}

@@ -20,6 +20,13 @@ analogBoards.Add("AO", analog);
 Info.Add("AnalogBoards", analogBoards);
 """
 
+SAFE_STATE = """
+Info.Add(DAQ.Analog.DAQMxAnalogSafeState.InfoKey, new Dictionary<string, double>
+{
+    { "MOTCoilsCurrent", 0.0 },
+});
+"""
+
 RUNNING = "CaF MotMaster (running a sequence)"
 UNREACHABLE = "CaF MotMaster is not reachable: its runs are not greyed out"
 SETUP_ERROR = (
@@ -33,6 +40,7 @@ TOO_OLD = (
 V21_LOCK = "PXI1Slot2/ao0"
 MOT1_SHUTTER = "PXI1Slot4/port3/line5"
 TCL_AO = "PXI1Slot8/ao0"
+MOT_COILS = "PXI1Slot2/ao1"
 
 
 class FakeStatus:
@@ -202,6 +210,36 @@ def test_end_of_run_sets_analogue_values_and_resets_the_rest(cards, status):
     )
     assert MOT1_SHUTTER not in last_set
     assert last_set[TCL_AO] == before
+
+
+def test_protected_channel_shows_its_end_value(hardware_file, io, status, queue):
+    cards = NICards(
+        hardware_file,
+        {},
+        ["v21Lock"],
+        "CaF MotMaster",
+        io=io,
+        motmaster_status=status,
+        queue=queue,
+    )
+    status.last = run(1, time.time() + 1.0, values={"v21Lock": 0.4})
+    assert cards.state()["last_set"][V21_LOCK]["value"] == 0.4
+
+
+@pytest.mark.parametrize("outputs_known", [True, False])
+def test_safe_state_channel_shows_its_safe_value_after_any_run(
+    tmp_path, io, status, queue, outputs_known
+):
+    path = tmp_path / "MoleculeMOTHardware.cs"
+    path.write_text(HARDWARE + PATTERN_BOARDS + SAFE_STATE)
+    cards = make_cards(str(path), io, status, queue)
+    status.last = run(
+        1,
+        time.time() + 1.0,
+        values={"MOTCoilsCurrent": 0.8},
+        outputs_known=outputs_known,
+    )
+    assert cards.state()["last_set"][MOT_COILS]["value"] == 0.0
 
 
 def test_panel_write_newer_than_the_run_survives(cards, status):

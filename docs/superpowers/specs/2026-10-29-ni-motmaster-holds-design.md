@@ -176,8 +176,10 @@ When the last-run record's run number changes:
 - **Outputs unknown**: every channel on MOTMaster's boards resets to
   unknown.
 
-Safe-state channels are protected and show no value either way. MOTMaster sets
-them to their safe values after every run.
+Protected channels get end values like any other: "protected" only stops panel
+writes. A channel in the hardware file's `DAQMxAnalogSafeState` block (CaF only)
+shows its safe value after every run, known outputs or not, since MOTMaster sets
+it after the run however the run ended.
 
 Whichever is newer wins between a panel write and a MOTMaster end value. That
 falls out naturally: a panel write on those boards can only happen after the

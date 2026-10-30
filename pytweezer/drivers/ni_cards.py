@@ -200,7 +200,6 @@ class NICards:
             hardware = HardwareFile({}, [])
         self._build_layout(hardware)
         static = self._static_holds(hardware, reserved, protected)
-        self._protected = {p for p, h in static.channels.items() if h == PROTECTED}
         addresses = {card["address"] for card in self._cards}
         self._pattern_boards = [a for a in hardware.pattern_boards if a in addresses]
         self._pattern_channels = {
@@ -210,6 +209,13 @@ class NICards:
             alias: self._channels[p]
             for p in self._pattern_channels
             for alias in self._channels[p]["aliases"]
+        }
+        self._safe_volts = {
+            p: hardware.safe_states[alias]
+            for p, channel in self._channels.items()
+            if channel["kind"] == "ao"
+            for alias in channel["aliases"]
+            if alias in hardware.safe_states
         }
         self._motmaster = motmaster
         self._status = None
@@ -414,20 +420,23 @@ class NICards:
         for physical in self._pattern_channels & self._last_set.keys():
             if self._last_set[physical]["time"] < last.finished:
                 del self._last_set[physical]
-        if not last.outputs_known:
-            return
-        shown = ("ao", "do") if SHOW_DIGITAL_END_VALUES else ("ao",)
-        for name, value in last.values.items():
-            channel = self._pattern_aliases.get(name)
-            if (
-                channel is None
-                or channel["kind"] not in shown
-                or channel["physical"] in self._protected
-                or channel["physical"] in self._last_set
-            ):
+        end_values = {}
+        if last.outputs_known:
+            shown = ("ao", "do") if SHOW_DIGITAL_END_VALUES else ("ao",)
+            for name, value in last.values.items():
+                channel = self._pattern_aliases.get(name)
+                if channel is not None and channel["kind"] in shown:
+                    end_values[channel["physical"]] = (
+                        float(value) if channel["kind"] == "ao" else bool(value)
+                    )
+        # MOTMaster sets its safe state after every run, however the run ended.
+        end_values.update(self._safe_volts)
+        for physical, value in end_values.items():
+            newer = self._last_set.get(physical, {}).get("time", -math.inf)
+            if newer >= last.finished:
                 continue
-            self._last_set[channel["physical"]] = {
-                "value": float(value) if channel["kind"] == "ao" else bool(value),
+            self._last_set[physical] = {
+                "value": value,
                 "time": last.finished,
                 "source": "motmaster",
                 "script": last.script,
