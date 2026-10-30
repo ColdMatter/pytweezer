@@ -9,6 +9,7 @@ from typing import Any
 _LOG_TOPIC = "Logs"
 _ENV_LOG_LEVEL = "PYTWEEZER_LOG_LEVEL"
 _LOG_DIR_ENV = "PYTWEEZER_LOG_DIR"
+_LOG_PUBLISH_ENV = "PYTWEEZER_LOG_PUBLISH"
 _LOG_FILE_PREFIX = "pytweezer"
 _LOG_FILE_EXTENSION = ".jsonl"
 _DEFAULT_FORMAT = (
@@ -105,7 +106,11 @@ class DailyJsonFileHandler(logging.Handler):
 
 
 def configure_logging(level: str | None = None) -> None:
-    """Configure root logging and publish structured logs to the Message hub."""
+    """Configure root logging: console, the daily JSONL file and the Message hub.
+
+    Setting ``PYTWEEZER_LOG_PUBLISH=0`` leaves out the Message hub, as the test
+    suite does so its records never reach a running lab's log stream.
+    """
     root = logging.getLogger()
     env_level = os.getenv(_ENV_LOG_LEVEL, "INFO")
     resolved_level = _parse_level(level or env_level)
@@ -116,12 +121,13 @@ def configure_logging(level: str | None = None) -> None:
             level=resolved_level, format=_DEFAULT_FORMAT, datefmt=_DEFAULT_DATEFMT
         )
 
-    if any(isinstance(handler, StructuredMessageHandler) for handler in root.handlers):
-        return
-
-    handler = StructuredMessageHandler()
-    handler.setLevel(resolved_level)
-    root.addHandler(handler)
+    publish = os.getenv(_LOG_PUBLISH_ENV, "1") != "0"
+    if publish and not any(
+        isinstance(handler, StructuredMessageHandler) for handler in root.handlers
+    ):
+        handler = StructuredMessageHandler()
+        handler.setLevel(resolved_level)
+        root.addHandler(handler)
 
     if not any(isinstance(handler, DailyJsonFileHandler) for handler in root.handlers):
         file_handler = DailyJsonFileHandler()

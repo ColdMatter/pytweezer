@@ -6,8 +6,13 @@ shared ``QApplication`` for tests that build widgets.
 """
 
 import os
+import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Set before any pytweezer import, and inherited by the subprocesses tests start,
+# so test log records stay out of the lab's log stream and log files.
+os.environ["PYTWEEZER_LOG_PUBLISH"] = "0"
+os.environ["PYTWEEZER_LOG_DIR"] = tempfile.mkdtemp(prefix="pytweezer-test-logs-")
 
 import pytest
 

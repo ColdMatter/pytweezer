@@ -133,7 +133,9 @@ thread, so they work from threaded and Qt code; mutate a notifier only through
 
 `pytweezer/logging_utils.py`'s `get_logger(name)` is the standard factory
 everywhere (not bare `logging.getLogger`) — it adds structured JSONL output
-under `logs/` (or `$PYTWEEZER_LOG_DIR`) alongside console output.
+under `logs/` (or `$PYTWEEZER_LOG_DIR`) alongside console output, and publishes
+each record on the Message hub's `Logs` topic unless `PYTWEEZER_LOG_PUBLISH=0`.
+`tests/conftest.py` sets both, so the suite never touches a running lab's logs.
 
 Do not confuse the pub/sub stream loggers (`datalogger`/`imagelogger`, which
 record which streams are active) with **database** metric logging
