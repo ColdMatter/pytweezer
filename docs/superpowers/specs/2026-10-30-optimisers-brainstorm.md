@@ -77,6 +77,21 @@ experiments**.
    points is known up front. There is **no optimiser service**: the
    Optimisers tab launches ordinary tasks, shows their progress and offers
    Accept. All stages of one staged scan belong to one experiment.
+5. **Optimisers inherit their measurement.** Each single-purpose experiment
+   puts its shot in `measure(**motmaster_overrides) -> dict[str, float]`; its
+   own `run_point` records that. Two generic mixins, `StagedScan` and
+   `BayesianOptimisation`, own the point loop and record the best values in
+   `finish()`. An optimiser is a short class such as
+   `class OptimiseMOTShims(BayesianOptimisation, TweezerLoading)` naming its
+   objective and its stages or dimensions. Rejected: one generic optimiser
+   taking the target class as an argument (devices would depend on argument
+   values), and shared plain functions (declarations copied into every
+   optimiser). Needs one framework hook: the experiment, not the submitted
+   `Scan`, says how many points it runs.
+   - `measure()` follows the usual camera pattern (see `LoadTweezers.run_point`):
+     start the acquisition, run the MOTMaster sequence (which triggers the
+     camera; `Go()` blocks for the whole sequence while the camera buffers),
+     then read the frames.
 
 ## Proposed, not yet confirmed
 
@@ -96,8 +111,9 @@ experiments**.
 
 ## Open questions
 
-- How an optimisation reuses a single-purpose experiment's measurement
-  (inheritance or a generic wrapper naming the experiment class).
+- Accepting: how an optimiser's best MOTMaster settings map to
+  `parameters.json` keys (they differ, e.g. `tImgCoolVCO1` is saved as
+  `tImgCoolVCO`).
 
 ## Still to cover
 
