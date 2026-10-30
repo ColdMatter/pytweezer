@@ -58,6 +58,20 @@ experiments**.
 2. **Runs live on the server and go through the experiment queue.** The
    optimiser submits ordinary tasks, waits for them and reads their results.
    Closing the GUI does not stop a run.
+3. **A Bayesian optimisation is a single task**, not one task per evaluation.
+   It is an `Experiment`: `prepare()` builds the skopt `Optimizer`, each point
+   is one evaluation (ask, run the shots, compute the objective, tell, record),
+   and `finish()` records the best values as constants. Consequences:
+   - The number of evaluations is known up front, so the existing runner,
+     progress, pause and terminate (at point boundaries) and the measurement
+     file work unchanged. The run's history is that file.
+   - The task holds its devices for the whole optimisation, so no other task
+     can change the sequencer's state between evaluations.
+   - The optimiser's state lives in the worker's memory; a crashed or
+     interrupted run does not resume (a later run could be seeded from the
+     old file's history).
+   - Its settings (bounds, number of calls, initial points, `xi` schedule) are
+     experiment arguments, so saved presets are ordinary recipes.
 
 ## Proposed, not yet confirmed
 
@@ -69,24 +83,25 @@ experiments**.
 - A scan preset sweeps one argument, picks the setting that maximises a result,
   and can chain stages. DetectResonances, for example, is a cooling-VCO stage
   followed by a repump-VCO stage.
-- A Bayesian preset submits one task per evaluation and feeds each result back.
 - Within one run, later stages use the earlier stages' optima directly, without
   waiting for acceptance.
 - Any PC can watch a run or accept its result.
 - Left to the builder: whether the optimiser service is its own server process
   or part of the Experiment Manager.
 
-## Open question when the session stopped
+## Open questions
 
-Should presets be written in code (modules in a folder the server reads, like
-experiments) or created and edited in the tab and saved like recipes?
+- Do chained scans (DetectResonances, OptimiseMOTNumber) follow the same rule
+  and run as one task, which removes the need for an optimiser service?
+- Presets in code or made in the tab: largely settled for Bayesian runs by
+  decision 3 (code plus recipes); still open for scans if they stay separate
+  tasks.
 
 ## Still to cover
 
 - The tab's layout (offer the visual companion for mockups).
-- Stopping and pausing a run part-way.
-- How a Bayesian run's history is stored.
-- Which pipeline the optimiser's tasks run in.
+- How an optimisation reuses a single-purpose experiment's measurement
+  (inheritance or a generic wrapper naming the experiment class).
 - Then the written design
   (`docs/superpowers/specs/2026-10-30-optimisers-design.md`), the builder check,
   and `superpowers:writing-plans`.
