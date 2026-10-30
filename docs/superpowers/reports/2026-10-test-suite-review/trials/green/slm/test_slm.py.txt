@@ -1,0 +1,158 @@
+"""What the SLM driver hands the Blink SDK; a fake SDK stands in for the DLL."""
+
+import ctypes
+import inspect
+
+import numpy as np
+import pytest
+
+from pytweezer.drivers import slm as slm_driver
+from pytweezer.drivers.slm import SLM, SimulatedSLM
+from pytweezer.servers.simulated_device import public_methods
+
+# Non-square, so a swapped width/height shows up as scrambled pixels.
+WIDTH, HEIGHT = 6, 4
+
+
+class FakeBlinkSDK:
+    """Records the pixel bytes each upload call reads through its pointer."""
+
+    def __init__(self):
+        self.status = {}  # call name -> return code, to inject SDK failures
+        self.written = []
+        self.preloaded_sequences = []
+        self.preloaded_images = {}
+        self.Read_SLM_temperature = lambda board: 35.0
+
+    def _ok(self, name):
+        return self.status.get(name, 1)
+
+    def Create_SDK(self, num_boards_ref, constructed_ok_ref):
+        num_boards_ref._obj.value = 1
+        constructed_ok_ref._obj.value = 1
+
+    def Get_image_width(self, board):
+        return WIDTH
+
+    def Get_image_height(self, board):
+        return HEIGHT
+
+    def Get_image_depth(self, board):
+        return 8
+
+    def Read_Serial_Number(self, board):
+        return 1234
+
+    def SetWaitForTrigger(self, board, enabled):
+        return 1
+
+    def SetFlipImmediate(self, board, enabled):
+        return 1
+
+    def SetOutputPulse(self, board, enabled):
+        return 1
+
+    def Load_LUT_file(self, board, path):
+        return self._ok("Load_LUT_file")
+
+    def Write_image(self, board, pixels, timeout_ms):
+        self.written.append(np.ctypeslib.as_array(pixels, (HEIGHT, WIDTH)).copy())
+        return self._ok("Write_image")
+
+    def ImageWriteComplete(self, board, timeout_ms):
+        return self._ok("ImageWriteComplete")
+
+    def PreLoad_sequence(self, board, pixels, list_length, timeout_ms):
+        frames = np.ctypeslib.as_array(pixels, (list_length, HEIGHT, WIDTH))
+        self.preloaded_sequences.append(frames.copy())
+        return 1
+
+    def PreLoad_Image(self, board, pixels, frame, timeout_ms):
+        self.preloaded_images[frame] = np.ctypeslib.as_array(
+            pixels, (HEIGHT, WIDTH)
+        ).copy()
+        return 1
+
+    def Delete_SDK(self):
+        pass
+
+
+@pytest.fixture
+def blink(monkeypatch):
+    sdk = FakeBlinkSDK()
+    monkeypatch.setattr(ctypes.cdll, "LoadLibrary", lambda path: None)
+    monkeypatch.setattr(ctypes, "CDLL", lambda name: sdk)
+    return sdk
+
+
+def _frame(seed=0):
+    return ((np.arange(HEIGHT * WIDTH) * 7 + seed) % 256).reshape(HEIGHT, WIDTH)
+
+
+@pytest.mark.parametrize(
+    "as_passed",
+    [
+        pytest.param(lambda frame: frame.astype(np.int64), id="int64 values"),
+        pytest.param(
+            lambda frame: np.ascontiguousarray(frame.T.astype(np.uint8)).T,
+            id="transposed view",
+        ),
+        pytest.param(
+            lambda frame: np.repeat(frame.astype(np.uint8), 2, axis=1)[:, ::2],
+            id="strided view",
+        ),
+    ],
+)
+def test_update_mask_sends_the_pixels_row_major_as_uint8(blink, as_passed):
+    frame = _frame()
+    SLM().update_mask(as_passed(frame))
+    np.testing.assert_array_equal(blink.written[-1], frame)
+
+
+def test_run_sequence_displays_every_frame_in_order(blink):
+    frames = np.stack([_frame(seed) for seed in range(5)])
+    slm = SLM()
+    n_before = len(blink.written)
+    slm.run_sequence(frames, fps=1e6)
+    np.testing.assert_array_equal(np.stack(blink.written[n_before:]), frames)
+
+
+def test_preload_sequence_uploads_frames_in_order(blink):
+    frames = np.stack([_frame(seed) for seed in range(3)]).astype(np.uint8)
+    # Frame axis last, as a stack assembled pixel-by-pixel would come out.
+    frames_last = np.ascontiguousarray(np.moveaxis(frames, 0, -1))
+    SLM().preload_sequence(np.moveaxis(frames_last, -1, 0))
+    np.testing.assert_array_equal(blink.preloaded_sequences[-1], frames)
+
+
+def test_preload_image_fills_the_last_on_board_slot(blink):
+    last_slot = slm_driver.MAX_PRELOAD_FRAMES - 1
+    SLM().preload_image(_frame(), last_slot)
+    np.testing.assert_array_equal(blink.preloaded_images[last_slot], _frame())
+
+
+@pytest.mark.parametrize("failing_call", ["Write_image", "ImageWriteComplete"])
+def test_failed_mask_write_raises(blink, failing_call):
+    slm = SLM()
+    blink.status[failing_call] = 0
+    with pytest.raises(RuntimeError, match=failing_call):
+        slm.update_mask(_frame())
+
+
+def test_failed_lut_load_refuses_to_connect(blink):
+    blink.status["Load_LUT_file"] = 0
+    with pytest.raises(RuntimeError, match="LUT"):
+        SLM(lut_file="missing.LUT")
+
+
+def test_simulated_slm_matches_the_real_call_signatures():
+    def signature(func):
+        return [
+            (p.name, p.kind, p.default)
+            for p in inspect.signature(func).parameters.values()
+        ]
+
+    for name, real in public_methods(SLM).items():
+        sim = getattr(SimulatedSLM, name)
+        if name in vars(SimulatedSLM) and "stub" not in sim.__qualname__:
+            assert signature(sim) == signature(real), name

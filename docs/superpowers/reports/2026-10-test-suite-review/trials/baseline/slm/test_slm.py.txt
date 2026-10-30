@@ -1,0 +1,308 @@
+"""Tests for the Blink Plus SLM driver, against a fake Blink C-wrapper DLL."""
+
+import ctypes
+
+import numpy as np
+import pytest
+
+from pytweezer.drivers import slm as slm_module
+from pytweezer.drivers.slm import MAX_PRELOAD_FRAMES, SLM, SimulatedSLM
+
+# Deliberately non-square so a transposed (W, H) mask would be caught.
+WIDTH, HEIGHT, DEPTH = 4, 3, 8
+
+
+class FakeFn:
+    """A DLL entry point: records calls, returns ``ret``, accepts argtypes/restype."""
+
+    def __init__(self, ret=1, side_effect=None):
+        self.ret = ret
+        self.side_effect = side_effect
+        self.calls = []
+
+    def __call__(self, *args):
+        self.calls.append(args)
+        if self.side_effect is not None:
+            return self.side_effect(*args)
+        return self.ret
+
+
+class FakeBlink:
+    def __init__(self, boards=1, constructed=1):
+        self.boards = boards
+        self.constructed = constructed
+        self.written = []
+        self.preloaded = []
+
+        def create_sdk(num_boards, constructed_okay):
+            num_boards.value = self.boards
+            constructed_okay.value = self.constructed
+
+        def write_image(board, ptr, timeout):
+            self.written.append(
+                np.ctypeslib.as_array(ptr, shape=(HEIGHT * WIDTH,)).copy()
+            )
+            return self.Write_image.ret
+
+        def preload_sequence(board, ptr, n, timeout):
+            self.preloaded.append(
+                np.ctypeslib.as_array(ptr, shape=(n * HEIGHT * WIDTH,)).copy()
+            )
+            return self.PreLoad_sequence.ret
+
+        self.Create_SDK = FakeFn(side_effect=create_sdk)
+        self.Get_image_width = FakeFn(WIDTH)
+        self.Get_image_height = FakeFn(HEIGHT)
+        self.Get_image_depth = FakeFn(DEPTH)
+        self.Read_Serial_Number = FakeFn(1234)
+        self.Read_SLM_temperature = FakeFn(36.5)
+        self.SetWaitForTrigger = FakeFn()
+        self.SetFlipImmediate = FakeFn()
+        self.SetOutputPulse = FakeFn()
+        self.Load_LUT_file = FakeFn()
+        self.Write_image = FakeFn(side_effect=write_image)
+        self.ImageWriteComplete = FakeFn()
+        self.PreLoad_sequence = FakeFn(side_effect=preload_sequence)
+        self.PreLoad_Image = FakeFn()
+        self.StartAutoIncrement = FakeFn()
+        self.StopAutoIncrement = FakeFn()
+        self.Delete_SDK = FakeFn()
+
+
+class _LoaderStub:
+    def __init__(self):
+        self.loaded = []
+
+    def LoadLibrary(self, path):
+        self.loaded.append(path)
+
+
+@pytest.fixture
+def blink(monkeypatch):
+    """Install a fake Blink DLL in place of ctypes' loaders; return it."""
+    lib = FakeBlink()
+    loader = _LoaderStub()
+    monkeypatch.setattr(ctypes, "cdll", loader)
+    monkeypatch.setattr(ctypes, "CDLL", lambda name: lib)
+    # Hand the fake the c_uint objects themselves so Create_SDK can fill them in.
+    monkeypatch.setattr(ctypes, "byref", lambda obj: obj)
+    lib.loader = loader
+    return lib
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(slm_module.time, "sleep", sleeps.append)
+    return sleeps
+
+
+def test_connect_configures_board_and_blanks_it(blink):
+    slm = SLM(
+        sdk_dll="sdk.dll",
+        lut_file="lut.LUT",
+        board_number=1,
+        wait_for_trigger=True,
+        flip_immediate=False,
+        output_pulse=True,
+    )
+
+    assert slm.is_connected()
+    assert blink.loader.loaded == ["sdk.dll"]
+    assert slm.get_dimensions() == {"width": WIDTH, "height": HEIGHT, "depth": DEPTH}
+    assert blink.SetWaitForTrigger.calls == [(1, 1)]
+    assert blink.SetFlipImmediate.calls == [(1, 0)]
+    assert blink.SetOutputPulse.calls == [(1, 1)]
+    assert blink.Load_LUT_file.calls == [(1, b"lut.LUT")]
+    assert len(blink.written) == 1
+    assert not blink.written[0].any()
+
+
+def test_no_lut_file_skips_lut_load(blink):
+    SLM(lut_file=None)
+    assert blink.Load_LUT_file.calls == []
+
+
+@pytest.mark.parametrize(
+    "boards, constructed, match",
+    [(1, 0, "construct"), (0, 1, "found 0"), (2, 1, "found 2")],
+)
+def test_connect_rejects_bad_sdk_state(blink, boards, constructed, match):
+    blink.boards = boards
+    blink.constructed = constructed
+    with pytest.raises(RuntimeError, match=match):
+        SLM()
+
+
+def test_lut_load_failure_raises(blink):
+    blink.Load_LUT_file.ret = 0
+    with pytest.raises(RuntimeError, match="LUT"):
+        SLM(lut_file="bad.LUT")
+
+
+def test_update_mask_sends_contiguous_uint8_row_major_data(blink):
+    slm = SLM()
+    # Fortran-ordered int64: the driver must convert, not hand the DLL raw memory.
+    mask = np.asfortranarray(np.arange(HEIGHT * WIDTH).reshape(HEIGHT, WIDTH))
+    slm.update_mask(mask)
+
+    np.testing.assert_array_equal(blink.written[-1], mask.astype(np.uint8).ravel())
+    assert blink.ImageWriteComplete.calls[-1] == (1, 5000)
+
+
+@pytest.mark.parametrize("failing", ["Write_image", "ImageWriteComplete"])
+def test_update_mask_raises_on_handshake_failure(blink, failing):
+    slm = SLM()
+    fn = getattr(blink, failing)
+    fn.side_effect = None
+    fn.ret = 0
+    with pytest.raises(RuntimeError, match=failing):
+        slm.update_mask(np.zeros((HEIGHT, WIDTH), np.uint8))
+
+
+def test_close_releases_sdk_and_blocks_further_calls(blink):
+    slm = SLM()
+    slm.close()
+    slm.close()
+
+    assert not slm.is_connected()
+    assert len(blink.Delete_SDK.calls) == 1
+    with pytest.raises(RuntimeError, match="relinquished"):
+        slm.update_mask(np.zeros((HEIGHT, WIDTH), np.uint8))
+    with pytest.raises(RuntimeError, match="relinquished"):
+        slm.get_temperature()
+
+
+def test_close_swallows_sdk_teardown_error(blink):
+    slm = SLM()
+
+    def fail():
+        raise OSError("boom")
+
+    blink.Delete_SDK.side_effect = fail
+    slm.close()
+    assert not slm.is_connected()
+
+
+def test_preload_sequence_passes_frames_and_length(blink):
+    slm = SLM()
+    seq = np.arange(2 * HEIGHT * WIDTH, dtype=np.uint8).reshape(2, HEIGHT, WIDTH)
+    slm.preload_sequence(seq)
+
+    assert blink.PreLoad_sequence.calls[-1][2] == 2
+    np.testing.assert_array_equal(blink.preloaded[-1], seq.ravel())
+
+    blink.PreLoad_sequence.side_effect = None
+    blink.PreLoad_sequence.ret = 0
+    with pytest.raises(RuntimeError, match="PreLoad_sequence"):
+        slm.preload_sequence(seq)
+
+
+@pytest.mark.parametrize("frame", [0, MAX_PRELOAD_FRAMES - 1])
+def test_preload_image_accepts_frame_bounds(blink, frame):
+    slm = SLM()
+    slm.preload_image(np.zeros((HEIGHT, WIDTH), np.uint8), frame)
+    assert blink.PreLoad_Image.calls[-1][2] == frame
+
+
+@pytest.mark.parametrize("frame", [-1, MAX_PRELOAD_FRAMES])
+def test_preload_image_rejects_out_of_range_frame_before_dll(blink, frame):
+    slm = SLM()
+    with pytest.raises(ValueError):
+        slm.preload_image(np.zeros((HEIGHT, WIDTH), np.uint8), frame)
+    assert blink.PreLoad_Image.calls == []
+
+
+def test_preload_image_failure_raises(blink):
+    slm = SLM()
+    blink.PreLoad_Image.ret = 0
+    with pytest.raises(RuntimeError, match="frame 5"):
+        slm.preload_image(np.zeros((HEIGHT, WIDTH), np.uint8), 5)
+
+
+def test_set_wait_for_trigger_tracks_state_only_on_success(blink):
+    slm = SLM(wait_for_trigger=False)
+    slm.set_wait_for_trigger(True)
+    assert slm.wait_for_trigger is True
+    assert blink.SetWaitForTrigger.calls[-1] == (1, 1)
+
+    blink.SetWaitForTrigger.ret = 0
+    with pytest.raises(RuntimeError):
+        slm.set_wait_for_trigger(False)
+    assert slm.wait_for_trigger is True
+
+
+def test_auto_increment_start_stop(blink):
+    slm = SLM()
+    slm.start_auto_increment(7)
+    slm.stop_auto_increment()
+    assert blink.StartAutoIncrement.calls == [(1, 7)]
+    assert blink.StopAutoIncrement.calls == [(1,)]
+
+    blink.StartAutoIncrement.ret = 0
+    blink.StopAutoIncrement.ret = 0
+    with pytest.raises(RuntimeError, match="StartAutoIncrement"):
+        slm.start_auto_increment(7)
+    with pytest.raises(RuntimeError, match="StopAutoIncrement"):
+        slm.stop_auto_increment()
+
+
+def test_run_sequence_writes_frames_in_order_at_fps(blink, no_sleep):
+    slm = SLM()
+    seq = np.stack([np.full((HEIGHT, WIDTH), v, np.uint8) for v in (1, 2, 3)])
+    slm.run_sequence(seq, fps=4.0)
+
+    assert [frame[0] for frame in blink.written[1:]] == [1, 2, 3]
+    assert no_sleep == [0.25, 0.25, 0.25]
+
+
+def test_run_sequence_with_zero_fps_does_not_sleep(blink, no_sleep):
+    slm = SLM()
+    slm.run_sequence(np.zeros((2, HEIGHT, WIDTH), np.uint8), fps=0)
+    assert len(blink.written) == 3
+    assert no_sleep == []
+
+
+def test_get_temperature_returns_float(blink):
+    slm = SLM()
+    temperature = slm.get_temperature()
+    assert isinstance(temperature, float)
+    assert temperature == pytest.approx(36.5)
+
+
+def test_simulated_slm_covers_real_interface():
+    sim = SimulatedSLM(sdk_dll="ignored", lut_file="ignored", board_number=1)
+    public = [
+        n for n in dir(SLM) if not n.startswith("_") and callable(getattr(SLM, n))
+    ]
+    missing = [n for n in public if not callable(getattr(sim, n, None))]
+    assert missing == []
+    assert SimulatedSLM._simulates is SLM
+
+
+def test_simulated_slm_records_writes():
+    sim = SimulatedSLM()
+    mask = np.ones((sim.height, sim.width), dtype=np.int32)
+    sim.update_mask(mask)
+    sim.run_sequence(np.zeros((3, sim.height, sim.width)))
+
+    assert sim.frames_written == 4
+    assert sim.last_mask.dtype == np.uint8
+    assert sim.get_dimensions() == {"width": 1024, "height": 1024, "depth": 8}
+
+
+def test_simulated_slm_preload_and_lifecycle():
+    sim = SimulatedSLM()
+    sim.preload_image(np.zeros((2, 2)), 9)
+    assert sim.preloaded_frames == 10
+    with pytest.raises(ValueError):
+        sim.preload_image(np.zeros((2, 2)), MAX_PRELOAD_FRAMES)
+
+    sim.start_auto_increment(10)
+    assert sim.auto_increment_length == 10
+    sim.stop_auto_increment()
+    assert sim.auto_increment_length == 0
+
+    assert sim.is_connected()
+    sim.close()
+    assert not sim.is_connected()
