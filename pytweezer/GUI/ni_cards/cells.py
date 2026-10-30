@@ -18,6 +18,7 @@ from pytweezer.GUI.components import CompactDoubleSpinBox, set_state
 from pytweezer.GUI.ni_cards.flow_grid import CELL_WIDTH
 
 TRACE_LENGTH = 100
+_TRACE_COLOUR = "#5b8def"
 
 
 class _NoWheelSpinBox(CompactDoubleSpinBox):
@@ -25,9 +26,6 @@ class _NoWheelSpinBox(CompactDoubleSpinBox):
 
     def wheelEvent(self, event):
         event.ignore()
-
-
-_TRACE_COLOUR = "#5b8def"
 
 
 def _volts(value: float) -> str:
