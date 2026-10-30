@@ -115,6 +115,9 @@ class FileCopier:
         target.parent.mkdir(parents=True, exist_ok=True)
         # Copy under another name first, so an interrupted copy never looks complete.
         partial = target.with_name(target.name + ".partial")
-        shutil.copy2(source, partial)
+        # Not copy2: the lab share refuses its chmod, failing every copy.
+        shutil.copyfile(source, partial)
+        source_stat = source.stat()
+        os.utime(partial, ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns))
         os.replace(partial, target)
         logger.info("Copied %s to %s", relpath, self.target_root)
