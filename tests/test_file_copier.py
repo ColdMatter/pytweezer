@@ -27,6 +27,23 @@ def test_a_file_lands_at_the_same_path_unchanged(tmp_path):
     ]
 
 
+def test_a_drive_that_refuses_permission_changes_still_gets_the_file(
+    tmp_path, monkeypatch
+):
+    def refuse(*args, **kwargs):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr("os.chmod", refuse)
+    write_source(tmp_path / "local")
+    copier = FileCopier(tmp_path / "local", tmp_path / "drive", retry_s=60)
+    try:
+        copier.add(RELPATH)
+        assert until(lambda: not copier.pending)
+    finally:
+        copier.close()
+    assert (tmp_path / "drive" / RELPATH).read_bytes() == b"measurement bytes"
+
+
 def test_an_unreachable_drive_is_retried_until_the_copy_lands(tmp_path):
     write_source(tmp_path / "local")
     drive = tmp_path / "drive"
