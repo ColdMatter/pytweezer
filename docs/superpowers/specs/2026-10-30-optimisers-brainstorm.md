@@ -178,8 +178,16 @@ experiments**.
 
 ## Open questions
 
-- Spec 1 design: sections 1 (store and commands) and 2 (experiment API)
-  approved; GUI, migration and testing to go.
+- Spec 1 design: sections 1 (store and commands), 2 (experiment API) and
+  3 (GUI) approved; migration and testing to go.
+  - GUI: a "Saved parameters" tab after Results (mockup on the canvas): a
+    live, filterable well grouped by the old categories (key, value, unit,
+    last changed by/when, why; today's acceptances in bold); a sheet to edit
+    the selected key (value with unit, a "why" saved in the log, Apply as the
+    primary, Revert); a well with that key's history. Editing only: keys are
+    created in code (`set_saved(..., create=True)`) or by the import. The
+    import fills obvious units (V for VCO/VVA, px for centres) and leaves the
+    rest blank.
   - Store: `saved_parameters.py` with `SavedParameter` (key, value, group,
     unit, updated_at, updated_by), `SavedParameterBook` (get, find, set,
     accept; unknown keys refused unless `create=True`), `SavedParameterStore`
