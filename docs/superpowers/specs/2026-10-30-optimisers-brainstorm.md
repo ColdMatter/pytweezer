@@ -141,6 +141,19 @@ experiments**.
     (2) Optimisers: `measure()`, the `StagedScan` and `BayesianOptimisation`
     mixins, the optimiser experiments, the `planned_scan()` hook and the
     dashboard. Each gets its own spec, plan and PR.
+11. **Saved values are resolved when the task starts**, just before
+    `prepare()`, so queued tasks pick up a value accepted after they were
+    submitted. Experiments use saved parameters in two ways:
+    - as an argument's default: `MotMasterNumber(4.0,
+      parameter="tImgCoolVCO1", saved="tImgCoolVCO")`. The form shows the
+      saved value and can override it for one task; task requests and recipes
+      store only real overrides, so a recipe follows later calibrations;
+    - as a fixed value the experiment reads in code, not exposed as an
+      argument.
+    The measurement file records the values used and which came from saved
+    keys. Ordinary experiments are expected only to read saved parameters
+    (writing is not prohibited); optimisers are expected to write them,
+    through Accept.
 
 ## Proposed, not yet confirmed
 
@@ -160,8 +173,7 @@ experiments**.
 
 ## Open questions
 
-- How an experiment declares that an argument comes from a saved value, and
-  whether it is resolved at submit or when the task starts.
+- Key namespace: flat keys or grouped by system (Rb, CaF).
 
 ## Still to cover
 
