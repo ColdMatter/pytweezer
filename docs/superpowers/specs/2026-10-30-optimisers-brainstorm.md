@@ -143,10 +143,10 @@ experiments**.
     dashboard. Each gets its own spec, plan and PR.
 11. **Saved parameters are a plain store with no special behaviour.** They
     are not tied to arguments or MOTMaster parameters. Code anywhere
-    (experiments, notebooks, analysis) reads them with `get_saved(key)` /
-    `get_saved()` and writes with `set_saved(values, reason)` from
+    (experiments, notebooks, analysis) reads them with `get_saved_parameter(key)` /
+    `get_saved_parameters()` and writes with `set_saved_parameters(values, reason)` from
     `pytweezer.experiment.client`, both going to the manager. A user who wants
-    a saved value as an argument's default writes `Number(get_saved("x_centre"))`;
+    a saved value as an argument's default writes `Number(get_saved_parameter("x_centre"))`;
     one who wants it in a MOTMaster parameter passes it to `run_sequences`.
     A worker imports the experiment fresh per task, so either gives the value
     saved at task start. What is recorded in the measurement file is up to the
@@ -154,7 +154,7 @@ experiments**.
     values are written through Accept. Rejected along the way: a `saved=` /
     `Saved(...)` link on arguments, recording which arguments came from saved
     keys, and a `saved_parameters=` argument to `run_local` (tests monkeypatch
-    `get_saved` through a fixture instead).
+    `get_saved_parameter` through a fixture instead).
 12. **Saved keys are flat and unique across the lab**; today's keys stay as
     they are. The old categories (`motmaster_parameters`, `misc_parameters`,
     `emccd_parameters`, `image_analysis`) become display groups. CaF keys get
@@ -185,7 +185,7 @@ experiments**.
     last changed by/when, why; today's acceptances in bold); a sheet to edit
     the selected key (value with unit, a "why" saved in the log, Apply as the
     primary, Revert); a well with that key's history. Editing only: keys are
-    created in code (`set_saved(..., create=True)`) or by the import. The
+    created in code (`set_saved_parameters(..., create=True)`) or by the import. The
     import fills obvious units (V for VCO/VVA, px for centres) and leaves the
     rest blank.
   - Store: `saved_parameters.py` with `SavedParameter` (key, value, group,
@@ -194,9 +194,9 @@ experiments**.
     (`saved_parameters.json` in the manager's data directory) and an
     append-only `saved_parameters_log.jsonl` (time, who, key, old, new,
     reason). Values are JSON scalars and keep their type.
-  - Commands: `saved_parameters`, `set_saved`, `accept` (checks the run
+  - Commands: `saved_parameters`, `set_saved_parameters`, `accept` (checks the run
     exists, logs its RID), `saved_history`; `saved_parameters_version` in the
-    snapshot. `TweezerBaseline` reads its map through `get_saved` and loses
+    snapshot. `TweezerBaseline` reads its map through `get_saved_parameter` and loses
     `parameters_file`; `ExpParameterManager` goes once unused.
 
 ## Still to cover
