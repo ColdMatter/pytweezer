@@ -64,7 +64,6 @@ class Harness:
         (package / "steps.py").write_text(EXPERIMENT)
         monkeypatch.syspath_prepend(str(tmp_path))
         monkeypatch.setenv("PYTHONPATH", str(tmp_path))
-        monkeypatch.setenv("PYTWEEZER_LOG_DIR", str(tmp_path / "logs"))
         self.conf = {
             "host": "127.0.0.1",
             "port": free_port(),
