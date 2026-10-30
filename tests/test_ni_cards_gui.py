@@ -3,7 +3,7 @@
 import time
 
 import pytest
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtTest import QTest
 
 from pytweezer.GUI.ni_cards import panel as panel_module
@@ -241,6 +241,25 @@ def test_ao_value_box_never_invents_or_keeps_a_stale_value(view, client):
     assert not [call for call in client.calls if call[0] == "write_ao"]
     client.state_received.emit(state(last_set={AO: {"value": 0.5, "time": 0.0}}))
     assert spin.text() == "0.5 V"
+
+
+def test_mouse_wheel_does_not_change_an_ao_value(view, client):
+    client.state_received.emit(state(last_set={AO: {"value": 0.5, "time": 0.0}}))
+    spin = view.cells[AO].spin
+    spin.setFocus()
+    centre = QtCore.QPointF(spin.rect().center())
+    wheel = QtGui.QWheelEvent(
+        centre,
+        spin.mapToGlobal(centre),
+        QtCore.QPoint(),
+        QtCore.QPoint(0, 120),
+        QtCore.Qt.MouseButton.NoButton,
+        QtCore.Qt.KeyboardModifier.NoModifier,
+        QtCore.Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    QtWidgets.QApplication.sendEvent(spin, wheel)
+    assert spin.value() == 0.5
 
 
 def test_tab_recovers_when_the_device_server_comes_up_late(qapp, monkeypatch):

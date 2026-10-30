@@ -18,6 +18,15 @@ from pytweezer.GUI.components import CompactDoubleSpinBox, set_state
 from pytweezer.GUI.ni_cards.flow_grid import CELL_WIDTH
 
 TRACE_LENGTH = 100
+
+
+class _NoWheelSpinBox(CompactDoubleSpinBox):
+    """Passes the wheel on to the scroll area, so scrolling never sets a voltage."""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 _TRACE_COLOUR = "#5b8def"
 
 
@@ -140,7 +149,7 @@ class ChannelCell(QFrame):
         self.spin = None
         self.trace = None
         if self.kind == "ao":
-            self.spin = CompactDoubleSpinBox()
+            self.spin = _NoWheelSpinBox()
             self.spin.setDecimals(3)
             self.spin.setSingleStep(0.1)
             self.spin.setSuffix(" V")
