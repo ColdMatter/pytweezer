@@ -92,6 +92,16 @@ experiments**.
      start the acquisition, run the MOTMaster sequence (which triggers the
      camera; `Go()` blocks for the whole sequence while the camera buffers),
      then read the frames.
+6. **Accept writes to saved parameters, which are their own namespace.** A
+   `parameters.json` key is not a MOTMaster parameter, even where the names
+   match: different experiments may keep different values for the same
+   MOTMaster parameter under different keys. A stage or dimension saves under
+   its MOTMaster parameter's name by default and takes `save_as=` for a
+   distinct one, e.g. `Stage("rb.tImgCoolVCO1", values,
+   save_as="cool_vco_resonance")`; results that are not MOTMaster settings
+   (the MOT centre) always name their key. Accept only updates keys that
+   already exist (`ExpParameterManager.set_parameter` refuses others) and
+   shows each key's current and new value, with rows the user can untick.
 
 ## Proposed, not yet confirmed
 
@@ -111,9 +121,8 @@ experiments**.
 
 ## Open questions
 
-- Accepting: how an optimiser's best MOTMaster settings map to
-  `parameters.json` keys (they differ, e.g. `tImgCoolVCO1` is saved as
-  `tImgCoolVCO`).
+- Where MOT counts gets the MOT centre: from saved parameters, or measured
+  at the start of each run.
 
 ## Still to cover
 
