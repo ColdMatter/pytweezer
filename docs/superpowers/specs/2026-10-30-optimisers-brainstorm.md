@@ -154,6 +154,10 @@ experiments**.
     keys. Ordinary experiments are expected only to read saved parameters
     (writing is not prohibited); optimisers are expected to write them,
     through Accept.
+12. **Saved keys are flat and unique across the lab**; today's keys stay as
+    they are. The old categories (`motmaster_parameters`, `misc_parameters`,
+    `emccd_parameters`, `image_analysis`) become display groups. CaF keys get
+    their own names when they arrive (e.g. `caf.tImgCoolVCO` by convention).
 
 ## Proposed, not yet confirmed
 
@@ -173,7 +177,8 @@ experiments**.
 
 ## Open questions
 
-- Key namespace: flat keys or grouped by system (Rb, CaF).
+- Spec 1 design sections: store and commands, experiment API, GUI,
+  migration, testing.
 
 ## Still to cover
 
