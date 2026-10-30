@@ -1,4 +1,5 @@
 import json
+import pathlib
 import sys
 import time
 import types
@@ -246,4 +247,4 @@ def test_missing_dll_does_not_grow_sys_path_on_every_attempt(monkeypatch):
         with pytest.raises(FileNotFoundError):
             motmaster._add_reference("C:/mm/Missing.dll")
 
-    assert sys.path.count("C:/mm") == 1
+    assert sys.path.count(str(pathlib.Path("C:/mm"))) == 1
