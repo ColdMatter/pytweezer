@@ -234,6 +234,8 @@ class ChannelCell(QFrame):
             detail = (
                 "protected" if self.holder == PROTECTED else f"held by {self.holder}"
             )
+            if self.kind in ("ao", "do"):
+                detail += f" · {last_set_text(self.last, self.kind)}"
             state = "held"
         elif self.kind in ("ao", "do"):
             detail = last_set_text(self.last, self.kind)

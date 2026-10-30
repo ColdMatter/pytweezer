@@ -6,6 +6,7 @@ import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtTest import QTest
 
+from pytweezer.drivers.ni_cards import PROTECTED
 from pytweezer.GUI.ni_cards import panel as panel_module
 from pytweezer.GUI.ni_cards.cells import last_set_text
 from pytweezer.GUI.ni_cards.client import CardsClient
@@ -200,6 +201,13 @@ def test_state_marks_held_cells_and_card_banner(view, client):
     banner = view.banners["/PXI1Slot4"]
     assert not banner.isHidden()
     assert "Hardware Control" in banner.text()
+
+
+@pytest.mark.parametrize("holder", ["Wavemeter Lock", PROTECTED])
+def test_held_output_keeps_its_last_set_value(view, client, holder):
+    entry = {"value": 0.5, "time": 1793300000.0}
+    client.state_received.emit(state(holds={AO: holder}, last_set={AO: entry}))
+    assert last_set_text(entry, "ao") in view.cells[AO].detail_text()
 
 
 def test_channel_becoming_held_stops_being_watched(view, client):
