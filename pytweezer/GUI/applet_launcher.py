@@ -38,6 +38,11 @@ DEFAULT_APPLETS = [
         "script": "pytweezer/GUI/viewers/scalar_history.py",
         "description": "Rolling history of a scalar from a data stream header",
     },
+    {
+        "name": "SLM Monitor",
+        "script": "pytweezer/GUI/viewers/slm_monitor.py",
+        "description": "Target tweezer array beside the phase mask on the SLM",
+    },
 ]
 
 
