@@ -118,3 +118,45 @@ def test_two_aliases_on_one_line_are_both_kept():
     first, second = hardware.aliases
     assert [first.name, second.name] == ["MOT3Shutter", "rbOPShutter"]
     assert first.physical == second.physical == "PXI1Slot4/port3/line7"
+
+
+@pytest.mark.parametrize(
+    ("declarations", "expected"),
+    [
+        (
+            """
+            Info.Add("PatternGeneratorBoard", dp);
+            Dictionary<string, string> additionalPatternBoards = new Dictionary<string, string>();
+            additionalPatternBoards.Add(dp2, dp2);
+            Info.Add("AdditionalPatternGeneratorBoards", additionalPatternBoards);
+            Dictionary<string, string> analogBoards = new Dictionary<string, string>();
+            analogBoards.Add("AO", ap);
+            Info.Add("AnalogBoards", analogBoards);
+            """,
+            ["/Dev1", "/PXI1Slot6", "/PXI1Slot2"],
+        ),
+        ('Info.Add("PGType", "dedicated");', []),
+    ],
+)
+def test_pattern_boards_are_read_from_info(declarations, expected):
+    hardware = parse_hardware_file(
+        f"""
+        string dp = "/Dev1"; string dp2 = "/PXI1Slot6"; string ap = "/PXI1Slot2";
+        {declarations}
+        """
+    )
+    assert hardware.pattern_boards == expected
+
+
+def test_safe_state_values_are_read_from_info():
+    hardware = parse_hardware_file(
+        """
+        Info.Add(DAQ.Analog.DAQMxAnalogSafeState.InfoKey, new Dictionary<string, double>
+        {
+            { "MOTCoilsCurrent", 0.0 },
+            { "transferCoils", 1.5 }, // amps, not volts
+        });
+        Info.Add("PGType", "dedicated");
+        """
+    )
+    assert hardware.safe_states == {"MOTCoilsCurrent": 0.0, "transferCoils": 1.5}

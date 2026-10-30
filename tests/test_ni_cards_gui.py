@@ -3,9 +3,10 @@
 import time
 
 import pytest
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtTest import QTest
 
+from pytweezer.drivers.ni_cards import PROTECTED
 from pytweezer.GUI.ni_cards import panel as panel_module
 from pytweezer.GUI.ni_cards.cells import last_set_text
 from pytweezer.GUI.ni_cards.client import CardsClient
@@ -54,11 +55,12 @@ LAYOUT = {
 }
 
 
-def state(holds=None, card_holds=None, last_set=None):
+def state(holds=None, card_holds=None, last_set=None, notices=None):
     return {
         "holds": holds or {},
         "card_holds": card_holds or {},
         "last_set": last_set or {},
+        "notices": notices or [],
     }
 
 
@@ -122,6 +124,21 @@ def test_ni_card_devices_picks_entries_by_class():
         (None, "ao", "unknown"),
         ({"value": 1.25, "time": 1793300000.0}, "ao", "last set 1.25 V at {}"),
         ({"value": True, "time": 1793300000.0}, "do", "last set high at {}"),
+        (
+            {
+                "value": 1.25,
+                "time": 1793300000.0,
+                "source": "motmaster",
+                "script": "LoadTweezer",
+            },
+            "ao",
+            "end of LoadTweezer: 1.25 V at {}",
+        ),
+        (
+            {"value": 1.25, "time": 1793300000.0, "source": "motmaster"},
+            "ao",
+            "end of MOTMaster run: 1.25 V at {}",
+        ),
     ],
 )
 def test_last_set_text(entry, kind, expected):
@@ -160,9 +177,23 @@ def test_panel_builds_offscreen_with_a_layout(view):
 
 
 def test_state_marks_held_cells_and_card_banner(view, client):
+    notice = "CaF MotMaster is not reachable: its runs are not greyed out"
+    assert view.notices.isHidden()
     client.state_received.emit(
         state(
-            holds={AO: "Wavemeter Lock"}, card_holds={"/PXI1Slot4": "Hardware Control"}
+            holds={AO: "Wavemeter Lock"},
+            card_holds={"/PXI1Slot4": "Hardware Control"},
+            notices=[notice],
+        )
+    )
+    assert not view.notices.isHidden()
+    assert view.notices.text() == notice
+    client.state_received.emit({k: v for k, v in state().items() if k != "notices"})
+    assert view.notices.isHidden()
+    client.state_received.emit(
+        state(
+            holds={AO: "Wavemeter Lock"},
+            card_holds={"/PXI1Slot4": "Hardware Control"},
         )
     )
     assert not view.cells[AO].isEnabled()
@@ -170,6 +201,13 @@ def test_state_marks_held_cells_and_card_banner(view, client):
     banner = view.banners["/PXI1Slot4"]
     assert not banner.isHidden()
     assert "Hardware Control" in banner.text()
+
+
+@pytest.mark.parametrize("holder", ["Wavemeter Lock", PROTECTED])
+def test_held_output_keeps_its_last_set_value(view, client, holder):
+    entry = {"value": 0.5, "time": 1793300000.0}
+    client.state_received.emit(state(holds={AO: holder}, last_set={AO: entry}))
+    assert last_set_text(entry, "ao") in view.cells[AO].detail_text()
 
 
 def test_channel_becoming_held_stops_being_watched(view, client):
@@ -211,6 +249,25 @@ def test_ao_value_box_never_invents_or_keeps_a_stale_value(view, client):
     assert not [call for call in client.calls if call[0] == "write_ao"]
     client.state_received.emit(state(last_set={AO: {"value": 0.5, "time": 0.0}}))
     assert spin.text() == "0.5 V"
+
+
+def test_mouse_wheel_does_not_change_an_ao_value(view, client):
+    client.state_received.emit(state(last_set={AO: {"value": 0.5, "time": 0.0}}))
+    spin = view.cells[AO].spin
+    spin.setFocus()
+    centre = QtCore.QPointF(spin.rect().center())
+    wheel = QtGui.QWheelEvent(
+        centre,
+        spin.mapToGlobal(centre),
+        QtCore.QPoint(),
+        QtCore.QPoint(0, 120),
+        QtCore.Qt.MouseButton.NoButton,
+        QtCore.Qt.KeyboardModifier.NoModifier,
+        QtCore.Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    QtWidgets.QApplication.sendEvent(spin, wheel)
+    assert spin.value() == 0.5
 
 
 def test_tab_recovers_when_the_device_server_comes_up_late(qapp, monkeypatch):

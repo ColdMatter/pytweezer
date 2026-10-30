@@ -4,83 +4,14 @@ import time
 
 import pytest
 
-from pytweezer.drivers.ni_cards import PROTECTED, CardInfo, ChannelHeld, NICards
-
-HARDWARE = """
-string dio = "/PXI1Slot4";
-Boards.Add("digitalPattern2", dio);
-string analog = "/PXI1Slot2";
-Boards.Add("analogPattern", analog);
-string tcl2 = "/PXI1Slot8";
-Boards.Add("tclBoard2", tcl2);
-string usb = "/Dev3";
-Boards.Add("usbBoard2", usb);
-
-AddDigitalOutputChannel("MOT3Shutter", dio, 3, 7);
-AddDigitalOutputChannel("rbOPShutter", dio, 3, 7);
-AddDigitalOutputChannel("MOT1Shutter", dio, 3, 5);
-AddAnalogOutputChannel("v21Lock", analog + "/ao0", 0.0, 1.0);
-AddAnalogOutputChannel("MOTCoilsCurrent", analog + "/ao1");
-AddAnalogInputChannel("v00PD", analog + "/ai0", AITerminalConfiguration.Rse);
-AddDigitalInputChannel("bXLockBlockFlag", analog, 0, 1);
-AddAnalogInputChannel("sourceTemp", tcl2 + "/ai4", AITerminalConfiguration.Rse);
-AddAnalogOutputChannel("v10Lock", usb + "/ao1", 0, 5);
-"""
-
-
-class FakeIO:
-    """Cards as NI-DAQmx would report them; records what reaches the hardware."""
-
-    def __init__(self):
-        self.calls = []
-        self.cards = {
-            "PXI1Slot4": CardInfo(
-                "PXI-6535",
-                ao=[],
-                ai=[],
-                lines=[
-                    "PXI1Slot4/port0/line10",
-                    "PXI1Slot4/port3/line7",
-                    "PXI1Slot4/port0/line2",
-                    "PXI1Slot4/port3/line5",
-                ],
-                ao_range=(0.0, 0.0),
-            ),
-            "PXI1Slot2": CardInfo(
-                "PXIe-6738",
-                ao=["PXI1Slot2/ao0", "PXI1Slot2/ao1"],
-                ai=["PXI1Slot2/ai0", "PXI1Slot2/ai1"],
-                lines=["PXI1Slot2/port0/line1"],
-                ao_range=(-10.0, 10.0),
-            ),
-            "PXI1Slot8": CardInfo(
-                "PXI-6221",
-                ao=["PXI1Slot8/ao0"],
-                ai=["PXI1Slot8/ai4", "PXI1Slot8/ai9"],
-                lines=["PXI1Slot8/port0/line0"],
-                ao_range=(-10.0, 10.0),
-            ),
-        }
-
-    def card(self, device):
-        card = self.cards.get(device)
-        if isinstance(card, Exception):
-            raise card
-        return card
-
-    def write_do(self, physical, high):
-        self.calls.append(("write_do", physical, high))
-
-    def write_ao(self, physical, volts, low, high):
-        self.calls.append(("write_ao", physical, volts, low, high))
-
-    def read_ai(self, physicals, terminals):
-        self.calls.append(("read_ai", list(physicals), list(terminals)))
-        return [1.5] * len(physicals)
-
-    def read_di(self, physicals):
-        self.calls.append(("read_di", list(physicals)))
-        return [True] * len(physicals)
+from pytweezer.drivers.ni_cards import (
+    PROTECTED,
+    ChannelHeld,
+    Holds,
+    NICards,
+    Reservations,
+)
+from tests.helpers import HARDWARE, FakeIO
 
 
 @pytest.fixture
@@ -169,6 +100,16 @@ def test_reserved_card_holds_every_channel_including_unaliased(hardware_file, io
         "PXI1Slot8/port0/line0",
     }
     assert {state["holds"][p] for p in on_card} == {"Hardware Control"}
+
+
+def test_earlier_source_wins_for_channels_and_cards():
+    first = Holds({"A/ao0": "first"}, {"/A": "first"})
+    second = Holds(
+        {"A/ao0": "second", "B/ao0": "second"}, {"/A": "second", "/B": "second"}
+    )
+    merged = Reservations([lambda: first, lambda: second]).current()
+    assert merged.channels == {"A/ao0": "first", "B/ao0": "second"}
+    assert merged.cards == {"/A": "first", "/B": "second"}
 
 
 @pytest.mark.parametrize("operation", ["write", "read"])

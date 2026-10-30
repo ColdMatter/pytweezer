@@ -7,6 +7,11 @@ whole card) and protected channels are never touched; both are enforced here,
 not only in the GUI. The last value written to each output is remembered,
 because most of these cards cannot read an output back.
 
+With ``motmaster`` set, MOTMaster's pattern boards are held whole while that
+MOTMaster runs a sequence or a running queued task reserves it, and after each
+run the analogue outputs show the values its pattern ended on. The run
+MOTMaster reports as its last when the driver starts is not shown.
+
 Config entry shape (``CONFIG["Devices"][name]``)::
 
     {
@@ -16,6 +21,8 @@ Config entry shape (``CONFIG["Devices"][name]``)::
         "reserved": {"Wavemeter Lock": {"channels": ["v00Lock"]},
                      "Hardware Control": {"cards": ["tclBoard2"]}},
         "protected": ["MOTCoilsCurrent"],
+        "motmaster": "CaF MotMaster",
+        "teardown": "close",
         ...
     }
 """
@@ -30,6 +37,14 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from pytweezer.configuration.paths import tweezerpath
+from pytweezer.drivers.ni_cards_sources import (
+    LastRun,
+    ManagerQueue,
+    MotMasterNotAnswering,
+    MotMasterTooOld,
+    RemotingMotMasterStatus,
+    SimulatedMotMasterStatus,
+)
 from pytweezer.drivers.ni_hardware_file import HardwareFile, read_hardware_file
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers.simulated_device import simulate
@@ -38,7 +53,16 @@ logger = get_logger("pytweezer.drivers.ni_cards")
 
 PROTECTED = "Protected"
 NOT_FOUND = "not found on this PC"
+NO_PATTERN_BOARDS = (
+    "The hardware file names no MOTMaster pattern boards: "
+    "MOTMaster runs are not greyed out"
+)
 _KIND_ORDER = {"ai": 0, "ao": 1, "di": 2, "do": 3}
+
+# TODO: check on the rig whether the PCI-6534 and PXI-6535 digital lines hold
+# the pattern's last sample once the pattern task stops; if they do, set this
+# to True. Until then a run leaves every digital pattern line "unknown".
+SHOW_DIGITAL_END_VALUES = False
 
 
 @dataclass
@@ -51,6 +75,18 @@ class CardInfo:
     lines: list[str]
     ao_range: tuple[float, float]
     input_lines: list[str] = field(default_factory=list)
+
+
+class MotMasterStatus(Protocol):
+    setup_error: bool
+
+    def is_running(self) -> bool | None: ...
+    def last_run(self) -> LastRun | None: ...
+
+
+class Queue(Protocol):
+    def running_devices(self) -> dict[str, int] | None: ...
+    def close(self) -> None: ...
 
 
 class CardIO(Protocol):
@@ -69,21 +105,33 @@ class ChannelHeld(Exception):
     """A write or read on a channel that is reserved or protected."""
 
 
-class Reservations:
-    """Who holds which physical channel, merged from several sources.
+@dataclass(frozen=True)
+class Holds:
+    """What is held: channels by physical name, whole cards by address.
 
-    Each source returns ``{physical: holder}``; earlier sources win.
+    A source that holds a card also lists every physical on it in ``channels``.
     """
 
-    def __init__(self, sources: list[Callable[[], dict[str, str]]]):
+    channels: dict[str, str] = field(default_factory=dict)
+    cards: dict[str, str] = field(default_factory=dict)
+
+
+class Reservations:
+    """Who holds what, merged from several sources; earlier sources win."""
+
+    def __init__(self, sources: list[Callable[[], Holds]]):
         self.sources = sources
 
-    def holds(self) -> dict[str, str]:
-        merged: dict[str, str] = {}
+    def current(self) -> Holds:
+        channels: dict[str, str] = {}
+        cards: dict[str, str] = {}
         for source in self.sources:
-            for physical, holder in source().items():
-                merged.setdefault(physical, holder)
-        return merged
+            held = source()
+            for physical, holder in held.channels.items():
+                channels.setdefault(physical, holder)
+            for address, holder in held.cards.items():
+                cards.setdefault(address, holder)
+        return Holds(channels, cards)
 
 
 def _ao_range(declared: tuple | None, info: CardInfo | None) -> list[float]:
@@ -113,10 +161,16 @@ class NICards:
         hardware_file: Path to the PC's ``*Hardware.cs``.
         reserved: ``{holder: {"channels": [alias, ...], "cards": [board, ...]}}``.
         protected: Aliases that are never written or read.
+        motmaster: The ``CONFIG["Devices"]`` name of the MOTMaster that drives
+            this PC's pattern boards; ``None`` for no MOTMaster holds.
+        io: NI-DAQmx access; the real hardware when omitted.
+        motmaster_status: How to ask MOTMaster whether it is running and what
+            its last run ended on; over .NET remoting when omitted.
+        queue: Which devices the Experiment Manager's running tasks hold; a
+            mirror of the manager's state when omitted.
 
     ``reserved`` and ``protected`` have no defaults, so a misspelt config key
     fails construction instead of leaving channels unprotected.
-        io: NI-DAQmx access; the real hardware when omitted.
     """
 
     def __init__(
@@ -124,8 +178,11 @@ class NICards:
         hardware_file: str,
         reserved: dict,
         protected: list[str],
+        motmaster: str | None = None,
         *,
         io: CardIO | None = None,
+        motmaster_status: MotMasterStatus | None = None,
+        queue: Queue | None = None,
     ):
         if io is None:
             io = DaqmxIO()
@@ -135,7 +192,6 @@ class NICards:
         self._channels: dict[str, dict] = {}
         self._card_of: dict[str, dict] = {}
         self._last_set: dict[str, dict] = {}
-        self._card_holds: dict[str, str] = {}
         try:
             hardware = read_hardware_file(hardware_file)
         except OSError as error:
@@ -144,7 +200,48 @@ class NICards:
             hardware = HardwareFile({}, [])
         self._build_layout(hardware)
         static = self._static_holds(hardware, reserved, protected)
-        self.reservations = Reservations([lambda: static])
+        addresses = {card["address"] for card in self._cards}
+        self._pattern_boards = [a for a in hardware.pattern_boards if a in addresses]
+        self._pattern_channels = {
+            p for a in self._pattern_boards for p in self._card_channels(a)
+        }
+        self._pattern_aliases = {
+            alias: self._channels[p]
+            for p in self._pattern_channels
+            for alias in self._channels[p]["aliases"]
+        }
+        self._safe_volts = {
+            p: hardware.safe_states[alias]
+            for p, channel in self._channels.items()
+            if channel["kind"] == "ao"
+            for alias in channel["aliases"]
+            if alias in hardware.safe_states
+        }
+        self._motmaster = motmaster
+        self._status = None
+        self._queue = queue
+        self._closed = False
+        self._motmaster_reachable = True
+        self._motmaster_setup_error = False
+        self._manager_reachable = True
+        self._motmaster_too_old = False
+        self._last_seen_finished = -math.inf
+        self._logged_errors: set[str] = set()
+        sources = [lambda: static]
+        if motmaster is not None and self._pattern_boards:
+            self._status = (
+                motmaster_status
+                if motmaster_status is not None
+                else RemotingMotMasterStatus(motmaster)
+            )
+            if self._queue is None:
+                self._queue = ManagerQueue()
+            sources += [self._running_holds, self._queued_holds]
+        self.reservations = Reservations(sources)
+        # Panel writes since MOTMaster's last run went with the previous server,
+        # so that run's values may be stale: pattern channels stay unknown until
+        # the next run finishes.
+        self._sync_end_of_run(apply=False)
 
     def _build_layout(self, hardware: HardwareFile) -> None:
         for board in hardware.boards.values():
@@ -207,7 +304,7 @@ class NICards:
 
     def _static_holds(
         self, hardware: HardwareFile, reserved: dict, protected: list[str]
-    ) -> dict[str, str]:
+    ) -> Holds:
         for holder, held in reserved.items():
             if unknown := set(held) - {"channels", "cards"}:
                 raise ValueError(
@@ -215,48 +312,192 @@ class NICards:
                     "expected 'channels' and/or 'cards'"
                 )
         if self._error:
-            return {}
+            return Holds()
         by_alias = {alias.name: alias.physical for alias in hardware.aliases}
-        holds = {}
+        channels: dict[str, str] = {}
+        cards: dict[str, str] = {}
         for name in protected:
             if name not in by_alias:
                 raise ValueError(
                     f"Protected channel {name!r} is not in the hardware file"
                 )
-            holds[by_alias[name]] = PROTECTED
+            channels[by_alias[name]] = PROTECTED
         for holder, held in reserved.items():
             for name in held.get("channels", []):
                 if name not in by_alias:
                     raise ValueError(
                         f"{holder} reserves {name!r}, which is not in the hardware file"
                     )
-                holds.setdefault(by_alias[name], holder)
+                channels.setdefault(by_alias[name], holder)
             for board_name in held.get("cards", []):
                 board = hardware.boards.get(board_name)
                 if board is None:
                     raise ValueError(
                         f"{holder} reserves card {board_name!r}, which is not in the hardware file"
                     )
-                self._card_holds[board.address] = holder
-                for physical, card in self._card_of.items():
-                    if card["address"] == board.address:
-                        holds.setdefault(physical, holder)
-        return holds
+                cards.setdefault(board.address, holder)
+                for physical in self._card_channels(board.address):
+                    channels.setdefault(physical, holder)
+        return Holds(channels, cards)
+
+    def _card_channels(self, address: str) -> list[str]:
+        """The physicals of the card at ``address``, aliased and unaliased."""
+        return [
+            channel["physical"]
+            for card in self._cards
+            if card["address"] == address
+            for channel in card["channels"] + card["unaliased"]
+        ]
+
+    def _hold_pattern_boards(self, why: str) -> Holds:
+        holder = f"{self._motmaster} ({why})"
+        return Holds(
+            dict.fromkeys(self._pattern_channels, holder),
+            dict.fromkeys(self._pattern_boards, holder),
+        )
+
+    def _log_once(self, call: str, error: Exception) -> None:
+        """Log an unexpected failure of ``call`` the first time its message is seen."""
+        message = f"{call}: {type(error).__name__}: {error}"
+        if message not in self._logged_errors:
+            self._logged_errors.add(message)
+            logger.exception("%s failed unexpectedly", call)
+
+    def _running_holds(self) -> Holds:
+        self._motmaster_reachable = True
+        try:
+            running = self._status.is_running()
+        except MotMasterNotAnswering:
+            return self._hold_pattern_boards("not answering")
+        except Exception as error:
+            self._log_once(f"{self._motmaster} is_running", error)
+            return self._hold_pattern_boards("status error, see log")
+        if running is None:
+            self._motmaster_reachable = False
+            self._motmaster_setup_error = self._status.setup_error
+        if running:
+            return self._hold_pattern_boards("running a sequence")
+        return Holds()
+
+    def _queued_holds(self) -> Holds:
+        try:
+            devices = self._queue.running_devices()
+        except Exception as error:
+            self._log_once("Experiment Manager queue", error)
+            devices = None
+        self._manager_reachable = devices is not None
+        if devices and self._motmaster in devices:
+            return self._hold_pattern_boards(f"queued run {devices[self._motmaster]}")
+        return Holds()
+
+    def _sync_end_of_run(self, apply: bool = True) -> None:
+        """Apply MOTMaster's last run if it finished after the last one seen.
+
+        Args:
+            apply: If false, only mark the run as seen, leaving its values
+                unapplied.
+        """
+        if self._status is None:
+            return
+        try:
+            last = self._status.last_run()
+        except MotMasterTooOld:
+            self._motmaster_too_old = True
+            return
+        except MotMasterNotAnswering:
+            return
+        except Exception as error:
+            self._log_once(f"{self._motmaster} last_run", error)
+            return
+        self._motmaster_too_old = False
+        # A restarted MOTMaster numbers its runs from 1 again, so only a later
+        # finish time counts as a new run.
+        if last is None or last.finished <= self._last_seen_finished:
+            return
+        self._last_seen_finished = last.finished
+        if not apply:
+            return
+        for physical in self._pattern_channels & self._last_set.keys():
+            if self._last_set[physical]["time"] < last.finished:
+                del self._last_set[physical]
+        end_values = {}
+        if last.outputs_known:
+            shown = ("ao", "do") if SHOW_DIGITAL_END_VALUES else ("ao",)
+            for name, value in last.values.items():
+                channel = self._pattern_aliases.get(name)
+                if channel is not None and channel["kind"] in shown:
+                    end_values[channel["physical"]] = (
+                        float(value) if channel["kind"] == "ao" else bool(value)
+                    )
+        # MOTMaster sets its safe state after every run, however the run ended.
+        end_values.update(self._safe_volts)
+        for physical, value in end_values.items():
+            newer = self._last_set.get(physical, {}).get("time", -math.inf)
+            if newer >= last.finished:
+                continue
+            self._last_set[physical] = {
+                "value": value,
+                "time": last.finished,
+                "source": "motmaster",
+                "script": last.script,
+            }
+
+    def _notices(self) -> list[str]:
+        if self._motmaster is None:
+            return []
+        if not self._pattern_boards:
+            if self._error:
+                return []
+            return [NO_PATTERN_BOARDS]
+        notices = []
+        if not self._motmaster_reachable and self._motmaster_setup_error:
+            notices.append(
+                f"Cannot connect to {self._motmaster} (setup error, see log): "
+                "its runs are not greyed out"
+            )
+        elif not self._motmaster_reachable:
+            notices.append(
+                f"{self._motmaster} is not reachable: its runs are not greyed out"
+            )
+        if self._motmaster_too_old:
+            notices.append(
+                f"{self._motmaster} does not report end-of-run values: "
+                "it needs a newer MOTMaster build"
+            )
+        if not self._manager_reachable:
+            notices.append(
+                "The Experiment Manager is not reachable: queued runs are not greyed out"
+            )
+        return notices
+
+    def close(self) -> None:
+        """Stop mirroring the Experiment Manager's queue."""
+        if self._queue is not None and not self._closed:
+            self._closed = True
+            self._queue.close()
 
     def layout(self) -> dict:
         """Every card with its aliased and unaliased channels, or the file error."""
         return {"error": self._error, "cards": self._cards}
 
     def state(self) -> dict:
-        """What is held and by whom, and the last value written to each output."""
+        """What is held and by whom, the last value of each output, and notices.
+
+        A ``last_set`` entry has ``"value"``, ``"time"`` and ``"source"``
+        (``"panel"`` or ``"motmaster"``); a MOTMaster entry also has the
+        ``"script"`` whose run ended on that value.
+        """
+        held = self.reservations.current()
+        self._sync_end_of_run()
         return {
-            "holds": self.reservations.holds(),
-            "card_holds": dict(self._card_holds),
+            "holds": held.channels,
+            "card_holds": held.cards,
             "last_set": dict(self._last_set),
+            "notices": self._notices(),
         }
 
-    def _usable(self, physical: str, kinds: tuple[str, ...]) -> dict:
-        holder = self.reservations.holds().get(physical)
+    def _usable(self, physical: str, kinds: tuple[str, ...], held: Holds) -> dict:
+        holder = held.channels.get(physical)
         if holder is not None:
             raise ChannelHeld(f"{physical} is held by {holder}")
         channel = self._channels.get(physical)
@@ -273,21 +514,31 @@ class NICards:
 
     def write_do(self, physical: str, high: bool) -> None:
         """Set a digital output line high or low."""
-        self._usable(physical, ("do",))
+        self._usable(physical, ("do",), self.reservations.current())
         self._io.write_do(physical, bool(high))
-        self._last_set[physical] = {"value": bool(high), "time": time.time()}
+        self._last_set[physical] = {
+            "value": bool(high),
+            "time": time.time(),
+            "source": "panel",
+        }
 
     def write_ao(self, physical: str, volts: float) -> None:
         """Set an analogue output, within its declared range or the card's."""
-        low, high = self._usable(physical, ("ao",))["range"]
+        channel = self._usable(physical, ("ao",), self.reservations.current())
+        low, high = channel["range"]
         if not low <= volts <= high:
             raise ValueError(f"{volts} V is outside {physical}'s range {low}…{high} V")
         self._io.write_ao(physical, float(volts), low, high)
-        self._last_set[physical] = {"value": float(volts), "time": time.time()}
+        self._last_set[physical] = {
+            "value": float(volts),
+            "time": time.time(),
+            "source": "panel",
+        }
 
     def read(self, physicals: list[str]) -> dict[str, float | bool]:
         """One reading from each analogue or digital input."""
-        channels = [self._usable(p, ("ai", "di")) for p in physicals]
+        held = self.reservations.current()
+        channels = [self._usable(p, ("ai", "di"), held) for p in physicals]
         ai = [c for c in channels if c["kind"] == "ai"]
         di = [c for c in channels if c["kind"] == "di"]
         values: dict[str, float | bool] = {}
@@ -458,6 +709,7 @@ class SimulatedNICards(NICards):
 
     A lab-PC path to the hardware file that does not exist here falls back to the
     same file in a sibling EDMSuite checkout (``<repo>/../EDMSuite/DAQ/``).
+    MOTMaster never runs in simulation; the Experiment Manager's queue is real.
     """
 
     def __init__(
@@ -465,6 +717,7 @@ class SimulatedNICards(NICards):
         hardware_file: str,
         reserved: dict,
         protected: list[str],
+        motmaster: str | None = None,
     ):
         if not os.path.exists(hardware_file):
             name = re.split(r"[\\/]", hardware_file)[-1]
@@ -475,4 +728,12 @@ class SimulatedNICards(NICards):
             aliased = [a.physical for a in read_hardware_file(hardware_file).aliases]
         except OSError:
             aliased = []
-        super().__init__(hardware_file, reserved, protected, io=SimulatedIO(aliased))
+        super().__init__(
+            hardware_file,
+            reserved,
+            protected,
+            motmaster,
+            io=SimulatedIO(aliased),
+            motmaster_status=SimulatedMotMasterStatus(),
+            queue=ManagerQueue() if motmaster is not None else None,
+        )

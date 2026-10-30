@@ -104,6 +104,45 @@ def _ensure_motmaster_running(
     )
 
 
+_referenced: set[str] = set()
+
+
+def _add_reference(path: str) -> None:
+    # Once per process: a poller that rebuilds its proxy must not grow sys.path,
+    # even while a DLL is missing and clr.AddReference keeps failing.
+    if path in _referenced:
+        return
+    parent = str(pathlib.Path(path).parent)
+    if parent not in sys.path:
+        sys.path.append(parent)
+    clr.AddReference(path)
+    _referenced.add(path)
+
+
+def motmaster_controller(config_file: str) -> Any:
+    """The remoting proxy for the MOTMaster ``Controller`` named by ``config_file``.
+
+    ``config_file`` is resolved against ``CONFIG_DIR`` as `MotMasterInterface`
+    does. The references are added once per process. Building the proxy does
+    not start MOTMaster or contact it; the first call through the proxy does.
+
+    Args:
+        config_file: JSON config naming the ``"motmaster"`` entry and ``dll_paths``.
+
+    Returns:
+        The ``MOTMaster.Controller`` proxy.
+    """
+    with open(CONFIG_DIR / config_file, "r") as f:
+        config = json.load(f)
+    for path in config["dll_paths"].values():
+        _add_reference(path)
+    motmaster = config["motmaster"]
+    _add_reference(motmaster["exe_path"])
+    import MOTMaster  # type: ignore
+
+    return Activator.GetObject(MOTMaster.Controller, motmaster["remote_path"])
+
+
 class MotMasterInterface:
     def __init__(self, config_file: str, interval: float = 0.1) -> None:
         # ``config_file`` names a JSON file in the package ``configuration/`` dir; an
@@ -126,9 +165,7 @@ class MotMasterInterface:
             raise RuntimeError("Failed to connect to MotMaster.")
 
     def _add_ref(self, path: str) -> None:
-        _path = pathlib.Path(path)
-        sys.path.append(_path.parent)
-        clr.AddReference(path)
+        _add_reference(path)
 
     def connect(self) -> None:
         for path in self.config["dll_paths"].values():

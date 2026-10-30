@@ -288,6 +288,8 @@ CONFIG = {
             },
             # MOTMaster's safe-state channels (DAQMxAnalogSafeState).
             "protected": ["MOTCoilsCurrent", "transferCoils", "TweezerCoils"],
+            "motmaster": "CaF MotMaster",
+            "teardown": "close",
         },
         "Rb NI Cards": {
             "active": True,
@@ -300,6 +302,8 @@ CONFIG = {
             "reserved": {"Wavemeter Lock": {"channels": ["tRbD1Lock"]}},
             # Coil currents.
             "protected": ["tMOTcc", "tMagneticTrapcc"],
+            "motmaster": "Rb MotMaster",
+            "teardown": "close",
         },
     },
     # Background database loggers. Each entry runs pytweezer/servers/logger_server.py,

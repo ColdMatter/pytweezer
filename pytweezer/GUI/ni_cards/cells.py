@@ -21,6 +21,13 @@ TRACE_LENGTH = 100
 _TRACE_COLOUR = "#5b8def"
 
 
+class _NoWheelSpinBox(CompactDoubleSpinBox):
+    """Passes the wheel on to the scroll area, so scrolling never sets a voltage."""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 def _volts(value: float) -> str:
     text = f"{value:.3f}".rstrip("0").rstrip(".")
     return f"{'0' if text == '-0' else text} V"
@@ -31,13 +38,19 @@ def _level(value: bool) -> str:
 
 
 def last_set_text(entry: dict | None, kind: str) -> str:
-    """``"last set 1.25 V at 14:02"``, ``"last set high at 14:02"`` or ``"unknown"``."""
+    """``"last set 1.25 V at 14:02"``, ``"last set high at 14:02"`` or ``"unknown"``.
+
+    A MOTMaster entry reads ``"end of LoadTweezer: 1.25 V at 14:02"``, or
+    ``"end of MOTMaster run: …"`` without a script. An entry without a
+    ``source`` (from an older server) reads as a panel write.
+    """
     if entry is None:
         return "unknown"
     value = _volts(entry["value"]) if kind == "ao" else _level(entry["value"])
-    return (
-        f"last set {value} at {time.strftime('%H:%M', time.localtime(entry['time']))}"
-    )
+    clock = time.strftime("%H:%M", time.localtime(entry["time"]))
+    if entry.get("source") == "motmaster":
+        return f"end of {entry.get('script') or 'MOTMaster run'}: {value} at {clock}"
+    return f"last set {value} at {clock}"
 
 
 def address_text(channel: dict) -> str:
@@ -134,7 +147,7 @@ class ChannelCell(QFrame):
         self.spin = None
         self.trace = None
         if self.kind == "ao":
-            self.spin = CompactDoubleSpinBox()
+            self.spin = _NoWheelSpinBox()
             self.spin.setDecimals(3)
             self.spin.setSingleStep(0.1)
             self.spin.setSuffix(" V")
@@ -154,6 +167,7 @@ class ChannelCell(QFrame):
         layout.addLayout(row)
         self.detail = QLabel()
         self.detail.setProperty("role", "cellAddress")
+        self.detail.setWordWrap(True)
         layout.addWidget(self.detail)
         if self.kind in ("ai", "di"):
             self.setToolTip("Click to watch: read live while selected")
@@ -220,6 +234,8 @@ class ChannelCell(QFrame):
             detail = (
                 "protected" if self.holder == PROTECTED else f"held by {self.holder}"
             )
+            if self.kind in ("ao", "do"):
+                detail += f" · {last_set_text(self.last, self.kind)}"
             state = "held"
         elif self.kind in ("ao", "do"):
             detail = last_set_text(self.last, self.kind)
