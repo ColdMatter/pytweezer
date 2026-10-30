@@ -72,6 +72,11 @@ experiments**.
      old file's history).
    - Its settings (bounds, number of calls, initial points, `xi` schedule) are
      experiment arguments, so saved presets are ordinary recipes.
+4. **A staged scan is a single task too.** The experiment runs stage 1's
+   points, takes the best value, then runs stage 2 at it; the total number of
+   points is known up front. There is **no optimiser service**: the
+   Optimisers tab launches ordinary tasks, shows their progress and offers
+   Accept. All stages of one staged scan belong to one experiment.
 
 ## Proposed, not yet confirmed
 
@@ -85,17 +90,14 @@ experiments**.
   followed by a repump-VCO stage.
 - Within one run, later stages use the earlier stages' optima directly, without
   waiting for acceptance.
+- Presets are code (optimisation experiments) plus recipes (their settings);
+  nothing is designed in the tab.
 - Any PC can watch a run or accept its result.
-- Left to the builder: whether the optimiser service is its own server process
-  or part of the Experiment Manager.
 
 ## Open questions
 
-- Do chained scans (DetectResonances, OptimiseMOTNumber) follow the same rule
-  and run as one task, which removes the need for an optimiser service?
-- Presets in code or made in the tab: largely settled for Bayesian runs by
-  decision 3 (code plus recipes); still open for scans if they stay separate
-  tasks.
+- How an optimisation reuses a single-purpose experiment's measurement
+  (inheritance or a generic wrapper naming the experiment class).
 
 ## Still to cover
 
