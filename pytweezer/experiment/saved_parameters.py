@@ -59,6 +59,10 @@ def _checked(key: str, value: Value, existing: Value | None) -> Value:
     if isinstance(value, float) and not math.isfinite(value):
         raise SavedParameterError(f"{key!r}: {value} is not a finite number")
     if existing is None:
+        if type(value) not in (float, int, bool, str):
+            raise SavedParameterError(
+                f"{key!r}: {value!r} is not a float, int, bool or string"
+            )
         return value
     kind = type(existing)
     if kind is float and type(value) is int:
@@ -81,11 +85,14 @@ class SavedParameterBook:
         for parameter in self.state.parameters:
             if parameter.key == key:
                 return parameter
+        raise self._unknown(key)
+
+    def _unknown(self, key: str) -> SavedParameterError:
         close = difflib.get_close_matches(
             key, [parameter.key for parameter in self.state.parameters], n=3
         )
         hint = f"; did you mean {', '.join(map(repr, close))}?" if close else ""
-        raise SavedParameterError(f"no saved parameter {key!r}{hint}")
+        return SavedParameterError(f"no saved parameter {key!r}{hint}")
 
     def all(self) -> list[SavedParameter]:
         return sorted(self.state.parameters, key=lambda p: (p.group, p.key))
@@ -113,9 +120,11 @@ class SavedParameterBook:
             key = raw_key.strip()
             if not key:
                 raise SavedParameterError("a saved parameter needs a key")
+            if any(key == planned_key for planned_key, _, _ in planned):
+                raise SavedParameterError(f"{key!r} is given more than once")
             current = existing.get(key)
             if current is None and not create:
-                self.get(key)
+                raise self._unknown(key)
             stored = _checked(key, value, None if current is None else current.value)
             planned.append((key, stored, current))
 

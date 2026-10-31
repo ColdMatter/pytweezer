@@ -76,3 +76,17 @@ def test_a_saved_book_reloads_with_every_value_in_its_type(tmp_path):
     assert {k: type(v) for k, v in loaded.items()} == {
         k: type(v) for k, v in values.items()
     }
+
+
+def test_a_creation_with_an_unstorable_value_creates_nothing():
+    book = SavedParameterBook()
+    with pytest.raises(SavedParameterError, match="b"):
+        book.set({"a": 1, "b": [1]}, reason="r", who="me", create=True)
+    assert book.all() == []
+
+
+def test_two_keys_that_strip_to_the_same_name_are_refused():
+    book = SavedParameterBook()
+    with pytest.raises(SavedParameterError, match="'a'"):
+        book.set({"a ": 1, "a": 2}, reason="r", who="me", create=True)
+    assert book.all() == []
