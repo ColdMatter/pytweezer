@@ -206,9 +206,15 @@ class SavedParameterLog:
             )
 
     def read(
-        self, key: str | None = None, *, limit: int | None = None
+        self,
+        key: str | None = None,
+        *,
+        rid: int | None = None,
+        limit: int | None = None,
     ) -> list[SavedParameterChange]:
-        """Changes to ``key`` (every key if ``None``), newest first, at most ``limit``.
+        """Changes to ``key`` (every key if ``None``) made by run ``rid`` (any if ``None``).
+
+        Newest first, at most ``limit``.
 
         A line that can't be parsed is skipped with a warning.
         """
@@ -222,7 +228,11 @@ class SavedParameterLog:
                 changes.append(SavedParameterChange.model_validate_json(line))
             except ValueError:
                 logger.warning("Skipping unreadable line %d of %s", number, self.path)
-        matching = [c for c in reversed(changes) if key in (None, c.key)]
+        matching = [
+            c
+            for c in reversed(changes)
+            if key in (None, c.key) and rid in (None, c.rid)
+        ]
         return matching if limit is None else matching[:limit]
 
 

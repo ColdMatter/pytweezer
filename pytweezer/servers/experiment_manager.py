@@ -350,7 +350,7 @@ class ExperimentManager:
 
     def _cmd_saved_parameter_history(self, request):
         entries = self.saved_parameter_log.read(
-            request.get("key"), limit=request.get("limit")
+            request.get("key"), rid=request.get("rid"), limit=request.get("limit")
         )
         return {"entries": [entry.model_dump(mode="json") for entry in entries]}
 

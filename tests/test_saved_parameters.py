@@ -74,6 +74,15 @@ def test_the_log_reads_newest_first_up_to_the_limit(tmp_path):
     assert [(c.key, c.new) for c in log.read(limit=3)] == [("b", 3), ("a", 3), ("b", 2)]
 
 
+def test_history_filters_by_run(tmp_path):
+    book, log = book_with(a=0, b=0), SavedParameterLog(tmp_path / "log.jsonl")
+    log.append(book.set({"a": 1}, reason="r", who="me", rid=7))
+    log.append(book.set({"a": 2}, reason="r", who="me", rid=8))
+    log.append(book.set({"b": 1}, reason="r", who="me", rid=7))
+    assert [(c.key, c.new) for c in log.read(rid=7)] == [("b", 1), ("a", 1)]
+    assert [c.new for c in log.read("a", rid=7)] == [1]
+
+
 def test_a_saved_book_reloads_with_every_value_in_its_type(tmp_path):
     values = {"f": 4.0, "i": 4, "flag": True, "s": "4"}
     store = SavedParameterStore(tmp_path / "parameters.json")

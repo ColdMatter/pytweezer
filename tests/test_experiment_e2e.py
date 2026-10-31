@@ -10,7 +10,14 @@ import pytest
 from pytweezer.experiment import ListAxis, Scan, load_measurement
 from pytweezer.experiment.archive import RemoteArchive
 from pytweezer.experiment.catalogue import Catalogue
-from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
+from pytweezer.experiment.client import (
+    ExperimentManagerClient,
+    get_saved_parameters,
+    saved_parameter_history,
+    set_saved_parameters,
+    submit,
+    wait,
+)
 from pytweezer.servers import experiment_manager as em
 from pytweezer.servers.sync import SyncMirror
 from tests.helpers import until
@@ -156,6 +163,56 @@ def test_catalogue_lists_runnable_experiments(harness):
     assert entry["module"] == "labexp.steps"
     assert entry["error"] is None
     assert [c["class_name"] for c in entry["classes"]] == ["Steps", "UsesSequencer"]
+
+
+OPTIM = textwrap.dedent(
+    """
+    from pytweezer.experiments.demo import DemoStagedScan
+
+
+    class Optim(DemoStagedScan):
+        pass
+    """
+)
+
+
+def test_an_optimiser_run_can_be_accepted(harness):
+    (harness.package_dir / "optim.py").write_text(OPTIM)
+    until(
+        lambda: any(e["module"] == "labexp.optim" for e in harness.client.catalogue()),
+        timeout=30,
+    )
+    set_saved_parameters(
+        {"demo_resonance": 0.0, "demo_power": 0.5},
+        "created",
+        create=True,
+        client=harness.client,
+    )
+    rid = submit(
+        "labexp.optim:Optim",
+        client=harness.client,
+        detuning_points=5,
+        power_points=3,
+    )
+    task = until(
+        lambda: (t := harness.client.get(rid)).status == "completed" and t, timeout=30
+    )
+    assert task
+    constants = harness.measurement(task).constants
+    proposals = {
+        name.removeprefix("proposed."): value
+        for name, value in constants.items()
+        if name.startswith("proposed.")
+    }
+    assert set(proposals) == {"demo_resonance", "demo_power"}
+
+    set_saved_parameters(
+        proposals, f"accepted from run {rid}", rid=rid, client=harness.client
+    )
+
+    assert get_saved_parameters(client=harness.client) == pytest.approx(proposals)
+    history = saved_parameter_history(rid=rid, client=harness.client)
+    assert sorted(c.key for c in history) == ["demo_power", "demo_resonance"]
 
 
 FROM_FILE = textwrap.dedent(

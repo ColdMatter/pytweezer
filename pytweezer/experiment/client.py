@@ -245,9 +245,13 @@ class ExperimentManagerClient:
         return [SavedParameterChange.model_validate(c) for c in reply["changes"]]
 
     def saved_parameter_history(
-        self, key: str | None = None, *, limit: int | None = None
+        self,
+        key: str | None = None,
+        *,
+        rid: int | None = None,
+        limit: int | None = None,
     ) -> list[SavedParameterChange]:
-        reply = self.call("saved_parameter_history", key=key, limit=limit)
+        reply = self.call("saved_parameter_history", key=key, rid=rid, limit=limit)
         return [SavedParameterChange.model_validate(e) for e in reply["entries"]]
 
     def set_priority(self, rid: int, priority: int) -> None:
@@ -492,12 +496,16 @@ def saved_parameter_history(
     key: str | None = None,
     /,
     *,
+    rid: int | None = None,
     limit: int | None = None,
     client: ExperimentManagerClient | None = None,
 ) -> list[SavedParameterChange]:
-    """Changes to saved parameter ``key`` (every key if ``None``), newest first."""
+    """Changes to saved parameter ``key`` (every key if ``None``), newest first.
+
+    Only those made by run ``rid`` if given.
+    """
     return (client or ExperimentManagerClient()).saved_parameter_history(
-        key, limit=limit
+        key, rid=rid, limit=limit
     )
 
 
