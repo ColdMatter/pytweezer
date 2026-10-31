@@ -155,6 +155,10 @@ class ExperimentManagerClient:
     def catalogue(self) -> list[dict[str, Any]]:
         return self.call("catalogue")["modules"]
 
+    def describe_again(self, module: str) -> None:
+        """Have the manager describe ``module`` again, so its defaults are re-read."""
+        self.call("describe_again", module=module)
+
     def submit(self, request: TaskRequest) -> int:
         return self.call("submit", request=request.model_dump(mode="json"))["rid"]
 

@@ -267,6 +267,10 @@ class StaticCatalogue:
     def poll(self):
         return False
 
+    def describe_again(self, module):
+        if module not in {entry["module"] for entry in self._entries}:
+            raise KeyError(module)
+
     def entries(self):
         return self._entries
 

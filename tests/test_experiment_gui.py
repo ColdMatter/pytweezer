@@ -65,13 +65,19 @@ class FakeClient:
         self.recipes = []
         self.recipes_version = 0
         self.errors = {}
+        self.modules = MODULES
+        self.catalogue_version = 1
 
     def call(self, command, **fields):
         self.calls.append((command, fields))
         if command in self.errors:
             raise ManagerError(self.errors[command])
         if command == "catalogue":
-            return {"ok": True, "modules": MODULES, "version": 1}
+            return {
+                "ok": True,
+                "modules": self.modules,
+                "version": self.catalogue_version,
+            }
         if command == "recipes":
             return {
                 "ok": True,
@@ -505,6 +511,45 @@ def test_panel_prefills_last_request_and_keeps_drafts(qapp):
     panel._current_key = None
     panel._experiment_selected(SCHEMA)
     assert panel.editor.rows["shots"].value.value() == 8
+
+
+def test_defaults_asks_for_a_fresh_description_and_applies_it(qapp):
+    client, feed = FakeClient(), FakeFeed()
+    panel = ExperimentsPanel(client=client, feed=feed)
+    panel.refresh_catalogue()
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    panel.editor.rows["shots"].value.widget.setValue(9)
+
+    panel.editor.defaults_button.click()
+    assert commands(client, "describe_again") == [{"module": SCHEMA["module"]}]
+    assert panel.editor.rows["shots"].value.value() == 9
+
+    changed = {
+        **SCHEMA,
+        "arguments": {
+            **SCHEMA["arguments"],
+            "shots": {**SCHEMA["arguments"]["shots"], "default": 999},
+        },
+    }
+    client.modules = [{**MODULES[0], "classes": [changed]}, MODULES[1]]
+    client.catalogue_version = 2
+    feed.queue_changed.emit(
+        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+    )
+    assert panel.editor.rows["shots"].value.value() == 999
+
+
+def test_defaults_with_the_manager_unreachable_leaves_the_form_alone(qapp):
+    client = FakeClient()
+    client.errors["describe_again"] = "not responding"
+    panel = ExperimentsPanel(client=client, feed=FakeFeed())
+    panel.refresh_catalogue()
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    panel.editor.rows["shots"].value.widget.setValue(77)
+
+    panel.editor.defaults_button.click()
+    assert panel.editor.rows["shots"].value.value() == 77
+    assert "not responding" in panel.status.text()
 
 
 def test_panel_resubmit_selects_the_experiment(qapp):

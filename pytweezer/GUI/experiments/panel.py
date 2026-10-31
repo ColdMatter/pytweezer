@@ -52,6 +52,7 @@ class ExperimentsPanel(QWidget):
         # Unsubmitted edits per experiment, restored when switching back.
         self._drafts = {}
         self._current_key = None
+        self._defaults_awaited = None
         self._simulated = False
 
         layout = QVBoxLayout(self)
@@ -104,6 +105,7 @@ class ExperimentsPanel(QWidget):
         self.catalogue.refresh_requested.connect(self.refresh_catalogue)
         self.editor.submit_requested.connect(self._submit)
         self.editor.last_requested.connect(self._load_last)
+        self.editor.defaults_requested.connect(self._defaults_requested)
         self.catalogue.recipe_selected.connect(self._recipe_selected)
         self.catalogue.recipe_action_requested.connect(self._recipe_action)
         self.editor.save_recipe_requested.connect(self._save_recipe)
@@ -138,6 +140,7 @@ class ExperimentsPanel(QWidget):
             return
         self._catalogue_version = reply.get("version")
         self.catalogue.set_modules(reply["modules"])
+        self._apply_awaited_defaults(reply)
         self.refresh_recipes()
 
     def refresh_recipes(self):
@@ -184,6 +187,24 @@ class ExperimentsPanel(QWidget):
             self.editor.load_request(self._drafts[key])
         else:
             self._load_last(*key, quiet=True)
+
+    def _defaults_requested(self, module, class_name):
+        if self._call(
+            "Describing again", self.client.call, "describe_again", module=module
+        ):
+            self._defaults_awaited = (module, class_name), self._catalogue_version
+
+    def _apply_awaited_defaults(self, reply):
+        if self._defaults_awaited is None:
+            return
+        key, requested_at = self._defaults_awaited
+        if reply.get("version") == requested_at or reply.get("busy"):
+            return
+        self._defaults_awaited = None
+        schema = self.catalogue.schema_for(*key)
+        if schema is not None and key == self._current_key:
+            self.editor.set_experiment(schema)
+            self.editor.reset_to_defaults()
 
     def _save_draft(self):
         if self._current_key is None:

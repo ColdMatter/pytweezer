@@ -158,6 +158,43 @@ def test_catalogue_lists_runnable_experiments(harness):
     assert [c["class_name"] for c in entry["classes"]] == ["Steps", "UsesSequencer"]
 
 
+FROM_FILE = textwrap.dedent(
+    """
+    from pathlib import Path
+
+    from pytweezer.experiment import Experiment, Number
+
+
+    class FromFile(Experiment):
+        level = Number(float((Path(__file__).parent / "level.txt").read_text()))
+
+        def run_point(self):
+            pass
+    """
+)
+
+
+def write_level(harness, text):
+    (harness.package_dir / "level.txt").write_text(text)
+
+
+def default_of(harness, class_name, argument):
+    for entry in harness.client.catalogue():
+        for described in entry["classes"]:
+            if described["class_name"] == class_name:
+                return described["arguments"][argument]["default"]
+    return None
+
+
+def test_describe_again_picks_up_a_changed_default(harness):
+    write_level(harness, "1.5")
+    (harness.package_dir / "fromfile.py").write_text(FROM_FILE)
+    assert until(lambda: default_of(harness, "FromFile", "level") == 1.5, timeout=30)
+    write_level(harness, "2.5")
+    harness.client.describe_again("labexp.fromfile")
+    assert until(lambda: default_of(harness, "FromFile", "level") == 2.5, timeout=30)
+
+
 def test_pause_resume_and_terminate_at_a_point_boundary(harness):
     rid = harness.submit(Scan(repetitions=10), delay=0.2)
     harness.wait_until(rid, lambda t: t.points_done >= 1)

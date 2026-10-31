@@ -321,6 +321,7 @@ class ArgumentEditor(QWidget):
     submit_requested = QtCore.pyqtSignal(object)
     last_requested = QtCore.pyqtSignal(str, str)
     save_recipe_requested = QtCore.pyqtSignal(object)
+    defaults_requested = QtCore.pyqtSignal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -424,7 +425,11 @@ class ArgumentEditor(QWidget):
 
         buttons = QHBoxLayout()
         self.defaults_button = QPushButton("Defaults")
-        self.defaults_button.clicked.connect(self.reset_to_defaults)
+        self.defaults_button.clicked.connect(
+            lambda: self.defaults_requested.emit(
+                self.schema["module"], self.schema["class_name"]
+            )
+        )
         self.last_button = QPushButton("Last submitted")
         self.last_button.clicked.connect(
             lambda: (

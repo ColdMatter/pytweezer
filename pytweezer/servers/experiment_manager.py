@@ -236,6 +236,10 @@ class ExperimentManager:
             "version": self._catalogue_version,
         }
 
+    def _cmd_describe_again(self, request):
+        self.catalogue.describe_again(request["module"])
+        self._catalogue_changed(self.catalogue.refresh())
+
     def _cmd_get(self, request):
         return {"task": self.queue.get(int(request["rid"])).model_dump(mode="json")}
 

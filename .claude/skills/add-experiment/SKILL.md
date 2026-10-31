@@ -219,6 +219,15 @@ the names; load it into the form, check it and save it again. An override may
 not fix an argument the recipe scans. MOTMaster `attribute.parameter` names are
 checked when the task runs, as for any submission.
 
+## Saved parameters
+
+Read one with `get_saved_parameter`: in `prepare()`/`run_point()` for the value
+at run time, or passed to an argument as its default, e.g.
+`level = Number(get_saved_parameter("level"))` (read when the module is
+imported; the form's **Defaults** button has the manager describe the
+experiment again and so re-reads it). Importing such a module contacts the
+manager.
+
 ## Files
 
 `{data_root}/YYYY/MM/DD/{rid:06d}_{Class}.h5`. Root attrs: rid, experiment,
