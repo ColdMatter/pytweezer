@@ -14,10 +14,21 @@ from pytweezer.experiment import (
     run_local,
 )
 from pytweezer.experiment.client import _resolve, recipes, save_recipe
+from pytweezer.experiment.optimisers import (
+    BayesianOptimisation,
+    Dimension,
+    Stage,
+    StagedScan,
+)
 from pytweezer.experiment.runner import open_writer, run_points
 from pytweezer.experiment.scan import Point
 from pytweezer.experiment.task import Action
-from pytweezer.experiments.demo import DemoBayesian, DemoStagedScan, RabiDemo
+from pytweezer.experiments.demo import (
+    DemoBayesian,
+    DemoResonance,
+    DemoStagedScan,
+    RabiDemo,
+)
 from tests.helpers import in_process_client
 
 
@@ -57,9 +68,9 @@ class SpyStagedScan(DemoStagedScan):
         return super().measure(**settings)
 
 
-class LowestSetting(DemoStagedScan):
+class LowestDetuningHighestPower(DemoStagedScan):
     def best(self, settings, objectives):
-        return min(settings)
+        return min(settings) if self.stage.setting == "detuning" else max(settings)
 
 
 def test_stage_two_runs_at_stage_ones_best_value():
@@ -76,10 +87,10 @@ def test_the_default_best_averages_repeats_and_ignores_nan():
     assert optimiser.best([1, 1, 2, 2], [10, math.nan, 8, 8]) == 1
 
 
-def test_an_overridden_best_replaces_the_default():
-    m = run_local(LowestSetting, detuning_points=5, power_points=3)
+def test_an_overridden_best_replaces_the_default_and_knows_its_stage():
+    m = run_local(LowestDetuningHighestPower, detuning_points=5, power_points=3)
     assert m.constants["proposed.demo_resonance"] == -5.0
-    assert m.constants["proposed.demo_power"] == pytest.approx(0.1)
+    assert m.constants["proposed.demo_power"] == pytest.approx(1.0)
 
 
 def test_a_single_point_stage_proposes_its_value():
@@ -154,6 +165,17 @@ def test_bayesian_proposes_the_best_measured_point():
     assert m.constants["proposed.demo_power"] == m.results["power"][best]
 
 
+class LowestCounts(DemoBayesian):
+    goal = "min"
+
+
+def test_a_bayesian_minimiser_proposes_the_lowest_measured_point():
+    m = run_local(LowestCounts, n_calls=6, n_initial=3)
+    best = int(m.results["objective"].argmin())
+    assert m.constants["proposed.demo_resonance"] == m.results["detuning"][best]
+    assert m.constants["proposed.demo_power"] == m.results["power"][best]
+
+
 def test_xi_is_annealed_from_start_to_end():
     m = run_local(DemoBayesian, n_calls=5, n_initial=2)
     assert list(m.results["xi"]) == pytest.approx(
@@ -217,5 +239,66 @@ def test_the_schema_lists_generated_arguments_and_proposals(
     assert schema["arguments"][argument]["default"] == default
     assert schema["optimiser"] == {
         "kind": kind,
+        "goal": "max",
+        "objective": "counts",
         "proposes": ["demo_resonance", "demo_power"],
+        "settings": ["detuning", "power"],
     }
+
+
+class SharedBase(StagedScan, DemoResonance):
+    objective = "counts"
+
+
+def test_a_base_without_stages_is_not_listed_as_an_optimiser():
+    assert "optimiser" not in SharedBase.schema()
+
+
+def _staged(stages, goal="max"):
+    return type("Bad", (StagedScan, DemoResonance), {"stages": stages, "goal": goal})
+
+
+def _bayesian(dimensions):
+    return type(
+        "Bad", (BayesianOptimisation, DemoResonance), {"dimensions": dimensions}
+    )
+
+
+@pytest.mark.parametrize(
+    ("define", "message"),
+    [
+        (
+            lambda: _staged(
+                [
+                    Stage("detuning", start=0, stop=1, points=3, save_as="a"),
+                    Stage("detuning", start=0, stop=1, points=3, save_as="b"),
+                ]
+            ),
+            "detuning",
+        ),
+        (
+            lambda: _staged(
+                [
+                    Stage("detuning", start=0, stop=1, points=3, save_as="a"),
+                    Stage("power", start=0, stop=1, points=3, save_as="a"),
+                ]
+            ),
+            "'a'",
+        ),
+        (
+            lambda: _staged(
+                [Stage("detuning", start=0, stop=1, points=3, save_as="a")],
+                goal="maximum",
+            ),
+            "maximum",
+        ),
+        (
+            lambda: _bayesian([Dimension("detuning", low=1, high=1, save_as="a")]),
+            "detuning",
+        ),
+    ],
+    ids=["duplicate setting", "duplicate save_as", "unknown goal", "empty range"],
+)
+def test_a_bad_declaration_is_refused_when_the_class_is_defined(define, message):
+    with pytest.raises(TypeError, match=message):
+        define()

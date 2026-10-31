@@ -62,7 +62,8 @@ class Optimiser:
     Subclasses name one result of ``measure()`` as :attr:`objective` and a
     :attr:`goal` of ``"max"`` or ``"min"``. Arguments a subclass generates
     from its declarations (:meth:`generated_arguments`) are added to every
-    subclass that does not declare one of the same name itself.
+    subclass that does not declare one of the same name itself. A class that
+    declares stages or dimensions is checked when it is defined.
     """
 
     objective: str
@@ -71,6 +72,8 @@ class Optimiser:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        if cls.declarations():
+            cls.check_declarations()
         declared = collect(cls, Argument)
         inherited = getattr(cls, "_generated_names", frozenset())
         generated = set()
@@ -83,6 +86,31 @@ class Optimiser:
         cls._generated_names = frozenset(generated)
 
     @classmethod
+    def declarations(cls) -> list[Any]:
+        """The stages or dimensions this optimiser declares, in order."""
+        return []
+
+    @classmethod
+    def check_declarations(cls) -> None:
+        """Refuse declarations that cannot run.
+
+        Raises:
+            TypeError: If two declarations share a setting or a ``save_as``,
+                or :attr:`goal` is neither ``"max"`` nor ``"min"``.
+        """
+        for field_name in ("setting", "save_as"):
+            names = [getattr(declared, field_name) for declared in cls.declarations()]
+            if repeated := sorted({name for name in names if names.count(name) > 1}):
+                raise TypeError(
+                    f"{cls.__name__}: {field_name} {', '.join(map(repr, repeated))} "
+                    "is declared more than once"
+                )
+        if cls.goal not in ("max", "min"):
+            raise TypeError(
+                f"{cls.__name__}: goal is {cls.goal!r}; it must be 'max' or 'min'"
+            )
+
+    @classmethod
     def generated_arguments(cls) -> dict[str, Argument]:
         """The arguments this optimiser's declarations give it."""
         return {}
@@ -90,11 +118,22 @@ class Optimiser:
     @classmethod
     def proposes(cls) -> list[str]:
         """The saved-parameter keys this optimiser proposes values for."""
-        return []
+        return [declared.save_as for declared in cls.declarations()]
 
     @classmethod
     def optimiser_schema(cls) -> dict[str, Any]:
-        return {"kind": cls.kind, "proposes": cls.proposes()}
+        """The optimiser's description, for the catalogue and the Optimisers tab.
+
+        ``settings[i]`` is the setting whose best value is proposed for
+        ``proposes[i]``; ``objective`` is ``None`` for a class that names none.
+        """
+        return {
+            "kind": cls.kind,
+            "goal": cls.goal,
+            "objective": getattr(cls, "objective", None),
+            "proposes": cls.proposes(),
+            "settings": [declared.setting for declared in cls.declarations()],
+        }
 
     def planned_points(self, scan: Scan) -> list[Point]:
         if scan.axes or scan.repetitions != 1:
@@ -112,10 +151,60 @@ class Optimiser:
         """The objective of one shot, from ``measure()``'s results."""
         return results[self.objective]
 
-    def best(self, settings: list[float], objectives: list[float]) -> float:
-        """The setting whose mean objective is best for :attr:`goal`.
+    def best(self, settings: list[Any], objectives: list[float]) -> Any:
+        """The proposal, from every setting measured and its objective.
 
-        Repeat shots of a setting are averaged, ignoring non-finite objectives.
+        Each building block defines the shapes it passes and expects back.
+        """
+        raise NotImplementedError
+
+
+class StagedScan(Optimiser):
+    """Scans one setting per stage, each at the best values of the stages before.
+
+    Each :class:`Stage` adds the arguments ``<setting>_start``,
+    ``<setting>_stop`` and ``<setting>_points``. Within a stage the sweep runs
+    ``repeats`` times. When a stage's points are done, :meth:`best` gives its
+    proposal, which every later stage passes to ``measure()``.
+
+    Each point records ``stage`` (its index), ``setting``, ``objective`` and
+    every result of ``measure()``, so ``measure()`` must not return a result
+    named ``stage``, ``setting`` or ``objective``. :meth:`finish` records
+    ``proposed.<key>`` for each finished stage, ``stages_done`` and
+    ``stages_total``.
+
+    While a run is in progress, :attr:`stage` is the :class:`Stage` being
+    scanned, so an overridden :meth:`best` can tell which stage it chooses for.
+    """
+
+    kind = "staged"
+    stages: ClassVar[list[Stage]]
+    stage: Stage
+    repeats = Integer(1, min=1)
+
+    @classmethod
+    def declarations(cls) -> list[Stage]:
+        return list(getattr(cls, "stages", []))
+
+    @classmethod
+    def generated_arguments(cls) -> dict[str, Argument]:
+        arguments: dict[str, Argument] = {}
+        for stage in cls.declarations():
+            arguments[f"{stage.setting}_start"] = Number(stage.start)
+            arguments[f"{stage.setting}_stop"] = Number(stage.stop)
+            arguments[f"{stage.setting}_points"] = Integer(stage.points, min=1)
+        return arguments
+
+    def best(self, settings: list[float], objectives: list[float]) -> float:
+        """The setting of this :attr:`stage` whose mean objective is best for :attr:`goal`.
+
+        Args:
+            settings: The setting of each shot of the stage, repeats included.
+            objectives: The objective of each shot.
+
+        Returns:
+            The setting to propose. Repeat shots of a setting are averaged,
+            ignoring non-finite objectives.
 
         Raises:
             ValueError: If no setting has a finite objective.
@@ -131,37 +220,6 @@ class Optimiser:
         }
         choose = {"max": max, "min": min}[self.goal]
         return float(choose(means, key=means.__getitem__))
-
-
-class StagedScan(Optimiser):
-    """Scans one setting per stage, each at the best values of the stages before.
-
-    Each :class:`Stage` adds the arguments ``<setting>_start``,
-    ``<setting>_stop`` and ``<setting>_points``. Within a stage the sweep runs
-    ``repeats`` times. When a stage's points are done, :meth:`best` gives its
-    proposal, which every later stage passes to ``measure()``.
-
-    Each point records ``stage`` (its index), ``setting``, ``objective`` and
-    every result of ``measure()``. :meth:`finish` records ``proposed.<key>``
-    for each finished stage, ``stages_done`` and ``stages_total``.
-    """
-
-    kind = "staged"
-    stages: ClassVar[list[Stage]]
-    repeats = Integer(1, min=1)
-
-    @classmethod
-    def generated_arguments(cls) -> dict[str, Argument]:
-        arguments: dict[str, Argument] = {}
-        for stage in getattr(cls, "stages", []):
-            arguments[f"{stage.setting}_start"] = Number(stage.start)
-            arguments[f"{stage.setting}_stop"] = Number(stage.stop)
-            arguments[f"{stage.setting}_points"] = Integer(stage.points, min=1)
-        return arguments
-
-    @classmethod
-    def proposes(cls) -> list[str]:
-        return [stage.save_as for stage in cls.stages]
 
     def number_of_points(self) -> int:
         return len(self._schedule())
@@ -187,7 +245,7 @@ class StagedScan(Optimiser):
 
     def run_point(self) -> None:
         stage_index, setting = self._points_schedule[self.point.index]
-        stage = self.stages[stage_index]
+        stage = self.stage = self.stages[stage_index]
         settings = {
             earlier.setting: value
             for earlier, value in zip(self.stages, self._best_values, strict=False)
@@ -239,8 +297,9 @@ class BayesianOptimisation(Optimiser):
     finite one so far, or not told if there is none yet.
 
     Each point records every setting by name, ``objective``, the ``xi`` its
-    settings were chosen with, and every result of ``measure()``.
-    :meth:`finish` records ``evaluations_done`` and ``evaluations_total`` and,
+    settings were chosen with, and every result of ``measure()``, so
+    ``measure()`` must not return a result named after a setting, ``objective``
+    or ``xi``. :meth:`finish` records ``evaluations_done`` and ``evaluations_total`` and,
     after at least one evaluation, ``proposed.<key>`` for each dimension from
     :meth:`best`.
     """
@@ -254,16 +313,32 @@ class BayesianOptimisation(Optimiser):
     xi_end = Number(0.001)
 
     @classmethod
+    def declarations(cls) -> list[Dimension]:
+        return list(getattr(cls, "dimensions", []))
+
+    @classmethod
+    def check_declarations(cls) -> None:
+        """Refuse declarations that cannot run.
+
+        Raises:
+            TypeError: As :meth:`Optimiser.check_declarations`, or if a
+                dimension's ``low`` is not below its ``high``.
+        """
+        super().check_declarations()
+        for dimension in cls.declarations():
+            if not dimension.low < dimension.high:
+                raise TypeError(
+                    f"{cls.__name__}: dimension {dimension.setting!r} has low "
+                    f"{dimension.low} not below high {dimension.high}"
+                )
+
+    @classmethod
     def generated_arguments(cls) -> dict[str, Argument]:
         arguments: dict[str, Argument] = {}
-        for dimension in getattr(cls, "dimensions", []):
+        for dimension in cls.declarations():
             arguments[f"{dimension.setting}_low"] = Number(dimension.low)
             arguments[f"{dimension.setting}_high"] = Number(dimension.high)
         return arguments
-
-    @classmethod
-    def proposes(cls) -> list[str]:
-        return [dimension.save_as for dimension in cls.dimensions]
 
     def number_of_points(self) -> int:
         return self.n_calls
@@ -321,7 +396,14 @@ class BayesianOptimisation(Optimiser):
         self._optimizer.tell(values, loss)
 
     def best(self, settings: list[list[float]], objectives: list[float]) -> list[float]:
-        """The settings, one per dimension, of the best finite objective for :attr:`goal`.
+        """The evaluation whose finite objective is best for :attr:`goal`.
+
+        Args:
+            settings: Each evaluation's settings, one per dimension.
+            objectives: Each evaluation's objective.
+
+        Returns:
+            The best evaluation's settings, one per dimension.
 
         Raises:
             ValueError: If no evaluation has a finite objective.

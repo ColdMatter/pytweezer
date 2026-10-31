@@ -80,8 +80,8 @@ class Experiment:
     def schema(cls) -> dict[str, Any]:
         """JSON-serialisable description of the class, for argument editors.
 
-        An optimiser also has an ``"optimiser"`` entry naming its kind and the
-        saved-parameter keys it proposes.
+        An optimiser that proposes saved parameters also has an ``"optimiser"``
+        entry describing it; a shared optimiser base that proposes none does not.
         """
         schema = {
             "class_name": cls.__name__,
@@ -92,7 +92,7 @@ class Experiment:
             },
             "devices": {name: dev.to_schema() for name, dev in cls.devices().items()},
         }
-        if hasattr(cls, "optimiser_schema"):
+        if hasattr(cls, "optimiser_schema") and cls.proposes():
             schema["optimiser"] = cls.optimiser_schema()
         return schema
 
