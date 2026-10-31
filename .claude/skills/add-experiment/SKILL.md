@@ -221,7 +221,8 @@ checked when the task runs, as for any submission.
 
 ## Saved parameters
 
-Read one with `get_saved_parameter`: in `prepare()`/`run_point()` for the value
+Import with `from pytweezer.experiment.client import get_saved_parameter`, then
+read one: in `prepare()`/`run_point()` for the value
 at run time, or passed to an argument as its default, e.g.
 `level = Number(get_saved_parameter("level"))` (read when the module is
 imported; the form's **Defaults** button has the manager describe the

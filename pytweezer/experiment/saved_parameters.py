@@ -16,9 +16,12 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from pytweezer.experiment.queue import ModelStore, now
+from pytweezer.logging_utils import get_logger
 
 if TYPE_CHECKING:
     from pytweezer.experiment.client import ExperimentManagerClient
+
+logger = get_logger(__name__)
 
 Value = float | int | bool | str
 
@@ -172,13 +175,23 @@ class SavedParameterBook:
 
 
 class SavedParameterStore(ModelStore):
-    """Persists a :class:`SavedParameterState`."""
+    """Persists a :class:`SavedParameterState`.
+
+    The file is ASCII-escaped JSON, so reasons and units with Greek letters or
+    other non-ASCII text save and load under any default encoding.
+    """
 
     model = SavedParameterState
 
+    def _dump(self, state: BaseModel) -> str:
+        return json.dumps(state.model_dump(mode="json"), indent=1)
+
 
 class SavedParameterLog:
-    """Append-only JSONL record of every change to a saved parameter."""
+    """Append-only JSONL record of every change to a saved parameter.
+
+    Lines are ASCII-escaped JSON, so any default encoding writes and reads them.
+    """
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
@@ -188,17 +201,27 @@ class SavedParameterLog:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as file:
-            file.writelines(change.model_dump_json() + "\n" for change in changes)
+            file.writelines(
+                json.dumps(change.model_dump(mode="json")) + "\n" for change in changes
+            )
 
     def read(
         self, key: str | None = None, *, limit: int | None = None
     ) -> list[SavedParameterChange]:
-        """Changes to ``key`` (every key if ``None``), newest first, at most ``limit``."""
+        """Changes to ``key`` (every key if ``None``), newest first, at most ``limit``.
+
+        A line that can't be parsed is skipped with a warning.
+        """
         try:
             lines = self.path.read_text().splitlines()
         except FileNotFoundError:
             return []
-        changes = [SavedParameterChange.model_validate_json(line) for line in lines]
+        changes = []
+        for number, line in enumerate(lines, 1):
+            try:
+                changes.append(SavedParameterChange.model_validate_json(line))
+            except ValueError:
+                logger.warning("Skipping unreadable line %d of %s", number, self.path)
         matching = [c for c in reversed(changes) if key in (None, c.key)]
         return matching if limit is None else matching[:limit]
 
@@ -209,8 +232,9 @@ def import_parameters_json(
 ) -> int:
     """Copy every value in a ``parameters.json`` into the store; return how many it holds.
 
-    Each top-level category becomes the group of its keys. Values already stored
-    unchanged are left alone, so importing twice changes nothing.
+    Each top-level category becomes the group of its keys. Importing again
+    restores the file's values over any changed since, each change being logged;
+    values that already match are left alone.
     """
     from pytweezer.experiment.client import set_saved_parameters
 

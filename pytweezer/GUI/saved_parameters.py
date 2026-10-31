@@ -365,6 +365,11 @@ class SavedParametersPanel(QWidget):
 
     def _current_changed(self, item, _previous):
         key = None if item is None else item.data(0, _KEY)
+        if item is not None and key is None:
+            kept = self._items.get(self._key)
+            if kept is not None:
+                self.tree.setCurrentItem(kept)
+            return
         if key == self._key:
             return
         self._key = key

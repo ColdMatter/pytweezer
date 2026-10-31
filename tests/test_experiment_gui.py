@@ -541,6 +541,30 @@ def test_defaults_asks_for_a_fresh_description_and_applies_it(qapp):
     assert panel.editor.rows["shots"].value.value() == 999
 
 
+def test_defaults_for_a_module_that_no_longer_imports_shows_its_error(qapp):
+    client, feed = FakeClient(), FakeFeed()
+    panel = ExperimentsPanel(client=client, feed=feed)
+    panel.refresh_catalogue()
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    panel.editor.defaults_button.click()
+
+    client.modules = [
+        {
+            "module": SCHEMA["module"],
+            "classes": [],
+            "warnings": [],
+            "error": "Traceback (most recent call last):\nSyntaxError: oops",
+        },
+        MODULES[1],
+    ]
+    client.catalogue_version = 2
+    feed.queue_changed.emit(
+        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+    )
+    assert "SyntaxError: oops" in panel.status.text()
+    assert panel.status.property("state") == "crashed"
+
+
 def test_defaults_with_the_manager_unreachable_leaves_the_form_alone(qapp):
     client = FakeClient()
     client.errors["describe_again"] = "not responding"
@@ -1168,6 +1192,18 @@ def test_a_live_update_keeps_the_selection_and_an_unsent_edit(qapp):
     feed.queue_changed.emit({"saved_parameters_version": 7})
     assert panel.selected_key() == "level"
     assert panel.value_edit.text() == "3.1"
+
+
+def test_a_group_header_cannot_be_made_current_and_keeps_an_unsent_edit(qapp):
+    panel = make_saved_panel()
+    panel.select("level")
+    panel.value_edit.setText("3.1")
+    panel.why_edit.setText("lifetime scan")
+    panel.tree.setCurrentItem(panel.tree.topLevelItem(0))
+    assert panel.selected_key() == "level"
+    assert panel.tree.currentItem().text(0) == "level"
+    assert panel.value_edit.text() == "3.1"
+    assert panel.why_edit.text() == "lifetime scan"
 
 
 def test_an_unreachable_manager_is_said_not_shown_as_current(qapp):

@@ -19,6 +19,7 @@ running, and records how the others' tasks ended.
 """
 
 import argparse
+import copy
 import os
 import secrets
 import signal
@@ -317,6 +318,7 @@ class ExperimentManager:
         }
 
     def _cmd_set_saved_parameters(self, request):
+        snapshot = copy.deepcopy(self.saved_parameters.state)
         changes = self.saved_parameters.set(
             request["values"],
             reason=request["reason"],
@@ -326,6 +328,15 @@ class ExperimentManager:
             unit=request.get("unit", ""),
             rid=request.get("rid"),
         )
+        try:
+            self._saved_parameters_changed(changes)
+        except Exception:
+            self.saved_parameters.state = snapshot
+            try:
+                self.saved_parameter_store.save(snapshot)
+            except Exception:
+                logger.exception("Could not restore saved_parameters.json")
+            raise
         for change in changes:
             logger.info(
                 "Saved parameter %r: %r -> %r (%s, %s)",
@@ -335,7 +346,6 @@ class ExperimentManager:
                 change.who,
                 change.reason,
             )
-        self._saved_parameters_changed(changes)
         return {"changes": [change.model_dump(mode="json") for change in changes]}
 
     def _cmd_saved_parameter_history(self, request):

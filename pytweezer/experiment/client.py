@@ -231,7 +231,10 @@ class ExperimentManagerClient:
     ) -> list[SavedParameterChange]:
         reply = self.call(
             "set_saved_parameters",
-            values=values,
+            values={
+                key: value.item() if hasattr(value, "item") else value
+                for key, value in values.items()
+            },
             reason=reason,
             who=who,
             create=create,

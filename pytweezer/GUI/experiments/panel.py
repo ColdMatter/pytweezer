@@ -202,9 +202,20 @@ class ExperimentsPanel(QWidget):
             return
         self._defaults_awaited = None
         schema = self.catalogue.schema_for(*key)
-        if schema is not None and key == self._current_key:
+        if key != self._current_key:
+            return
+        if schema is not None:
             self.editor.set_experiment(schema)
             self.editor.reset_to_defaults()
+            return
+        error = next(
+            (m.get("error") for m in reply["modules"] if m["module"] == key[0]), None
+        )
+        if error:
+            self._show_status(
+                f"{key[0]} no longer imports: {error.strip().splitlines()[-1]}",
+                "crashed",
+            )
 
     def _save_draft(self):
         if self._current_key is None:

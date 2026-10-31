@@ -1,5 +1,6 @@
 import json
 
+import numpy as np
 import pytest
 
 from pytweezer.experiment.client import saved_parameter_history
@@ -85,6 +86,35 @@ def test_a_saved_book_reloads_with_every_value_in_its_type(tmp_path):
     assert {p.reason for p in store.load().parameters} == {"r"}
 
 
+def test_non_ascii_text_is_stored_and_logged_as_ascii_and_reads_back(tmp_path):
+    book = SavedParameterBook()
+    store = SavedParameterStore(tmp_path / "parameters.json")
+    log = SavedParameterLog(tmp_path / "log.jsonl")
+    reason = "detuning \u0394 and Rabi \u03a9"
+    changes = book.set(
+        {"f": 1.0}, reason=reason, who="me", create=True, group="\u03a9", unit="\u00b5s"
+    )
+    store.save(book.state)
+    log.append(changes)
+    assert store.path.read_bytes().isascii() and log.path.read_bytes().isascii()
+    [parameter] = store.load().parameters
+    assert (parameter.reason, parameter.group, parameter.unit) == (
+        reason,
+        "\u03a9",
+        "\u00b5s",
+    )
+    assert [c.reason for c in log.read()] == [reason]
+
+
+def test_a_log_line_that_cannot_be_read_is_skipped(tmp_path):
+    book, log = book_with(a=0), SavedParameterLog(tmp_path / "log.jsonl")
+    log.append(book.set({"a": 1}, reason="r", who="me"))
+    with log.path.open("a") as file:
+        file.write('{"time": "2026-10-30T10:00:00", "who": "m\n')
+    log.append(book.set({"a": 2}, reason="r", who="me"))
+    assert [c.new for c in log.read("a")] == [2, 1]
+
+
 def test_a_creation_with_an_unstorable_value_creates_nothing():
     book = SavedParameterBook()
     with pytest.raises(SavedParameterError, match="b"):
@@ -110,3 +140,20 @@ def test_the_import_copies_every_value_with_its_category_as_group(
     assert found == {"a": (3.0, "first"), "b": (600, "first"), "c": ("x", "second")}
     assert import_parameters_json(path, client=client) == 3
     assert len(saved_parameter_history(client=client)) == 3
+
+
+def test_numpy_scalars_are_stored_as_python_numbers(make_manager):
+    client = in_process_client(make_manager())
+    client.set_saved_parameters(
+        {"i": np.int64(3), "f": np.float32(0.5), "flag": np.bool_(True)},
+        "r",
+        "me",
+        create=True,
+    )
+    found = {p.key: p.value for p in client.saved_parameters()}
+    assert found == {"i": 3, "f": 0.5, "flag": True}
+    assert {k: type(v) for k, v in found.items()} == {
+        "i": int,
+        "f": float,
+        "flag": bool,
+    }
