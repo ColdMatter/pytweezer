@@ -120,12 +120,13 @@ experiments**.
    - Accept writes through `set_saved_parameters(..., rid=...)`, so each
      acceptance is logged with its run; spec 2 decides whether it needs a
      command of its own.
-   - Everything that reads `parameters.json` today moves to the manager:
+   - Everything that reads `parameters.json` today moves to the manager
+     (later work, not spec 1):
      `TweezerBaseline`, `analysis.py` (reads `cool_vco_resonance` at import),
      notebooks.
 10. **Two specs, built in order.** (1) Saved parameters: the manager-owned
     store and change log, get/set/history commands, client functions, the
-    tab, and moving the current readers over. (2) Optimisers, the framework
+    tab and an import from `parameters.json`. (2) Optimisers, the framework
     only: `measure()`, the `StagedScan` and `BayesianOptimisation` mixins, the
     `planned_scan()` hook, Accept and the dashboard, built and tested against
     a demo optimiser over `pytweezer/experiments/demo.py`. The real
@@ -171,6 +172,11 @@ built on the spec 2 framework: MOT position, MOT counts, tweezer loading
 probability, molasses survival probability; and the optimisers over them
 (resonances, MOT number, MOT and molasses shims). Where each gets its inputs
 (MOT centre, site positions) is decided then.
+
+Moving the existing readers of `parameters.json` (`TweezerBaseline`,
+`analysis.py`, `optimisation.py`, notebooks) to saved parameters, running the
+import on the server PC, and deleting `parameters.json` and
+`ExpParameterManager`.
 
 ## Relevant code and skills
 

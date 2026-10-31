@@ -29,8 +29,8 @@ the values mean: it is a general facility of the task-running system.
 3. Code that reads a saved value gets the value saved at that moment; nothing
    is cached.
 4. A GUI tab to view saved values, edit one, and see its history.
-5. The current values and every current reader move over without losing a
-   value.
+5. The current values in `parameters.json` can be imported without losing
+   one.
 
 ## Non-goals
 
@@ -40,6 +40,10 @@ the values mean: it is a general facility of the task-running system.
 - **No per-system namespacing.** Keys are flat and unique across the lab.
 - **No list or array values** until something needs them.
 - **No creating or deleting keys in the GUI.** Keys are created in code.
+- **No moving the existing readers.** `TweezerBaseline`, `analysis.py`,
+  `optimisation.py` and the notebooks keep using `parameters.json` and
+  `ExpParameterManager` until later work moves them; both stay in the repo
+  until then.
 - **No Accept.** Accepting optimiser results is the Optimisers spec; it writes
   through `set_saved_parameters(..., rid=...)`, or adds a command of its own
   when it needs one.
@@ -186,47 +190,17 @@ nothing while hidden. If the manager is unreachable the tab says so
 ("Saved parameters: the Experiment Manager is not responding") rather than
 showing stale values as current.
 
-## 5. Migration
+## 5. Importing the current values
 
-**The values** are moved once, on the server PC, by
-`import_parameters_json(path)` in `saved_parameters.py`, marked `FIXME` for
-removal once the move is done. It reads a `parameters.json` and calls
-`set_saved_parameters(..., create=True)` once per category, with the category
-name as the group and reason `imported from parameters.json`. Running it twice
-changes nothing.
-
-On the server PC, the steps (in the PR description):
-
-1. Copy `pytweezer/experiment/parameters.json` somewhere outside the checkout.
-2. Discard its local changes and pull.
-3. Start the Experiment Manager and run the import on the copy.
-4. Check the values in the Saved parameters tab, filling in units by hand.
-
-**The code**, in the same PR, reads and writes through the client functions:
-
-- `TweezerBaseline` reads its `SAVED_MOTMASTER_PARAMETERS` in `prepare()`; its
-  `parameters_file` argument is removed.
-- `pytweezer/analysis/analysis.py`: the module-level read moves into the
-  function that uses it; the `x_centre`/`y_centre` read and write use the
-  client functions.
-- `pytweezer/helper_scripts/optimisation.py` keeps writing results directly,
-  with reason `optimisation.py`.
-- `notebooks/tweezer_baseline.ipynb` writes `conversion_factor` with
-  `set_saved_parameters`.
-- `pytweezer/experiment/parameters.json` and
-  `pytweezer/experiment/experiment_parameter_manager.py` are deleted.
-
-Left alone: `notebooks/optimisation-scans-testing.ipynb` and
-`optimisation-scans-testing-2.ipynb`, which already import a class that no
-longer exists. Lab-book notebooks that use `ExpParameterManager` break; before
-the PR merges, the lab book is searched and the affected notebooks are listed
-in the PR description.
+`import_parameters_json(path)` in `saved_parameters.py` reads a
+`parameters.json` and calls `set_saved_parameters(..., create=True)` once per
+category, with the category name as the group and reason
+`imported from parameters.json`. Running it twice changes nothing. When to run
+it on the server PC, and moving the existing readers over, is later work.
 
 ## 6. Testing
 
-Following the `write-tests` skill. Existing tests that assume
-`parameters.json` (`tests/test_tweezer_baseline.py`,
-`tests/test_optimisation.py`) are changed to fit. Tests that need saved values
+Following the `write-tests` skill. Tests that need saved values
 run a manager on a scratch data directory and point the client's CONFIG at
 it; there is no fake store.
 
