@@ -1,54 +1,48 @@
 # Saved parameters — design
 
-Date: 2026-10-30. Status: design, agreed in conversation; not yet planned.
+Date: 2026-10-30, revised 2026-10-31. Status: design, awaiting review.
 This is the first of two specs; the second, Optimisers, depends on it. The
 decisions behind both are in `2026-10-30-optimisers-brainstorm.md`.
 
 ## Intent
 
-Saved parameters are the lab's current calibrated values: resonances, MOT and
-molasses settings, shim currents, camera conversion factors, the MOT centre.
-Today they live in `pytweezer/experiment/parameters.json`, a file tracked in
-git, read and written through `ExpParameterManager` by whichever checkout the
-code runs in. That has three problems:
+Saved parameters are the lab's current calibrated values. Today they live in
+`pytweezer/experiment/parameters.json`, a file tracked in git, read and
+written through `ExpParameterManager` by whichever checkout the code runs in.
+That has three problems:
 
-- Writing a value (as `optimisation.py` and `analysis.py` do) leaves the
-  server PC's checkout with local changes, so `git pull` there fails whenever
-  someone commits the file.
+- Writing a value leaves the server PC's checkout with local changes, so
+  `git pull` there fails whenever someone commits the file.
 - Every other PC reads its own, stale copy.
 - There is no record of who changed a value, when, or why.
 
-This spec moves saved parameters into the Experiment Manager, which every PC
-and every task already talks to, keeps a log of every change, and gives the
-lab a tab to view and edit them. Reading saved values in experiments is the
-norm for new experiments (as `TweezerBaseline` does today), so it is built
-properly now.
+This spec moves saved parameters into the Experiment Manager, which runs every
+task and which every PC already talks to, keeps a log of every change, and
+gives the lab a tab to view and edit them. The store knows nothing about what
+the values mean: it is a general facility of the task-running system.
 
 ## Goals
 
 1. One set of saved values for the whole lab, owned by the Experiment Manager
    and the same from every PC, notebook and task.
 2. Every change is logged with who, when, the old and new value, and why.
-3. A task reads the values saved when it reads them; a value changed while a
-   task is queued reaches that task when it runs.
+3. Code that reads a saved value gets the value saved at that moment; nothing
+   is cached.
 4. A GUI tab to view saved values, edit one, and see its history.
 5. The current values and every current reader move over without losing a
    value.
 
 ## Non-goals
 
-- **No link between saved parameters and experiment arguments or MOTMaster
-  parameters.** Saved parameters are a plain store. Code reads a value and
-  does with it what it likes: pass it as an argument's default, send it to a
-  MOTMaster parameter, use it in analysis.
+- **No inherent link between saved parameters and experiment arguments or
+  MOTMaster parameters.** Code reads a value and does with it what it likes,
+  including passing it to an argument as its default (section 3).
 - **No per-system namespacing.** Keys are flat and unique across the lab.
 - **No list or array values** until something needs them.
-- **No creating or deleting keys in the GUI.** Keys are created in code or by
-  the import.
-- **No offline or override mode** for `run_local()`. Tests replace the client
-  functions through a fixture (see Testing).
-- **Accepting optimiser results in the GUI** is the Optimisers spec; this spec
-  provides the `accept` command it uses.
+- **No creating or deleting keys in the GUI.** Keys are created in code.
+- **No Accept.** Accepting optimiser results is the Optimisers spec; it writes
+  through `set_saved_parameters(..., rid=...)`, or adds a command of its own
+  when it needs one.
 
 ## 1. Data
 
@@ -56,9 +50,12 @@ In a new `pytweezer/experiment/saved_parameters.py`, following the pattern of
 `recipes.py`.
 
 ```python
+Value = float | int | bool | str
+
+
 class SavedParameter(BaseModel):
     key: str
-    value: float | int | bool | str
+    value: Value
     group: str = ""
     unit: str = ""
     updated_at: datetime
@@ -69,32 +66,28 @@ class SavedParameterChange(BaseModel):
     time: datetime
     who: str
     key: str
-    old: float | int | bool | str | None   # None when the key was created
-    new: float | int | bool | str
+    old: Value | None        # None when the key was created
+    new: Value
     reason: str
-    rid: int | None = None   # the run whose results were accepted, or that set it
+    rid: int | None = None   # the run that set it, if any
 ```
 
-- **Keys** are flat strings, unique across the lab, stripped of surrounding
-  whitespace and non-empty. Today's keys are kept as they are. New CaF keys
-  take their own names (e.g. `caf.tImgCoolVCO`, by convention only).
-- **Groups** are for display only (`MOTMaster settings`, `Resonances`,
-  `EMCCD`, `Image analysis` from the old categories). Lookups ignore them.
+- **Keys** are flat strings, stripped of surrounding whitespace and non-empty.
+  Today's keys are kept as they are.
+- **Groups** are for display only. Lookups ignore them.
 - **Values** are JSON scalars. A key keeps its type: an int stays an int, a
   float accepts an int (stored as float), a bool is not an int, a str is only
-  a str. A value of the wrong type is refused.
+  a str. A value of the wrong type, or a non-finite float, is refused.
 
 `SavedParameterBook` holds the rules as plain data, like `RecipeBook`:
 
 - `get(key)` raises `SavedParameterError` naming the key, with close matches
   (`difflib`) if any.
-- `find(group=None)`, sorted by group then key.
+- `all()`, sorted by group then key.
 - `set(values, reason, who, *, create=False, group="", unit="", rid=None)`
   applies every value or none. Without `create` an unknown key is refused; with
   it, new keys get `group` and `unit`. Returns the changes made. Setting a key
   to the value it already has is not a change and is not logged.
-- `accept(rid, values, who)` is `set` with reason `accepted from run <rid>` and
-  `rid` recorded.
 
 `SavedParameterError` is a `ValueError`, so the manager returns it as a
 refusal.
@@ -102,9 +95,8 @@ refusal.
 `SavedParameterState` (`schema_version`, `parameters: list[SavedParameter]`)
 is persisted by `SavedParameterStore` (a `ModelStore`) to
 `saved_parameters.json` in the manager's data directory, next to
-`recipes.json`, with the same atomic replace and unreadable-file handling. The
-change log is appended to `saved_parameters_log.jsonl` in the same directory,
-one `SavedParameterChange` per line, never rewritten.
+`recipes.json`. The change log is appended to `saved_parameters_log.jsonl` in
+the same directory, one `SavedParameterChange` per line, never rewritten.
 
 ## 2. Manager commands and client functions
 
@@ -114,57 +106,60 @@ included in the published snapshot (as `recipes_version` is).
 
 | command | fields | reply |
 | --- | --- | --- |
-| `saved_parameters` | optional `group` | `parameters`, `version` |
+| `saved_parameters` | | `parameters`, `version` |
 | `set_saved_parameters` | `values`, `reason`, `who`, optional `create`, `group`, `unit`, `rid` | `changes` |
-| `accept_saved_parameters` | `rid`, `values`, `who` | `changes` |
-| `saved_parameter_history` | optional `key`, `rid`, `limit` | `entries`, newest first |
+| `saved_parameter_history` | optional `key`, `limit` | `entries`, newest first |
+| `describe_again` | `module` | |
 
-`accept_saved_parameters` refuses a run ID the manager does not know.
+`describe_again` makes the catalogue describe `module` afresh even though its
+file has not changed; the result reaches GUIs through `catalogue_version` as
+any other catalogue change does (section 3).
 
-In `pytweezer/experiment/client.py`, next to the recipe functions:
+In `pytweezer/experiment/client.py`, next to the recipe functions, each taking
+`client=` as the existing functions do:
 
 ```python
-get_saved_parameter(key) -> value              # KeyError naming the key if missing
-get_saved_parameters(group=None) -> dict       # {key: value}
+get_saved_parameter(key) -> Value              # KeyError naming the key if missing
+get_saved_parameters() -> dict[str, Value]
 set_saved_parameters(values, reason, *, create=False, group="", unit="", rid=None)
-accept_saved_parameters(rid, values)
-saved_parameter_history(key=None, *, rid=None, limit=None) -> list[SavedParameterChange]
+saved_parameter_history(key=None, *, limit=None) -> list[SavedParameterChange]
 ```
 
-`who` is filled in with `submitter_name()`. Every call goes to the manager;
-nothing is cached. With the manager unreachable they raise
-`ManagerUnavailable`, as the other client functions do.
+`who` is filled in with `submitter_name()`. Every call goes to the manager at
+the address CONFIG gives; nothing is cached. With the manager unreachable they
+raise `ManagerUnavailable`, as the other client functions do.
 
 ## 3. Using saved parameters in code
 
 There is no special behaviour. Code reads values where it needs them:
 
 ```python
-class MOTCounts(MotMasterExperiment):
-    centre_x = Number(get_saved_parameter("x_centre"))    # as an argument's default
+class Example(Experiment):
+    threshold = Number(get_saved_parameter("example_threshold"))   # a default
 
-
-class TweezerBaseline(MotMasterExperiment):
     def prepare(self):
-        self._saved = {
-            parameter: get_saved_parameter(key)
-            for parameter, key in SAVED_MOTMASTER_PARAMETERS.items()
-        }                                                  # sent to MOTMaster parameters
-        ...
+        self.offset = get_saved_parameter("example_offset")       # read at run time
 ```
 
-- The Experiment Manager's worker imports the experiment module fresh for
-  every task, so a value read at class level or in `prepare()` is the value
-  saved when the task starts.
-- A module that reads a value at class level contacts the manager when it is
-  imported (by the worker, the catalogue, the tests). The Experiments form
-  shows such a default as of when the catalogue was last loaded, and a recipe
-  stores it like any other argument value.
-- What a run records in its measurement file is up to the experiment, as
-  `TweezerBaseline` already records `motmaster_parameters`.
-- Ordinary experiments are expected only to read saved values. Writing is not
-  prohibited: an experiment may call `set_saved_parameters(..., rid=...)`.
-  Optimisers do not write; their results are accepted by hand.
+- **Read in `prepare()` or `run_point()`:** the value saved when the task runs.
+- **Passed to an argument as its default:** read whenever the module is
+  imported. That happens:
+  - when the catalogue describes the experiment, which sets the default the
+    Experiments form shows;
+  - when the worker imports the experiment for a task, which fills in any
+    argument the request leaves out (a notebook `submit()` that does not pass
+    it);
+  - in a notebook or test that imports the module.
+- **The Experiments form submits exactly what it shows.** Its defaults are as of
+  the catalogue's last description, which may be older than the latest saved
+  value. **Defaults** sends `describe_again` for the selected experiment and,
+  when the new description arrives, fills the form with its defaults, so a
+  changed saved value is picked up there.
+- A recipe stores argument values like any other.
+- Importing a module that reads a saved value contacts the manager. If the
+  manager is unreachable or the key is missing, the import fails and the
+  catalogue shows that error for the module, as for any other import error.
+- What a run records in its measurement file is up to the experiment.
 
 ## 4. The Saved parameters tab
 
@@ -172,14 +167,15 @@ A new tab, `Saved parameters`, after `Results` in `bin/gui.py`, in
 `pytweezer/GUI/saved_parameters.py`. Mockup: the "Saved parameters tab"
 artboard on https://claude.ai/artifact/2E9MRytEvLUcr7AVahEcPJ.
 
-- **Well, left: "Saved parameters"**, hint "N values, read by experiments when
-  they run; pick one to edit", with a filter box. A table grouped by group:
-  key, value, unit, last changed (when, who), why. Values changed today are in
-  bold.
+- **Well, left: "Saved parameters"**, hint "N values; pick one to edit", with a
+  filter box. A table grouped by group: key, value, unit, last changed (when,
+  who), why. Values changed today are in bold.
 - **Sheet, top right: the selected key.** Value field with its unit, a "Why"
-  field (saved as the reason), Apply as the primary button with the note
-  "tasks that start afterwards use the new value", and Revert. Apply calls
-  `set_saved_parameters` with the reason prefixed `set by hand: `.
+  field (saved as the reason), Apply as the primary button, and Revert. The
+  note under Apply reads "Read from now on; press Defaults in Experiments to
+  use it in an open form". Apply calls `set_saved_parameters` with the reason
+  prefixed `set by hand: `. A value that does not parse as the key's type is
+  refused in the sheet and nothing is sent.
 - **Well, bottom right: "History"** for the selected key, newest first: when,
   old, new, who and why.
 
@@ -192,39 +188,28 @@ showing stale values as current.
 
 ## 5. Migration
 
-**The values.** The real values are in the server PC's checkout of
-`pytweezer/experiment/parameters.json`, possibly with local changes. A new
-console script, `pytweezer-saved-parameters import <file>`, loads a
-`parameters.json` into the store through `set_saved_parameters(create=True)`:
-
-- each category becomes a group (`motmaster_parameters` → `MOTMaster
-  settings`, `misc_parameters` → `Resonances`, `emccd_parameters` → `EMCCD`,
-  `image_analysis` → `Image analysis`);
-- units are filled in where obvious: `V` for keys containing `VCO` or `VVA`
-  (including the two resonances), `px` for `x_centre` and `y_centre`, `mm/px`
-  for `*_mm_per_px`; the rest are left blank;
-- every value is logged with reason `imported from parameters.json`;
-- it refuses if the store already holds values, unless given `--replace`.
+**The values** are moved once, on the server PC, by
+`import_parameters_json(path)` in `saved_parameters.py`, marked `FIXME` for
+removal once the move is done. It reads a `parameters.json` and calls
+`set_saved_parameters(..., create=True)` once per category, with the category
+name as the group and reason `imported from parameters.json`. Running it twice
+changes nothing.
 
 On the server PC, the steps (in the PR description):
 
 1. Copy `pytweezer/experiment/parameters.json` somewhere outside the checkout.
 2. Discard its local changes and pull.
 3. Start the Experiment Manager and run the import on the copy.
-4. Check the values in the Saved parameters tab.
+4. Check the values in the Saved parameters tab, filling in units by hand.
 
-**The code**, in the same PR:
+**The code**, in the same PR, reads and writes through the client functions:
 
-- `TweezerBaseline` reads its `SAVED_MOTMASTER_PARAMETERS` map with
-  `get_saved_parameter` in `prepare()`; its behaviour is otherwise unchanged.
-  The `parameters_file` argument is removed.
-- `pytweezer/analysis/analysis.py`: the module-level read of
-  `cool_vco_resonance` moves into the function that uses it, so importing
-  analysis never contacts the manager. The `x_centre`/`y_centre` read and
-  write use `get_saved_parameter` / `set_saved_parameters`.
-- `pytweezer/helper_scripts/optimisation.py` keeps its behaviour of writing
-  results directly: `ExpParams.get_parameter` becomes `get_saved_parameter`,
-  and `set_parameter` plus `save_parameters` becomes `set_saved_parameters`
+- `TweezerBaseline` reads its `SAVED_MOTMASTER_PARAMETERS` in `prepare()`; its
+  `parameters_file` argument is removed.
+- `pytweezer/analysis/analysis.py`: the module-level read moves into the
+  function that uses it; the `x_centre`/`y_centre` read and write use the
+  client functions.
+- `pytweezer/helper_scripts/optimisation.py` keeps writing results directly,
   with reason `optimisation.py`.
 - `notebooks/tweezer_baseline.ipynb` writes `conversion_factor` with
   `set_saved_parameters`.
@@ -239,49 +224,37 @@ in the PR description.
 
 ## 6. Testing
 
-Following the `write-tests` skill.
-
-A `saved_parameters` fixture in `tests/conftest.py` replaces
-`get_saved_parameter`, `get_saved_parameters` and `set_saved_parameters` with
-functions over a dict the test supplies, and records every write.
+Following the `write-tests` skill. Existing tests that assume
+`parameters.json` (`tests/test_tweezer_baseline.py`,
+`tests/test_optimisation.py`) are changed to fit. Tests that need saved values
+run a manager on a scratch data directory and point the client's CONFIG at
+it; there is no fake store.
 
 `tests/test_saved_parameters.py` (new):
 
-1. A key keeps its type: an int stays an int, a float accepts an int, a wrong
-   type is refused (parametrised).
-2. Setting an unknown key is refused unless `create=True`.
-3. Every change is logged with who, when, old, new and why; `accept` records
-   the run ID.
-4. Values and the log read back identical after the store is reopened.
-5. An unreadable store file is moved aside, never silently overwritten.
-6. The import copies all values unchanged, turns the categories into groups
-   and fills the obvious units.
-7. The import refuses a store that already has values, unless `--replace`.
+1. A key keeps its type: an int stays an int, a float accepts an int; a wrong
+   type or a non-finite float is refused and nothing changes (parametrised).
+2. Setting an unknown key is refused unless `create=True`, all or nothing.
+3. Every change is logged with who, when, old, new and why; setting a key to
+   its current value is not logged.
+4. The import copies every value, with its category as the group.
 
 `tests/test_experiment_manager.py`:
 
-8. A value written with `set_saved_parameters` is returned by the next read,
-   and the snapshot's `saved_parameters_version` goes up.
-9. `accept_saved_parameters` refuses an unknown run ID.
+5. A value written with `set_saved_parameters` is read back, survives a
+   manager restart, and the snapshot's `saved_parameters_version` goes up.
+6. A misspelt key in `get_saved_parameter` raises `KeyError` naming the
+   closest key.
+7. `describe_again` describes an unchanged module afresh.
 
-`tests/test_experiment_e2e.py`:
+`tests/test_experiment_gui.py`:
 
-10. A task queued before a value changes reads the new value when it starts.
+8. The tab builds offscreen; Apply sends the value with its reason; a value of
+   the wrong type is refused before sending; a live update keeps the selected
+   key and an unsent edit; an unreachable manager is said, not shown as
+   current.
+9. Defaults in the Experiments form asks for the experiment to be described
+   again and applies the new defaults when they arrive.
 
-`tests/test_experiments.py` (new), parametrised over every module in
-`pytweezer/experiments/`, with the `saved_parameters` fixture applied:
-
-- it imports cleanly the way the manager imports it
-  (`introspect.describe`);
-- every declared device exists in CONFIG (`reserved_devices()`).
-
-These replace per-experiment tests: `tests/test_tweezer_baseline.py` is
-deleted. `tests/test_optimisation.py` uses the fixture instead of patching
-`ExpParams`.
-
-`tests/test_experiment_gui.py`: the tab builds offscreen; Apply sends the value
-with its reason; a live update keeps the selected key.
-
-Not tested, ranked: importing `analysis.py` does not contact the manager; the
-table filter; the units the import fills in; the bold styling for today's
-changes (checked by eye).
+Not tested, ranked: the table filter; the bold styling for today's changes
+(checked by eye).

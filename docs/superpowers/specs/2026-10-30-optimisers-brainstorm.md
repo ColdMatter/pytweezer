@@ -77,36 +77,24 @@ experiments**.
    points is known up front. There is **no optimiser service**: the
    Optimisers tab launches ordinary tasks, shows their progress and offers
    Accept. All stages of one staged scan belong to one experiment.
-5. **Optimisers inherit their measurement.** Each single-purpose experiment
-   puts its shot in `measure(**motmaster_overrides) -> dict[str, float]`; its
-   own `run_point` records that. Two generic mixins, `StagedScan` and
-   `BayesianOptimisation`, own the point loop and record the best values in
-   `finish()`. An optimiser is a short class such as
-   `class OptimiseMOTShims(BayesianOptimisation, TweezerLoading)` naming its
-   objective and its stages or dimensions. Rejected: one generic optimiser
+5. **Optimisers inherit their measurement.** A measurement experiment puts
+   one shot in `measure(**settings) -> dict[str, float]`; its own `run_point`
+   records that. Two generic mixins, `StagedScan` and `BayesianOptimisation`,
+   own the point loop and record the best values in `finish()`. An optimiser
+   is a short class combining a mixin with a measurement experiment, naming
+   its objective and its stages or dimensions. Rejected: one generic optimiser
    taking the target class as an argument (devices would depend on argument
    values), and shared plain functions (declarations copied into every
    optimiser). Needs one framework hook: the experiment, not the submitted
    `Scan`, says how many points it runs.
-   - `measure()` follows the usual camera pattern (see `LoadTweezers.run_point`):
-     start the acquisition, run the MOTMaster sequence (which triggers the
-     camera; `Go()` blocks for the whole sequence while the camera buffers),
-     then read the frames.
 6. **Accept writes to saved parameters, which are their own namespace.** A
-   `parameters.json` key is not a MOTMaster parameter, even where the names
-   match: different experiments may keep different values for the same
-   MOTMaster parameter under different keys. A stage or dimension saves under
-   its MOTMaster parameter's name by default and takes `save_as=` for a
-   distinct one, e.g. `Stage("rb.tImgCoolVCO1", values,
-   save_as="cool_vco_resonance")`; results that are not MOTMaster settings
-   (the MOT centre) always name their key. Accept only updates keys that
-   already exist (`ExpParameterManager.set_parameter` refuses others) and
-   shows each key's current and new value, with rows the user can untick.
-7. **MOT counts reads the saved MOT centre** (`x_centre`, `y_centre`) in
-   `prepare()`, as `TweezerBaseline` reads its settings; arguments can
-   override it by hand. Finding the centre is a separate MOT Position run whose
-   result is accepted first. Runs stay short, at the cost of a manual step and
-   a wrong window if the MOT has moved since.
+   saved key is not an argument or a MOTMaster parameter, even where the
+   names match. Each stage or dimension names the saved key it proposes a
+   value for. Accept only updates keys that already exist and shows each
+   key's current and new value, with rows the user can untick.
+7. *(Moved to later work.)* Where a particular optimiser's inputs come from
+   (the MOT centre, tweezer site positions) is decided when that optimiser is
+   written, not in the framework.
 8. **The tab is a calibration dashboard** (mockup A in
    https://claude.ai/artifact/2E9MRytEvLUcr7AVahEcPJ):
    - Top well: one row per optimiser with what it saves, its last run (state
@@ -129,59 +117,60 @@ experiments**.
      to `recipes.json`; the tracked `parameters.json` only seeds them. This
      stops Accept dirtying the server PC's checkout (and breaking `git pull`)
      and stops other PCs reading stale copies.
-   - Accept is a manager command; each acceptance is logged (time, who, run,
-     key, old, new) and the snapshot carries the latest per optimiser, so
-     every PC's dashboard updates live.
+   - Accept writes through `set_saved_parameters(..., rid=...)`, so each
+     acceptance is logged with its run; spec 2 decides whether it needs a
+     command of its own.
    - Everything that reads `parameters.json` today moves to the manager:
      `TweezerBaseline`, `analysis.py` (reads `cool_vco_resonance` at import),
      notebooks.
 10. **Two specs, built in order.** (1) Saved parameters: the manager-owned
-    store and change log, get/set/accept commands, experiment arguments that
-    take their value from a saved key, and moving the current readers over.
-    (2) Optimisers: `measure()`, the `StagedScan` and `BayesianOptimisation`
-    mixins, the optimiser experiments, the `planned_scan()` hook and the
-    dashboard. Each gets its own spec, plan and PR.
+    store and change log, get/set/history commands, client functions, the
+    tab, and moving the current readers over. (2) Optimisers, the framework
+    only: `measure()`, the `StagedScan` and `BayesianOptimisation` mixins, the
+    `planned_scan()` hook, Accept and the dashboard, built and tested against
+    a demo optimiser over `pytweezer/experiments/demo.py`. The real
+    optimisers (MOT position, resonances, MOT number, MOT and molasses shims)
+    are later work, one short experiment each. Each spec gets its own plan
+    and PR.
 11. **Saved parameters are a plain store with no special behaviour.** They
     are not tied to arguments or MOTMaster parameters. Code anywhere
     (experiments, notebooks, analysis) reads them with `get_saved_parameter(key)` /
     `get_saved_parameters()` and writes with `set_saved_parameters(values, reason)` from
     `pytweezer.experiment.client`, both going to the manager. A user who wants
-    a saved value as an argument's default writes `Number(get_saved_parameter("x_centre"))`;
-    one who wants it in a MOTMaster parameter passes it to `run_sequences`.
-    A worker imports the experiment fresh per task, so either gives the value
-    saved at task start. What is recorded in the measurement file is up to the
-    experiment. Ordinary experiments are expected only to read; optimisers'
+    a saved value as an argument's default writes `Number(get_saved_parameter("x_centre"))`,
+    read when the module is imported; the Experiments form submits exactly
+    what it shows, and its Defaults button has the manager describe the
+    experiment again so a changed saved value is picked up. One who wants it
+    in a MOTMaster parameter reads it in `prepare()`. What is recorded in the
+    measurement file is up to the experiment. Ordinary experiments are expected only to read; optimisers'
     values are written through Accept. Rejected along the way: a `saved=` /
     `Saved(...)` link on arguments, recording which arguments came from saved
-    keys, and a `saved_parameters=` argument to `run_local` (tests monkeypatch
-    `get_saved_parameter` through a fixture instead).
+    keys, and a `saved_parameters=` argument to `run_local`.
 12. **Saved keys are flat and unique across the lab**; today's keys stay as
     they are. The old categories (`motmaster_parameters`, `misc_parameters`,
     `emccd_parameters`, `image_analysis`) become display groups. CaF keys get
     their own names when they arrive (e.g. `caf.tImgCoolVCO` by convention).
-
-## Proposed, not yet confirmed
-
-- The routines split into single-purpose experiments, each also usable by hand:
-  - MOT position: the background-subtracted image and its fitted centre.
-  - MOT counts: windowed counts around a given centre.
-  - Tweezer loading probability.
-  - Molasses survival probability.
-- A scan preset sweeps one argument, picks the setting that maximises a result,
-  and can chain stages. DetectResonances, for example, is a cooling-VCO stage
-  followed by a repump-VCO stage.
-- Within one run, later stages use the earlier stages' optima directly, without
-  waiting for acceptance.
-- Presets are code (optimisation experiments) plus recipes (their settings);
-  nothing is designed in the tab.
-- Any PC can watch a run or accept its result.
+13. **The framework knows nothing about tweezers or MOTs.** The task system,
+    saved parameters and optimisers are general; lab-specific behaviour lives
+    only in the experiments written on top of them.
+14. **One place runs tasks.** The Experiment Manager on the server PC runs
+    every task in a worker it starts; code inside a task reaches the manager
+    at the address CONFIG gives, like any other client.
 
 ## Status
 
-- Spec 1 is written: `2026-10-30-saved-parameters-design.md`, awaiting
-  review.
-- Then spec 2 (`2026-10-30-optimisers-design.md`), most of whose decisions
-  are above, and `superpowers:writing-plans` for each.
+- Spec 1 revised 2026-10-31: `2026-10-30-saved-parameters-design.md`, awaiting
+  review. Its plan is rewritten once the spec is approved.
+- Then spec 2 (`2026-10-30-optimisers-design.md`), the framework only, and
+  `superpowers:writing-plans` for it.
+
+## Later work, not in either spec
+
+The routines split into single-purpose experiments, each also usable by hand,
+built on the spec 2 framework: MOT position, MOT counts, tweezer loading
+probability, molasses survival probability; and the optimisers over them
+(resonances, MOT number, MOT and molasses shims). Where each gets its inputs
+(MOT centre, site positions) is decided then.
 
 ## Relevant code and skills
 
