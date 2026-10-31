@@ -7,7 +7,6 @@ catalogue, recipes and saved parameters when their versions change, and reads
 each run's measurement file through a results archive, as the Results tab does.
 """
 
-import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -59,7 +58,6 @@ _TABLE_HEIGHT_LIMIT = 420
 _RUN_HEIGHT_MIN = 400
 #: Results read from a run's file; per-setting results are added for Bayesian runs.
 _PLOTTED = ["stage", "setting", "objective"]
-_UNREADABLE = (OSError, KeyError, ValueError)
 
 _ICON_STATE = {
     "queued": "stopped",
@@ -69,18 +67,6 @@ _ICON_STATE = {
     "accepted": "stopped",
     "failed": "crashed",
 }
-
-
-def generated_settings(schema: dict, suffixes: tuple[str, ...]) -> list[str]:
-    """The settings with every generated argument ``<setting><suffix>``, in order.
-
-    ``("_start", "_stop", "_points")`` gives a staged scan's stages and
-    ``("_low", "_high")`` a Bayesian optimisation's dimensions.
-    """
-    names = schema.get("arguments", {})
-    first, *rest = suffixes
-    settings = [name[: -len(first)] for name in names if name.endswith(first)]
-    return [s for s in settings if all(s + suffix in names for suffix in rest)]
 
 
 def partial_label(constants: dict) -> str:
@@ -514,17 +500,22 @@ class OptimisersPanel(QWidget):
         """The run's measurement, or the exception reading it raised.
 
         Only finished files are read, so each is read once; one that could not
-        be read is tried again on the next :meth:`refresh`.
+        be read is tried again on the next :meth:`refresh`. Any exception is
+        caught, since one escaping a Qt slot aborts the GUI.
         """
         path = task.h5_path
+        if not path:
+            return FileNotFoundError(f"run {task.rid} wrote no file")
         if path not in self._measurements:
             row = self.rows.get((task.experiment, task.class_name))
-            schema = row.schema if row else {}
-            wanted = _PLOTTED + generated_settings(schema, ("_low", "_high"))
+            optimiser = row.schema["optimiser"] if row else {}
+            wanted = list(_PLOTTED)
+            if optimiser.get("kind") == "bayesian":
+                wanted += optimiser["settings"]
             try:
                 self._measurements[path] = self.archive.load(path, results=wanted)
-            except _UNREADABLE as error:
-                logger.warning("Cannot read %s: %s", path, error)
+            except Exception as error:
+                logger.warning("Cannot read %s", path, exc_info=True)
                 self._measurements[path] = error
         return self._measurements[path]
 
@@ -585,6 +576,7 @@ class OptimisersPanel(QWidget):
         self.run_region.set_hint(hint)
         self._show_plots(row, run, measurement)
         if discarded:
+            self._show_proposals(None, "")
             self.sheet.setVisible(False)
             return
         if _failed(measurement):
@@ -602,7 +594,7 @@ class OptimisersPanel(QWidget):
             else:
                 self._show_proposals(run.rid, "", proposed)
                 accepted = self._acceptance(run.rid)
-                if accepted and not self.status.property("state"):
+                if accepted and not self.status.text():
                     change = accepted[0]
                     self._show_status(
                         f"Accepted {when_text(change.time, now())} by {change.who}"
@@ -706,17 +698,18 @@ class OptimisersPanel(QWidget):
     def _plot_stages(self, row, measurement):
         results = measurement.results
         stages = np.asarray(results.get("stage", []))
-        settings = generated_settings(row.schema, ("_start", "_stop", "_points"))
-        for index, key in enumerate(row.proposes):
+        optimiser = row.schema["optimiser"]
+        for index, (setting, key) in enumerate(
+            zip(optimiser["settings"], optimiser["proposes"], strict=True)
+        ):
             chosen = measurement.constants.get(f"proposed.{key}")
-            setting = settings[index] if index < len(settings) else "setting"
             title = f"Stage {index + 1}: {setting} → {key}"
             here = stages == index
             if not here.any():
                 continue
             x = np.asarray(results["setting"], dtype=float)[here]
             y = np.asarray(results["objective"], dtype=float)[here]
-            plot = _plot(title, setting)
+            plot = _plot(title, setting, optimiser["objective"])
             plot.plot(x, y, pen=None, symbol="o", symbolSize=6, symbolBrush=_POINTS)
             means_x = np.unique(x)
             if len(means_x) < len(x):
@@ -736,11 +729,16 @@ class OptimisersPanel(QWidget):
             self.plot_message.setText("No evaluations recorded")
             return
         number = np.arange(1, len(objective) + 1)
-        goal = _bayesian_goal(row, measurement)
+        optimiser = row.schema["optimiser"]
+        goal = optimiser["goal"]
         finite = np.where(np.isfinite(objective), objective, np.nan)
         accumulate = np.fmax.accumulate if goal == "max" else np.fmin.accumulate
         best = accumulate(finite)
-        plot = _plot(f"Objective per evaluation; best so far ({goal})", "evaluation")
+        plot = _plot(
+            f"Objective per evaluation; best so far ({goal})",
+            "evaluation",
+            optimiser["objective"],
+        )
         plot.plot(
             number, objective, pen=None, symbol="o", symbolSize=6, symbolBrush=_POINTS
         )
@@ -801,7 +799,8 @@ class OptimisersPanel(QWidget):
         """Save the ticked proposals of the shown run for the whole lab.
 
         The store sets every value or, refusing any, none; a refusal is shown
-        in the sheet.
+        in the sheet. The run is recorded as accepted even if every value
+        matches the one saved.
         """
         rid = self._sheet_rid
         values = {
@@ -812,7 +811,7 @@ class OptimisersPanel(QWidget):
         if rid is None or not values:
             return
         try:
-            self.client.set_saved_parameters(
+            changes = self.client.set_saved_parameters(
                 values, f"accepted from run {rid}", submitter_name(), rid=rid
             )
         except ManagerUnavailable:
@@ -821,8 +820,13 @@ class OptimisersPanel(QWidget):
         except ManagerError as error:
             self._show_status(f"Accepting: {error}", "error")
             return
-        count = len(values)
-        self._show_status(f"Saved {count} value{'' if count == 1 else 's'}")
+        changed = sum(change.old != change.new for change in changes)
+        if changed:
+            self._show_status(
+                f"Accepted: {changed} value{'' if changed == 1 else 's'} changed"
+            )
+        else:
+            self._show_status("Accepted: nothing changed")
         self._stale.add("saved")
         self._fetch_stale()
         self._update()
@@ -856,36 +860,7 @@ def _failed(measurement) -> bool:
     return isinstance(measurement, Exception)
 
 
-def _bayesian_goal(row, measurement) -> str:
-    """``"min"`` if the proposal is the lowest objective, else ``"max"``.
-
-    The schema does not carry the goal, so it is read off which evaluation
-    the run proposed.
-    """
-    objective = np.asarray(measurement.results.get("objective", []), dtype=float)
-    finite = objective[np.isfinite(objective)]
-    settings = generated_settings(row.schema, ("_low", "_high"))
-    proposed = proposals(measurement.constants, row.proposes)
-    if not len(finite) or len(settings) != len(row.proposes):
-        return "max"
-    matches = np.ones(len(objective), dtype=bool)
-    for setting, key in zip(settings, row.proposes, strict=True):
-        if setting not in measurement.results or key not in proposed:
-            return "max"
-        matches &= np.isclose(
-            np.asarray(measurement.results[setting], dtype=float), proposed[key]
-        )
-    chosen = objective[matches & np.isfinite(objective)]
-    if (
-        len(chosen)
-        and math.isclose(chosen[0], finite.min())
-        and finite.min() != finite.max()
-    ):
-        return "min"
-    return "max"
-
-
-def _plot(title, x_label):
+def _plot(title, x_label, objective):
     plot = pg.PlotWidget(background=PLOT_BACKGROUND)
     plot.setMinimumSize(280, 200)
     plot.setTitle(title, color=PLOT_FOREGROUND, size="10pt")
@@ -894,7 +869,7 @@ def _plot(title, x_label):
         plot.getAxis(axis).setTextPen(PLOT_FOREGROUND)
         plot.getAxis(axis).enableAutoSIPrefix(False)
     plot.setLabel("bottom", x_label)
-    plot.setLabel("left", "objective")
+    plot.setLabel("left", objective or "objective")
     return plot
 
 

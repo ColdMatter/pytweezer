@@ -151,6 +151,14 @@ def test_form_shows_display_units_and_returns_si(editor):
     assert request.class_name == "Demo"
 
 
+def test_an_optimiser_offers_no_scan_and_says_it_sets_its_own_points(qapp):
+    editor = ArgumentEditor()
+    editor.set_experiment(DemoStagedScan.schema())
+    assert not any(row.scan_button.isEnabled() for row in editor.rows.values())
+    assert not editor.repetitions.isEnabled()
+    assert editor.point_count.text() == "sets its own points"
+
+
 class Tiny(Experiment):
     pulse = Number(2e-7, unit="s")
 
@@ -1305,13 +1313,17 @@ class FakeArchive:
         self.files = files
 
     def load(self, path, results=None):
-        return self.files[path]
+        found = self.files[path]
+        if isinstance(found, Exception):
+            raise found
+        return found
 
 
 class FakeOptimiserClient:
     def __init__(self, schemas, tasks, accepted_rids=()):
         self.calls = []
         self.refusal = None
+        self.recipe_names = []
         self.schemas = schemas
         self.tasks = tasks
         self.changes = [
@@ -1345,7 +1357,18 @@ class FakeOptimiserClient:
         return list(self.tasks)
 
     def recipes(self, experiment=None, class_name=None):
-        return []
+        return [
+            Recipe(experiment=DEMO, class_name="DemoStagedScan", name=name)
+            for name in self.recipe_names
+        ]
+
+    def submit(self, request):
+        self.calls.append(("submit", request.experiment, request.class_name))
+        return 60
+
+    def submit_recipe(self, experiment, class_name, name, **kwargs):
+        self.calls.append(("submit_recipe", experiment, class_name, name))
+        return 61
 
     def saved_parameters(self):
         return list(self.parameters)
@@ -1357,7 +1380,23 @@ class FakeOptimiserClient:
         self.calls.append(("set_saved_parameters", values, reason, rid))
         if self.refusal:
             raise ManagerError(self.refusal)
-        return []
+        saved = {parameter.key: parameter for parameter in self.parameters}
+        changes = [
+            SavedParameterChange(
+                time=now(),
+                who=who,
+                key=key,
+                old=saved[key].value,
+                new=value,
+                reason=reason,
+                rid=rid,
+            )
+            for key, value in values.items()
+        ]
+        for key, value in values.items():
+            saved[key].value = value
+        self.changes = changes + self.changes
+        return changes
 
     def close(self):
         pass
@@ -1488,3 +1527,81 @@ def test_a_refused_accept_changes_nothing_and_says_why(qapp):
     assert len(panel.client.calls) == 1
     assert panel.status.property("state") == "error"
     assert "no saved parameter 'demo_power'" in panel.status.text()
+
+
+@pytest.mark.parametrize(
+    ("saved", "status"),
+    [
+        ({"demo_resonance": 1.2, "demo_power": 0.9}, "nothing changed"),
+        ({"demo_resonance": 1.2, "demo_power": 0.5}, "1 value changed"),
+    ],
+)
+def test_accepting_marks_the_run_accepted_and_counts_what_changed(qapp, saved, status):
+    panel = make_optimisers_panel()
+    for parameter in panel.client.parameters:
+        parameter.value = saved[parameter.key]
+    panel.refresh()
+    panel.select(DEMO, "DemoStagedScan")
+    panel.accept()
+    assert panel.rows[(DEMO, "DemoStagedScan")].state == "accepted"
+    assert status in panel.status.text()
+
+
+class UnexpectedRemoteError(Exception):
+    pass
+
+
+def test_a_file_that_raises_anything_shows_as_unreadable(qapp):
+    panel = make_optimisers_panel(
+        [STAGED],
+        [finished_run(41, "completed", "DemoStagedScan")],
+        {run_file(41, "DemoStagedScan"): UnexpectedRemoteError("server fault")},
+    )
+    panel.select(DEMO, "DemoStagedScan")
+    assert "its file cannot be read" in last_run_text(panel, "DemoStagedScan")
+    assert panel.accept_rows == {}
+
+
+@pytest.mark.parametrize(
+    ("goal", "best_so_far"), [("max", [300, 900, 900]), ("min", [300, 300, 300])]
+)
+def test_the_evaluations_plot_follows_the_goal(qapp, goal, best_so_far):
+    schema = {**BAYESIAN, "optimiser": {**BAYESIAN["optimiser"], "goal": goal}}
+    panel = make_optimisers_panel(
+        [schema],
+        [finished_run(40, "completed", "DemoBayesian")],
+        {run_file(40, "DemoBayesian"): bayesian_measurement()},
+    )
+    panel.select(DEMO, "DemoBayesian")
+    plot = panel.plots_layout.itemAt(0).widget()
+    _, best = plot.getPlotItem().listDataItems()
+    assert list(best.yData) == best_so_far
+
+
+@pytest.mark.parametrize(
+    ("preset", "expected"),
+    [
+        ("Defaults", ("submit", DEMO, "DemoStagedScan")),
+        ("quick", ("submit_recipe", DEMO, "DemoStagedScan", "quick")),
+    ],
+)
+def test_run_submits_the_chosen_preset(qapp, preset, expected):
+    panel = make_optimisers_panel()
+    panel.client.recipe_names = ["quick"]
+    panel.refresh()
+    row = panel.rows[(DEMO, "DemoStagedScan")]
+    row.preset.setCurrentText(preset)
+    row.run_button.click()
+    assert panel.client.calls == [expected]
+
+
+def test_discarded_proposals_cannot_be_accepted(qapp, tmp_path):
+    panel = make_optimisers_panel()
+    panel._settings = QtCore.QSettings(
+        str(tmp_path / "optimisers.ini"), QtCore.QSettings.Format.IniFormat
+    )
+    panel.select(DEMO, "DemoStagedScan")
+    panel.discard()
+    panel.accept()
+    assert panel.accept_rows == {}
+    assert panel.client.calls == []
