@@ -119,7 +119,7 @@ class ExperimentManager:
         )
         self.saved_parameters = SavedParameterBook(self.saved_parameter_store.load())
         self.saved_parameter_log = SavedParameterLog(
-            self.root / "saved_parameter_log.jsonl"
+            self.root / "saved_parameters_log.jsonl"
         )
         state = self.queue.state
         state.next_rid = max(state.next_rid, highest_rid(self.root) + 1)

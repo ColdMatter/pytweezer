@@ -620,7 +620,7 @@ def test_notebook_calls_check_arguments_before_sending():
 
 
 def test_a_written_value_is_read_back_after_a_restart_and_bumps_the_version(
-    make_manager,
+    make_manager, tmp_path
 ):
     manager = make_manager()
     version = manager._snapshot()["saved_parameters_version"]
@@ -634,6 +634,7 @@ def test_a_written_value_is_read_back_after_a_restart_and_bumps_the_version(
         }
     )
     assert reply["ok"], reply
+    assert (tmp_path / "saved_parameters_log.jsonl").exists()
     [parameter] = manager.handle({"command": "saved_parameters"})["parameters"]
     assert (parameter["key"], parameter["value"]) == ("offset", 131.5)
     assert manager._snapshot()["saved_parameters_version"] == version + 1
