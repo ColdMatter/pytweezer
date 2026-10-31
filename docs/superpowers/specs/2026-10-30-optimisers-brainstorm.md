@@ -158,6 +158,26 @@ experiments**.
     every task in a worker it starts; code inside a task reaches the manager
     at the address CONFIG gives, like any other client.
 
+## Spec 2 decisions (2026-10-31)
+
+15. **Within one run, later stages use earlier stages' best values directly**,
+    without waiting for acceptance.
+16. **Presets are code plus recipes.** An optimiser's stages and dimensions are
+    its class; its ranges, point counts and evaluation counts are arguments,
+    so saved presets are recipes. Nothing is designed in the tab.
+17. **Any PC can watch a run and accept its result**; accepting is a
+    saved-parameter write through the manager.
+18. **Completed and terminated runs can be accepted; failed runs cannot.** A
+    terminated run's Accept sheet says it is partial ("stage 1 of 2 finished",
+    "34 of 60 evaluations"); in a staged scan only finished stages propose
+    values.
+19. **A stage proposes the setting with the best mean result by default**
+    (over that setting's repeat shots), for a named result and a goal of
+    higher or lower; an optimiser overrides `best(settings, results) ->
+    value` for anything else, such as a peak fit. The framework records
+    whatever `best` returns and the plot marks it. A Bayesian optimisation
+    uses the same hook, proposing the best measured point by default.
+
 ## Status
 
 - Spec 1 revised 2026-10-31: `2026-10-30-saved-parameters-design.md`, awaiting

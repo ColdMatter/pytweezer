@@ -64,6 +64,7 @@ class SavedParameter(BaseModel):
     unit: str = ""
     updated_at: datetime
     updated_by: str          # user@host, as submitter_name() gives it
+    reason: str = ""          # the reason given for its last change
 
 
 class SavedParameterChange(BaseModel):
