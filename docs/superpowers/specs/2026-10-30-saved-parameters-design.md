@@ -92,7 +92,8 @@ class SavedParameterChange(BaseModel):
 - `set(values, reason, who, *, create=False, group="", unit="", rid=None)`
   applies every value or none. Without `create` an unknown key is refused; with
   it, new keys get `group` and `unit`. Returns the changes made. Setting a key
-  to the value it already has is not a change and is not logged.
+  to the value it already has is not a change and is not logged, except
+  when `rid` is given: an acceptance from a run logs every key it names.
 
 `SavedParameterError` is a `ValueError`, so the manager returns it as a
 refusal.
