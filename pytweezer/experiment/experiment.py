@@ -78,8 +78,12 @@ class Experiment:
 
     @classmethod
     def schema(cls) -> dict[str, Any]:
-        """JSON-serialisable description of the class, for argument editors."""
-        return {
+        """JSON-serialisable description of the class, for argument editors.
+
+        An optimiser also has an ``"optimiser"`` entry naming its kind and the
+        saved-parameter keys it proposes.
+        """
+        schema = {
             "class_name": cls.__name__,
             "module": cls.__module__,
             "doc": inspect.getdoc(cls) or "",
@@ -88,6 +92,9 @@ class Experiment:
             },
             "devices": {name: dev.to_schema() for name, dev in cls.devices().items()},
         }
+        if hasattr(cls, "optimiser_schema"):
+            schema["optimiser"] = cls.optimiser_schema()
+        return schema
 
     @classmethod
     def extra_argument(cls, name: str) -> Argument | None:
