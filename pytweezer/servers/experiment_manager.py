@@ -54,6 +54,12 @@ from pytweezer.experiment.recipes import (
     RecipeStore,
     unknown_arguments,
 )
+from pytweezer.experiment.saved_parameters import (
+    SavedParameterBook,
+    SavedParameterChange,
+    SavedParameterLog,
+    SavedParameterStore,
+)
 from pytweezer.experiment.storage import (
     data_root,
     git_provenance,
@@ -71,7 +77,8 @@ logger = get_logger("pytweezer.servers.experiment_manager")
 #: The published state (:data:`~pytweezer.experiment.client.NOTIFIER_NAME`)
 #: is laid out as::
 #:
-#:     {"started", "catalogue_version", "recipes_version", "simulated",
+#:     {"started", "catalogue_version", "recipes_version",
+#:      "saved_parameters_version", "simulated",
 #:      "alive",                         # epoch s, at least every PUBLISH_INTERVAL_S
 #:      "running", "queue", "history",   # as ExperimentQueue.snapshot()
 #:      "points": {str(rid): [{"index", "values", "scalars", "t_start", "t_end"}]}}
@@ -107,6 +114,13 @@ class ExperimentManager:
         self.queue = ExperimentQueue(self.store.load())
         self.recipe_store = RecipeStore(self.root / "recipes.json")
         self.recipes = RecipeBook(self.recipe_store.load())
+        self.saved_parameter_store = SavedParameterStore(
+            self.root / "saved_parameters.json"
+        )
+        self.saved_parameters = SavedParameterBook(self.saved_parameter_store.load())
+        self.saved_parameter_log = SavedParameterLog(
+            self.root / "saved_parameter_log.jsonl"
+        )
         state = self.queue.state
         state.next_rid = max(state.next_rid, highest_rid(self.root) + 1)
         self.catalogue = catalogue or Catalogue()
@@ -127,6 +141,7 @@ class ExperimentManager:
         # Bumped whenever the catalogue changes, so GUIs know to fetch it again.
         self._catalogue_version = 0
         self._recipes_version = 0
+        self._saved_parameters_version = 0
         self._dirty = True
         self._last_publish = 0.0
         self._last_rescan = 0.0
@@ -287,6 +302,43 @@ class ExperimentManager:
             request["experiment"], request["class_name"], request["name"]
         )
         self._recipes_changed()
+
+    def _cmd_saved_parameters(self, request):
+        return {
+            "parameters": [
+                parameter.model_dump(mode="json")
+                for parameter in self.saved_parameters.all()
+            ],
+            "version": self._saved_parameters_version,
+        }
+
+    def _cmd_set_saved_parameters(self, request):
+        changes = self.saved_parameters.set(
+            request["values"],
+            reason=request["reason"],
+            who=request["who"],
+            create=bool(request.get("create")),
+            group=request.get("group", ""),
+            unit=request.get("unit", ""),
+            rid=request.get("rid"),
+        )
+        for change in changes:
+            logger.info(
+                "Saved parameter %r: %r -> %r (%s, %s)",
+                change.key,
+                change.old,
+                change.new,
+                change.who,
+                change.reason,
+            )
+        self._saved_parameters_changed(changes)
+        return {"changes": [change.model_dump(mode="json") for change in changes]}
+
+    def _cmd_saved_parameter_history(self, request):
+        entries = self.saved_parameter_log.read(
+            request.get("key"), limit=request.get("limit")
+        )
+        return {"entries": [entry.model_dump(mode="json") for entry in entries]}
 
     def _cmd_submit_recipe(self, request):
         recipe = self.recipes.get(
@@ -653,6 +705,14 @@ class ExperimentManager:
         self._recipes_version += 1
         self._dirty = True
 
+    def _saved_parameters_changed(self, changes: list[SavedParameterChange]) -> None:
+        if not changes:
+            return
+        self.saved_parameter_store.save(self.saved_parameters.state)
+        self.saved_parameter_log.append(changes)
+        self._saved_parameters_version += 1
+        self._dirty = True
+
     def _save(self) -> None:
         self.store.save(self.queue.state)
 
@@ -663,6 +723,7 @@ class ExperimentManager:
             "started": self.started,
             "catalogue_version": self._catalogue_version,
             "recipes_version": self._recipes_version,
+            "saved_parameters_version": self._saved_parameters_version,
             "simulated": self.simulate,
             "alive": time.time(),
             **self.queue.snapshot(),

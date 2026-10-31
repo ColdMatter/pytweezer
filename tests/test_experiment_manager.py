@@ -617,3 +617,31 @@ def test_notebook_calls_check_arguments_before_sending():
         )
     with pytest.raises(ValueError, match="run_local"):
         submit(type("Local", (), {"__module__": "__main__"}), client=client)
+
+
+def test_a_written_value_is_read_back_after_a_restart_and_bumps_the_version(
+    make_manager,
+):
+    manager = make_manager()
+    version = manager._snapshot()["saved_parameters_version"]
+    reply = manager.handle(
+        {
+            "command": "set_saved_parameters",
+            "values": {"offset": 131.5},
+            "reason": "r",
+            "who": "me",
+            "create": True,
+        }
+    )
+    assert reply["ok"], reply
+    [parameter] = manager.handle({"command": "saved_parameters"})["parameters"]
+    assert (parameter["key"], parameter["value"]) == ("offset", 131.5)
+    assert manager._snapshot()["saved_parameters_version"] == version + 1
+    restarted = make_manager()
+    assert restarted.handle({"command": "saved_parameters"})["parameters"] == [
+        parameter
+    ]
+    [entry] = restarted.handle({"command": "saved_parameter_history", "key": "offset"})[
+        "entries"
+    ]
+    assert entry["new"] == 131.5
