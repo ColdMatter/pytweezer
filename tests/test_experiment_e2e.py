@@ -183,7 +183,7 @@ def test_an_optimiser_run_can_be_accepted(harness):
         timeout=30,
     )
     set_saved_parameters(
-        {"demo_resonance": 0.0, "demo_power": 0.5},
+        {"demo_resonance": 0.1, "demo_power": 0.5},
         "created",
         create=True,
         client=harness.client,

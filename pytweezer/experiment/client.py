@@ -479,7 +479,9 @@ def set_saved_parameters(
 
     Either every value is set or, if the manager refuses any, none. Unknown keys
     are refused unless ``create``; ``group`` and ``unit`` apply to created keys.
-    Returns a change for each value that differs from the stored one.
+    Returns a change for each value that differs from the stored one or, when
+    accepting from run ``rid``, for every key named, so the run is recorded as
+    accepted even where its values match those saved.
     """
     return (client or ExperimentManagerClient()).set_saved_parameters(
         values,

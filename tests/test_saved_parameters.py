@@ -66,6 +66,14 @@ def test_every_change_is_logged_but_an_unchanged_value_is_not(tmp_path):
     assert book.get("key").reason == "by hand"
 
 
+def test_an_acceptance_from_a_run_logs_an_unchanged_value(tmp_path):
+    book, log = book_with(key=1.0), SavedParameterLog(tmp_path / "log.jsonl")
+    log.append(book.set({"key": 1.0}, reason="accepted from run 7", who="me", rid=7))
+    [change] = log.read(rid=7)
+    assert (change.old, change.new) == (1.0, 1.0)
+    assert book.get("key").reason == "r"
+
+
 def test_the_log_reads_newest_first_up_to_the_limit(tmp_path):
     book, log = book_with(a=0, b=0), SavedParameterLog(tmp_path / "log.jsonl")
     for step in (1, 2, 3):

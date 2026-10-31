@@ -31,7 +31,7 @@ class SavedParameterError(ValueError):
 
 
 class SavedParameter(BaseModel):
-    """One saved value; ``updated_by`` and ``reason`` are those of its last change."""
+    """One saved value; ``updated_by`` and ``reason`` are those of its last change of value."""
 
     key: str
     value: Value
@@ -121,7 +121,10 @@ class SavedParameterBook:
 
         Keys that don't exist are refused unless ``create``; ``group`` and
         ``unit`` apply only to keys created here. Returns a change for each
-        value that differs from the stored one.
+        value that differs from the stored one or, when ``rid`` is given (an
+        acceptance from that run), for every key named, unchanged ones with
+        ``old == new``. A parameter's ``updated_*`` and ``reason`` change only
+        with its value.
         """
         existing = {parameter.key: parameter for parameter in self.state.parameters}
         planned: list[tuple[str, Value, SavedParameter | None]] = []
@@ -154,7 +157,8 @@ class SavedParameterBook:
                     )
                 )
             elif old == value:
-                continue
+                if rid is None:
+                    continue
             else:
                 current.value = value
                 current.updated_at = time
