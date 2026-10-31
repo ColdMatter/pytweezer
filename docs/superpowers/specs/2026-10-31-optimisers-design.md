@@ -78,7 +78,7 @@ measurement experiment: `class DemoStagedScan(StagedScan, DemoResonance)`.
 `objective` and a `goal` of `"max"` or `"min"`. `objective(results) -> float`
 returns that result by default; an optimiser overrides it to combine results.
 
-**Best value.** `best(settings, results) -> value` chooses a proposal. By
+**Best value.** `best(settings, objectives) -> value` chooses a proposal from each shot's setting and objective. By
 default it takes the setting whose objective, averaged over that setting's
 repeat shots, is best for the goal (D19). An optimiser overrides it, for
 example to fit a peak. If `best` raises, the run fails with that error.
