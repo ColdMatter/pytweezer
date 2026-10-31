@@ -1,7 +1,9 @@
 """Experiments tab widgets, offscreen, with a fake manager client and feed."""
 
 import threading
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from PyQt6 import QtCore
 from PyQt6.QtTest import QTest
@@ -24,8 +26,9 @@ from pytweezer.experiment.motmaster import (
 )
 from pytweezer.experiment.queue import UNKNOWN_DEVICES, now
 from pytweezer.experiment.recipes import Recipe
-from pytweezer.experiment.saved_parameters import SavedParameter
-from pytweezer.experiment.task import TaskRequest
+from pytweezer.experiment.saved_parameters import SavedParameter, SavedParameterChange
+from pytweezer.experiment.task import Task, TaskRequest
+from pytweezer.experiments.demo import DemoBayesian, DemoStagedScan
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
@@ -36,6 +39,7 @@ from pytweezer.GUI.experiments.queue_view import (
     QueueView,
     queue_summary,
 )
+from pytweezer.GUI.optimisers import OptimisersPanel
 from pytweezer.GUI.saved_parameters import SavedParametersPanel
 from tests.helpers import FakeFeed, until
 
@@ -1229,3 +1233,258 @@ def test_a_refresh_that_regroups_keys_keeps_the_selection_and_an_unsent_edit(qap
     assert panel.selected_key() == "enabled"
     assert panel.value_edit.text() == "false"
     assert panel.why_edit.text() == "trap off"
+
+
+DEMO = "pytweezer.experiments.demo"
+STAGED = DemoStagedScan.schema()
+BAYESIAN = DemoBayesian.schema()
+
+
+def optimiser_schema(class_name, base=STAGED):
+    return {**base, "class_name": class_name}
+
+
+def run_file(rid, class_name):
+    return f"2026/10/31/{rid:06d}_{class_name}.h5"
+
+
+def finished_run(rid, status, class_name, **kwargs):
+    return Task.model_validate(
+        task(
+            rid,
+            status,
+            experiment=DEMO,
+            class_name=class_name,
+            t_end="2026-10-31T10:41:00+00:00",
+            h5_path=run_file(rid, class_name),
+            **kwargs,
+        )
+    )
+
+
+def staged_measurement(stages_done=2, proposed=None):
+    proposed = (
+        {"demo_resonance": 1.2, "demo_power": 0.9} if proposed is None else proposed
+    )
+    stage = np.repeat([0, 1], 3)[: 3 * stages_done]
+    setting = np.array([0.0, 1.2, 2.4, 0.3, 0.6, 0.9])[: 3 * stages_done]
+    return SimpleNamespace(
+        status="completed",
+        constants={
+            **{f"proposed.{key}": value for key, value in proposed.items()},
+            "stages_done": stages_done,
+            "stages_total": 2,
+        },
+        results={
+            "stage": stage,
+            "setting": setting,
+            "objective": np.linspace(100.0, 600.0, len(stage)),
+        },
+    )
+
+
+def bayesian_measurement():
+    return SimpleNamespace(
+        status="completed",
+        constants={
+            "proposed.demo_resonance": 1.3,
+            "proposed.demo_power": 1.0,
+            "evaluations_done": 3,
+            "evaluations_total": 3,
+        },
+        results={
+            "objective": np.array([300.0, 900.0, 600.0]),
+            "detuning": np.array([0.0, 1.3, 2.0]),
+            "power": np.array([0.5, 1.0, 0.8]),
+        },
+    )
+
+
+class FakeArchive:
+    def __init__(self, files):
+        self.files = files
+
+    def load(self, path, results=None):
+        return self.files[path]
+
+
+class FakeOptimiserClient:
+    def __init__(self, schemas, tasks, accepted_rids=()):
+        self.calls = []
+        self.refusal = None
+        self.schemas = schemas
+        self.tasks = tasks
+        self.changes = [
+            SavedParameterChange(
+                time=now(),
+                who="me@pc",
+                key="demo_resonance",
+                old=1.0,
+                new=1.1,
+                reason=f"accepted from run {rid}",
+                rid=rid,
+            )
+            for rid in accepted_rids
+        ]
+        self.parameters = [
+            SavedParameter(key=key, value=value, updated_at=now(), updated_by="me@pc")
+            for key, value in [("demo_resonance", 1.0), ("demo_power", 0.5)]
+        ]
+
+    def call(self, command, **fields):
+        assert command == "catalogue"
+        return {
+            "ok": True,
+            "version": 1,
+            "modules": [
+                {"module": DEMO, "classes": self.schemas, "warnings": [], "error": None}
+            ],
+        }
+
+    def history(self, before_rid=None, limit=50):
+        return list(self.tasks)
+
+    def recipes(self, experiment=None, class_name=None):
+        return []
+
+    def saved_parameters(self):
+        return list(self.parameters)
+
+    def saved_parameter_history(self, key=None, *, rid=None, limit=None):
+        return [change for change in self.changes if rid in (None, change.rid)]
+
+    def set_saved_parameters(self, values, reason, who, *, rid=None, **kwargs):
+        self.calls.append(("set_saved_parameters", values, reason, rid))
+        if self.refusal:
+            raise ManagerError(self.refusal)
+        return []
+
+    def close(self):
+        pass
+
+
+def make_optimisers_panel(schemas=None, tasks=None, files=None, accepted_rids=()):
+    if schemas is None:
+        schemas = [STAGED, BAYESIAN]
+        tasks = [
+            finished_run(41, "completed", "DemoStagedScan"),
+            finished_run(40, "completed", "DemoBayesian"),
+        ]
+        files = {
+            run_file(41, "DemoStagedScan"): staged_measurement(),
+            run_file(40, "DemoBayesian"): bayesian_measurement(),
+        }
+    panel = OptimisersPanel(
+        client=FakeOptimiserClient(schemas, tasks, accepted_rids),
+        feed=FakeFeed(),
+        archive=FakeArchive(files),
+    )
+    panel.show()
+    return panel
+
+
+def last_run_text(panel, class_name):
+    row = panel.rows[(DEMO, class_name)]
+    return row.item.text(row.LAST_RUN)
+
+
+def test_rows_show_each_run_state(qapp):
+    names = ["Running", "Failed", "Partial", "Accepted", "Unaccepted"]
+    tasks = [
+        finished_run(2, "failed", "Failed"),
+        finished_run(3, "terminated", "Partial"),
+        finished_run(4, "completed", "Accepted"),
+        finished_run(5, "completed", "Unaccepted"),
+    ]
+    files = {
+        run_file(2, "Failed"): staged_measurement(stages_done=0, proposed={}),
+        run_file(3, "Partial"): staged_measurement(
+            stages_done=1, proposed={"demo_resonance": 1.2}
+        ),
+        run_file(4, "Accepted"): staged_measurement(),
+        run_file(5, "Unaccepted"): staged_measurement(),
+    }
+    panel = make_optimisers_panel(
+        [optimiser_schema(name) for name in names], tasks, files, accepted_rids=[4]
+    )
+    running = task(
+        1,
+        "running",
+        experiment=DEMO,
+        class_name="Running",
+        points_done=31,
+        points_total=80,
+    )
+    panel.feed.queue_changed.emit({"running": [running], "queue": [], "history": []})
+    states = {name: panel.rows[(DEMO, name)].state for name in names}
+    assert states == {
+        "Running": "running",
+        "Failed": "failed",
+        "Partial": "partial",
+        "Accepted": "accepted",
+        "Unaccepted": "not accepted",
+    }
+    assert "stage 1 of 2 finished" in last_run_text(panel, "Partial")
+    assert "31 of 80" in last_run_text(panel, "Running")
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_run_is_disabled_while_queued_or_running(qapp, status):
+    panel = make_optimisers_panel()
+    active = task(50, status, experiment=DEMO, class_name="DemoStagedScan")
+    snapshot = {"running": [], "queue": [], "history": []}
+    snapshot["running" if status == "running" else "queue"].append(active)
+    panel.feed.queue_changed.emit(snapshot)
+    assert not panel.rows[(DEMO, "DemoStagedScan")].run_button.isEnabled()
+    assert panel.rows[(DEMO, "DemoBayesian")].run_button.isEnabled()
+
+    finished = {**active, "status": "completed"}
+    panel.feed.queue_changed.emit({"running": [], "queue": [], "history": [finished]})
+    assert panel.rows[(DEMO, "DemoStagedScan")].run_button.isEnabled()
+
+
+def test_accept_writes_only_ticked_rows_with_the_run(qapp):
+    panel = make_optimisers_panel()
+    panel.select(DEMO, "DemoStagedScan")
+    panel.accept_rows["demo_power"].setChecked(False)
+    panel.accept()
+    assert panel.client.calls[-1] == (
+        "set_saved_parameters",
+        {"demo_resonance": 1.2},
+        "accepted from run 41",
+        41,
+    )
+
+
+def test_a_failed_run_offers_no_accept(qapp):
+    panel = make_optimisers_panel(
+        [STAGED],
+        [finished_run(41, "failed", "DemoStagedScan")],
+        {run_file(41, "DemoStagedScan"): staged_measurement(stages_done=1)},
+    )
+    panel.select(DEMO, "DemoStagedScan")
+    assert panel.accept_rows == {}
+    assert not panel.accept_button.isEnabled()
+    panel.accept()
+    assert panel.client.calls == []
+
+
+def test_a_run_with_no_proposals_offers_no_accept(qapp):
+    panel = make_optimisers_panel(
+        [STAGED],
+        [finished_run(41, "terminated", "DemoStagedScan")],
+        {run_file(41, "DemoStagedScan"): staged_measurement(0, proposed={})},
+    )
+    panel.select(DEMO, "DemoStagedScan")
+    assert panel.accept_rows == {}
+    assert not panel.accept_button.isEnabled()
+
+
+def test_a_refused_accept_changes_nothing_and_says_why(qapp):
+    panel = make_optimisers_panel()
+    panel.client.refusal = "no saved parameter 'demo_power'"
+    panel.select(DEMO, "DemoStagedScan")
+    panel.accept()
+    assert len(panel.client.calls) == 1
+    assert panel.status.property("state") == "error"
+    assert "no saved parameter 'demo_power'" in panel.status.text()
