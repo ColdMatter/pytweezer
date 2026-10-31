@@ -363,7 +363,7 @@ class ArgumentEditor(QWidget):
 
         settings = QHBoxLayout()
         settings.setSpacing(10)
-        scan_box = QGroupBox("Scan")
+        self.scan_box = scan_box = QGroupBox("Scan")
         scan_box.setObjectName("EditorGroup")
         scan_form = QFormLayout(scan_box)
         scan_form.setFieldGrowthPolicy(
@@ -506,14 +506,30 @@ class ArgumentEditor(QWidget):
                 argument_row = ArgumentRow(name, argument, box)
                 argument_row.add_to(grid, row)
                 argument_row.changed.connect(self._update_count)
+                self._offer_scan(argument_row)
                 self.rows[name] = argument_row
             self.arguments_layout.addWidget(box)
+        if self.sets_own_points():
+            self.repetitions.setValue(1)
+        self.scan_box.setEnabled(not self.sets_own_points())
+        self.scan_box.setToolTip(
+            "An optimiser sets its own points" if self.sets_own_points() else ""
+        )
         self._add_motmaster_boxes(schema)
         if not self.rows and not self.motmaster_boxes:
             self.arguments_layout.addWidget(QLabel("No arguments."))
         self.error.clear()
         self._set_enabled(True)
         self._update_count()
+
+    def sets_own_points(self) -> bool:
+        """Whether the experiment is an optimiser, which cannot be scanned."""
+        return bool(self.schema and self.schema.get("optimiser"))
+
+    def _offer_scan(self, row):
+        if self.sets_own_points():
+            row.scan_button.setEnabled(False)
+            row.scan_button.setToolTip("An optimiser sets its own points")
 
     def reset_to_defaults(self):
         self.set_recipe_name("")
@@ -561,11 +577,12 @@ class ArgumentEditor(QWidget):
                 except (TypeError, ValueError):
                     pass
         for axis in request.scan.axes:
-            if axis.argument in self.rows:
+            if axis.argument in self.rows and not self.sets_own_points():
                 row = self.rows[axis.argument]
                 row.scan_button.setChecked(True)
                 row.scan.set_axis(axis)
-        self.repetitions.setValue(request.scan.repetitions)
+        if not self.sets_own_points():
+            self.repetitions.setValue(request.scan.repetitions)
         self.order.setCurrentText(request.scan.order)
         self.repeat.setCurrentText(request.scan.repeat)
         self.priority.setValue(request.priority)
@@ -648,6 +665,7 @@ class ArgumentEditor(QWidget):
         }
         row = ArgumentRow(name, schema, box)
         row.add_to(box.grid, grid_row)
+        self._offer_scan(row)
         remove = QToolButton()
         remove.setText("×")
         remove.setToolTip("Remove: the script's own value is used")
@@ -796,6 +814,9 @@ class ArgumentEditor(QWidget):
                 )
 
     def _update_count(self):
+        if self.sets_own_points():
+            self.point_count.setText("sets its own points")
+            return
         count = self.repetitions.value()
         for row in self.rows.values():
             if row.scanning:

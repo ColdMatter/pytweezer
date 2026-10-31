@@ -257,6 +257,7 @@ class ExperimentManager:
 
     def _cmd_submit(self, request):
         task_request = TaskRequest.model_validate(request["request"])
+        self._refuse_scanned_optimiser(task_request)
         devices = self._reservation(task_request.experiment, task_request.class_name)
         task = self.queue.submit(task_request, devices=devices)
         logger.info("Queued task %s: %s.%s", task.rid, task.experiment, task.class_name)
@@ -376,6 +377,7 @@ class ExperimentManager:
                 f"{recipe.class_name} no longer has argument(s) {unknown}; load "
                 f"recipe {recipe.name!r} into the form, check it and save it again"
             )
+        self._refuse_scanned_optimiser(task_request)
         devices = self._reservation(recipe.experiment, recipe.class_name)
         task = self.queue.submit(task_request, devices=devices)
         logger.info("Queued task %s from recipe %r", task.rid, recipe.name)
@@ -411,6 +413,25 @@ class ExperimentManager:
                 "is still reading the experiments, so try again shortly"
             )
         raise RecipeError(f"{module}.{class_name} is not in the catalogue")
+
+    def _refuse_scanned_optimiser(self, request: TaskRequest) -> None:
+        """Refuse an optimiser submitted with scan axes or repetitions.
+
+        Raises:
+            RecipeError: If the catalogue lists the class as an optimiser and
+                the request scans it.
+        """
+        try:
+            schema = self._schema(request.experiment, request.class_name)
+        except _CatalogueBusy:
+            return
+        if schema.get("optimiser") and (
+            request.scan.axes or request.scan.repetitions != 1
+        ):
+            raise RecipeError(
+                f"{request.class_name} sets its own points; submit it without "
+                "scan axes or repetitions"
+            )
 
     def _reservation(self, module: str, class_name: str) -> list[str] | None:
         """The canonical device names ``module.class_name`` reserves.

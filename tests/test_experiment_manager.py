@@ -147,6 +147,44 @@ def test_submit_refuses_a_bad_declaration(make_manager, command):
     assert manager.queue.ordered() == []
 
 
+@pytest.mark.parametrize("command", ["submit", "submit_recipe"])
+@pytest.mark.parametrize(
+    "scan", [PULSE_SCAN, Scan(repetitions=2)], ids=["axes", "reps"]
+)
+def test_an_optimiser_submitted_with_a_scan_is_refused(make_manager, command, scan):
+    manager = make_manager()
+    optimiser = demo_schema("Optimiser") | {
+        "optimiser": {
+            "kind": "staged",
+            "goal": "max",
+            "objective": "counts",
+            "proposes": ["demo_resonance"],
+            "settings": ["detuning"],
+        }
+    }
+    manager.catalogue.entries()[0]["classes"].append(optimiser)
+    if command == "submit":
+        reply = manager.handle(
+            {
+                "command": "submit",
+                "request": request(class_name="Optimiser", scan=scan),
+            }
+        )
+    else:
+        save(manager, class_name="Optimiser", scan=scan)
+        reply = manager.handle(
+            {
+                "command": "submit_recipe",
+                "experiment": DEMO,
+                "class_name": "Optimiser",
+                "name": "check",
+            }
+        )
+    assert not reply["ok"]
+    assert "sets its own points" in reply["error"]
+    assert manager.queue.ordered() == []
+
+
 def test_reservation_resolved_later_when_catalogue_was_busy(make_manager, workers):
     manager = make_manager()
     manager.catalogue.busy = True
