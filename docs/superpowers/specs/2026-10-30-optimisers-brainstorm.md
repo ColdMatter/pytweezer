@@ -178,12 +178,14 @@ experiments**.
     whatever `best` returns and the plot marks it. A Bayesian optimisation
     uses the same hook, proposing the best measured point by default.
 
+20. **A stage or dimension creates its own arguments** (`<setting>_start`,
+    `_stop`, `_points`; `<setting>_low`, `_high`) from the values given in it.
+
 ## Status
 
-- Spec 1 revised 2026-10-31: `2026-10-30-saved-parameters-design.md`, awaiting
-  review. Its plan is rewritten once the spec is approved.
-- Then spec 2 (`2026-10-30-optimisers-design.md`), the framework only, and
-  `superpowers:writing-plans` for it.
+- Spec 1 built (PR #41).
+- Spec 2 written: `2026-10-31-optimisers-design.md`, awaiting review; then
+  `superpowers:writing-plans`.
 
 ## Later work, not in either spec
 
