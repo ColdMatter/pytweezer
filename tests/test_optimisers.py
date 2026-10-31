@@ -16,7 +16,7 @@ from pytweezer.experiment.client import _resolve, recipes, save_recipe
 from pytweezer.experiment.runner import open_writer, run_points
 from pytweezer.experiment.scan import Point
 from pytweezer.experiment.task import Action
-from pytweezer.experiments.demo import DemoStagedScan, RabiDemo
+from pytweezer.experiments.demo import DemoBayesian, DemoStagedScan, RabiDemo
 from tests.helpers import in_process_client
 
 
@@ -99,9 +99,9 @@ def test_the_points_argument_sets_the_number_of_points():
     )
 
 
-def _run_until(done_limit, **args):
+def _run_until(done_limit, experiment_cls=DemoStagedScan, **args):
     experiment, points, writer = open_writer(
-        None, DemoStagedScan, args, Scan(), {"rid": -1, "label": ""}
+        None, experiment_cls, args, Scan(), {"rid": -1, "label": ""}
     )
 
     def control(progress):
@@ -128,6 +128,52 @@ def test_a_run_terminated_in_stage_one_proposes_nothing():
     assert m.constants["stages_done"] == 0
 
 
+class NanOnThirdCall(DemoBayesian):
+    def prepare(self):
+        self.calls = 0
+        super().prepare()
+
+    def measure(self, **settings):
+        self.calls += 1
+        if self.calls == 3:
+            return {"counts": math.nan}
+        return super().measure(**settings)
+
+
+def test_bayesian_finds_the_simulated_resonance():
+    m = run_local(DemoBayesian, n_calls=25, seed=1)
+    assert m.constants["proposed.demo_resonance"] == pytest.approx(1.3, abs=0.5)
+    assert m.constants["evaluations_done"] == 25
+
+
+def test_bayesian_proposes_the_best_measured_point():
+    m = run_local(DemoBayesian, n_calls=6, n_initial=3)
+    best = int(m.results["objective"].argmax())
+    assert m.constants["proposed.demo_resonance"] == m.results["detuning"][best]
+    assert m.constants["proposed.demo_power"] == m.results["power"][best]
+
+
+def test_xi_is_annealed_from_start_to_end():
+    m = run_local(DemoBayesian, n_calls=5, n_initial=5)
+    assert list(m.results["xi"]) == pytest.approx(
+        [0.1, 0.1 / 10**0.5, 0.01, 0.01 / 10**0.5, 0.001]
+    )
+
+
+def test_a_nan_objective_does_not_stop_the_run():
+    m = run_local(NanOnThirdCall, n_calls=6, n_initial=3)
+    assert m.status == TaskStatus.COMPLETED
+    assert math.isnan(m.results["objective"][2])
+    assert math.isfinite(m.constants["proposed.demo_resonance"])
+    assert math.isfinite(m.constants["proposed.demo_power"])
+
+
+def test_a_bayesian_run_terminated_before_any_evaluation_proposes_nothing():
+    m = _run_until(0, DemoBayesian, n_calls=5)
+    assert not [name for name in m.constants if name.startswith("proposed.")]
+    assert (m.constants["evaluations_done"], m.constants["evaluations_total"]) == (0, 5)
+
+
 def test_a_recipe_stores_the_generated_arguments(make_manager):
     client = in_process_client(make_manager())
     save_recipe(DemoStagedScan, "quick", client=client, detuning_points=5)
@@ -135,10 +181,19 @@ def test_a_recipe_stores_the_generated_arguments(make_manager):
     assert recipe.args["detuning_points"] == 5
 
 
-def test_the_schema_lists_generated_arguments_and_proposals():
-    schema = DemoStagedScan.schema()
-    assert schema["arguments"]["detuning_points"]["default"] == 21
+@pytest.mark.parametrize(
+    ("optimiser", "argument", "default", "kind"),
+    [
+        (DemoStagedScan, "detuning_points", 21, "staged"),
+        (DemoBayesian, "detuning_low", -5.0, "bayesian"),
+    ],
+)
+def test_the_schema_lists_generated_arguments_and_proposals(
+    optimiser, argument, default, kind
+):
+    schema = optimiser.schema()
+    assert schema["arguments"][argument]["default"] == default
     assert schema["optimiser"] == {
-        "kind": "staged",
+        "kind": kind,
         "proposes": ["demo_resonance", "demo_power"],
     }

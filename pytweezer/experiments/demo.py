@@ -6,7 +6,12 @@ from typing import ClassVar
 import numpy as np
 
 from pytweezer.experiment import Experiment, Integer, Number
-from pytweezer.experiment.optimisers import Stage, StagedScan
+from pytweezer.experiment.optimisers import (
+    BayesianOptimisation,
+    Dimension,
+    Stage,
+    StagedScan,
+)
 
 
 class RabiDemo(Experiment):
@@ -62,4 +67,14 @@ class DemoStagedScan(StagedScan, DemoResonance):
     stages: ClassVar[list[Stage]] = [
         Stage("detuning", start=-5.0, stop=5.0, points=21, save_as="demo_resonance"),
         Stage("power", start=0.1, stop=1.0, points=10, save_as="demo_power"),
+    ]
+
+
+class DemoBayesian(BayesianOptimisation, DemoResonance):
+    """Finds the demo resonance and power together by Bayesian optimisation."""
+
+    objective = "counts"
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("detuning", low=-5.0, high=5.0, save_as="demo_resonance"),
+        Dimension("power", low=0.1, high=1.0, save_as="demo_power"),
     ]
