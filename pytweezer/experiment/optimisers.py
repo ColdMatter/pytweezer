@@ -238,10 +238,11 @@ class BayesianOptimisation(Optimiser):
     ``xi_end`` across the calls. A non-finite objective is told as the worst
     finite one so far, or not told if there is none yet.
 
-    Each point records every setting by name, ``objective``, ``xi`` and every
-    result of ``measure()``. :meth:`finish` records ``evaluations_done`` and
-    ``evaluations_total`` and, after at least one evaluation, ``proposed.<key>``
-    for each dimension from :meth:`best`.
+    Each point records every setting by name, ``objective``, the ``xi`` its
+    settings were chosen with, and every result of ``measure()``.
+    :meth:`finish` records ``evaluations_done`` and ``evaluations_total`` and,
+    after at least one evaluation, ``proposed.<key>`` for each dimension from
+    :meth:`best`.
     """
 
     kind = "bayesian"
@@ -281,14 +282,17 @@ class BayesianOptimisation(Optimiser):
             base_estimator="GP",
             acq_func="EI",
             n_initial_points=self.n_initial,
+            acq_func_kwargs={"xi": self._xi(0)},
             random_state=self.seed,
         )
         super().prepare()
 
+    def _xi(self, index: int) -> float:
+        fraction = index / max(self.n_calls - 1, 1)
+        return self.xi_start * (self.xi_end / self.xi_start) ** fraction
+
     def run_point(self) -> None:
-        fraction = self.point.index / max(self.n_calls - 1, 1)
-        xi = self.xi_start * (self.xi_end / self.xi_start) ** fraction
-        self._optimizer.acq_func_kwargs = {"xi": xi}
+        xi = self._optimizer.acq_func_kwargs["xi"]
         values = [float(value) for value in self._optimizer.ask()]
         results = self.measure(
             **{
@@ -305,6 +309,8 @@ class BayesianOptimisation(Optimiser):
             self.record(name, value)
 
         self._evaluations.append((values, objective))
+        # skopt chooses the next point inside tell(), so set its xi first.
+        self._optimizer.acq_func_kwargs = {"xi": self._xi(self.point.index + 1)}
         if math.isfinite(objective):
             loss = -objective if self.goal == "max" else objective
         elif self._told:

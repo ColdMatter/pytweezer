@@ -2,6 +2,7 @@ import math
 from typing import ClassVar
 
 import pytest
+import skopt
 
 from pytweezer.experiment import (
     Experiment,
@@ -154,10 +155,31 @@ def test_bayesian_proposes_the_best_measured_point():
 
 
 def test_xi_is_annealed_from_start_to_end():
-    m = run_local(DemoBayesian, n_calls=5, n_initial=5)
+    m = run_local(DemoBayesian, n_calls=5, n_initial=2)
     assert list(m.results["xi"]) == pytest.approx(
         [0.1, 0.1 / 10**0.5, 0.01, 0.01 / 10**0.5, 0.001]
     )
+
+
+def test_each_points_xi_is_the_one_that_chose_it(monkeypatch):
+    tell = skopt.Optimizer._tell
+    chosen = []
+
+    def spy(optimizer, *args, **kwargs):
+        result = tell(optimizer, *args, **kwargs)
+        if hasattr(optimizer, "_next_x"):
+            xi = optimizer.acq_func_kwargs["xi"]
+            chosen.append((xi, [float(v) for v in optimizer._next_x]))
+        return result
+
+    monkeypatch.setattr(skopt.Optimizer, "_tell", spy)
+    m = run_local(DemoBayesian, n_calls=4, n_initial=2)
+    recorded = [
+        (m.results["xi"][i], [m.results["detuning"][i], m.results["power"][i]])
+        for i in (2, 3)
+    ]
+    assert recorded == chosen[:2]
+    assert recorded[-1][0] == pytest.approx(0.001)
 
 
 def test_a_nan_objective_does_not_stop_the_run():
