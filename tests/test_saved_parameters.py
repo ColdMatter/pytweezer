@@ -62,6 +62,7 @@ def test_every_change_is_logged_but_an_unchanged_value_is_not(tmp_path):
         "me",
         7,
     )
+    assert book.get("key").reason == "by hand"
 
 
 def test_the_log_reads_newest_first_up_to_the_limit(tmp_path):
@@ -81,6 +82,7 @@ def test_a_saved_book_reloads_with_every_value_in_its_type(tmp_path):
     assert {k: type(v) for k, v in loaded.items()} == {
         k: type(v) for k, v in values.items()
     }
+    assert {p.reason for p in store.load().parameters} == {"r"}
 
 
 def test_a_creation_with_an_unstorable_value_creates_nothing():

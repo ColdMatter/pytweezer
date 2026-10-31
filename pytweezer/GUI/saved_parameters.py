@@ -36,8 +36,6 @@ from pytweezer.GUI.components import Region, set_state
 from pytweezer.GUI.experiments.feed import ExperimentFeed
 
 NOT_RESPONDING = "the Experiment Manager is not responding"
-#: The newest changes read to show each key's last reason; older keys show none.
-REASON_WINDOW = 1000
 HISTORY_LIMIT = 200
 _KEY = QtCore.Qt.ItemDataRole.UserRole
 _NO_GROUP = "No group"
@@ -244,19 +242,18 @@ class SavedParametersPanel(QWidget):
             self.refresh()
 
     def refresh(self):
-        """Fetch every value and the selected key's history, updating in place."""
+        """Fetch every value and the selected key's history.
+
+        The selected key, the scroll position and an unsent edit survive.
+        """
         try:
             parameters = self.client.saved_parameters()
-            recent = self.client.saved_parameter_history(limit=REASON_WINDOW)
         except ManagerUnavailable:
             self._show_unreachable(NOT_RESPONDING)
             return
         except ManagerError as error:
             self._show_unreachable(str(error))
             return
-        reasons = {}
-        for change in recent:
-            reasons.setdefault(change.key, change.reason)
         self._parameters = {parameter.key: parameter for parameter in parameters}
         self.tree.setEnabled(True)
         count = len(parameters)
@@ -264,10 +261,10 @@ class SavedParametersPanel(QWidget):
             f"{count} value{'' if count == 1 else 's'}; pick one to edit"
         )
         set_state(self.parameters_region.hint, "")
-        self._show_parameters(parameters, reasons)
-        if self._key is not None and self._key not in self._parameters:
-            self.tree.setCurrentItem(None)
-        elif self._key is not None:
+        self._show_parameters(parameters)
+        if self._key not in self._parameters:
+            self._current_changed(None, None)
+        else:
             self._show_sheet(self._parameters[self._key])
             self._fetch_history()
 
@@ -277,78 +274,70 @@ class SavedParametersPanel(QWidget):
         self.tree.setEnabled(False)
         self.apply_button.setEnabled(False)
 
-    def _show_parameters(self, parameters, reasons):
+    def _show_parameters(self, parameters):
+        """Rebuild the table, then put back the selected key and the scroll position.
+
+        Signals are blocked meanwhile, so the sheet never sees the selection
+        go and come back.
+        """
         current = now()
+        scroll = self.tree.verticalScrollBar().value()
         by_group: dict[str, list[SavedParameter]] = {}
         for parameter in sorted(parameters, key=lambda p: (p.group, p.key)):
             by_group.setdefault(parameter.group or _NO_GROUP, []).append(parameter)
-        for group in set(self._groups) - set(by_group):
-            self.tree.takeTopLevelItem(
-                self.tree.indexOfTopLevelItem(self._groups.pop(group))
-            )
-        for key in set(self._items) - set(self._parameters):
-            item = self._items.pop(key)
-            if item.parent() is not None:
-                item.parent().removeChild(item)
-        for group_index, (group, members) in enumerate(by_group.items()):
-            group_item = self._group_item(group, group_index)
-            for index, parameter in enumerate(members):
-                item = self._items.get(parameter.key)
-                if item is None:
-                    item = self._items[parameter.key] = self._new_item(parameter.key)
-                elif group_item.indexOfChild(item) != index:
-                    item.parent().removeChild(item)
-                if item.parent() is None:
-                    group_item.insertChild(index, item)
-                self._fill_item(
-                    item, parameter, reasons.get(parameter.key, ""), current
-                )
-        self._apply_filter()
+        self.tree.blockSignals(True)
+        try:
+            self.tree.clear()
+            self._groups, self._items = {}, {}
+            for group, members in by_group.items():
+                group_item = self._groups[group] = self._group_item(group)
+                for parameter in members:
+                    item = self._items[parameter.key] = self._item(parameter, current)
+                    group_item.addChild(item)
+            self._apply_filter()
+            if self._key in self._items:
+                self.tree.setCurrentItem(self._items[self._key])
+            self.tree.doItemsLayout()
+            self.tree.verticalScrollBar().setValue(scroll)
+        finally:
+            self.tree.blockSignals(False)
 
-    def _group_item(self, group, index):
-        item = self._groups.get(group)
-        if item is None:
-            item = self._groups[group] = QTreeWidgetItem([group])
-            item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled)
-            font = item.font(0)
-            font.setBold(True)
-            item.setFont(0, font)
-            self.tree.insertTopLevelItem(index, item)
-            item.setFirstColumnSpanned(True)
-            item.setExpanded(True)
-        elif self.tree.indexOfTopLevelItem(item) != index:
-            self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
-            self.tree.insertTopLevelItem(index, item)
-            item.setFirstColumnSpanned(True)
-            item.setExpanded(True)
+    def _group_item(self, group):
+        item = QTreeWidgetItem([group])
+        item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled)
+        font = item.font(0)
+        font.setBold(True)
+        item.setFont(0, font)
+        self.tree.addTopLevelItem(item)
+        item.setFirstColumnSpanned(True)
+        item.setExpanded(True)
         return item
 
     @staticmethod
-    def _new_item(key):
-        item = QTreeWidgetItem([key])
-        item.setData(0, _KEY, key)
+    def _item(parameter, current):
+        item = QTreeWidgetItem(
+            [
+                parameter.key,
+                display_value(parameter.value),
+                parameter.unit,
+                f"{when_text(parameter.updated_at, current)}, {parameter.updated_by}",
+                parameter.reason,
+            ]
+        )
+        item.setData(0, _KEY, parameter.key)
         item.setFont(0, _monospace())
         right = (
             QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
         )
         item.setTextAlignment(1, right)
-        return item
-
-    @staticmethod
-    def _fill_item(item, parameter, reason, current):
-        item.setText(1, display_value(parameter.value))
-        item.setText(2, parameter.unit)
-        item.setText(
-            3, f"{when_text(parameter.updated_at, current)}, {parameter.updated_by}"
-        )
         item.setToolTip(3, parameter.updated_at.isoformat(sep=" ", timespec="seconds"))
-        item.setText(4, reason)
-        item.setToolTip(4, reason)
+        item.setToolTip(4, parameter.reason)
         font = item.font(1)
         font.setBold(
             parameter.updated_at.astimezone(current.tzinfo).date() == current.date()
         )
         item.setFont(1, font)
+        return item
 
     def _apply_filter(self):
         wanted = self.filter_edit.text().strip().lower()

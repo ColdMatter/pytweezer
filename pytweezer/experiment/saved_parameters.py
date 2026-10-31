@@ -28,7 +28,7 @@ class SavedParameterError(ValueError):
 
 
 class SavedParameter(BaseModel):
-    """One saved value; ``updated_by`` is whoever last changed it."""
+    """One saved value; ``updated_by`` and ``reason`` are those of its last change."""
 
     key: str
     value: Value
@@ -36,6 +36,7 @@ class SavedParameter(BaseModel):
     unit: str = ""
     updated_at: datetime
     updated_by: str
+    reason: str = ""
 
 
 class SavedParameterChange(BaseModel):
@@ -146,6 +147,7 @@ class SavedParameterBook:
                         unit=unit,
                         updated_at=time,
                         updated_by=who,
+                        reason=reason,
                     )
                 )
             elif old == value:
@@ -154,6 +156,7 @@ class SavedParameterBook:
                 current.value = value
                 current.updated_at = time
                 current.updated_by = who
+                current.reason = reason
             changes.append(
                 SavedParameterChange(
                     time=time,

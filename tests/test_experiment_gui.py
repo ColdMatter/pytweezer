@@ -1178,3 +1178,18 @@ def test_an_unreachable_manager_is_said_not_shown_as_current(qapp):
         panel.parameters_region.hint.text()
         == "Saved parameters: the Experiment Manager is not responding"
     )
+
+
+def test_a_refresh_that_regroups_keys_keeps_the_selection_and_an_unsent_edit(qapp):
+    feed = FakeFeed()
+    panel = make_saved_panel(feed=feed)
+    panel.select("enabled")
+    panel.value_edit.setText("false")
+    panel.why_edit.setText("trap off")
+    level, count, _ = panel.client.parameters
+    level.group = "EMCCD"
+    count.group = "Camera"
+    feed.queue_changed.emit({"saved_parameters_version": 8})
+    assert panel.selected_key() == "enabled"
+    assert panel.value_edit.text() == "false"
+    assert panel.why_edit.text() == "trap off"
