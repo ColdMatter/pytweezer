@@ -16,14 +16,15 @@ from pytweezer.experiment import (
     Number,
     Scan,
 )
-from pytweezer.experiment.client import ManagerError
+from pytweezer.experiment.client import ManagerError, ManagerUnavailable
 from pytweezer.experiment.motmaster import (
     MotMaster,
     MotMasterExperiment,
     MotMasterNumber,
 )
-from pytweezer.experiment.queue import UNKNOWN_DEVICES
+from pytweezer.experiment.queue import UNKNOWN_DEVICES, now
 from pytweezer.experiment.recipes import Recipe
+from pytweezer.experiment.saved_parameters import SavedParameter
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
@@ -35,6 +36,7 @@ from pytweezer.GUI.experiments.queue_view import (
     QueueView,
     queue_summary,
 )
+from pytweezer.GUI.saved_parameters import SavedParametersPanel
 from tests.helpers import FakeFeed, until
 
 Left, Right = QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton
@@ -1087,3 +1089,92 @@ def test_clicks_on_the_catalogue_only_reload_a_recipe_on_a_left_click(qapp):
     panel.catalogue.recipe_selected.connect(loaded.append)
     click(other, Left)
     assert [r["name"] for r in loaded] == ["other"], "loaded exactly once"
+
+
+class FakeSavedParameterClient:
+    def __init__(self):
+        self.calls = []
+        self.unavailable = False
+        self.parameters = [
+            SavedParameter(
+                key=key,
+                value=value,
+                group=group,
+                updated_at=now(),
+                updated_by="me@pc",
+            )
+            for key, value, group in [
+                ("level", 3.0, "Resonances"),
+                ("count", 4, "EMCCD"),
+                ("enabled", True, "EMCCD"),
+            ]
+        ]
+
+    def saved_parameters(self):
+        if self.unavailable:
+            raise ManagerUnavailable("not responding")
+        return [parameter.model_copy() for parameter in self.parameters]
+
+    def saved_parameter_history(self, key=None, *, limit=None):
+        return []
+
+    def set_saved_parameters(self, values, reason, who, **kwargs):
+        self.calls.append(("set_saved_parameters", values, reason))
+        return []
+
+    def close(self):
+        pass
+
+
+def make_saved_panel(client=None, feed=None):
+    panel = SavedParametersPanel(
+        client=client or FakeSavedParameterClient(), feed=feed or FakeFeed()
+    )
+    panel.show()
+    return panel
+
+
+def test_apply_sends_the_value_with_its_reason(qapp):
+    panel = make_saved_panel()
+    panel.select("level")
+    panel.value_edit.setText("3.1")
+    panel.why_edit.setText("lifetime scan")
+    panel.apply()
+    assert panel.client.calls[-1] == (
+        "set_saved_parameters",
+        {"level": 3.1},
+        "set by hand: lifetime scan",
+    )
+
+
+@pytest.mark.parametrize(
+    "key, text", [("level", "4,05"), ("count", "4.5"), ("enabled", "yes")]
+)
+def test_a_value_of_the_wrong_type_is_refused_before_sending(qapp, key, text):
+    panel = make_saved_panel()
+    panel.select(key)
+    panel.value_edit.setText(text)
+    panel.apply()
+    assert panel.client.calls == []
+    assert panel.status.property("state") == "error"
+
+
+def test_a_live_update_keeps_the_selection_and_an_unsent_edit(qapp):
+    feed = FakeFeed()
+    panel = make_saved_panel(feed=feed)
+    panel.select("level")
+    panel.value_edit.setText("3.1")
+    panel.client.parameters[0].value = 3.05
+    feed.queue_changed.emit({"saved_parameters_version": 7})
+    assert panel.selected_key() == "level"
+    assert panel.value_edit.text() == "3.1"
+
+
+def test_an_unreachable_manager_is_said_not_shown_as_current(qapp):
+    client = FakeSavedParameterClient()
+    client.unavailable = True
+    panel = make_saved_panel(client=client)
+    assert (
+        panel.parameters_region.hint.text()
+        == "Saved parameters: the Experiment Manager is not responding"
+    )

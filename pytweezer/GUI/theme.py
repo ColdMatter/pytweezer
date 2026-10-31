@@ -232,7 +232,9 @@ QLabel[role="argument"][state="scanned"] {
     color: #5b8def;
 }
 
-QLabel#StatusLabel[state="crashed"] {
+QLabel#StatusLabel[state="crashed"],
+QLabel#StatusLabel[state="error"],
+QLabel[role="regionHint"][state="error"] {
     color: #e74c3c;
 }
 
@@ -330,6 +332,14 @@ QTableWidget#FeedTable QHeaderView::section {
 }
 QTreeWidget#MeasurementTree::item {
     padding: 3px 6px 3px 0;
+}
+QTreeWidget#SavedParameterTree::item,
+QTreeWidget#SavedParameterHistory::item {
+    padding: 3px 14px 3px 0;
+}
+QTreeWidget#SavedParameterTree QHeaderView::section,
+QTreeWidget#SavedParameterHistory QHeaderView::section {
+    padding: 4px 14px 4px 4px;
 }
 QFrame#Region[kind="well"] QPlainTextEdit {
     background: transparent;

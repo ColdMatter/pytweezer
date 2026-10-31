@@ -6,7 +6,8 @@ which panels they expose:
 
 * ``pytweezer-server`` (:func:`server_main`) runs on the server PC and gives full
   start/stop control of the server processes: Servers | Devices | Loggers |
-  Streams | Applets | Analysis | Experiments | Results | Properties.
+  Streams | Applets | Analysis | Experiments | Results | Saved parameters |
+  Properties.
 * ``pytweezer-client`` (:func:`client_main`) runs on client PCs with the same
   tabs, except that the Servers and Loggers tabs are view-only because those
   processes run on the server PC.
@@ -170,9 +171,10 @@ def build_gui(server: bool) -> TabbedGUI:
     from pytweezer.GUI.experiments.results import ResultsPanel
     from pytweezer.GUI.ni_cards.panel import NICardsPanel
     from pytweezer.GUI.property_editor import PropEdit
+    from pytweezer.GUI.saved_parameters import SavedParametersPanel
 
     name = "Server" if server else "Client"
-    # One live copy of the manager's state, shared by both experiment tabs.
+    # One live copy of the manager's state, shared by every experiment tab.
     try:
         feed = ExperimentFeed()
     except Exception:
@@ -215,6 +217,12 @@ def build_gui(server: bool) -> TabbedGUI:
             ("Analysis", _safe_panel("Analysis", lambda: AnalysisManager("Analysis"))),
             ("Experiments", experiments),
             ("Results", _safe_panel("Results", make_results)),
+            (
+                "Saved parameters",
+                _safe_panel(
+                    "Saved parameters", lambda: SavedParametersPanel(feed=feed)
+                ),
+            ),
             ("NI Cards", _safe_panel("NI Cards", NICardsPanel)),
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],
