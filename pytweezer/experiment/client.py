@@ -292,7 +292,7 @@ def _resolve(
         # Fail here rather than when the task reaches the front of the queue.
         coerce_arguments(experiment, args or {})
         if scan is not None:
-            scan.axis_values(experiment)
+            experiment(args or {}).planned_points(scan)
     if module == "__main__" or "<locals>" in class_name or not class_name:
         raise ValueError(
             f"{experiment!r} can't be imported by the manager; define it in a module "

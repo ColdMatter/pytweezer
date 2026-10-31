@@ -10,7 +10,7 @@ from pytweezer.experiment.arguments import (
     collect,
 )
 from pytweezer.experiment.reservations import canonical_device
-from pytweezer.experiment.scan import Point
+from pytweezer.experiment.scan import Point, Scan
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.experiment")
@@ -102,6 +102,15 @@ class Experiment:
     def argument_values(self) -> dict[str, Any]:
         names = [*self.arguments(), *self._extra_names]
         return {name: getattr(self, name) for name in names}
+
+    def planned_points(self, scan: Scan) -> list[Point]:
+        """The points to run for the submitted ``scan``.
+
+        The default expands ``scan``. An experiment that chooses its own
+        number of points, which may depend on its argument values, overrides
+        this and raises :class:`ValueError` for a scan it cannot honour.
+        """
+        return scan.points(type(self))
 
     def prepare(self) -> None:
         """Called once before the first point."""

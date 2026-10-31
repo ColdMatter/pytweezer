@@ -9,6 +9,7 @@ import psutil
 import pytest
 import zmq
 
+from pytweezer.experiment import Experiment
 from pytweezer.experiment.client import (
     ExperimentManagerClient,
     ManagerError,
@@ -545,7 +546,7 @@ def test_notebook_calls_check_arguments_before_sending():
             RabiDemo, Scan(axes=[ListAxis(argument="atoms", values=[0])]), client=client
         )
     with pytest.raises(ValueError, match="run_local"):
-        submit(type("Local", (), {"__module__": "__main__"}), client=client)
+        submit(type("Local", (Experiment,), {"__module__": "__main__"}), client=client)
 
 
 def test_a_written_value_is_read_back_after_a_restart_and_bumps_the_version(

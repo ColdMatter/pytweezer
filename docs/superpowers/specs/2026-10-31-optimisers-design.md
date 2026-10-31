@@ -56,13 +56,15 @@ only passes names and values through.
 `Experiment` gains
 
 ```python
-@classmethod
-def points(cls, scan: Scan) -> list[Point]:
-    return scan.points(cls)
+def planned_points(self, scan: Scan) -> list[Point]:
+    return scan.points(type(self))
 ```
 
+It is an instance method, not a class method, because an optimiser's number of
+points depends on its argument values (for example `n_calls`).
+
 The runner (`open_writer`) and `submit()` (`_resolve`) call
-`experiment_cls.points(scan)` in place of `scan.points(experiment_cls)`, so
+`experiment.planned_points(scan)` in place of `scan.points(experiment_cls)`, so
 existing experiments are unchanged. An optimiser returns its own number of
 points with no argument values; the runner's progress, pause, terminate and
 file handling work as before. An optimiser refuses a submitted scan with axes
