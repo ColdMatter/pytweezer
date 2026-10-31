@@ -7,13 +7,18 @@ A saved parameter is a single float, int, bool or string kept under a key.
 """
 
 import difflib
+import json
 import math
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from pytweezer.experiment.queue import ModelStore, now
+
+if TYPE_CHECKING:
+    from pytweezer.experiment.client import ExperimentManagerClient
 
 Value = float | int | bool | str
 
@@ -193,3 +198,26 @@ class SavedParameterLog:
         changes = [SavedParameterChange.model_validate_json(line) for line in lines]
         matching = [c for c in reversed(changes) if key in (None, c.key)]
         return matching if limit is None else matching[:limit]
+
+
+# FIXME: remove once parameters.json has been moved into the store
+def import_parameters_json(
+    path: Path | str, *, client: "ExperimentManagerClient | None" = None
+) -> int:
+    """Copy every value in a ``parameters.json`` into the store; return how many it holds.
+
+    Each top-level category becomes the group of its keys. Values already stored
+    unchanged are left alone, so importing twice changes nothing.
+    """
+    from pytweezer.experiment.client import set_saved_parameters
+
+    categories = json.loads(Path(path).read_text())
+    for category, values in categories.items():
+        set_saved_parameters(
+            values,
+            "imported from parameters.json",
+            create=True,
+            group=category,
+            client=client,
+        )
+    return sum(len(values) for values in categories.values())

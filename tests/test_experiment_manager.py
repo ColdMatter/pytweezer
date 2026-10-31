@@ -1,6 +1,5 @@
 """Experiment Manager request handling and restart reconciliation, mostly without sockets."""
 
-import json
 import sys
 import threading
 import time
@@ -15,8 +14,10 @@ from pytweezer.experiment.client import (
     ManagerError,
     ManagerUnavailable,
     delete_recipe,
+    get_saved_parameter,
     recipes,
     save_recipe,
+    set_saved_parameters,
     submit,
     submit_recipe,
 )
@@ -26,68 +27,10 @@ from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.experiments.demo import RabiDemo
 from pytweezer.servers import experiment_manager as em
+from tests.helpers import BROKEN, DEMO, demo_schema, in_process_client
 
-DEMO = "pytweezer.experiments.demo"
 DEAD_PID = 2**22 + 12345
 PULSE_SCAN = Scan(axes=[LinearAxis(argument="pulse_time", start=0, stop=1e-5, n=3)])
-BROKEN = {
-    "module": "pytweezer.experiments.broken",
-    "classes": [],
-    "warnings": [],
-    "error": "Traceback (most recent call last):\n  ...\nSyntaxError: invalid syntax\n",
-}
-
-
-class StaticCatalogue:
-    """A catalogue whose entries are given, never read from files."""
-
-    def __init__(self, entries):
-        self._entries = entries
-        self.busy = False
-        self.rereading = set()
-
-    def refresh(self):
-        return False
-
-    def poll(self):
-        return False
-
-    def entries(self):
-        return self._entries
-
-    def pending(self, module):
-        return module in self.rereading
-
-    def close(self):
-        pass
-
-
-def demo_schema(class_name="RabiDemo", reserves=("Rb MotMaster",), error=None):
-    return RabiDemo.schema() | {
-        "class_name": class_name,
-        "reserves": None if reserves is None else list(reserves),
-        "reserve_error": error,
-    }
-
-
-@pytest.fixture
-def make_manager(tmp_path, recording_db):
-    demo = {
-        "module": DEMO,
-        "classes": [demo_schema(), demo_schema("CaFDemo", ["CaF MotMaster"])],
-        "warnings": [],
-        "error": None,
-    }
-
-    def make():
-        return em.ExperimentManager(
-            root=tmp_path,
-            catalogue=StaticCatalogue([demo, BROKEN]),
-            bind=False,
-            db=recording_db,
-        )
-
-    return make
 
 
 def request(class_name="RabiDemo", **kwargs):
@@ -526,19 +469,6 @@ def test_a_recipe_that_no_longer_fits_its_experiment_is_refused(
     assert manager.queue.ordered() == []
 
 
-class InProcess:
-    """Routes client requests straight into a manager, through JSON as on the wire."""
-
-    def __init__(self, manager):
-        self.manager = manager
-
-    def request(self, payload, *, retry=True):
-        return self.manager.handle(json.loads(json.dumps(payload)))
-
-    def close(self):
-        pass
-
-
 def test_a_slow_manager_receives_each_submit_once():
     server = zmq.Context.instance().socket(zmq.REP)
     server.bind("tcp://127.0.0.1:*")
@@ -565,8 +495,7 @@ def test_a_slow_manager_receives_each_submit_once():
 
 def test_notebook_recipes_round_trip(make_manager):
     manager = make_manager()
-    client = ExperimentManagerClient(endpoint="tcp://127.0.0.1:1")
-    client._req = InProcess(manager)
+    client = in_process_client(manager)
     save_recipe(RabiDemo, "check", PULSE_SCAN, label="nightly", client=client, atoms=50)
     [saved] = recipes(RabiDemo, client=client)
     assert saved.args == {"rabi_frequency": 50e3, "atoms": 50, "point_delay": 0.2}
@@ -646,3 +575,11 @@ def test_a_written_value_is_read_back_after_a_restart_and_bumps_the_version(
         "entries"
     ]
     assert entry["new"] == 131.5
+
+
+def test_a_misspelt_key_names_the_closest_one(make_manager):
+    client = in_process_client(make_manager())
+    set_saved_parameters({"cool_resonance": 4.05}, "r", create=True, client=client)
+    assert get_saved_parameter("cool_resonance", client=client) == 4.05
+    with pytest.raises(KeyError, match="cool_resonance"):
+        get_saved_parameter("cool_resonanse", client=client)

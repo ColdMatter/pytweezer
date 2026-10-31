@@ -1,11 +1,16 @@
+import json
+
 import pytest
 
+from pytweezer.experiment.client import saved_parameter_history
 from pytweezer.experiment.saved_parameters import (
     SavedParameterBook,
     SavedParameterError,
     SavedParameterLog,
     SavedParameterStore,
+    import_parameters_json,
 )
+from tests.helpers import in_process_client
 
 
 def book_with(**values):
@@ -90,3 +95,16 @@ def test_two_keys_that_strip_to_the_same_name_are_refused():
     with pytest.raises(SavedParameterError, match="'a'"):
         book.set({"a ": 1, "a": 2}, reason="r", who="me", create=True)
     assert book.all() == []
+
+
+def test_the_import_copies_every_value_with_its_category_as_group(
+    make_manager, tmp_path
+):
+    path = tmp_path / "parameters.json"
+    path.write_text(json.dumps({"first": {"a": 3.0, "b": 600}, "second": {"c": "x"}}))
+    client = in_process_client(make_manager())
+    assert import_parameters_json(path, client=client) == 3
+    found = {p.key: (p.value, p.group) for p in client.saved_parameters()}
+    assert found == {"a": (3.0, "first"), "b": (600, "first"), "c": ("x", "second")}
+    assert import_parameters_json(path, client=client) == 3
+    assert len(saved_parameter_history(client=client)) == 3

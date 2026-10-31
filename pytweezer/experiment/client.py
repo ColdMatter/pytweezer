@@ -11,6 +11,7 @@ From a notebook::
     rid = submit_recipe(RabiDemo, "nightly check", atoms=300)
 """
 
+import difflib
 import getpass
 import socket
 import time
@@ -22,6 +23,11 @@ import zmq
 from pytweezer.configuration.config import get_config
 from pytweezer.experiment.arguments import coerce_arguments
 from pytweezer.experiment.recipes import Recipe
+from pytweezer.experiment.saved_parameters import (
+    SavedParameter,
+    SavedParameterChange,
+    Value,
+)
 from pytweezer.experiment.scan import Scan
 from pytweezer.experiment.task import Task, TaskRequest
 
@@ -114,6 +120,8 @@ _READ_ONLY_COMMANDS = {
     "history",
     "last_request",
     "recipes",
+    "saved_parameters",
+    "saved_parameter_history",
 }
 
 
@@ -201,6 +209,39 @@ class ExperimentManagerClient:
             pipeline=pipeline,
             submitter=submitter,
         )["rid"]
+
+    def saved_parameters(self) -> list[SavedParameter]:
+        reply = self.call("saved_parameters")
+        return [SavedParameter.model_validate(p) for p in reply["parameters"]]
+
+    def set_saved_parameters(
+        self,
+        values: dict[str, Value],
+        reason: str,
+        who: str,
+        *,
+        create: bool = False,
+        group: str = "",
+        unit: str = "",
+        rid: int | None = None,
+    ) -> list[SavedParameterChange]:
+        reply = self.call(
+            "set_saved_parameters",
+            values=values,
+            reason=reason,
+            who=who,
+            create=create,
+            group=group,
+            unit=unit,
+            rid=rid,
+        )
+        return [SavedParameterChange.model_validate(c) for c in reply["changes"]]
+
+    def saved_parameter_history(
+        self, key: str | None = None, *, limit: int | None = None
+    ) -> list[SavedParameterChange]:
+        reply = self.call("saved_parameter_history", key=key, limit=limit)
+        return [SavedParameterChange.model_validate(e) for e in reply["entries"]]
 
     def set_priority(self, rid: int, priority: int) -> None:
         self.call("set_priority", rid=rid, priority=priority)
@@ -382,6 +423,75 @@ def delete_recipe(
     """Delete recipe ``name`` of ``experiment`` for every PC."""
     module, class_name = _resolve(experiment)
     (client or ExperimentManagerClient()).delete_recipe(module, class_name, name)
+
+
+def get_saved_parameters(
+    *, client: ExperimentManagerClient | None = None
+) -> dict[str, Value]:
+    """Every saved parameter's current value, by key."""
+    parameters = (client or ExperimentManagerClient()).saved_parameters()
+    return {parameter.key: parameter.value for parameter in parameters}
+
+
+def get_saved_parameter(
+    key: str,
+    /,
+    *,
+    client: ExperimentManagerClient | None = None,
+) -> Value:
+    """The current value of saved parameter ``key``.
+
+    Raises:
+        KeyError: no such key; the message names up to three close matches.
+    """
+    values = get_saved_parameters(client=client)
+    try:
+        return values[key]
+    except KeyError:
+        close = difflib.get_close_matches(key, values, n=3)
+        hint = f"; did you mean {', '.join(map(repr, close))}?" if close else ""
+        raise KeyError(f"no saved parameter {key!r}{hint}") from None
+
+
+def set_saved_parameters(
+    values: dict[str, Value],
+    reason: str,
+    /,
+    *,
+    create: bool = False,
+    group: str = "",
+    unit: str = "",
+    rid: int | None = None,
+    client: ExperimentManagerClient | None = None,
+) -> list[SavedParameterChange]:
+    """Set saved parameters for every PC, recording ``reason`` and who set them.
+
+    Either every value is set or, if the manager refuses any, none. Unknown keys
+    are refused unless ``create``; ``group`` and ``unit`` apply to created keys.
+    Returns a change for each value that differs from the stored one.
+    """
+    return (client or ExperimentManagerClient()).set_saved_parameters(
+        values,
+        reason,
+        submitter_name(),
+        create=create,
+        group=group,
+        unit=unit,
+        rid=rid,
+    )
+
+
+def saved_parameter_history(
+    key: str | None = None,
+    /,
+    *,
+    limit: int | None = None,
+    client: ExperimentManagerClient | None = None,
+) -> list[SavedParameterChange]:
+    """Changes to saved parameter ``key`` (every key if ``None``), newest first."""
+    return (client or ExperimentManagerClient()).saved_parameter_history(
+        key, limit=limit
+    )
 
 
 def wait(
