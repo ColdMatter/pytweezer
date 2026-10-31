@@ -19,6 +19,7 @@ running, and records how the others' tasks ended.
 """
 
 import argparse
+import copy
 import os
 import secrets
 import signal
@@ -54,6 +55,12 @@ from pytweezer.experiment.recipes import (
     RecipeStore,
     unknown_arguments,
 )
+from pytweezer.experiment.saved_parameters import (
+    SavedParameterBook,
+    SavedParameterChange,
+    SavedParameterLog,
+    SavedParameterStore,
+)
 from pytweezer.experiment.storage import (
     data_root,
     git_provenance,
@@ -71,7 +78,8 @@ logger = get_logger("pytweezer.servers.experiment_manager")
 #: The published state (:data:`~pytweezer.experiment.client.NOTIFIER_NAME`)
 #: is laid out as::
 #:
-#:     {"started", "catalogue_version", "recipes_version", "simulated",
+#:     {"started", "catalogue_version", "recipes_version",
+#:      "saved_parameters_version", "simulated",
 #:      "alive",                         # epoch s, at least every PUBLISH_INTERVAL_S
 #:      "running", "queue", "history",   # as ExperimentQueue.snapshot()
 #:      "points": {str(rid): [{"index", "values", "scalars", "t_start", "t_end"}]}}
@@ -107,6 +115,13 @@ class ExperimentManager:
         self.queue = ExperimentQueue(self.store.load())
         self.recipe_store = RecipeStore(self.root / "recipes.json")
         self.recipes = RecipeBook(self.recipe_store.load())
+        self.saved_parameter_store = SavedParameterStore(
+            self.root / "saved_parameters.json"
+        )
+        self.saved_parameters = SavedParameterBook(self.saved_parameter_store.load())
+        self.saved_parameter_log = SavedParameterLog(
+            self.root / "saved_parameters_log.jsonl"
+        )
         state = self.queue.state
         state.next_rid = max(state.next_rid, highest_rid(self.root) + 1)
         self.catalogue = catalogue or Catalogue()
@@ -127,6 +142,7 @@ class ExperimentManager:
         # Bumped whenever the catalogue changes, so GUIs know to fetch it again.
         self._catalogue_version = 0
         self._recipes_version = 0
+        self._saved_parameters_version = 0
         self._dirty = True
         self._last_publish = 0.0
         self._last_rescan = 0.0
@@ -221,6 +237,10 @@ class ExperimentManager:
             "version": self._catalogue_version,
         }
 
+    def _cmd_describe_again(self, request):
+        self.catalogue.describe_again(request["module"])
+        self._catalogue_changed(self.catalogue.refresh())
+
     def _cmd_get(self, request):
         return {"task": self.queue.get(int(request["rid"])).model_dump(mode="json")}
 
@@ -237,6 +257,7 @@ class ExperimentManager:
 
     def _cmd_submit(self, request):
         task_request = TaskRequest.model_validate(request["request"])
+        self._refuse_scanned_optimiser(task_request)
         devices = self._reservation(task_request.experiment, task_request.class_name)
         task = self.queue.submit(task_request, devices=devices)
         logger.info("Queued task %s: %s.%s", task.rid, task.experiment, task.class_name)
@@ -288,6 +309,52 @@ class ExperimentManager:
         )
         self._recipes_changed()
 
+    def _cmd_saved_parameters(self, request):
+        return {
+            "parameters": [
+                parameter.model_dump(mode="json")
+                for parameter in self.saved_parameters.all()
+            ],
+            "version": self._saved_parameters_version,
+        }
+
+    def _cmd_set_saved_parameters(self, request):
+        snapshot = copy.deepcopy(self.saved_parameters.state)
+        changes = self.saved_parameters.set(
+            request["values"],
+            reason=request["reason"],
+            who=request["who"],
+            create=bool(request.get("create")),
+            group=request.get("group", ""),
+            unit=request.get("unit", ""),
+            rid=request.get("rid"),
+        )
+        try:
+            self._saved_parameters_changed(changes)
+        except Exception:
+            self.saved_parameters.state = snapshot
+            try:
+                self.saved_parameter_store.save(snapshot)
+            except Exception:
+                logger.exception("Could not restore saved_parameters.json")
+            raise
+        for change in changes:
+            logger.info(
+                "Saved parameter %r: %r -> %r (%s, %s)",
+                change.key,
+                change.old,
+                change.new,
+                change.who,
+                change.reason,
+            )
+        return {"changes": [change.model_dump(mode="json") for change in changes]}
+
+    def _cmd_saved_parameter_history(self, request):
+        entries = self.saved_parameter_log.read(
+            request.get("key"), rid=request.get("rid"), limit=request.get("limit")
+        )
+        return {"entries": [entry.model_dump(mode="json") for entry in entries]}
+
     def _cmd_submit_recipe(self, request):
         recipe = self.recipes.get(
             request["experiment"], request["class_name"], request["name"]
@@ -310,6 +377,7 @@ class ExperimentManager:
                 f"{recipe.class_name} no longer has argument(s) {unknown}; load "
                 f"recipe {recipe.name!r} into the form, check it and save it again"
             )
+        self._refuse_scanned_optimiser(task_request)
         devices = self._reservation(recipe.experiment, recipe.class_name)
         task = self.queue.submit(task_request, devices=devices)
         logger.info("Queued task %s from recipe %r", task.rid, recipe.name)
@@ -345,6 +413,25 @@ class ExperimentManager:
                 "is still reading the experiments, so try again shortly"
             )
         raise RecipeError(f"{module}.{class_name} is not in the catalogue")
+
+    def _refuse_scanned_optimiser(self, request: TaskRequest) -> None:
+        """Refuse an optimiser submitted with scan axes or repetitions.
+
+        Raises:
+            RecipeError: If the catalogue lists the class as an optimiser and
+                the request scans it.
+        """
+        try:
+            schema = self._schema(request.experiment, request.class_name)
+        except _CatalogueBusy:
+            return
+        if schema.get("optimiser") and (
+            request.scan.axes or request.scan.repetitions != 1
+        ):
+            raise RecipeError(
+                f"{request.class_name} sets its own points; submit it without "
+                "scan axes or repetitions"
+            )
 
     def _reservation(self, module: str, class_name: str) -> list[str] | None:
         """The canonical device names ``module.class_name`` reserves.
@@ -653,6 +740,14 @@ class ExperimentManager:
         self._recipes_version += 1
         self._dirty = True
 
+    def _saved_parameters_changed(self, changes: list[SavedParameterChange]) -> None:
+        if not changes:
+            return
+        self.saved_parameter_store.save(self.saved_parameters.state)
+        self.saved_parameter_log.append(changes)
+        self._saved_parameters_version += 1
+        self._dirty = True
+
     def _save(self) -> None:
         self.store.save(self.queue.state)
 
@@ -663,6 +758,7 @@ class ExperimentManager:
             "started": self.started,
             "catalogue_version": self._catalogue_version,
             "recipes_version": self._recipes_version,
+            "saved_parameters_version": self._saved_parameters_version,
             "simulated": self.simulate,
             "alive": time.time(),
             **self.queue.snapshot(),

@@ -6,7 +6,8 @@ which panels they expose:
 
 * ``pytweezer-server`` (:func:`server_main`) runs on the server PC and gives full
   start/stop control of the server processes: Servers | Devices | Loggers |
-  Streams | Applets | Analysis | Experiments | Results | Properties.
+  Streams | Applets | Analysis | Experiments | Results | Saved parameters |
+  Optimisers | NI Cards | Properties.
 * ``pytweezer-client`` (:func:`client_main`) runs on client PCs with the same
   tabs, except that the Servers and Loggers tabs are view-only because those
   processes run on the server PC.
@@ -169,10 +170,12 @@ def build_gui(server: bool) -> TabbedGUI:
     from pytweezer.GUI.experiments.panel import ExperimentsPanel
     from pytweezer.GUI.experiments.results import ResultsPanel
     from pytweezer.GUI.ni_cards.panel import NICardsPanel
+    from pytweezer.GUI.optimisers import OptimisersPanel
     from pytweezer.GUI.property_editor import PropEdit
+    from pytweezer.GUI.saved_parameters import SavedParametersPanel
 
     name = "Server" if server else "Client"
-    # One live copy of the manager's state, shared by both experiment tabs.
+    # One live copy of the manager's state, shared by every experiment tab.
     try:
         feed = ExperimentFeed()
     except Exception:
@@ -185,6 +188,10 @@ def build_gui(server: bool) -> TabbedGUI:
         if isinstance(experiments, ExperimentsPanel):
             results.resubmit_requested.connect(experiments.load_request)
         return results
+
+    def make_optimisers():
+        editor = experiments if isinstance(experiments, ExperimentsPanel) else None
+        return OptimisersPanel(feed=feed, experiments_panel=editor)
 
     gui = TabbedGUI(
         f"PyTweezer {name}",
@@ -215,6 +222,13 @@ def build_gui(server: bool) -> TabbedGUI:
             ("Analysis", _safe_panel("Analysis", lambda: AnalysisManager("Analysis"))),
             ("Experiments", experiments),
             ("Results", _safe_panel("Results", make_results)),
+            (
+                "Saved parameters",
+                _safe_panel(
+                    "Saved parameters", lambda: SavedParametersPanel(feed=feed)
+                ),
+            ),
+            ("Optimisers", _safe_panel("Optimisers", make_optimisers)),
             ("NI Cards", _safe_panel("NI Cards", NICardsPanel)),
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],

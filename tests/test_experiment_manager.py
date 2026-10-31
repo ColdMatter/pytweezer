@@ -1,6 +1,5 @@
 """Experiment Manager request handling and restart reconciliation, mostly without sockets."""
 
-import json
 import sys
 import threading
 import time
@@ -10,13 +9,16 @@ import psutil
 import pytest
 import zmq
 
+from pytweezer.experiment import Experiment
 from pytweezer.experiment.client import (
     ExperimentManagerClient,
     ManagerError,
     ManagerUnavailable,
     delete_recipe,
+    get_saved_parameter,
     recipes,
     save_recipe,
+    set_saved_parameters,
     submit,
     submit_recipe,
 )
@@ -26,68 +28,10 @@ from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.experiments.demo import RabiDemo
 from pytweezer.servers import experiment_manager as em
+from tests.helpers import BROKEN, DEMO, demo_schema, in_process_client
 
-DEMO = "pytweezer.experiments.demo"
 DEAD_PID = 2**22 + 12345
 PULSE_SCAN = Scan(axes=[LinearAxis(argument="pulse_time", start=0, stop=1e-5, n=3)])
-BROKEN = {
-    "module": "pytweezer.experiments.broken",
-    "classes": [],
-    "warnings": [],
-    "error": "Traceback (most recent call last):\n  ...\nSyntaxError: invalid syntax\n",
-}
-
-
-class StaticCatalogue:
-    """A catalogue whose entries are given, never read from files."""
-
-    def __init__(self, entries):
-        self._entries = entries
-        self.busy = False
-        self.rereading = set()
-
-    def refresh(self):
-        return False
-
-    def poll(self):
-        return False
-
-    def entries(self):
-        return self._entries
-
-    def pending(self, module):
-        return module in self.rereading
-
-    def close(self):
-        pass
-
-
-def demo_schema(class_name="RabiDemo", reserves=("Rb MotMaster",), error=None):
-    return RabiDemo.schema() | {
-        "class_name": class_name,
-        "reserves": None if reserves is None else list(reserves),
-        "reserve_error": error,
-    }
-
-
-@pytest.fixture
-def make_manager(tmp_path, recording_db):
-    demo = {
-        "module": DEMO,
-        "classes": [demo_schema(), demo_schema("CaFDemo", ["CaF MotMaster"])],
-        "warnings": [],
-        "error": None,
-    }
-
-    def make():
-        return em.ExperimentManager(
-            root=tmp_path,
-            catalogue=StaticCatalogue([demo, BROKEN]),
-            bind=False,
-            db=recording_db,
-        )
-
-    return make
 
 
 def request(class_name="RabiDemo", **kwargs):
@@ -200,6 +144,44 @@ def test_submit_refuses_a_bad_declaration(make_manager, command):
         )
     assert not reply["ok"]
     assert "linked_partner" in reply["error"]
+    assert manager.queue.ordered() == []
+
+
+@pytest.mark.parametrize("command", ["submit", "submit_recipe"])
+@pytest.mark.parametrize(
+    "scan", [PULSE_SCAN, Scan(repetitions=2)], ids=["axes", "reps"]
+)
+def test_an_optimiser_submitted_with_a_scan_is_refused(make_manager, command, scan):
+    manager = make_manager()
+    optimiser = demo_schema("Optimiser") | {
+        "optimiser": {
+            "kind": "staged",
+            "goal": "max",
+            "objective": "counts",
+            "proposes": ["demo_resonance"],
+            "settings": ["detuning"],
+        }
+    }
+    manager.catalogue.entries()[0]["classes"].append(optimiser)
+    if command == "submit":
+        reply = manager.handle(
+            {
+                "command": "submit",
+                "request": request(class_name="Optimiser", scan=scan),
+            }
+        )
+    else:
+        save(manager, class_name="Optimiser", scan=scan)
+        reply = manager.handle(
+            {
+                "command": "submit_recipe",
+                "experiment": DEMO,
+                "class_name": "Optimiser",
+                "name": "check",
+            }
+        )
+    assert not reply["ok"]
+    assert "sets its own points" in reply["error"]
     assert manager.queue.ordered() == []
 
 
@@ -526,19 +508,6 @@ def test_a_recipe_that_no_longer_fits_its_experiment_is_refused(
     assert manager.queue.ordered() == []
 
 
-class InProcess:
-    """Routes client requests straight into a manager, through JSON as on the wire."""
-
-    def __init__(self, manager):
-        self.manager = manager
-
-    def request(self, payload, *, retry=True):
-        return self.manager.handle(json.loads(json.dumps(payload)))
-
-    def close(self):
-        pass
-
-
 def test_a_slow_manager_receives_each_submit_once():
     server = zmq.Context.instance().socket(zmq.REP)
     server.bind("tcp://127.0.0.1:*")
@@ -565,8 +534,7 @@ def test_a_slow_manager_receives_each_submit_once():
 
 def test_notebook_recipes_round_trip(make_manager):
     manager = make_manager()
-    client = ExperimentManagerClient(endpoint="tcp://127.0.0.1:1")
-    client._req = InProcess(manager)
+    client = in_process_client(manager)
     save_recipe(RabiDemo, "check", PULSE_SCAN, label="nightly", client=client, atoms=50)
     [saved] = recipes(RabiDemo, client=client)
     assert saved.args == {"rabi_frequency": 50e3, "atoms": 50, "point_delay": 0.2}
@@ -616,4 +584,81 @@ def test_notebook_calls_check_arguments_before_sending():
             RabiDemo, Scan(axes=[ListAxis(argument="atoms", values=[0])]), client=client
         )
     with pytest.raises(ValueError, match="run_local"):
-        submit(type("Local", (), {"__module__": "__main__"}), client=client)
+        submit(type("Local", (Experiment,), {"__module__": "__main__"}), client=client)
+
+
+def test_a_written_value_is_read_back_after_a_restart_and_bumps_the_version(
+    make_manager, tmp_path
+):
+    manager = make_manager()
+    version = manager._snapshot()["saved_parameters_version"]
+    reply = manager.handle(
+        {
+            "command": "set_saved_parameters",
+            "values": {"offset": 131.5},
+            "reason": "r",
+            "who": "me",
+            "create": True,
+        }
+    )
+    assert reply["ok"], reply
+    assert (tmp_path / "saved_parameters_log.jsonl").exists()
+    [parameter] = manager.handle({"command": "saved_parameters"})["parameters"]
+    assert (parameter["key"], parameter["value"]) == ("offset", 131.5)
+    assert manager._snapshot()["saved_parameters_version"] == version + 1
+    restarted = make_manager()
+    assert restarted.handle({"command": "saved_parameters"})["parameters"] == [
+        parameter
+    ]
+    [entry] = restarted.handle({"command": "saved_parameter_history", "key": "offset"})[
+        "entries"
+    ]
+    assert entry["new"] == 131.5
+
+
+@pytest.mark.parametrize("failing", ["save", "append"])
+def test_a_saved_parameter_write_that_fails_to_persist_changes_nothing(
+    make_manager, tmp_path, monkeypatch, failing
+):
+    manager = make_manager()
+
+    def set_value(value, **extra):
+        return manager.handle(
+            {
+                "command": "set_saved_parameters",
+                "values": {"offset": value},
+                "reason": "r",
+                "who": "me",
+                **extra,
+            }
+        )
+
+    assert set_value(1.0, create=True)["ok"]
+    version = manager._snapshot()["saved_parameters_version"]
+    target = (
+        manager.saved_parameter_store
+        if failing == "save"
+        else manager.saved_parameter_log
+    )
+
+    def refuse(*args, **kwargs):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(target, failing, refuse)
+    reply = set_value(2.0)
+    assert not reply["ok"] and "locked" in reply["error"]
+    [parameter] = manager.handle({"command": "saved_parameters"})["parameters"]
+    assert parameter["value"] == 1.0
+    assert manager._snapshot()["saved_parameters_version"] == version
+    monkeypatch.undo()
+    [stored] = make_manager().handle({"command": "saved_parameters"})["parameters"]
+    assert stored["value"] == 1.0
+    assert set_value(3.0)["ok"]
+
+
+def test_a_misspelt_key_names_the_closest_one(make_manager):
+    client = in_process_client(make_manager())
+    set_saved_parameters({"cool_resonance": 4.05}, "r", create=True, client=client)
+    assert get_saved_parameter("cool_resonance", client=client) == 4.05
+    with pytest.raises(KeyError, match="cool_resonance"):
+        get_saved_parameter("cool_resonanse", client=client)

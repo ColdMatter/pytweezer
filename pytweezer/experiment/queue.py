@@ -373,10 +373,13 @@ class ModelStore:
                     raise
                 time.sleep(0.05)
 
+    def _dump(self, state: BaseModel) -> str:
+        return state.model_dump_json(indent=1)
+
     def save(self, state: BaseModel) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(state.model_dump_json(indent=1))
+        tmp.write_text(self._dump(state))
         for attempt in range(20):
             try:
                 os.replace(tmp, self.path)

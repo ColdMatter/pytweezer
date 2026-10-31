@@ -16,7 +16,13 @@ os.environ["PYTWEEZER_LOG_DIR"] = tempfile.mkdtemp(prefix="pytweezer-test-logs-"
 
 import pytest
 
-from tests.helpers import RecordingDB
+from tests.helpers import (
+    BROKEN,
+    DEMO,
+    RecordingDB,
+    StaticCatalogue,
+    demo_schema,
+)
 
 
 @pytest.fixture(scope="session")
@@ -55,3 +61,30 @@ def fake_devices(monkeypatch):
 
     monkeypatch.setattr("pytweezer.experiment.experiment._get_device", get_device)
     return opened
+
+
+@pytest.fixture
+def make_manager(tmp_path, recording_db):
+    """Builds an in-process Experiment Manager (no sockets) over a static catalogue.
+
+    Each call to the returned function starts a fresh manager on the same root,
+    as a restart would.
+    """
+    from pytweezer.servers import experiment_manager as em
+
+    demo = {
+        "module": DEMO,
+        "classes": [demo_schema(), demo_schema("CaFDemo", ["CaF MotMaster"])],
+        "warnings": [],
+        "error": None,
+    }
+
+    def make():
+        return em.ExperimentManager(
+            root=tmp_path,
+            catalogue=StaticCatalogue([demo, BROKEN]),
+            bind=False,
+            db=recording_db,
+        )
+
+    return make

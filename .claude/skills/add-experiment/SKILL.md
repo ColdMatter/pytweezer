@@ -219,6 +219,46 @@ the names; load it into the form, check it and save it again. An override may
 not fix an argument the recipe scans. MOTMaster `attribute.parameter` names are
 checked when the task runs, as for any submission.
 
+## Saved parameters
+
+Import with `from pytweezer.experiment.client import get_saved_parameter`, then
+read one: in `prepare()`/`run_point()` for the value
+at run time, or passed to an argument as its default, e.g.
+`level = Number(get_saved_parameter("level"))` (read when the module is
+imported; the form's **Defaults** button has the manager describe the
+experiment again and so re-reads it). Importing such a module contacts the
+manager.
+
+## Optimisers
+
+An optimiser (`pytweezer/experiment/optimisers.py`) runs a *measurement
+experiment* to propose saved-parameter values. The measurement provides
+`measure(**settings) -> dict[str, float]`; put the mixin first:
+
+```python
+class FindResonance(StagedScan, Resonance):        # or BayesianOptimisation
+    objective = "counts"                           # a key of measure()'s results
+    goal = "max"                                   # or "min"
+    stages: ClassVar[list[Stage]] = [
+        Stage("detuning", start=-5.0, stop=5.0, points=21, save_as="resonance"),
+    ]
+    # BayesianOptimisation: dimensions = [Dimension("detuning", low=-5, high=5, save_as=...)]
+```
+
+- Each `Stage` generates `<setting>_start/_stop/_points` arguments (each
+  `Dimension` `<setting>_low/_high`); declare one of those names yourself to
+  override it. Duplicate settings or `save_as`, a bad `goal` or `low >= high`
+  raise `TypeError` when the class is defined.
+- Override `objective_of(results)` for an objective computed from several
+  results, and `best(settings, objectives)` to choose differently; in a
+  `StagedScan`, `self.stage` is the `Stage` being chosen for.
+- The mixins record their own results — `stage`, `setting`, `objective`
+  (staged); each setting name, `objective`, `xi` (Bayesian) — so `measure()`
+  must not return those names.
+- An optimiser sets its own points: submitting it with scan axes or
+  repetitions is refused. Its proposals are constants `proposed.<key>`;
+  nothing is saved until someone accepts them in the **Optimisers** tab.
+
 ## Files
 
 `{data_root}/YYYY/MM/DD/{rid:06d}_{Class}.h5`. Root attrs: rid, experiment,
