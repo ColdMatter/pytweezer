@@ -43,11 +43,23 @@ that raises — rank last: someone notices them straight away.
 - It calls the code the way its callers do and checks what those callers care
   about, so it passes unchanged after the internals are reorganised.
 - Stand-ins appear only at process and hardware edges. Where one exists, use
-  it: `fake_devices` and `recording_db` in `tests/conftest.py`, helpers in
-  `tests/helpers.py`, and each driver's `simulate()` twin
-  (`pytweezer/servers/simulated_device.py`). A driver test that must see what
-  reaches the hardware gets a fake vendor library that only records the data
-  handed to it.
+  it, and do not build a second:
+
+  | Stand-in | Where | Gives |
+  |---|---|---|
+  | `fake_devices` | `tests/conftest.py` | a recording client for every device an experiment opens |
+  | `recording_db` | `tests/conftest.py` | a `DBWriter` stand-in that keeps the rows it is sent |
+  | `make_manager` | `tests/conftest.py` | an in-process Experiment Manager (no sockets) on `tmp_path`; call it again to "restart" on the same root |
+  | `in_process_client(manager)` | `tests/helpers.py` | an `ExperimentManagerClient` whose requests go through JSON straight into that manager |
+  | `qapp` | `tests/conftest.py` | the one shared offscreen `QApplication` |
+  | `until(condition, qapp=...)` | `tests/helpers.py` | poll for an asynchronous result instead of sleeping a fixed time |
+  | `write_run`, `demo_schema`, `FakeFeed` | `tests/helpers.py` | a small recorded run on disk; a catalogue entry for the demo experiment; the GUI's live queue/points feed |
+  | `simulate()` twin | each driver, via `pytweezer/servers/simulated_device.py` | the driver without hardware |
+
+  A driver test that must see what reaches the hardware gets a fake vendor
+  library that only records the data handed to it. `conftest.py` already
+  points logging at a temporary directory with publishing off, so tests (and
+  the workers they start) never write to the lab's log stream or `logs/`.
 - Each test guards one behaviour; a test whose name needs "and" is two tests.
 - It runs in well under a second, gives the same result every run, and needs no
   hardware, network or real database.

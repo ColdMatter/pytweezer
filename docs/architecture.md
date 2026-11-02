@@ -6,12 +6,14 @@ A short orientation. For working detail, read the module docstrings in the
 ## Processes and PCs
 
 One **server PC** runs the shared long-lived processes — the ZMQ hubs, stream
-loggers, the Analysis Manager, and Device Status. **Arbitrarily many client
-PCs** each run the devices physically plugged into them, their own applets, and
-a GUI.
+loggers, the Properties server, the Analysis Manager, Device Status and the
+Experiment Manager. **Arbitrarily many client PCs** each run the devices
+physically plugged into them, their own applets, and a GUI.
 
-The full-control GUI (`pytweezer-server`) runs on the server PC; client PCs run
-the view-only GUI (`pytweezer-client`).
+The server GUI (`pytweezer-server`) runs on the server PC and starts and stops
+the shared processes. Client PCs run `pytweezer-client`, which has the same tabs
+except that the Servers and Loggers tabs only show the processes running on the
+server PC.
 
 ## CONFIG is the single source of truth
 
@@ -42,3 +44,18 @@ pub/sub layer ({mod}`pytweezer.servers.clients`), with an XSUB/XPUB proxy
 subscribers. Streaming analysis processes
 ({mod}`pytweezer.analysis.analysis_base`) subscribe to a stream, transform each
 message, and republish the result.
+
+## Experiments and measurement data
+
+The Experiment Manager ({mod}`pytweezer.servers.experiment_manager`) owns the
+experiment queue. Each task runs in its own worker subprocess and reserves the
+devices its experiment declares, so tasks in different pipelines run side by
+side unless they need the same device. Every GUI holds a live copy of the
+queue and of the points measured so far through a sipyco notifier.
+
+Each measurement is one h5 file under the manager's `data_root`. The manager
+serves those files to other PCs ({mod}`pytweezer.experiment.archive`, read by
+the Results tab) and copies each finished file to `copy_root` on the lab
+network drive ({mod}`pytweezer.experiment.copier`). It also holds the saved
+parameters ({mod}`pytweezer.experiment.saved_parameters`): named calibration
+values that experiments read and optimisers propose new values for.

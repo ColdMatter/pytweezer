@@ -27,15 +27,19 @@ Defined under `[project.scripts]` in `pyproject.toml`:
 | Command | Purpose |
 | --- | --- |
 | `uv run pytweezer-server` | full-control GUI, run on the server PC |
-| `uv run pytweezer-client` | view-only GUI, run on client PCs |
+| `uv run pytweezer-client` | client GUI, run on client PCs |
 | `uv run pytweezer-device <name>` | start one device's RPC server standalone |
 | `uv run pytweezer-logger <name>` | start one database logger standalone |
+| `uv run pytweezer-experiment-manager <name>` | start the experiment queue manager standalone |
 | `uv run pytweezer-db-backfill` | load existing measurement files into the database |
 | `uv run pytweezer-kill-stale` | kill leftover processes holding ZMQ ports |
 
-`start_servers.bat` / `start_client.bat` / `kill_stale.bat` wrap these on the
-lab machines. Run kill-stale after an unclean shutdown, when a launch fails
-with "Address already in use".
+`start_servers.bat` / `start_client.bat` / `kill_stale.bat` start the same
+entry points on the lab machines as `uv run python -m bin.launch [client]` and
+`uv run python -m bin.kill_stale`: Windows Smart App Control blocks the unsigned
+`.venv\Scripts\pytweezer-*.exe` launchers that uv generates, but allows the
+signed `python.exe`. Run kill-stale after an unclean shutdown, when a launch
+fails with "Address already in use".
 
 Qt windows cannot construct without a display. Set
 `QT_QPA_PLATFORM=offscreen` before running any script that imports Qt widgets
