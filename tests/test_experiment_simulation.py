@@ -105,7 +105,8 @@ def test_manager_tells_guis_it_is_simulating(monkeypatch, tmp_path, recording_db
     )
     manager = em.ExperimentManager(
         root=tmp_path,
-        catalogue=Catalogue(package="none", directory=tmp_path / "none"),
+        experiments=Catalogue("none", tmp_path / "none"),
+        optimisers=Catalogue("none", tmp_path / "none"),
         bind=False,
         db=recording_db,
     )

@@ -5,7 +5,8 @@ description: Write, run, queue and read back pytweezer experiments — an Experi
 
 # Experiments
 
-An experiment is a class in a module under `pytweezer/experiments/`. The
+An experiment is a class in a module under `pytweezer/experiments/`
+(optimisers are under `pytweezer/optimisers/`: add-optimiser). The
 Experiment Manager (a `CONFIG["Servers"]` process on the server PC) queues
 tasks and runs each one in a **fresh worker subprocess** that imports the
 module, makes one instance, and writes **one h5 file per measurement**, flushed
@@ -179,7 +180,9 @@ m.status, m.attrs["error"]  # a failure is recorded, not raised
 
 `submit` needs a class importable by the manager — **not one defined in a
 notebook**; use `run_local` for those (pass `path=` to keep a file). A plain
-`submit()` is refused at once if the class is not in the catalogue, its module
+`submit()` is refused at once if the class is not in the catalogue for its
+package (the manager keeps one for `pytweezer.experiments` and one for
+`pytweezer.optimisers`), its module
 fails to import, or its devices can't be reserved (`ReservationError`: unknown
 or inactive device, or `linked=True` on a MOTMaster with no `linked_partner`;
 `run_local` raises the same before running). While the catalogue
@@ -187,7 +190,7 @@ is still being read the task is queued and resolved later, failing if it then
 can't be.
 `Scan(repeat="scan")` repeats the whole grid rather than each point.
 `ExperimentManagerClient` has `get/pause/resume/terminate/abort/hold/release/
-delete/set_priority/snapshot/history/last_request/catalogue/describe_again/
+delete/set_priority/snapshot/history/last_request/experiments/optimisers/describe_again/
 recipes/save_recipe/delete_recipe/submit_recipe/saved_parameters/
 set_saved_parameters/saved_parameter_history`.
 
@@ -296,7 +299,7 @@ add-optimiser skill; a measurement it runs only needs a
 
 The Rb tweezer experiments, in the order a session uses them:
 
-1. `SlmTweezerArray` (`slm_array.py`) puts an array on the SLM through
+1. `SlmTweezerArray` (`slm_tweezer_array.py`) puts an array on the SLM through
    `Rb Rearrangement Rig` (`rig.make_array(...)`, one mask per point, shown on
    the `slm` image stream for the SLM Monitor applet). The rig remembers it:
    `rig.get_array()` gives `sites` and trap `x_um`/`y_um` (`None` if the rig
@@ -313,7 +316,7 @@ The Rb tweezer experiments, in the order a session uses them:
    `save_tweezer_counts`; frames are recorded only with `save_raw_images`.
    `LoadTweezers` runs without sites only if it records frames;
    `TweezerArrayMeasurement` always needs them.
-4. `TweezerArrayShots` (`tweezer_array.py`) runs every shot at the saved
+4. `TweezerArrayShots` (`tweezer_array_shots.py`) runs every shot at the saved
    sequence parameters (`SAVED_SEQUENCE_PARAMETERS`: script parameter → saved
    key; a missing key fails `prepare()`), a script parameter set in the form
    winning; the values used are the constant `saved_sequence`. Each point is a
@@ -374,8 +377,8 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
 
 - **Published state:** the manager serves sipyco notifier `"experiment"` on
   `sync_port` (layout in the module): the queue snapshot (`running`, a list,
-  `queue`, `history`, `simulated`, `alive`, and `catalogue_`/`recipes_`/
-  `saved_parameters_version` counters; waiting tasks carry `waiting_for`) and
+  `queue`, `history`, `simulated`, `alive`, and `experiments_`/`optimisers_`/
+  `recipes_`/`saved_parameters_version` counters; waiting tasks carry `waiting_for`) and
   `points`, keyed by rid, every point each running task (and each pipeline's
   last finished one) has measured, with its scanned values and 0-d numeric
   results. Only changes are sent; a GUI connecting late gets it all.
@@ -437,5 +440,5 @@ Tests: `tests/test_experiment_*.py`, `tests/test_motmaster_experiment.py`,
 `tests/test_results_{browser,archive,analyses}.py`, `tests/test_file_copier.py`,
 `tests/test_saved_parameters.py`; `test_experiment_e2e.py` runs a real manager
 and worker subprocesses on localhost. Tweezer measurements:
-`tests/test_tweezer_array.py`, `tests/test_slm_array.py`,
+`tests/test_tweezer_array.py`, `tests/test_slm_tweezer_array.py`,
 `tests/test_tweezer_histogram.py`.

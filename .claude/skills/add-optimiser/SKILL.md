@@ -1,17 +1,20 @@
 ---
 name: add-optimiser
-description: Write, run and accept pytweezer optimisers — StagedScan, BayesianOptimisation and Fit classes in pytweezer/experiment/optimisers.py that run a measurement experiment and propose new saved-parameter values, accepted by hand in the Optimisers tab. Use whenever the user wants to write, add or change an optimiser or calibration search, find the best value of something ("find the best imaging detuning", "optimise the molasses shims", "fit the trap sites"), work on FindTrapSites, OptimiseTweezerImaging or OptimiseMolassesShims, accept or discard an optimiser run's proposals, or work on the Optimisers tab (pytweezer/GUI/optimisers.py) — even if they only describe the search without saying "optimiser". For the measurement experiment it runs, and for saved parameters themselves, use add-experiment.
+description: Write, run and accept pytweezer optimisers — StagedScan, BayesianOptimisation and Fit classes in pytweezer/optimisers/ (mixins in pytweezer/experiment/optimisers.py) that run a measurement experiment and propose new saved-parameter values, accepted by hand in the Optimisers tab. Use whenever the user wants to write, add or change an optimiser or calibration search, find the best value of something ("find the best imaging detuning", "optimise the molasses shims", "fit the trap sites"), work on FindTrapSites, OptimiseTweezerImaging or OptimiseMolassesShims, accept or discard an optimiser run's proposals, or work on the Optimisers tab (pytweezer/GUI/optimisers.py) — even if they only describe the search without saying "optimiser". For the measurement experiment it runs, and for saved parameters themselves, use add-experiment.
 ---
 
 # Optimisers
 
-An optimiser (`pytweezer/experiment/optimisers.py`) runs a *measurement
+An optimiser is a class in a module under `pytweezer/optimisers/`, built on a
+mixin from `pytweezer/experiment/optimisers.py`; it runs a *measurement
 experiment* to propose saved-parameter values; nothing is saved until someone
 accepts them in the **Optimisers** tab. It is an `Experiment` subclass, so
 everything in the add-experiment skill (arguments, devices, recording, the
 queue, files, saved parameters) applies; this skill covers what an optimiser
 adds. Device-free examples: `DemoStagedScan`/`DemoBayesian` in
-`experiments/demo.py`; real ones in `experiments/tweezer_array.py`.
+`optimisers/demo_staged_scan.py`/`demo_bayesian.py` (over
+`experiments/demo_resonance.py`); real ones `optimisers/find_trap_sites.py`,
+`optimise_tweezer_imaging.py`, `optimise_molasses_shims.py`.
 
 ## Search optimisers
 
@@ -72,8 +75,10 @@ fit view draws the results `calibration_image` and `roi_sites`
   axes or repetitions is refused. Its proposals are constants
   `proposed.<key>`.
 - In the GUI, optimisers are set up and run only in the **Optimisers** tab
-  (`pytweezer/GUI/optimisers.py`); the Experiments tab does not list them (a
-  class whose schema has an `"optimiser"` entry, i.e. one that proposes keys),
+  (`pytweezer/GUI/optimisers.py`), which lists the manager's optimisers
+  catalogue (`pytweezer.optimisers`, fetched with the `optimisers` command);
+  the Experiments tab lists only the experiments catalogue
+  (`pytweezer.experiments`),
   and Results' Resubmit opens an optimiser run there. From code, `submit`
   without a scan works as for any experiment. The tab's form groups the
   mixin's own arguments (group `SEARCH`) first, starts from the last run's

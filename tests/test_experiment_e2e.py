@@ -69,6 +69,9 @@ class Harness:
         package.mkdir()
         (package / "__init__.py").write_text("")
         (package / "steps.py").write_text(EXPERIMENT)
+        optimisers = tmp_path / "laboptim"
+        optimisers.mkdir()
+        (optimisers / "__init__.py").write_text("")
         monkeypatch.syspath_prepend(str(tmp_path))
         monkeypatch.setenv("PYTHONPATH", str(tmp_path))
         self.conf = {
@@ -84,6 +87,7 @@ class Harness:
         )
         self.root = tmp_path / "data"
         self.package_dir = package
+        self.optimisers_dir = optimisers
         self.client = ExperimentManagerClient(
             f"tcp://127.0.0.1:{self.conf['port']}", timeout_ms=3000
         )
@@ -94,7 +98,8 @@ class Harness:
         def serve():
             self.manager = em.ExperimentManager(
                 root=self.root,
-                catalogue=Catalogue(package="labexp", directory=self.package_dir),
+                experiments=Catalogue("labexp", self.package_dir),
+                optimisers=Catalogue("laboptim", self.optimisers_dir),
                 db=self.db,
             )
             ready.set()
@@ -159,7 +164,7 @@ def test_tasks_run_in_order_and_write_measurements(harness):
 
 
 def test_catalogue_lists_runnable_experiments(harness):
-    [entry] = until(harness.client.catalogue, timeout=30)
+    [entry] = until(harness.client.experiments, timeout=30)
     assert entry["module"] == "labexp.steps"
     assert entry["error"] is None
     assert [c["class_name"] for c in entry["classes"]] == ["Steps", "UsesSequencer"]
@@ -167,7 +172,7 @@ def test_catalogue_lists_runnable_experiments(harness):
 
 OPTIM = textwrap.dedent(
     """
-    from pytweezer.experiments.demo import DemoStagedScan
+    from pytweezer.optimisers.demo_staged_scan import DemoStagedScan
 
 
     class Optim(DemoStagedScan):
@@ -177,11 +182,8 @@ OPTIM = textwrap.dedent(
 
 
 def test_an_optimiser_run_can_be_accepted(harness):
-    (harness.package_dir / "optim.py").write_text(OPTIM)
-    until(
-        lambda: any(e["module"] == "labexp.optim" for e in harness.client.catalogue()),
-        timeout=30,
-    )
+    (harness.optimisers_dir / "optim.py").write_text(OPTIM)
+    until(harness.client.optimisers, timeout=30)
     set_saved_parameters(
         {"demo_resonance": 0.1, "demo_power": 0.5},
         "created",
@@ -189,7 +191,7 @@ def test_an_optimiser_run_can_be_accepted(harness):
         client=harness.client,
     )
     rid = submit(
-        "labexp.optim:Optim",
+        "laboptim.optim:Optim",
         client=harness.client,
         detuning_points=5,
         power_points=3,
@@ -236,7 +238,7 @@ def write_level(harness, text):
 
 
 def default_of(harness, class_name, argument):
-    for entry in harness.client.catalogue():
+    for entry in harness.client.experiments():
         for described in entry["classes"]:
             if described["class_name"] == class_name:
                 return described["arguments"][argument]["default"]

@@ -26,18 +26,18 @@ from pytweezer.experiment.queue import WorkerRecord
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
 from pytweezer.experiment.task import TaskRequest
-from pytweezer.experiments.demo import RabiDemo
+from pytweezer.experiments.rabi_demo import RabiDemo
 from pytweezer.servers import experiment_manager as em
-from tests.helpers import BROKEN, DEMO, demo_schema, in_process_client
+from tests.helpers import BROKEN, DEMO, OPTIMISER, demo_schema, in_process_client
 
 DEAD_PID = 2**22 + 12345
 PULSE_SCAN = Scan(axes=[LinearAxis(argument="pulse_time", start=0, stop=1e-5, n=3)])
 
 
-def request(class_name="RabiDemo", **kwargs):
-    return TaskRequest(experiment=DEMO, class_name=class_name, **kwargs).model_dump(
-        mode="json"
-    )
+def request(class_name="RabiDemo", experiment=DEMO, **kwargs):
+    return TaskRequest(
+        experiment=experiment, class_name=class_name, **kwargs
+    ).model_dump(mode="json")
 
 
 class FakeWorker:
@@ -126,7 +126,7 @@ def test_clashing_tasks_start_one_after_the_other(make_manager, workers):
 def test_submit_refuses_a_bad_declaration(make_manager, command):
     manager = make_manager()
     error = "'CaF MotMaster' is linked but its CONFIG entry has no 'linked_partner'"
-    classes = manager.catalogue.entries()[0]["classes"]
+    classes = manager.catalogues["experiments"].entries()[0]["classes"]
     classes.append(demo_schema("Linked", reserves=None, error=error))
     if command == "submit":
         reply = manager.handle(
@@ -162,20 +162,23 @@ def test_an_optimiser_submitted_with_a_scan_is_refused(make_manager, command, sc
             "settings": ["detuning"],
         }
     }
-    manager.catalogue.entries()[0]["classes"].append(optimiser)
+    optimiser["module"] = OPTIMISER
+    manager.catalogues["optimisers"].entries()[0]["classes"].append(optimiser)
     if command == "submit":
         reply = manager.handle(
             {
                 "command": "submit",
-                "request": request(class_name="Optimiser", scan=scan),
+                "request": request(
+                    class_name="Optimiser", experiment=OPTIMISER, scan=scan
+                ),
             }
         )
     else:
-        save(manager, class_name="Optimiser", scan=scan)
+        save(manager, experiment=OPTIMISER, class_name="Optimiser", scan=scan)
         reply = manager.handle(
             {
                 "command": "submit_recipe",
-                "experiment": DEMO,
+                "experiment": OPTIMISER,
                 "class_name": "Optimiser",
                 "name": "check",
             }
@@ -187,16 +190,16 @@ def test_an_optimiser_submitted_with_a_scan_is_refused(make_manager, command, sc
 
 def test_reservation_resolved_later_when_catalogue_was_busy(make_manager, workers):
     manager = make_manager()
-    manager.catalogue.busy = True
+    manager.catalogues["experiments"].busy = True
     rid = submit_to(manager, "Later")
     assert manager.queue.get(rid).devices is None
     manager.tick()
     assert manager.processes == {}
 
-    manager.catalogue.entries()[0]["classes"].append(
+    manager.catalogues["experiments"].entries()[0]["classes"].append(
         demo_schema("Later", ["Rb HamCam"])
     )
-    manager.catalogue.busy = False
+    manager.catalogues["experiments"].busy = False
     manager.tick()
     assert running(manager) == [rid]
     assert manager.queue.get(rid).devices == ["Rb HamCam"]
@@ -204,9 +207,9 @@ def test_reservation_resolved_later_when_catalogue_was_busy(make_manager, worker
 
 def test_unresolvable_reservation_fails_the_task(make_manager, workers):
     manager = make_manager()
-    manager.catalogue.busy = True
+    manager.catalogues["experiments"].busy = True
     rid = submit_to(manager, "Gone")
-    manager.catalogue.busy = False
+    manager.catalogues["experiments"].busy = False
     manager.tick()
     task = manager.queue.get(rid)
     assert task.status == "failed"
@@ -219,7 +222,7 @@ def test_a_module_being_reread_is_not_reserved_from_its_old_description(
 ):
     manager = make_manager()
     save(manager)
-    manager.catalogue.rereading = {DEMO}
+    manager.catalogues["experiments"].rereading = {DEMO}
     rid = submit_to(manager)
     assert manager.queue.get(rid).devices is None
     reply = manager.handle(
@@ -232,8 +235,10 @@ def test_a_module_being_reread_is_not_reserved_from_its_old_description(
     )
     assert not reply["ok"] and "try again shortly" in reply["error"]
 
-    manager.catalogue.entries()[0]["classes"][0]["reserves"] = ["Rb HamCam"]
-    manager.catalogue.rereading = set()
+    manager.catalogues["experiments"].entries()[0]["classes"][0]["reserves"] = [
+        "Rb HamCam"
+    ]
+    manager.catalogues["experiments"].rereading = set()
     manager.tick()
     assert manager.queue.get(rid).devices == ["Rb HamCam"]
 
@@ -498,7 +503,7 @@ def test_a_recipe_that_no_longer_fits_its_experiment_is_refused(
 ):
     manager = make_manager()
     save(manager, **saved)
-    manager.catalogue.busy = busy
+    manager.catalogues["experiments"].busy = busy
     key = {"experiment": DEMO, "class_name": "RabiDemo", "name": "check"}
     key |= {k: v for k, v in saved.items() if k in key}
     reply = manager.handle({"command": "submit_recipe", **key, **submitted})

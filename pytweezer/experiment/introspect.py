@@ -1,6 +1,6 @@
 """Describe the experiments in a module as JSON, without running them.
 
-``python -m pytweezer.experiment.introspect pytweezer.experiments.demo``
+``python -m pytweezer.experiment.introspect pytweezer.experiments.rabi_demo``
 
 Run as a subprocess by the Experiment Manager, so importing a broken or slow
 experiment module can never affect the manager or a GUI. Always prints one

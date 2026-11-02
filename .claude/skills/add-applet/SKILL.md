@@ -121,7 +121,7 @@ Header keys are all optional — use `head.get(...)`. A camera frame
 reads a shot, counting up from the acquisition start when broadcast live),
 `roi_x0`/`roi_y0` (the sensor pixel of the frame's corner), and `rid` when the
 experiment that read it passes one (`LoadTweezers` does). The pair `_offset`/`_imgresolution` (pixel origin and metres
-per pixel) is set by some publishers (`roi_slice.py`, `experiments/slm_array.py`)
+per pixel) is set by some publishers (`roi_slice.py`, `experiments/slm_tweezer_array.py`)
 and not others.
 If you scale an image by `_imgresolution`, keep the axis labels honest — an image
 drawn in metres inside a view ranged in pixels shrinks into the corner and looks

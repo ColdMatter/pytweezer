@@ -4,7 +4,7 @@ From a notebook::
 
     from pytweezer.experiment import Scan, LinearAxis
     from pytweezer.experiment.client import submit, submit_recipe, wait
-    from pytweezer.experiments.demo import RabiDemo
+    from pytweezer.experiments.rabi_demo import RabiDemo
 
     rid = submit(RabiDemo, Scan(axes=[LinearAxis(argument="pulse_time", start=0, stop=2e-5, n=21)]))
     task = wait(rid)
@@ -116,7 +116,8 @@ class ReqClient:
 _READ_ONLY_COMMANDS = {
     "ping",
     "snapshot",
-    "catalogue",
+    "experiments",
+    "optimisers",
     "get",
     "history",
     "last_request",
@@ -153,8 +154,11 @@ class ExperimentManagerClient:
     def snapshot(self) -> dict[str, Any]:
         return self.call("snapshot")["snapshot"]
 
-    def catalogue(self) -> list[dict[str, Any]]:
-        return self.call("catalogue")["modules"]
+    def experiments(self) -> list[dict[str, Any]]:
+        return self.call("experiments")["modules"]
+
+    def optimisers(self) -> list[dict[str, Any]]:
+        return self.call("optimisers")["modules"]
 
     def describe_again(self, module: str) -> None:
         """Have the manager describe ``module`` again, so its defaults are re-read."""
@@ -305,7 +309,8 @@ def _resolve(
     if module == "__main__" or "<locals>" in class_name or not class_name:
         raise ValueError(
             f"{experiment!r} can't be imported by the manager; define it in a module "
-            "under pytweezer/experiments/, or run it here with run_local()"
+            "under pytweezer/experiments/ (or pytweezer/optimisers/), or run it here "
+            "with run_local()"
         )
     return module, class_name
 

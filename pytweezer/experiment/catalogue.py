@@ -1,6 +1,7 @@
-"""The list of available experiments, kept up to date as files change.
+"""The list of available experiments or optimisers, kept up to date as files change.
 
-Each module under the experiments package is described by running
+Each module under the catalogue's package (:mod:`pytweezer.experiments` or
+:mod:`pytweezer.optimisers`) is described by running
 :mod:`pytweezer.experiment.introspect` in a subprocess; results are cached by
 file modification time and size, and :meth:`Catalogue.poll` never blocks.
 """
@@ -30,7 +31,7 @@ class _Pending:
 class Catalogue:
     def __init__(
         self,
-        package: str = "pytweezer.experiments",
+        package: str,
         directory: Path | str | None = None,
         max_parallel: int = 4,
     ) -> None:
@@ -44,7 +45,7 @@ class Catalogue:
         self._again: set[str] = set()
 
     def modules(self) -> dict[str, tuple[Path, tuple[int, int]]]:
-        """``{module name: (file, (mtime_ns, size))}`` for every experiment module."""
+        """``{module name: (file, (mtime_ns, size))}`` for every module in the package."""
         found = {}
         for path in sorted(self.directory.rglob("*.py")):
             relative = path.relative_to(self.directory).with_suffix("")
@@ -83,10 +84,10 @@ class Catalogue:
         whatever prompted this, and the following :meth:`refresh` starts a new one.
 
         Raises:
-            KeyError: ``module`` is not an experiment module.
+            KeyError: ``module`` is not in the package.
         """
         if module not in self.modules():
-            raise KeyError(f"{module} is not an experiment module")
+            raise KeyError(f"{module} is not under {self.package}")
         self._stamps.pop(module, None)
         self._due.add(module)
         if module in self._pending:

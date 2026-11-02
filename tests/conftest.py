@@ -19,6 +19,7 @@ import pytest
 from tests.helpers import (
     BROKEN,
     DEMO,
+    OPTIMISER,
     RecordingDB,
     StaticCatalogue,
     demo_schema,
@@ -65,7 +66,7 @@ def fake_devices(monkeypatch):
 
 @pytest.fixture
 def make_manager(tmp_path, recording_db):
-    """Builds an in-process Experiment Manager (no sockets) over a static catalogue.
+    """Builds an in-process Experiment Manager (no sockets) over static catalogues.
 
     Each call to the returned function starts a fresh manager on the same root,
     as a restart would.
@@ -82,7 +83,11 @@ def make_manager(tmp_path, recording_db):
     def make():
         return em.ExperimentManager(
             root=tmp_path,
-            catalogue=StaticCatalogue([demo, BROKEN]),
+            experiments=StaticCatalogue("pytweezer.experiments", [demo, BROKEN]),
+            optimisers=StaticCatalogue(
+                "pytweezer.optimisers",
+                [{"module": OPTIMISER, "classes": [], "warnings": [], "error": None}],
+            ),
             bind=False,
             db=recording_db,
         )

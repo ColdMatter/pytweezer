@@ -29,8 +29,7 @@ from pytweezer.experiment.queue import UNKNOWN_DEVICES, now
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.saved_parameters import SavedParameter, SavedParameterChange
 from pytweezer.experiment.task import Task, TaskRequest
-from pytweezer.experiments.demo import DemoBayesian, DemoStagedScan, RabiDemo
-from pytweezer.experiments.tweezer_array import FindTrapSites
+from pytweezer.experiments.rabi_demo import RabiDemo
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
@@ -43,6 +42,9 @@ from pytweezer.GUI.experiments.queue_view import (
 )
 from pytweezer.GUI.optimisers import OptimisersPanel
 from pytweezer.GUI.saved_parameters import SavedParametersPanel, display_value
+from pytweezer.optimisers.demo_bayesian import DemoBayesian
+from pytweezer.optimisers.demo_staged_scan import DemoStagedScan
+from pytweezer.optimisers.find_trap_sites import FindTrapSites
 from tests.helpers import FakeFeed, settle, until
 
 Left, Right = QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton
@@ -74,17 +76,17 @@ class FakeClient:
         self.recipes_version = 0
         self.errors = {}
         self.modules = MODULES
-        self.catalogue_version = 1
+        self.experiments_version = 1
 
     def call(self, command, **fields):
         self.calls.append((command, fields))
         if command in self.errors:
             raise ManagerError(self.errors[command])
-        if command == "catalogue":
+        if command == "experiments":
             return {
                 "ok": True,
                 "modules": self.modules,
-                "version": self.catalogue_version,
+                "version": self.experiments_version,
             }
         if command == "recipes":
             return {
@@ -115,7 +117,7 @@ def task(rid, status, **kwargs):
     return {
         "rid": rid,
         "status": status,
-        "experiment": "pytweezer.experiments.demo",
+        "experiment": "pytweezer.experiments.rabi_demo",
         "class_name": "Demo",
         "args": {},
         "scan": {"axes": []},
@@ -158,7 +160,7 @@ def test_optimisers_are_not_offered_in_the_experiments_tab(qapp):
     view.set_modules(
         [
             {
-                "module": "pytweezer.experiments.demo",
+                "module": "pytweezer.experiments.rabi_demo",
                 "classes": [SCHEMA, DemoStagedScan.schema()],
                 "warnings": [],
                 "error": None,
@@ -168,7 +170,17 @@ def test_optimisers_are_not_offered_in_the_experiments_tab(qapp):
     module = view.tree.topLevelItem(0)
     names = [module.child(i).text(0) for i in range(module.childCount())]
     assert names == ["Demo"]
-    assert view.schema_for("pytweezer.experiments.demo", "DemoStagedScan") is None
+    assert view.schema_for("pytweezer.experiments.rabi_demo", "DemoStagedScan") is None
+
+
+def test_a_module_of_base_classes_only_is_not_listed(qapp):
+    view = CatalogueView()
+    base_only = {"module": "pytweezer.experiments.base", "classes": [], "error": None}
+    view.set_modules([base_only, *MODULES])
+    names = [
+        view.tree.topLevelItem(i).text(0) for i in range(view.tree.topLevelItemCount())
+    ]
+    assert "base" not in names and "broken" in names
 
 
 class Tiny(Experiment):
@@ -302,7 +314,7 @@ def test_panel_offers_pipelines_seen_in_the_queue(qapp):
             "running": [task(1, "running", pipeline="CaF")],
             "queue": [task(2, "queued", pipeline="Rb")],
             "history": [task(3, "done", pipeline="old")],
-            "catalogue_version": 1,
+            "experiments_version": 1,
         }
     )
     combo = panel.editor.pipeline
@@ -509,17 +521,17 @@ def test_panel_submits_and_forwards_actions(qapp):
             "running": [task(12, "running")],
             "queue": [],
             "history": [],
-            "catalogue_version": 1,
+            "experiments_version": 1,
         }
     )
     panel.queue_view.table.selectRow(0)
     panel.queue_view.buttons["terminate"].click()
     assert ("terminate", {"rid": 12}) in client.calls
-    catalogue_fetches = len(commands(client, "catalogue"))
+    catalogue_fetches = len(commands(client, "experiments"))
     feed.queue_changed.emit(
-        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+        {"running": [], "queue": [], "history": [], "experiments_version": 2}
     )
-    assert len(commands(client, "catalogue")) == catalogue_fetches + 1
+    assert len(commands(client, "experiments")) == catalogue_fetches + 1
 
 
 def test_panel_prefills_last_request_and_keeps_drafts(qapp):
@@ -558,9 +570,9 @@ def test_defaults_asks_for_a_fresh_description_and_applies_it(qapp):
         },
     }
     client.modules = [{**MODULES[0], "classes": [changed]}, MODULES[1]]
-    client.catalogue_version = 2
+    client.experiments_version = 2
     feed.queue_changed.emit(
-        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+        {"running": [], "queue": [], "history": [], "experiments_version": 2}
     )
     assert panel.editor.rows["shots"].value.value() == 999
 
@@ -581,9 +593,9 @@ def test_defaults_for_a_module_that_no_longer_imports_shows_its_error(qapp):
         },
         MODULES[1],
     ]
-    client.catalogue_version = 2
+    client.experiments_version = 2
     feed.queue_changed.emit(
-        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+        {"running": [], "queue": [], "history": [], "experiments_version": 2}
     )
     assert "SyntaxError: oops" in panel.status.text()
     assert panel.status.property("state") == "crashed"
@@ -1281,9 +1293,9 @@ def test_a_refresh_that_regroups_keys_keeps_the_selection_and_an_unsent_edit(qap
     assert panel.why_edit.text() == "trap off"
 
 
-DEMO = "pytweezer.experiments.demo"
-STAGED = DemoStagedScan.schema()
-BAYESIAN = DemoBayesian.schema()
+DEMO = "pytweezer.optimisers.demo"
+STAGED = {**DemoStagedScan.schema(), "module": DEMO}
+BAYESIAN = {**DemoBayesian.schema(), "module": DEMO}
 
 
 def optimiser_schema(class_name, base=STAGED):
@@ -1382,15 +1394,10 @@ class FakeOptimiserClient:
             for key, value in [("demo_resonance", 1.0), ("demo_power", 0.5)]
         ]
 
-    def call(self, command, **fields):
-        assert command == "catalogue"
-        return {
-            "ok": True,
-            "version": 1,
-            "modules": [
-                {"module": DEMO, "classes": self.schemas, "warnings": [], "error": None}
-            ],
-        }
+    def optimisers(self):
+        return [
+            {"module": DEMO, "classes": self.schemas, "warnings": [], "error": None}
+        ]
 
     def history(self, before_rid=None, limit=50):
         return list(self.tasks)

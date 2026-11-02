@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from pytweezer.experiments.slm_array import render_target
+from pytweezer.experiments.slm_tweezer_array import render_target
 from pytweezer.helper_scripts.array_hologram import envelope_weights
 
 
@@ -101,7 +101,7 @@ def rig_and_streams(monkeypatch):
 
 def test_rig_is_asked_for_the_array_in_the_form(rig_and_streams):
     from pytweezer.experiment import run_local
-    from pytweezer.experiments.slm_array import SlmTweezerArray
+    from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
 
     rig, _ = rig_and_streams
 
@@ -117,7 +117,7 @@ def test_rig_is_asked_for_the_array_in_the_form(rig_and_streams):
 
 def test_mask_the_rig_made_is_the_one_recorded_and_broadcast(rig_and_streams):
     from pytweezer.experiment import run_local
-    from pytweezer.experiments.slm_array import SlmTweezerArray
+    from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
 
     _, sent = rig_and_streams
 

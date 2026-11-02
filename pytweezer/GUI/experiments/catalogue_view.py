@@ -74,6 +74,9 @@ class CatalogueView(QWidget):
         self.tree.clear()
         reselect = None
         for module in self.modules:
+            # A module of base classes only, such as TweezerArrayShots, offers nothing.
+            if not module.get("error") and not _experiments(module):
+                continue
             name = module["module"].removeprefix(self.package + ".")
             module_item = QTreeWidgetItem([name])
             module_item.setToolTip(0, module["module"])

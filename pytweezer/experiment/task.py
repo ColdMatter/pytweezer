@@ -49,7 +49,7 @@ class TaskRequest(BaseModel):
     """What a submitter asks for."""
 
     experiment: str = Field(
-        description="dotted module name, e.g. pytweezer.experiments.demo"
+        description="dotted module name, e.g. pytweezer.experiments.rabi_demo"
     )
     class_name: str
     args: dict[str, Any] = Field(default_factory=dict)

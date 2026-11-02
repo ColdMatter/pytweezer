@@ -7,15 +7,13 @@ from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
 from pytweezer.experiment import Scan, optimisers, run_local
 from pytweezer.experiment.client import ManagerUnavailable
-from pytweezer.experiments import load_tweezers, tweezer_array
+from pytweezer.experiments import load_tweezers, tweezer_array_shots
 from pytweezer.experiments.load_tweezers import LoadTweezers
-from pytweezer.experiments.tweezer_array import (
-    SAVED_SEQUENCE_PARAMETERS,
-    FindTrapSites,
-    OptimiseMolassesShims,
-    OptimiseTweezerImaging,
-    TweezerArrayMeasurement,
-)
+from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
+from pytweezer.experiments.tweezer_array_shots import SAVED_SEQUENCE_PARAMETERS
+from pytweezer.optimisers.find_trap_sites import FindTrapSites
+from pytweezer.optimisers.optimise_molasses_shims import OptimiseMolassesShims
+from pytweezer.optimisers.optimise_tweezer_imaging import OptimiseTweezerImaging
 
 #: The default 8x8, 5 µm grid at 2 px/µm, in the pixels of the camera's ROI.
 SITES = [
@@ -161,7 +159,7 @@ def rig(monkeypatch):
     )
     saved = dict(SAVED)
     sequencer.saved = saved
-    for module in (tweezer_array, load_tweezers, optimisers):
+    for module in (tweezer_array_shots, load_tweezers, optimisers):
         monkeypatch.setattr(module, "get_saved_parameters", lambda: saved)
     return sequencer
 

@@ -12,7 +12,7 @@ from pytweezer.drivers.ni_cards import CardInfo
 from pytweezer.experiment import Experiment, ListAxis, Number, Scan
 from pytweezer.experiment.client import ExperimentManagerClient
 from pytweezer.experiment.runner import open_writer
-from pytweezer.experiments.demo import RabiDemo
+from pytweezer.experiments.rabi_demo import RabiDemo
 
 
 def until(condition, timeout=5.0, qapp=None):
@@ -261,7 +261,8 @@ class FakeIO:
         return [True] * len(physicals)
 
 
-DEMO = "pytweezer.experiments.demo"
+DEMO = "pytweezer.experiments.rabi_demo"
+OPTIMISER = "pytweezer.optimisers.demo_optimiser"
 BROKEN = {
     "module": "pytweezer.experiments.broken",
     "classes": [],
@@ -273,7 +274,8 @@ BROKEN = {
 class StaticCatalogue:
     """A catalogue whose entries are given, never read from files."""
 
-    def __init__(self, entries):
+    def __init__(self, package, entries):
+        self.package = package
         self._entries = entries
         self.busy = False
         self.rereading = set()
