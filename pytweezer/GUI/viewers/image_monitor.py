@@ -161,6 +161,7 @@ class ImageDisplay(Applet):
                     )
                 )
                 self.imgdata = imgdata
+                self.image_head = head
         self.update_mask()
 
     def update_mask(self):

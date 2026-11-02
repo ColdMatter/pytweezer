@@ -44,6 +44,11 @@ DEFAULT_APPLETS = [
         "description": "Photon histograms and loading map of the tweezer array",
     },
     {
+        "name": "Tweezer Monitor",
+        "script": "pytweezer/GUI/viewers/tweezer_monitor.py",
+        "description": "Tweezer camera image with the accepted trap sites drawn on it",
+    },
+    {
         "name": "SLM Monitor",
         "script": "pytweezer/GUI/viewers/slm_monitor.py",
         "description": "Target tweezer array beside the phase mask on the SLM",
