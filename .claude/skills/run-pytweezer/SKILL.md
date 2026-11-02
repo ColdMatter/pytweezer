@@ -26,8 +26,9 @@ All paths below are relative to the repo root. Everything runs through uv
 - On a truly headless box (SSH, no session, or Linux without a display), prefix
   the run with `QT_QPA_PLATFORM=offscreen` (see Gotchas — on Windows text won't
   render there).
-- Off the lab network, also set `PYTWEEZER_DATA_DIR` to an empty scratch
-  directory (see Gotchas — the Results tab otherwise stalls the run for minutes).
+- Off the lab network, the Results tab lists nothing (the Experiment Manager
+  is unreachable); set `PYTWEEZER_DATA_DIR` to a directory of measurement files
+  to screenshot it with content.
 
 ## Run (agent path) — screenshot driver
 
@@ -124,11 +125,6 @@ The GUI tests run offscreen through the `qapp` fixture in `tests/conftest.py`.
   database renders no normal glyphs — every label comes out blank. There, only
   the native backend (default, needs a session) produces readable screenshots,
   so prefer it. On Linux, offscreen renders text normally.
-- **Off-network, the Results tab stalls the run.** Off the Experiment Manager's
-  PC, Results reads measurement files from it over RPC on the GUI thread, and
-  each refresh waits up to 30 s for an unreachable host, so the driver runs
-  for many minutes. `PYTWEEZER_DATA_DIR=<empty dir>`
-  makes it read local files instead.
 - **`os._exit(0)` swallows piped stdout.** `bin/gui.py` and the driver hard-exit
   after the Qt loop (to skip lingering non-daemon ZMQ threads). The driver
   `flush()`es first, but redirect to a file rather than piping through
@@ -147,8 +143,6 @@ The GUI tests run offscreen through the `qapp` fixture in `tests/conftest.py`.
 
 ## Troubleshooting
 
-- Driver hangs after `client_full.png` — the Results tab is waiting on an
-  unreachable Experiment Manager; set `PYTWEEZER_DATA_DIR` (see Gotchas).
 - Blank/textless screenshots — you're on the offscreen backend on Windows.
   Run on a machine with a desktop session, or accept textless layout shots.
 - Empty printed output from the driver — it was piped through `head`; redirect to

@@ -158,7 +158,10 @@ Every panel shares one GUI thread, so one slow call lags every tab.
   stream monitors' timers would otherwise hold the thread most of the time.
 - Anything that can block on the network runs off the GUI thread and reports
   back by signal: `_ProbeWorker` (a `QThread`), NI Cards' `CardsClient` (a
-  worker thread with a call queue), `_stop_orphan` (process listing).
+  worker thread with a call queue), `_stop_orphan` (process listing). For a
+  one-off read, use `BackgroundReader` (`pytweezer/GUI/background.py`), as the
+  Results and Optimisers tabs do for measurement files: never signal the
+  widget itself from the worker, since the GUI thread may be deleting it.
 - A table with `ResizeToContents` columns re-measures the whole column on every
   `setItem`; for a bulk redraw switch those columns to `Interactive` and back,
   as `QueueView.set_snapshot` does.

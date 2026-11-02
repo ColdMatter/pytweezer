@@ -15,6 +15,11 @@ poll for files written outside the manager.
 
 Without a connected feed the tab polls the archive every couple of seconds
 while visible, re-reading a selected running measurement each time.
+
+Every archive read runs off the GUI thread (one at a time per kind: listing,
+loading, plotting), since over RPC a read can wait the archive's whole timeout
+for an unreachable manager. Asking again while one is in flight replaces any
+earlier pending request, and only the newest request's answer is shown.
 """
 
 import time
@@ -46,6 +51,7 @@ from pytweezer.experiment.archive import (
 )
 from pytweezer.experiment.summary import aggregate, describe, display_value
 from pytweezer.experiment.task import TaskRequest, TaskStatus
+from pytweezer.GUI.background import BackgroundReader
 from pytweezer.GUI.components import Region, status_icon
 from pytweezer.GUI.experiments.analyses import ANALYSES, declared_analyses
 from pytweezer.GUI.grafana import open_in_browser, run_url
@@ -99,6 +105,13 @@ class ResultsPanel(QWidget):
         if archive is None:
             archive = ResultsArchive(root) if root is not None else default_archive()
         self.archive = archive
+        #: A second connection, so loading a large file never holds up the listing.
+        self._loader = archive.clone()
+        self._reader = BackgroundReader(self)
+        self._reading = set()
+        self._pending_reads = {}
+        #: A path to select as soon as a listing shows it.
+        self._select_when_listed = None
         self.feed = feed
         self.measurement = None
         self.path = None
@@ -126,7 +139,7 @@ class ResultsPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.itemExpanded.connect(self._fill_day)
         self.tree.currentItemChanged.connect(self._selected)
-        self.browser = Region("well", "Measurements", "newest first")
+        self.browser = Region("well", "Measurements", "fetching…")
         self.browser.header.addWidget(self.show_unfinished)
         self.browser.body.addWidget(self.tree, 1)
         splitter.addWidget(self.browser)
@@ -276,24 +289,68 @@ class ResultsPanel(QWidget):
         super().showEvent(event)
         self.refresh()
 
+    # -- reading off the GUI thread -------------------------------------------
+
+    def _read_in_background(self, kind, read, show):
+        """Run ``read()`` on a worker thread, then ``show(result or exception)`` here."""
+        if kind in self._reading:
+            self._pending_reads[kind] = (read, show)
+            return
+        self._reading.add(kind)
+        self._reader.start(
+            f"Results {kind}",
+            read,
+            lambda outcome: self._finish_read(kind, show, outcome),
+        )
+
+    def _finish_read(self, kind, show, outcome):
+        self._reading.discard(kind)
+        newer = self._pending_reads.pop(kind, None)
+        if newer is not None:
+            self._read_in_background(kind, *newer)
+            return
+        show(outcome)
+
+    # -- browsing ------------------------------------------------------------
+
     def refresh(self):
         """Bring the tree up to date with the archive, in place."""
         self._last_refresh = time.monotonic()
-        try:
-            days = self.archive.days()
-        except ArchiveUnavailable:
-            logger.debug("Cannot list %s", self.archive.location, exc_info=True)
+        filled = [
+            item.data(0, _PATH) for item in self._day_items() if item.data(0, _FILLED)
+        ]
+        self._read_in_background(
+            "listing", lambda: self._list(filled), self._show_listing
+        )
+
+    def _list(self, filled_days):
+        days = self.archive.days()
+        runs = {}
+        for day in filled_days:
+            try:
+                runs[day] = self.archive.runs(day)
+            except OSError:
+                logger.debug("Cannot list %s", day, exc_info=True)
+        return days, runs
+
+    def _show_listing(self, outcome):
+        if isinstance(outcome, ArchiveUnavailable):
+            logger.debug("Cannot list %s", self.archive.location, exc_info=outcome)
             self.browser.set_hint("Experiment Manager not reachable")
             self.browser.hint.setToolTip(
                 f"Measurements are fetched from {self.archive.location}; "
                 "check it is running in the Servers tab"
             )
             return
-        except OSError:
-            logger.debug("Cannot list %s", self.archive.location, exc_info=True)
+        if isinstance(outcome, OSError):
+            logger.debug("Cannot list %s", self.archive.location, exc_info=outcome)
             self.browser.set_hint(f"{self.archive.location} not found")
             self.browser.hint.setToolTip("")
             return
+        if isinstance(outcome, Exception):
+            logger.error("Cannot list %s", self.archive.location, exc_info=outcome)
+            return
+        days, runs = outcome
         self.browser.set_hint("newest first")
         self.browser.hint.setToolTip("")
         newest_was_open = self._newest_day_open()
@@ -301,11 +358,16 @@ class ResultsPanel(QWidget):
             item = self._day_item(day)
             if item is None:
                 item = self._add_day(day)
-            if item is not None and item.data(0, _FILLED):
-                self._sync_day(item)
+            if day in runs:
+                self._sync_day(item, runs[day])
         if newest_was_open and self.tree.topLevelItemCount():
             self.tree.topLevelItem(0).setExpanded(True)
+        if self._select_when_listed is not None:
+            self.select_path(self._select_when_listed)
         self._reload_if_running()
+
+    def _day_items(self):
+        return [self.tree.topLevelItem(i) for i in range(self.tree.topLevelItemCount())]
 
     def _newest_day_open(self):
         if not self.tree.topLevelItemCount():
@@ -335,14 +397,9 @@ class ResultsPanel(QWidget):
     def _fill_day(self, day_item):
         if not day_item.data(0, _FILLED):
             day_item.setData(0, _FILLED, True)
-            self._sync_day(day_item)
+            self.refresh()
 
-    def _sync_day(self, day_item):
-        try:
-            runs = self.archive.runs(day_item.data(0, _PATH))
-        except OSError:
-            logger.debug("Cannot list %s", day_item.text(0), exc_info=True)
-            return
+    def _sync_day(self, day_item, runs):
         for run in runs:
             path, status, label = run["path"], run["status"], run["label"]
             known = self._files.get(path)
@@ -379,17 +436,17 @@ class ResultsPanel(QWidget):
         self.refresh()
 
     def select_path(self, path):
-        """Select the measurement at data-root-relative ``path``, if it is listed."""
-        day = self._day_item(PurePosixPath(path).parent.as_posix())
-        if day is None:
-            return False
-        day.setExpanded(True)
-        self._fill_day(day)
+        """Select the measurement at data-root-relative ``path``, now or once it is listed."""
         known = self._files.get(path)
-        if known is None or known[2] is None:
-            return False
-        self.tree.setCurrentItem(known[2])
-        return True
+        if known is not None and known[2] is not None:
+            self._select_when_listed = None
+            self.tree.setCurrentItem(known[2])
+            return
+        self._select_when_listed = path
+        day = self._day_item(PurePosixPath(path).parent.as_posix())
+        if day is not None:
+            day.setExpanded(True)
+            self._fill_day(day)
 
     def _selected(self, item, _previous):
         path = item.data(0, _PATH) if item else None
@@ -398,25 +455,38 @@ class ResultsPanel(QWidget):
         self.load(path)
 
     def load(self, path):
-        try:
-            measurement = self.archive.load(path, results=[])
-        except (OSError, KeyError, ValueError) as error:
+        self._read_in_background(
+            "load",
+            lambda: self._read_measurement(path),
+            lambda outcome: self._show_measurement(path, outcome),
+        )
+
+    def _read_measurement(self, path):
+        measurement = self._loader.load(path, results=[])
+        planned = None
+        if measurement.status == "running":
+            try:
+                planned = self._loader.planned_points(path)
+            except (OSError, KeyError):
+                pass
+        return measurement, planned
+
+    def _show_measurement(self, path, outcome):
+        if isinstance(outcome, Exception):
+            if not isinstance(outcome, (OSError, KeyError, ValueError)):
+                logger.error("Could not read %s", path, exc_info=outcome)
             self._wanted = path
-            self.metadata.setPlainText(f"Could not read {path}:\n{error}")
+            self.metadata.setPlainText(f"Could not read {path}:\n{outcome}")
             self.detail_region.set_hint("unreadable")
             self.simulation_banner.setVisible(False)
             self.measurement = None
             self.resubmit_button.setEnabled(False)
             self.grafana_button.setEnabled(False)
             return
+        measurement, planned = outcome
         first_load = self.path != path
         self._wanted = None
-        self._planned = None
-        if measurement.status == "running":
-            try:
-                self._planned = self.archive.planned_points(path)
-            except (OSError, KeyError):
-                pass
+        self._planned = planned
         self.path = path
         self.measurement = measurement
         self.metadata.setPlainText(describe(measurement))
@@ -537,22 +607,36 @@ class ResultsPanel(QWidget):
                 self.plot_message.setText("No scalar results to plot.")
             return
         rows = self._live_rows()
-        points = m.points
         if rows is not None:
             points = self._planned
             y = np.full(len(points["index"]), np.nan)
             for row in rows:
                 y[row["index"]] = row["scalars"].get(y_name, np.nan)
+            self._draw(m, points, y_name, y)
+            return
+        path = self.path
+        self._read_in_background(
+            "plot",
+            lambda: np.asarray(
+                self._loader.load(path, results=[y_name]).results[y_name], dtype=float
+            ),
+            lambda outcome: self._show_result_values(m, y_name, outcome),
+        )
+
+    def _show_result_values(self, m, y_name, outcome):
+        if m is not self.measurement or y_name != self.y_choice.currentText():
+            return
+        if isinstance(outcome, ArchiveUnavailable):
+            self.plot_message.setText("Experiment Manager not reachable.")
+        elif isinstance(outcome, (OSError, ValueError, TypeError)):
+            self.plot_message.setText(f"{y_name} is not numeric.")
+        elif isinstance(outcome, Exception):
+            logger.error("Could not plot %s", y_name, exc_info=outcome)
+            self.plot_message.setText(f"Could not read {y_name}.")
         else:
-            try:
-                y = self.archive.load(self.path, results=[y_name]).results[y_name]
-                y = np.asarray(y, dtype=float)
-            except ArchiveUnavailable:
-                self.plot_message.setText("Experiment Manager not reachable.")
-                return
-            except (OSError, ValueError, TypeError):
-                self.plot_message.setText(f"{y_name} is not numeric.")
-                return
+            self._draw(m, m.points, y_name, outcome)
+
+    def _draw(self, m, points, y_name, y):
         x_name = self.x_choice.currentText()
         x = points["index"] if x_name == _POINT_INDEX else points[x_name]
         series_name = self.series_choice.currentText()

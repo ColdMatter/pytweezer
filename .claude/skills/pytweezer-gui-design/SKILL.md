@@ -170,9 +170,8 @@ uv run python .claude/skills/pytweezer-gui-design/scripts/shoot.py \
 
 Then Read the PNG. `--crop X,Y,W,H` zooms in on a region; `--wait` gives feeds
 and polls time to settle. Off the lab network, set `PYTWEEZER_DATA_DIR` to a
-scratch directory for the Results tab (and Optimisers' finished runs), which
-otherwise read files from the Experiment Manager over RPC, on the GUI thread,
-waiting up to 30 s per call. For a panel that needs a server, give it fakes. Write
+directory of measurement files for the Results tab (and Optimisers' finished
+runs) to show any; they otherwise fetch them from the Experiment Manager. For a panel that needs a server, give it fakes. Write
 a factory in a scratch directory and pass `--path`:
 
 ```python

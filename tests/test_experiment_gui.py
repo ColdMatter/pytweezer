@@ -43,7 +43,7 @@ from pytweezer.GUI.experiments.queue_view import (
 )
 from pytweezer.GUI.optimisers import OptimisersPanel
 from pytweezer.GUI.saved_parameters import SavedParametersPanel, display_value
-from tests.helpers import FakeFeed, until
+from tests.helpers import FakeFeed, settle, until
 
 Left, Right = QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton
 
@@ -1456,7 +1456,9 @@ class FakeOptimiserClient:
         pass
 
 
-def make_optimisers_panel(schemas=None, tasks=None, files=None, accepted_rids=()):
+def make_optimisers_panel(
+    schemas=None, tasks=None, files=None, accepted_rids=(), archive=None
+):
     if schemas is None:
         schemas = [STAGED, BAYESIAN]
         tasks = [
@@ -1470,10 +1472,16 @@ def make_optimisers_panel(schemas=None, tasks=None, files=None, accepted_rids=()
     panel = OptimisersPanel(
         client=FakeOptimiserClient(schemas, tasks, accepted_rids),
         feed=FakeFeed(),
-        archive=FakeArchive(files),
+        archive=archive or FakeArchive(files),
     )
     panel.show()
+    settle(QtCore.QCoreApplication.instance(), "Optimisers read")
     return panel
+
+
+def selected(panel, class_name):
+    panel.select(DEMO, class_name)
+    settle(QtCore.QCoreApplication.instance(), "Optimisers read")
 
 
 FIT = optimiser_schema("FindTrapSites", base={**FindTrapSites.schema(), "module": DEMO})

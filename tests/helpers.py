@@ -1,6 +1,7 @@
 """Helpers shared by several test modules (fixtures live in conftest.py)."""
 
 import json
+import threading
 import time
 from contextlib import contextmanager
 
@@ -25,6 +26,22 @@ def until(condition, timeout=5.0, qapp=None):
             qapp.processEvents()
         time.sleep(0.01)
     return result
+
+
+def settle(qapp, thread_prefix, timeout=5.0):
+    """Wait until no thread named ``thread_prefix...`` runs and its replies are shown.
+
+    A reply signalled from a worker thread can land a processEvents() pass
+    after the thread ends, hence several quiet passes in a row.
+    """
+    deadline = time.monotonic() + timeout
+    quiet = 0
+    while quiet < 3:
+        assert time.monotonic() < deadline, f"{thread_prefix} threads never finished"
+        qapp.processEvents()
+        busy = any(t.name.startswith(thread_prefix) for t in threading.enumerate())
+        quiet = 0 if busy else quiet + 1
+        time.sleep(0.01)
 
 
 class RecordingDB:
