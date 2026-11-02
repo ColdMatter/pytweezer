@@ -12,6 +12,9 @@ which panels they expose:
   tabs, except that the Servers and Loggers tabs are view-only because those
   processes run on the server PC.
 
+Only one of them runs per PC (:mod:`bin.single_instance`): a second launch is
+refused and brings the running window to the front.
+
 Each panel is reused from its original module (``bin.managed_panel``,
 ``pytweezer.GUI.applet_launcher``, ``pytweezer.GUI.analysismanager``,
 ``pytweezer.GUI.property_editor``, ``pytweezer.GUI.streammonitor``). The
@@ -35,12 +38,14 @@ from PyQt6.QtWidgets import (
     QDockWidget,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QScrollArea,
     QTabWidget,
     QWidget,
 )
 
 from bin.managed_panel import ControlPanel, DevicesPanel
+from bin.single_instance import GuiAlreadyRunning, claim_gui
 from pytweezer.configuration import config
 from pytweezer.GUI.applet_launcher import AppletLauncher
 from pytweezer.GUI.streammonitor import make_stream_monitor
@@ -250,10 +255,18 @@ def build_client_gui():
     return build_gui(False)
 
 
-def _run(build):
+def _run(build, role):
     app = QApplication.instance() or QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)
+    # Before building: the server GUI starts the shared servers as it builds.
+    try:
+        lock = claim_gui(role)
+    except GuiAlreadyRunning as refusal:
+        logger.warning("Not starting: %s", refusal)
+        QMessageBox.information(None, "PyTweezer is already running", str(refusal))
+        sys.exit(1)
     win = build()
+    lock.raise_requested.connect(lambda: _bring_to_front(win))
     win.show()
 
     def on_exit(signo, _frame):
@@ -279,6 +292,13 @@ def _run(build):
     os._exit(0)
 
 
+def _bring_to_front(win):
+    if win.isMinimized():
+        win.showNormal()
+    win.raise_()
+    win.activateWindow()
+
+
 def server_main():
     """Run the server GUI; use ``bin.launch.server_main`` as the entry point so
     that a session off the server PC simulates."""
@@ -287,8 +307,8 @@ def server_main():
             "Not on the server PC (%s): this session runs in SIMULATION mode",
             config.SERVER_PC,
         )
-    _run(build_server_gui)
+    _run(build_server_gui, "server")
 
 
 def client_main():
-    _run(build_client_gui)
+    _run(build_client_gui, "client")

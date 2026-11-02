@@ -91,6 +91,11 @@ startup state) — not the Python `CONFIG` dict.
 Control blocks uv's unsigned `.exe` launchers, while the signed `python.exe`
 runs the same entry points.
 
+One GUI, server or client, runs per PC: before building anything it takes
+localhost port 7277 (`bin/single_instance.py`, just below the range
+`get_next_port()` hands out), and a second launch is refused and raises the
+running window instead.
+
 `bin/managed_panel.py`'s `ManagedRow` starts every managed process the same way:
 `subprocess.Popen([sys.executable, script, name])`, where `name` is the CONFIG
 key. Use `sys.executable`, never a bare `python3`: uv's `.venv` has no

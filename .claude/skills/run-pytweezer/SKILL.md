@@ -88,6 +88,11 @@ On the lab's Windows PCs, Smart App Control blocks uv's console-script `.exe`
 launchers, so the `.bat` files run `uv run python -m bin.launch` (server) and
 `uv run python -m bin.launch client` instead; use those forms there.
 
+Only one GUI runs per PC: a launch while one is already up (server or client,
+any user) shows a message, brings the running window to the front and exits.
+`driver.py` builds its window directly and is not refused, so it can run
+beside a live GUI.
+
 Useless in a non-interactive shell (nothing to look at, blocks forever). Ctrl-C
 to quit. Use the driver instead when you need a screenshot.
 
