@@ -12,6 +12,21 @@ add it to this file - and it would not be used in every run, suggest making a
 skill instead and explain why: lean always-on context plus progressive
 disclosure through skills gets noticeably better performance out of agents.
 
+## Keeping skills current
+
+Whenever a change alters something a skill under `.claude/skills/` describes,
+bring the skill up to date as part of that change:
+
+- **Minor** (a renamed function, file or argument; a corrected signature or
+  path; a line or table row for something new within the skill's existing
+  scope): make the edit yourself, in the same commit as the code.
+- **Significant** (a new section; changing or removing a rule or recommended
+  approach; restructuring or splitting a skill; changing its `description`):
+  tell the user what you would change and why, and wait for their go-ahead.
+- **Not covered by any skill** (a new subsystem, workflow or set of
+  conventions that future agents will need): propose a new skill to the user,
+  naming its scope and trigger, and create it only once they agree.
+
 
 ## What this is
 
