@@ -5,6 +5,7 @@ process and by :func:`run_local` for interactive use.
 """
 
 import inspect
+import json
 import traceback
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -68,6 +69,7 @@ def open_writer(
             "class_name": experiment_cls.__name__,
             **git_provenance(),
             "simulated": simulate,
+            "analyses": json.dumps(list(experiment_cls.analyses)),
             **header,
         },
         argument_values=experiment.argument_values(),

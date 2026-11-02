@@ -15,6 +15,7 @@ class LoadTweezers(MotMasterExperiment):
     """
 
     rb = MotMaster("Rb MotMaster", script="RbTweezerBasic2026_2")
+    analyses = ("tweezer_histogram",)
 
     camera: ImagEMX2Camera = Device("Rb HamCam")
 

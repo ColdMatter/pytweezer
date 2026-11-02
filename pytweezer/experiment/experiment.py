@@ -1,7 +1,7 @@
 """The :class:`Experiment` base class."""
 
 import inspect
-from typing import Any
+from typing import Any, ClassVar
 
 from pytweezer.experiment.arguments import (
     Argument,
@@ -40,6 +40,10 @@ class Experiment:
     """
 
     point: Point | None = None
+    #: Names of the analyses the Results tab offers for this experiment's
+    #: files, beside its universal plot; see
+    #: :mod:`pytweezer.GUI.experiments.analyses`.
+    analyses: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self, args: dict[str, Any] | None = None) -> None:
         self._extra_names: list[str] = []
@@ -93,6 +97,7 @@ class Experiment:
                 name: argument.to_schema() for name, argument in cls.arguments().items()
             },
             "devices": {name: dev.to_schema() for name, dev in cls.devices().items()},
+            "analyses": list(cls.analyses),
         }
         if hasattr(cls, "optimiser_schema") and cls.proposes():
             schema["optimiser"] = cls.optimiser_schema()
