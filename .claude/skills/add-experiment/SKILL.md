@@ -133,6 +133,15 @@ and quick-plots a scalar against a scan axis; "Resubmit" reloads its
 arguments. A running measurement plots live from the manager's published points,
 not by re-reading its file; see "The manager and its workers".
 
+Its **Analysis** dropdown offers "Plot against" for every file, then the
+analyses the experiment declares, e.g. `analyses = ("tweezer_histogram",)` as
+a class attribute (inherited; `LoadTweezers` and the tweezer-array measurements
+declare it). Names map to views in `pytweezer/GUI/experiments/analyses.py`
+(`ANALYSES`); a name this GUI doesn't know is listed disabled, and every
+analysis is disabled until the measurement finishes. An analysis only reads the
+file, through its own archive connection, off the GUI thread. The tab
+remembers the choice per experiment class for the session.
+
 From a notebook or script:
 
 ```python
@@ -273,7 +282,8 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
 
 `{data_root}/YYYY/MM/DD/{rid:06d}_{Class}.h5`. Root attrs: rid, experiment,
 class_name, label, submitter, host, status, error, times, n_points, n_done, git
-commit/dirty. Groups: `/arguments` (effective values; `__schema__` attr),
+commit/dirty, analyses (JSON list of the class's `analyses`; absent in older
+files). Groups: `/arguments` (effective values; `__schema__` attr),
 `/scan` (spec JSON), `/points/{index,repetition,<axis>,t_start,t_end}`,
 `/results`, `/recorded`, `/constants`, `/source` (the module's code). Rows are
 planned points in execution order; only the first `n_done` ran. Files are

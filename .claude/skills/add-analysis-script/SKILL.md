@@ -17,6 +17,15 @@ by existing. That makes the two things worth getting right (1) the `process`
 transform and (2) the handful of conventions that decide whether the GUI can see
 your script at all.
 
+An analysis of a *finished measurement file*, offered in the Results tab, is a
+different thing: no process, no stream. Put the computation in a Qt-free module
+under `pytweezer/analysis/` taking a `Measurement` (it is not listed by the
+Analysis Manager, which only lists files with stream properties), write an
+`AnalysisView` for it in `pytweezer/GUI/experiments/analyses.py`, add it to
+`ANALYSES`, and name it in the experiment's `analyses = (...)`.
+`tweezer_histogram.py` is the example; it shares its numbers with the live
+`tweezer_loading.py` through `array_loading.py`, so the two cannot disagree.
+
 ## How the framework runs your class
 
 `AnalysisProcess.__init__` opens a `Properties` connection named after the
