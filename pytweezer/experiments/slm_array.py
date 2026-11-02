@@ -1,55 +1,25 @@
-"""Compute a rectangular tweezer-array phase mask, put it on the Rb SLM and show it.
+"""Put a rectangular tweezer array on the Rb SLM through the rearrangement rig, and show it.
 
-Each point broadcasts the requested trap intensities (``slm_target``) and the
-8-bit mask on the SLM (``slm_phasemask``) on the image hub, for the SLM Monitor
-applet. The mask is computed on the GPU, so this runs only where cupy is
-installed (PH-BEAST).
+The rig computes the mask, writes it to the SLM and remembers the array, so
+analyses and later experiments can ask it what is there. Each point broadcasts
+the requested trap intensities (``slm_target``) and the 8-bit mask on the SLM
+(``slm_phasemask``) on the image hub, for the SLM Monitor applet.
 """
 
+from __future__ import annotations
+
 import math
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pytweezer.drivers.slm import SLM
 from pytweezer.experiment import Bool, Device, Experiment, Integer, Number
+from pytweezer.helper_scripts.array_hologram import ENVELOPE, GENERATOR_SETTINGS
 from pytweezer.servers import ImageClient
 
-GENERATOR_SETTINGS = {
-    "wavelength_um": 0.852,
-    "focal_length_mm": 17.3,
-    "slm_pitch_um": 17,
-    "slm_res": (1024, 1024),
-    "input_beam_waist_mm": 16,
-    "zernike_coeff_dict": {
-        5: 1.195,
-        6: 0.725,
-        7: 0.970,
-        8: 0.478,
-        9: -1.091,
-        10: 0.303,
-        11: 0.021,
-        12: 0.072,
-        13: 0.049,
-    },
-}
-
-#: Measured fall-off of trap depth across the focal plane, as
-#: ``offset + amplitude * exp(-r^2 / 2 sigma^2)`` about a centre in focal-plane
-#: coordinates (blaze included). Traps are weighted by it so they come out equal.
-ENVELOPE = {
-    "amplitude": -2.14197604e03,
-    "centre_um": (28.8556150, -5.9008040),
-    "sigma_um": (2.95002910e03, 2.64281503e03),
-    "offset": 2.14239505e03,
-}
-
-
-def envelope_weights(x_um: np.ndarray, y_um: np.ndarray) -> np.ndarray:
-    (x0, y0), (sx, sy) = ENVELOPE["centre_um"], ENVELOPE["sigma_um"]
-    gaussian = np.exp(
-        -((x_um - x0) ** 2) / (2 * sx**2) - (y_um - y0) ** 2 / (2 * sy**2)
-    )
-    return ENVELOPE["amplitude"] * gaussian + ENVELOPE["offset"]
+if TYPE_CHECKING:
+    # Imports cupy where it is installed, so only for the annotation.
+    from pytweezer.coordinators.rearrangement import Rearrangement
 
 
 def render_target(
@@ -80,28 +50,13 @@ def render_target(
     return image.astype(np.float32), (x0, y0)
 
 
-def apply_pupil(
-    generator, phase, radius_um: float, dump_dx_um: float, dump_dy_um: float
-):
-    """Keep ``phase`` inside a circular pupil and steer the light outside it away."""
-    import cupy as cp
-
-    x, y = cp.meshgrid(generator.x_slm, generator.y_slm)
-    inside = x**2 + y**2 <= radius_um**2
-    dump = generator.generate_blazed_grating_phasemask(dump_dx_um, dump_dy_um)
-    return cp.where(inside, phase, dump)
-
-
 class SlmTweezerArray(Experiment):
     """Put an NxM tweezer array on the Rb SLM, one optimised phase mask per point.
 
-    The traps sit on a grid of ``spacing``, rotated by ``angle``, centred on the
-    blaze offset. The mask is the weighted-superposition optimum for that grid,
-    plus a Fresnel lens, the blaze and optionally the Zernike correction, inside
-    a circular pupil; light outside the pupil is steered off by the dump grating.
+    See :mod:`pytweezer.helper_scripts.array_hologram` for how the mask is made.
     """
 
-    slm: SLM = Device("Rb SLM")
+    rig: Rearrangement = Device("Rb Rearrangement Rig")
 
     rows = Integer(15, min=1, group="Array")
     columns = Integer(15, min=1, group="Array")
@@ -135,65 +90,40 @@ class SlmTweezerArray(Experiment):
     )
 
     def prepare(self) -> None:
-        from pytweezer.helper_scripts.phasemask import (
-            OptimisationBasedPhasemaskGeneratorGPU,
-        )
-
-        self.generator = OptimisationBasedPhasemaskGeneratorGPU(
-            fresnel_f_mm=self.fresnel_focal_length * 1e3,
-            blaze_dx_dy_um=(self.blaze_x * 1e6, self.blaze_y * 1e6),
-            **GENERATOR_SETTINGS,
-        )
         self.stream = ImageClient("slm")
         self.record("generator_settings", GENERATOR_SETTINGS)
         self.record("envelope", ENVELOPE)
 
     def run_point(self) -> None:
-        generator = self.generator
         blaze_um = (self.blaze_x * 1e6, self.blaze_y * 1e6)
-
-        weights, phases, x_um, y_um = generator.generate_weighted_array(
-            np.ones((self.rows, self.columns)),
-            self.spacing * 1e6,
-            init_phase_randomness=self.phase_randomness,
+        hologram = self.rig.make_array(
+            rows=self.rows,
+            columns=self.columns,
+            spacing_um=self.spacing * 1e6,
             angle_deg=math.degrees(self.angle),
+            compensate_envelope=self.compensate_envelope,
+            blaze_um=blaze_um,
+            fresnel_focal_length_mm=self.fresnel_focal_length * 1e3,
+            zernike=self.zernike,
+            pupil_radius_um=self.pupil_radius * 1e6,
+            pupil_dump_um=(self.pupil_dump_x * 1e6, self.pupil_dump_y * 1e6),
+            iterations=self.iterations,
+            damping=self.damping,
+            phase_randomness=self.phase_randomness,
         )
-        if self.compensate_envelope:
-            weights = envelope_weights(x_um + blaze_um[0], y_um + blaze_um[1])
-
-        array_phase, _, (uniformity, min_max, mse, _) = (
-            generator.superposition_optimization(
-                [weights, phases, x_um, y_um],
-                max_iter=self.iterations,
-                damping=self.damping,
-                verbose=False,
-            )
+        mask = hologram["mask"]
+        self.broadcast(
+            np.asarray(hologram["x_um"]) + blaze_um[0],
+            np.asarray(hologram["y_um"]) + blaze_um[1],
+            np.asarray(hologram["weights"]),
+            mask,
+            spot_sigma_um=hologram["focal_pixel_um"],
         )
-        layers = [
-            array_phase,
-            generator.generate_fresnel_lens_phasemask(self.fresnel_focal_length * 1e3),
-            generator.generate_blazed_grating_phasemask(*blaze_um),
-        ]
-        if self.zernike:
-            layers.append(generator.zernike)
-        phase = apply_pupil(
-            generator,
-            generator.superimpose(layers),
-            self.pupil_radius * 1e6,
-            self.pupil_dump_x * 1e6,
-            self.pupil_dump_y * 1e6,
-        )
-        mask = generator.transform_phase_8bit(phase).get()
-        self.slm.update_mask(mask)
-
-        self.broadcast(x_um + blaze_um[0], y_um + blaze_um[1], weights, mask)
         self.record("phasemask", mask)
-        self.record("uniformity", float(uniformity[-1]))
-        self.record("min_max_ratio", float(min_max[-1]))
-        self.record("mse", float(mse[-1]))
+        for name in ("uniformity", "min_max_ratio", "mse"):
+            self.record(name, hologram[name])
 
-    def broadcast(self, x_um, y_um, weights, mask) -> None:
-        spot_sigma_um = self.generator.dx_f
+    def broadcast(self, x_um, y_um, weights, mask, spot_sigma_um) -> None:
         pixel_um = spot_sigma_um / 4
         target, (x0_um, y0_um) = render_target(
             x_um,

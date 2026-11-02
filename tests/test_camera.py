@@ -49,6 +49,13 @@ def test_broadcast_frames_go_out_unchanged_in_order_with_their_frame_number():
         np.testing.assert_array_equal(image, frame)
 
 
+def test_broadcast_frames_carry_the_header_the_caller_adds():
+    camera = BufferCamera()
+    camera.image_client = RecordingImageClient()
+    camera.acquire_n_frames(2, broadcast=True, header={"rid": 57})
+    assert [info["rid"] for info, _image in camera.image_client.sent] == [57, 57]
+
+
 def test_autosave_writes_each_frame_to_its_own_tiff_in_frame_order(tmp_path):
     BufferCamera(image_dir=str(tmp_path)).acquire_n_frames(3, autosave=True)
     for i, frame in enumerate(FRAMES[:3], start=1):

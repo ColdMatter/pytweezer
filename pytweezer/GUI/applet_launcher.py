@@ -39,6 +39,11 @@ DEFAULT_APPLETS = [
         "description": "Rolling history of a scalar from a data stream header",
     },
     {
+        "name": "Tweezer Loading",
+        "script": "pytweezer/GUI/viewers/tweezer_loading.py",
+        "description": "Photon histograms and loading map of the tweezer array",
+    },
+    {
         "name": "SLM Monitor",
         "script": "pytweezer/GUI/viewers/slm_monitor.py",
         "description": "Target tweezer array beside the phase mask on the SLM",

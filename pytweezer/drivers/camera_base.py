@@ -181,14 +181,20 @@ class Camera(ABC):
         start_frame: int = 0,
         autosave: bool = False,
         broadcast: bool = False,
+        header: dict | None = None,
     ) -> np.ndarray:
+        """Read ``nframes`` frames; ``header`` adds keys to each broadcast frame's header."""
         start_frame = int(start_frame)
         images = self._read_frames(int(nframes), start_frame)
         for i, image in enumerate(images):
             if autosave:
                 self.save_tiff(image=image, image_dir=self.image_dir)
             if broadcast:
-                info = {"timestamp": time.time(), "index": start_frame + i}
+                info = {
+                    **(header or {}),
+                    "timestamp": time.time(),
+                    "index": start_frame + i,
+                }
                 self.broadcast_image(image, info)
         return np.asarray(images)
 
@@ -198,12 +204,14 @@ class Camera(ABC):
         autosave: bool = False,
         broadcast: bool = False,
         start_frame: int = 0,
+        header: dict | None = None,
     ) -> np.ndarray:
         images = self.acquire_n_frames(
             nframes=1,
             start_frame=start_frame,
             autosave=autosave,
             broadcast=broadcast,
+            header=header,
         )
         return images[0]
 

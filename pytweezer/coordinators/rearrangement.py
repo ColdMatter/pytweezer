@@ -27,6 +27,10 @@ the coordinator contract):
   (``OptimisationBasedPhasemaskGeneratorGPU.iter_rearrangement_sequence``) and
   upload it to the SLM concurrently, then grab a reset image. Returns the
   before/after images.
+* :meth:`make_array` — compute the phase mask for a rectangular array and put it
+  on the SLM. :meth:`get_array` then says which array is on the SLM, for
+  analyses and experiments that need the number or positions of the sites; it
+  returns ``None`` once anything else has written the SLM.
 * :meth:`test` / :meth:`status` / :meth:`shutdown`.
 
 Generation and upload are pipelined: the GPU loop pushes each finished frame onto a
@@ -47,19 +51,20 @@ and clocking them out with a hardware trigger (``preload_sequence`` /
 import queue
 import threading
 import time
-import asyncio
+
 import numpy as np
 
-
-from pytweezer.coordinators.base import Coordinator
 from pytweezer import analysis as an
+from pytweezer.coordinators.base import Coordinator
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.slm import SLM
+from pytweezer.helper_scripts import array_hologram
 
 try:
     import cupy as cp
 
-    _HAS_CUPY = True
+    # cupy imports without a usable driver; only a device count proves a GPU
+    _HAS_CUPY = cp.cuda.runtime.getDeviceCount() > 0
 except Exception:  # pragma: no cover - depends on the machine's GPU stack
     cp = None
     _HAS_CUPY = False
@@ -126,7 +131,7 @@ def _pinned_like(frame):
 
 
 def _steady_median(values):
-    
+
     tail = values[1:] if len(values) > 1 else values
     return float(np.median(tail)) if tail else float("nan")
 
@@ -142,11 +147,12 @@ def _morph_cpp():
 
             _morph_cpp_module = morph_tophat_cpp
         except Exception:  # pragma: no cover
-            # pragme no cover stops coverage.py complaining about failing imports here on machine 
+            # pragme no cover stops coverage.py complaining about failing imports here on machine
             # without the C++ extension built. The extension is optional, so this is not a test failure.
             print("morph_tophat_cpp unavailable; using numpy.")
             _morph_cpp_module = None
     return _morph_cpp_module
+
 
 def _sum_cpp():
     global _sum_cpp_module, _sum_cpp_loaded
@@ -158,7 +164,7 @@ def _sum_cpp():
             from pytweezer.cpp import sum_pixel_values_cpp
 
             _sum_cpp_module = sum_pixel_values_cpp
-        except Exception:  # pragma: no cover 
+        except Exception:  # pragma: no cover
             print("sum_pixel_values_cpp unavailable; using numpy.")
             _sum_cpp_module = None
     return _sum_cpp_module
@@ -183,6 +189,10 @@ class Rearrangement(Coordinator):
         self._initialised = False
         self._state = None  # populated by initialise()
 
+        self._array = None
+        self._array_mask = None
+        self._array_generator = None
+
         #: ``time.perf_counter()`` at which the most recent
         #: :meth:`_play_sequence_pipelined` finished displaying its *first* frame,
         #: or ``None`` if it never did. Frame 0 must be synthesised, copied to the
@@ -203,14 +213,16 @@ class Rearrangement(Coordinator):
             raise RuntimeError(
                 f"{type(self).__name__} needs a sub-device with role "
                 f"{self.camera_role!r} for this call; this composite provides roles: "
-                f"{sorted(self.targets) or '(none)'}. Set \"role\": "
+                f'{sorted(self.targets) or "(none)"}. Set "role": '
                 f"{self.camera_role!r} on the relevant entry in the composite's "
                 '"devices" block.'
             )
 
     def _require_initialised(self):
         if not self._initialised:
-            raise RuntimeError("Rearrangement not initialised; call initialise() first.")
+            raise RuntimeError(
+                "Rearrangement not initialised; call initialise() first."
+            )
 
     # ------------------------------------------------------------------ #
     # Status
@@ -222,12 +234,99 @@ class Rearrangement(Coordinator):
             "gpu_available": _HAS_CUPY,
             "initialised": self._initialised,
             "roles": sorted(self.targets),
-            "camera_connected": bool(getattr(self.camera, "is_connected", lambda: None)()),
+            "camera_connected": bool(
+                getattr(self.camera, "is_connected", lambda: None)()
+            ),
             "slm_connected": bool(getattr(self.slm, "is_connected", lambda: None)()),
         }
 
     def get_slm_temperature(self) -> float:
         return float(self.slm.get_temperature())
+
+    # ------------------------------------------------------------------ #
+    # The array on the SLM
+    # ------------------------------------------------------------------ #
+
+    def make_array(
+        self,
+        rows: int,
+        columns: int,
+        spacing_um: float,
+        angle_deg: float,
+        compensate_envelope: bool = True,
+        blaze_um: tuple[float, float] = (48.0, 4.0),
+        fresnel_focal_length_mm: float = 1125.0,
+        zernike: bool = False,
+        pupil_radius_um: float = 8704.0,
+        pupil_dump_um: tuple[float, float] = (100.0, 0.0),
+        iterations: int = 2000,
+        damping: float = 0.5,
+        phase_randomness: float = 1.0,
+    ) -> dict:
+        """Put a ``rows`` x ``columns`` tweezer array on the SLM and remember it.
+
+        See :mod:`pytweezer.helper_scripts.array_hologram` for the mask. Returns
+        its result: the mask, the trap positions and weights, and the
+        optimisation's final uniformity, min/max ratio and error.
+        """
+        self._require_gpu()
+        if self._array_generator is None:
+            self._array_generator = array_hologram.make_generator()
+        hologram = array_hologram.array_hologram(
+            self._array_generator,
+            rows=int(rows),
+            columns=int(columns),
+            spacing_um=float(spacing_um),
+            angle_deg=float(angle_deg),
+            compensate_envelope=bool(compensate_envelope),
+            blaze_um=tuple(blaze_um),
+            fresnel_focal_length_mm=float(fresnel_focal_length_mm),
+            zernike=bool(zernike),
+            pupil_radius_um=float(pupil_radius_um),
+            pupil_dump_um=tuple(pupil_dump_um),
+            iterations=int(iterations),
+            damping=float(damping),
+            phase_randomness=float(phase_randomness),
+        )
+        self.slm.update_mask(hologram["mask"])
+        self._remember_array(
+            hologram["mask"],
+            x_um=hologram["x_um"],
+            y_um=hologram["y_um"],
+            weights=hologram["weights"],
+            rows=int(rows),
+            columns=int(columns),
+            spacing_um=float(spacing_um),
+            angle_deg=float(angle_deg),
+        )
+        return hologram
+
+    def _remember_array(self, mask, *, x_um, y_um, weights, **geometry) -> None:
+        self._array_mask = np.array(mask, dtype=np.uint8)
+        self._array = {
+            "sites": len(x_um),
+            "x_um": [float(x) for x in x_um],
+            "y_um": [float(y) for y in y_um],
+            "weights": [float(w) for w in weights],
+            **geometry,
+        }
+
+    def get_array(self) -> dict | None:
+        """The array on the SLM, or ``None`` if the rig did not put the SLM's mask there.
+
+        Always carries ``sites`` and the trap ``x_um``/``y_um`` (focal plane,
+        relative to the blaze spot) and ``weights``; an array from
+        :meth:`make_array` also carries ``rows``, ``columns``, ``spacing_um``
+        and ``angle_deg``.
+        """
+        if self._array is None:
+            return None
+        shown = getattr(self.slm, "last_mask", None)
+        if shown is None or not np.array_equal(
+            np.ravel(shown), self._array_mask.ravel()
+        ):
+            return None
+        return dict(self._array)
 
     # ------------------------------------------------------------------ #
     # Initialise
@@ -245,7 +344,7 @@ class Rearrangement(Coordinator):
         feature_size: int = 10,
         profile: str = "linear",
         detector=None,
-        num_images: int = 1
+        num_images: int = 1,
     ) -> None:
 
         self._require_gpu()
@@ -263,20 +362,38 @@ class Rearrangement(Coordinator):
 
         # The initial array to load onto the SLM before each rearrangement.
         pm_array_init = self.pm_gen.generate_phasemask(list(terms1))
-        pm_init = self.pm_gen.superimpose([pm_array_init, self.pm_gen.fresnel, self.pm_gen.blaze, self.pm_gen.zernike])
-        pm_init_uint8 = self.pm_gen.transform_phase_8bit(pm_init).get()
-
-        self._state = dict(
-            PM=self.pm_gen,
-            terms1=terms1, terms2=terms2,
-            pm_init_uint8=pm_init_uint8,
-            d0=d0, fps=fps, threshold=threshold, grid_positions=grid_positions, window_size=window_size, feature_size=feature_size,
-            profile=profile, detector=detector, num_images=num_images
+        pm_init = self.pm_gen.superimpose(
+            [pm_array_init, self.pm_gen.fresnel, self.pm_gen.blaze, self.pm_gen.zernike]
         )
+        pm_init_uint8 = self.pm_gen.transform_phase_8bit(pm_init).get()
+        self._remember_array(
+            pm_init_uint8,
+            x_um=cp.asnumpy(x1),
+            y_um=cp.asnumpy(y1),
+            weights=cp.asnumpy(w1),
+        )
+
+        self._state = {
+            "PM": self.pm_gen,
+            "terms1": terms1,
+            "terms2": terms2,
+            "pm_init_uint8": pm_init_uint8,
+            "d0": d0,
+            "fps": fps,
+            "threshold": threshold,
+            "grid_positions": grid_positions,
+            "window_size": window_size,
+            "feature_size": feature_size,
+            "profile": profile,
+            "detector": detector,
+            "num_images": num_images,
+        }
         self._initialised = True
         if detector is not None:
-            print(f"Occupancy via {detector.name} detector "
-                  f"(window {detector.window_size}, threshold {detector.threshold:.1f}).")
+            print(
+                f"Occupancy via {detector.name} detector "
+                f"(window {detector.window_size}, threshold {detector.threshold:.1f})."
+            )
         print("Rearrangement node initialised.")
 
     # ------------------------------------------------------------------ #
@@ -284,7 +401,7 @@ class Rearrangement(Coordinator):
     # ------------------------------------------------------------------ #
 
     def _extract_occupancy(self, image, threshold):
-        
+
         detector = self._state.get("detector")
         if detector is not None:
             return detector.occupancy(image)
@@ -295,20 +412,19 @@ class Rearrangement(Coordinator):
 
         cpp_morph = _morph_cpp()
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
-            img = cpp_morph.tophat(np.ascontiguousarray(image, dtype=np.uint16),
-                                   feature_size=feature_size)
+            img = cpp_morph.tophat(
+                np.ascontiguousarray(image, dtype=np.uint16), feature_size=feature_size
+            )
         else:
             img = an.morphological_tophat_high_pass(image, feature_size=feature_size)
 
-        #cpp_sum = _sum_cpp()
-        #if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
+        # cpp_sum = _sum_cpp()
+        # if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
         #    pixel_sums = cpp_sum.sum_pixel_values(
         #        img, grid_positions, array_shape, window_size=window_size
         #    )
-        #else:
-        pixel_sums = an.sum_pixel_values(
-            img, grid_positions, window_size=window_size
-        )
+        # else:
+        pixel_sums = an.sum_pixel_values(img, grid_positions, window_size=window_size)
         return pixel_sums > threshold
 
     def _play_sequence_pipelined(self, frames):
@@ -416,7 +532,9 @@ class Rearrangement(Coordinator):
 
         # 3. Pairing, interpolation and SLM upload, pipelined.
         frames = PM.iter_rearrangement_sequence(
-            s["terms1"], s["terms2"], occ_mask,
+            s["terms1"],
+            s["terms2"],
+            occ_mask,
             d0=s["d0"],
             profile=s.get("profile", "minimum_jerk"),
             to_host=False,
@@ -433,22 +551,21 @@ class Rearrangement(Coordinator):
             img_array1 = np.zeros((s["num_images"], *img_array0.shape))
 
         print(
-            f"Rearrangement complete: {n_frames} frames, {(t3 - t1)*1000:.4f}ms total "
-            f"(occupancy {(t2 - t1)*1000:.4f}ms, calculation+upload {(t3 - t2)*1000:.4f}ms)."
+            f"Rearrangement complete: {n_frames} frames, {(t3 - t1) * 1000:.4f}ms total "
+            f"(occupancy {(t2 - t1) * 1000:.4f}ms, calculation+upload {(t3 - t2) * 1000:.4f}ms)."
         )
         # Generation and upload are pipelined (see docstring), so they share one
         # measured span; both keys report it rather than a fabricated split.
         timings = {
             "n_frames": n_frames,
-            "occupancy_extraction_ms": (t2 - t1)*1000,
-            "calculation_and_upload_ms": (t3 - t2)*1000,
-            "total_rearrangement_ms": (t3 - t1)*1000
+            "occupancy_extraction_ms": (t2 - t1) * 1000,
+            "calculation_and_upload_ms": (t3 - t2) * 1000,
+            "total_rearrangement_ms": (t3 - t1) * 1000,
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
-
     def _play_sequence_pipelined_timings(self, frames):
-        
+
         upload_queue = queue.Queue(maxsize=UPLOAD_QUEUE_DEPTH)
         errors = []
         first_frame_at = []
@@ -595,7 +712,9 @@ class Rearrangement(Coordinator):
         # 3. One-time pairing and interpolation setup, eager so it lands in its
         #    own span instead of on frame 0.
         plan = PM.plan_rearrangement(
-            s["terms1"], s["terms2"], occ_mask,
+            s["terms1"],
+            s["terms2"],
+            occ_mask,
             d0=s["d0"],
             profile=s.get("profile", "minimum_jerk"),
         )
@@ -620,11 +739,19 @@ class Rearrangement(Coordinator):
 
         ttff_ms = (
             (self.last_first_frame_at - t2) * 1000
-            if self.last_first_frame_at is not None else float("nan")
+            if self.last_first_frame_at is not None
+            else float("nan")
         )
-        med = {k: _steady_median(stage[k])
-               for k in ("gpu_compute_ms", "gpu_wait_ms", "transfer_ms",
-                         "display_ms", "pacing_ms")}
+        med = {
+            k: _steady_median(stage[k])
+            for k in (
+                "gpu_compute_ms",
+                "gpu_wait_ms",
+                "transfer_ms",
+                "display_ms",
+                "pacing_ms",
+            )
+        }
 
         # After the reset image, so the syncs it costs land outside every timed
         # span and never delay arming the camera.
@@ -632,16 +759,24 @@ class Rearrangement(Coordinator):
 
         ttff_ms = (
             (self.last_first_frame_at - t2) * 1000
-            if self.last_first_frame_at is not None else float("nan")
+            if self.last_first_frame_at is not None
+            else float("nan")
         )
-        med = {k: _steady_median(stage[k])
-               for k in ("gpu_compute_ms", "gpu_wait_ms", "transfer_ms",
-                         "display_ms", "pacing_ms")}
+        med = {
+            k: _steady_median(stage[k])
+            for k in (
+                "gpu_compute_ms",
+                "gpu_wait_ms",
+                "transfer_ms",
+                "display_ms",
+                "pacing_ms",
+            )
+        }
 
         print(
-            f"Rearrangement complete: {n_frames} frames, {(t3 - t1)*1000:.4f}ms total "
-            f"(occupancy {(t2 - t1)*1000:.4f}ms, pairing+setup {(t_plan - t2)*1000:.4f}ms, "
-            f"streaming {(t3 - t_plan)*1000:.4f}ms).\n"
+            f"Rearrangement complete: {n_frames} frames, {(t3 - t1) * 1000:.4f}ms total "
+            f"(occupancy {(t2 - t1) * 1000:.4f}ms, pairing+setup {(t_plan - t2) * 1000:.4f}ms, "
+            f"streaming {(t3 - t_plan) * 1000:.4f}ms).\n"
             f"  per-frame medians (frame 0 excluded): compute {med['gpu_compute_ms']:.4f}ms, "
             f"gpu-wait {med['gpu_wait_ms']:.4f}ms, transfer {med['transfer_ms']:.4f}ms, "
             f"board-write {med['display_ms']:.4f}ms, pacing {med['pacing_ms']:.4f}ms.\n"
@@ -653,21 +788,18 @@ class Rearrangement(Coordinator):
             "occupancy_extraction_ms": (t2 - t1) * 1000,
             "calculation_and_upload_ms": (t3 - t2) * 1000,
             "total_rearrangement_ms": (t3 - t1) * 1000,
-
             # One-time costs, now separated out of calculation_and_upload_ms.
             "pairing_and_setup_ms": (t_plan - t2) * 1000,
             "streaming_ms": (t3 - t_plan) * 1000,
             "time_to_first_frame_ms": ttff_ms,
             "pinned_alloc_ms": stage["pinned_alloc_ms"],
             "n_moving": plan["n_moving"],
-
             # Per-frame series, one entry per frame, in frame order.
             "gpu_compute_ms": stage["gpu_compute_ms"],
             "gpu_wait_ms": stage["gpu_wait_ms"],
             "transfer_ms": stage["transfer_ms"],
             "display_ms": stage["display_ms"],
             "pacing_ms": stage["pacing_ms"],
-
             # Steady-state medians of the above, frame 0 dropped.
             "gpu_compute_median_ms": med["gpu_compute_ms"],
             "gpu_wait_median_ms": med["gpu_wait_ms"],
@@ -677,7 +809,13 @@ class Rearrangement(Coordinator):
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings, pairing
 
-    def arm_rearrangement_preload_trigger(self, pulser, period_us: float = 700, profile: str = None, restore_initial_array: bool = True):
+    def arm_rearrangement_preload_trigger(
+        self,
+        pulser,
+        period_us: float = 700,
+        profile: str | None = None,
+        restore_initial_array: bool = True,
+    ):
         self._require_gpu()
         self._require_initialised()
 
@@ -700,7 +838,9 @@ class Rearrangement(Coordinator):
 
         # 3. Pairing, interpolation and on-board preload, pipelined.
         frames = PM.iter_rearrangement_sequence(
-            s["terms1"], s["terms2"], occ_mask,
+            s["terms1"],
+            s["terms2"],
+            occ_mask,
             d0=s["d0"],
             profile=profile or s.get("profile", "minimum_jerk"),
             to_host=False,
@@ -731,18 +871,20 @@ class Rearrangement(Coordinator):
             img_array1 = np.zeros_like(img_array0)
 
         if restore_initial_array:
-            self.slm.update_mask(s["pm_init_uint8"])  # restore the initial array for the next run
+            self.slm.update_mask(
+                s["pm_init_uint8"]
+            )  # restore the initial array for the next run
 
         print(
-            f"Rearrangement complete (preload+trigger): {n_frames} frames, {(t4 - t1)*1000:.4f}ms total "
-            f"(occupancy {(t2 - t1)*1000:.4f}ms, calculation and preload {(t3 - t2)*1000:.4f}ms, hardware trigger upload {(t4 - t3)*1000:.4f}ms)."
+            f"Rearrangement complete (preload+trigger): {n_frames} frames, {(t4 - t1) * 1000:.4f}ms total "
+            f"(occupancy {(t2 - t1) * 1000:.4f}ms, calculation and preload {(t3 - t2) * 1000:.4f}ms, hardware trigger upload {(t4 - t3) * 1000:.4f}ms)."
         )
         timings = {
             "n_frames": n_frames,
-            "occupancy_extraction_ms": (t2 - t1)*1000,
-            "calculation_and_preload_ms": (t3 - t2)*1000,
-            "hardware_trigger_upload_ms": (t4 - t3)*1000,
-            "total_rearrangement_ms": (t4 - t1)*1000, 
+            "occupancy_extraction_ms": (t2 - t1) * 1000,
+            "calculation_and_preload_ms": (t3 - t2) * 1000,
+            "hardware_trigger_upload_ms": (t4 - t3) * 1000,
+            "total_rearrangement_ms": (t4 - t1) * 1000,
             "trigger_span_s": trigger_span_s,
         }
         return np.asarray(img_array0), np.asarray(img_array1), timings

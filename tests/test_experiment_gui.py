@@ -152,12 +152,22 @@ def test_form_shows_display_units_and_returns_si(editor):
     assert request.class_name == "Demo"
 
 
-def test_an_optimiser_offers_no_scan_and_says_it_sets_its_own_points(qapp):
-    editor = ArgumentEditor()
-    editor.set_experiment(DemoStagedScan.schema())
-    assert not any(row.scan_button.isEnabled() for row in editor.rows.values())
-    assert not editor.repetitions.isEnabled()
-    assert editor.point_count.text() == "sets its own points"
+def test_optimisers_are_not_offered_in_the_experiments_tab(qapp):
+    view = CatalogueView()
+    view.set_modules(
+        [
+            {
+                "module": "pytweezer.experiments.demo",
+                "classes": [SCHEMA, DemoStagedScan.schema()],
+                "warnings": [],
+                "error": None,
+            }
+        ]
+    )
+    module = view.tree.topLevelItem(0)
+    names = [module.child(i).text(0) for i in range(module.childCount())]
+    assert names == ["Demo"]
+    assert view.schema_for("pytweezer.experiments.demo", "DemoStagedScan") is None
 
 
 class Tiny(Experiment):
@@ -1324,7 +1334,8 @@ class FakeOptimiserClient:
     def __init__(self, schemas, tasks, accepted_rids=()):
         self.calls = []
         self.refusal = None
-        self.recipe_names = []
+        self.recipe_args = {}
+        self.last_requests = {}
         self.schemas = schemas
         self.tasks = tasks
         self.changes = [
@@ -1359,17 +1370,24 @@ class FakeOptimiserClient:
 
     def recipes(self, experiment=None, class_name=None):
         return [
-            Recipe(experiment=DEMO, class_name="DemoStagedScan", name=name)
-            for name in self.recipe_names
+            Recipe(experiment=DEMO, class_name="DemoStagedScan", name=name, args=args)
+            for name, args in self.recipe_args.items()
         ]
 
-    def submit(self, request):
-        self.calls.append(("submit", request.experiment, request.class_name))
-        return 60
+    def last_request(self, experiment, class_name):
+        return self.last_requests.get(class_name)
 
-    def submit_recipe(self, experiment, class_name, name, **kwargs):
-        self.calls.append(("submit_recipe", experiment, class_name, name))
-        return 61
+    def save_recipe(self, recipe, overwrite=False):
+        self.calls.append(("save_recipe", recipe.name, recipe.args, overwrite))
+        self.recipe_args[recipe.name] = recipe.args
+
+    def delete_recipe(self, experiment, class_name, name):
+        self.calls.append(("delete_recipe", name))
+        del self.recipe_args[name]
+
+    def submit(self, request):
+        self.calls.append(("submit", request.class_name, request.args))
+        return 60
 
     def saved_parameters(self):
         return list(self.parameters)
@@ -1475,12 +1493,15 @@ def test_run_is_disabled_while_queued_or_running(qapp, status):
     snapshot = {"running": [], "queue": [], "history": []}
     snapshot["running" if status == "running" else "queue"].append(active)
     panel.feed.queue_changed.emit(snapshot)
-    assert not panel.rows[(DEMO, "DemoStagedScan")].run_button.isEnabled()
-    assert panel.rows[(DEMO, "DemoBayesian")].run_button.isEnabled()
+    panel.select(DEMO, "DemoStagedScan")
+    assert not panel.run_button.isEnabled()
+    panel.select(DEMO, "DemoBayesian")
+    assert panel.run_button.isEnabled()
 
     finished = {**active, "status": "completed"}
     panel.feed.queue_changed.emit({"running": [], "queue": [], "history": [finished]})
-    assert panel.rows[(DEMO, "DemoStagedScan")].run_button.isEnabled()
+    panel.select(DEMO, "DemoStagedScan")
+    assert panel.run_button.isEnabled()
 
 
 def test_accept_writes_only_ticked_rows_with_the_run(qapp):
@@ -1579,21 +1600,102 @@ def test_the_evaluations_plot_follows_the_goal(qapp, goal, best_so_far):
     assert list(best.yData) == best_so_far
 
 
-@pytest.mark.parametrize(
-    ("preset", "expected"),
-    [
-        ("Defaults", ("submit", DEMO, "DemoStagedScan")),
-        ("quick", ("submit_recipe", DEMO, "DemoStagedScan", "quick")),
-    ],
-)
-def test_run_submits_the_chosen_preset(qapp, preset, expected):
+def settings(panel):
+    return panel.forms[panel._selected]
+
+
+def test_run_submits_the_settings_shown(qapp):
     panel = make_optimisers_panel()
-    panel.client.recipe_names = ["quick"]
+    panel.select(DEMO, "DemoStagedScan")
+    settings(panel).fields["detuning_points"].set_value(5)
+    panel.run_button.click()
+    (call,) = panel.client.calls
+    assert call[:2] == ("submit", "DemoStagedScan")
+    assert call[2]["detuning_points"] == 5
+    assert call[2]["power_points"] == 10
+
+
+def test_settings_start_from_the_last_run(qapp):
+    panel = make_optimisers_panel()
+    panel.client.last_requests["DemoStagedScan"] = TaskRequest(
+        experiment=DEMO, class_name="DemoStagedScan", args={"repeats": 3}
+    )
+    panel.select(DEMO, "DemoStagedScan")
+    assert settings(panel).values()["repeats"] == 3
+    assert panel.preset.currentText() == "Last run"
+    assert panel.run_count.text() == "93 points"
+
+
+@pytest.mark.parametrize(("preset", "repeats"), [("quick", 4), ("Defaults", 1)])
+def test_choosing_a_preset_loads_its_settings(qapp, preset, repeats):
+    panel = make_optimisers_panel()
+    panel.client.recipe_args = {"quick": {"repeats": 4}}
     panel.refresh()
-    row = panel.rows[(DEMO, "DemoStagedScan")]
-    row.preset.setCurrentText(preset)
-    row.run_button.click()
-    assert panel.client.calls == [expected]
+    panel.select(DEMO, "DemoStagedScan")
+    settings(panel).fields["repeats"].set_value(2)
+    panel.preset.setCurrentText(preset)
+    panel.preset.activated.emit(panel.preset.currentIndex())
+    assert settings(panel).values()["repeats"] == repeats
+
+
+def test_save_as_preset_stores_the_settings_shown_for_every_pc(qapp):
+    panel = make_optimisers_panel()
+    panel.select(DEMO, "DemoStagedScan")
+    settings(panel).fields["repeats"].set_value(2)
+    panel.ask_preset_name = lambda default: "careful"
+    panel.save_preset()
+    name, args, overwrite = panel.client.calls[-1][1:]
+    assert (name, args["repeats"], overwrite) == ("careful", 2, False)
+    assert panel.preset.currentText() == "careful"
+
+
+def test_a_resubmitted_optimiser_run_opens_in_the_optimisers_tab(qapp):
+    panel = make_optimisers_panel()
+    request = TaskRequest(
+        experiment=DEMO, class_name="DemoBayesian", args={"n_calls": 12}
+    )
+    assert panel.load_request(request)
+    assert panel._selected == (DEMO, "DemoBayesian")
+    assert settings(panel).values()["n_calls"] == 12
+    other = TaskRequest(experiment=DEMO, class_name="RabiDemo")
+    assert not panel.load_request(other)
+
+
+def live_point(index, objective, detuning, power):
+    return {
+        "index": index,
+        "values": {},
+        "scalars": {"objective": objective, "detuning": detuning, "power": power},
+    }
+
+
+def test_a_running_optimiser_is_plotted_point_by_point(qapp):
+    panel = make_optimisers_panel()
+    running = task(
+        70,
+        "running",
+        experiment=DEMO,
+        class_name="DemoBayesian",
+        points_done=2,
+        points_total=30,
+    )
+    panel.feed.rows[70] = [
+        live_point(0, 300.0, 0.0, 0.5),
+        live_point(1, 900.0, 1.3, 1.0),
+    ]
+    panel.feed.queue_changed.emit({"running": [running], "queue": [], "history": []})
+    panel.select(DEMO, "DemoBayesian")
+    progress = panel.plots_layout.itemAt(0).widget()
+    shots, best = progress.getPlotItem().listDataItems()
+    assert list(shots.yData) == [300.0, 900.0]
+
+    point = {"rid": 70, **live_point(2, 600.0, 2.0, 0.8)}
+    panel.feed.rows[70].append(point)
+    panel.feed.point_received.emit(point)
+    assert panel.plots_layout.itemAt(0).widget() is progress
+    assert list(shots.yData) == [300.0, 900.0, 600.0]
+    assert list(best.yData) == [300.0, 900.0, 900.0]
+    assert panel.accept_rows == {}
 
 
 def test_discarded_proposals_cannot_be_accepted(qapp, tmp_path):

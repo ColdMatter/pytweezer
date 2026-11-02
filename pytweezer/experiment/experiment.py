@@ -54,6 +54,8 @@ class Experiment:
         #: Canonical names of the devices :meth:`device` may open; ``None``
         #: means unrestricted.
         self.allowed_devices: frozenset[str] | None = None
+        #: The task's run id; -1 for :func:`~pytweezer.experiment.run_local`.
+        self.rid: int | None = None
 
     @classmethod
     def arguments(cls) -> dict[str, Argument]:
