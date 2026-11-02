@@ -98,12 +98,12 @@ def partial_label(constants: dict) -> str:
 
 
 def proposals(constants: dict, keys: list[str]) -> dict:
-    """The values a run proposes for ``keys``, as plain Python values."""
+    """The values a run proposes for ``keys``, as plain Python values; arrays as nested lists."""
     proposed = {}
     for key in keys:
         value = constants.get(f"proposed.{key}")
         if value is not None:
-            proposed[key] = value.item() if hasattr(value, "item") else value
+            proposed[key] = value.tolist() if hasattr(value, "tolist") else value
     return proposed
 
 
@@ -196,6 +196,8 @@ class SettingsForm(QWidget):
         """How many points the next run takes: ``30 evaluations`` or ``31 points``."""
         values = self.values()
         optimiser = self.schema["optimiser"]
+        if optimiser["kind"] == "fit":
+            return "1 fit"
         if optimiser["kind"] == "bayesian":
             count, noun = values.get("n_calls", 0), "evaluation"
         else:
@@ -743,6 +745,8 @@ class OptimisersPanel(QWidget):
         """
         proposed = proposed or {}
         saved = {key: self._parameters.get(key) for key in proposed}
+        row = self._selected_row()
+        proposal_units = row.schema["optimiser"].get("units", {}) if row else {}
         shown = (rid, message, proposed, {k: p and p.value for k, p in saved.items()})
         if shown == self._sheet_shown:
             return
@@ -775,7 +779,8 @@ class OptimisersPanel(QWidget):
             name = QLabel(key)
             name.setFont(_monospace())
             parameter = saved[key]
-            unit = f" {parameter.unit}" if parameter and parameter.unit else ""
+            unit = parameter.unit if parameter else proposal_units.get(key, "")
+            unit = f" {unit}" if unit else ""
             current = QLabel(
                 _number(parameter.value) + unit if parameter else "not saved"
             )
@@ -822,7 +827,9 @@ class OptimisersPanel(QWidget):
                     widget.deleteLater()
             self._plots = None
             if key is not None:
-                kind = _StagedPlots if key[1] == "staged" else _EvaluationPlots
+                kind = {"staged": _StagedPlots, "fit": _FitPlots}.get(
+                    key[1], _EvaluationPlots
+                )
                 self._plots = kind(key, row.schema)
                 for index, plot in enumerate(self._plots.widgets):
                     self.plots_layout.addWidget(
@@ -1066,8 +1073,9 @@ class OptimisersPanel(QWidget):
     def accept(self) -> None:
         """Save the ticked proposals of the shown run for the whole lab.
 
-        The store sets every value or, refusing any, none; a refusal is shown
-        in the Accept area. The run is recorded as accepted even if every value
+        A key not saved yet is created, in the optimiser's group and with its
+        unit. The store sets every value or, refusing any, none; a refusal is
+        shown in the Accept area. The run is recorded as accepted even if every value
         matches the one saved.
         """
         rid = self._sheet_rid
@@ -1076,11 +1084,19 @@ class OptimisersPanel(QWidget):
             for key, box in self.accept_rows.items()
             if box.isChecked()
         }
-        if rid is None or not values:
+        row = self._selected_row()
+        if rid is None or not values or row is None:
             return
+        optimiser = row.schema["optimiser"]
         try:
             changes = self.client.set_saved_parameters(
-                values, f"accepted from run {rid}", submitter_name(), rid=rid
+                values,
+                f"accepted from run {rid}",
+                submitter_name(),
+                create=True,
+                group=optimiser.get("group", ""),
+                units=optimiser.get("units", {}),
+                rid=rid,
             )
         except ManagerUnavailable:
             self._show_status(f"Accepting: {NOT_RESPONDING}", "error")
@@ -1248,8 +1264,44 @@ class _EvaluationPlots:
         return len(objective) > 0
 
 
+class _FitPlots:
+    """The image a fit was made on, with a square the summing window's size at each site."""
+
+    def __init__(self, key, schema):
+        self.key = key
+        plot = _plot("Fitted trap sites", "x (px)", "y (px)")
+        plot.getViewBox().setAspectLocked(True)
+        plot.getViewBox().invertY(True)
+        self.image = pg.ImageItem(axisOrder="row-major")
+        self.squares = pg.ScatterPlotItem(
+            symbol="s", pxMode=False, brush=None, pen=pg.mkPen(_ACCENT, width=1)
+        )
+        plot.addItem(self.image)
+        plot.addItem(self.squares)
+        self.widgets = [plot]
+
+    def update(self, results, constants) -> bool:
+        images = results.get("calibration_image")
+        sites = results.get("roi_sites")
+        if images is None or not len(images):
+            self.image.clear()
+            self.squares.clear()
+            return False
+        image = np.asarray(images[-1], dtype=float)
+        self.image.setImage(image)
+        # Sites are in pixel-centre coordinates; an ImageItem puts centres at +0.5.
+        height, width = image.shape
+        self.image.setRect(QtCore.QRectF(-0.5, -0.5, width, height))
+        size = float(constants.get("proposed.trap_window_size", 5))
+        rows, columns = np.asarray(sites[-1], dtype=float).T
+        self.squares.setData(x=columns, y=rows, size=size)
+        return True
+
+
 def _plotted_names(schema) -> list[str]:
     optimiser = schema["optimiser"]
+    if optimiser.get("kind") == "fit":
+        return ["calibration_image", "roi_sites"]
     if optimiser.get("kind") == "bayesian":
         return [*_PLOTTED, *optimiser["settings"]]
     return list(_PLOTTED)

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PyQt6 import QtCore
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QMessageBox, QWidget
+from PyQt6.QtWidgets import QLabel, QMessageBox, QWidget
 
 from pytweezer.experiment import (
     Choice,
@@ -30,6 +30,7 @@ from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.saved_parameters import SavedParameter, SavedParameterChange
 from pytweezer.experiment.task import Task, TaskRequest
 from pytweezer.experiments.demo import DemoBayesian, DemoStagedScan, RabiDemo
+from pytweezer.experiments.tweezer_array import FindTrapSites
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
@@ -1423,6 +1424,7 @@ class FakeOptimiserClient:
 
     def set_saved_parameters(self, values, reason, who, *, rid=None, **kwargs):
         self.calls.append(("set_saved_parameters", values, reason, rid))
+        self.set_options = kwargs
         if self.refusal:
             raise ManagerError(self.refusal)
         saved = {parameter.key: parameter for parameter in self.parameters}
@@ -1431,7 +1433,7 @@ class FakeOptimiserClient:
                 time=now(),
                 who=who,
                 key=key,
-                old=saved[key].value,
+                old=saved[key].value if key in saved else None,
                 new=value,
                 reason=reason,
                 rid=rid,
@@ -1439,7 +1441,14 @@ class FakeOptimiserClient:
             for key, value in values.items()
         ]
         for key, value in values.items():
-            saved[key].value = value
+            if key in saved:
+                saved[key].value = value
+            else:
+                self.parameters.append(
+                    SavedParameter(
+                        key=key, value=value, updated_at=now(), updated_by=who
+                    )
+                )
         self.changes = changes + self.changes
         return changes
 
@@ -1465,6 +1474,41 @@ def make_optimisers_panel(schemas=None, tasks=None, files=None, accepted_rids=()
     )
     panel.show()
     return panel
+
+
+FIT = optimiser_schema("FindTrapSites", base={**FindTrapSites.schema(), "module": DEMO})
+FIT_SITES = np.array([[10.0, 10.0], [10.0, 20.0], [20.0, 10.0]])
+
+
+def fit_measurement():
+    return SimpleNamespace(
+        status="completed",
+        constants={
+            "proposed.trap_sites": FIT_SITES + [220, 110],
+            "proposed.trap_threshold": np.float64(120.0),
+            "proposed.trap_window_size": np.int64(5),
+            "proposed.trap_feature_size": np.int64(10),
+            "proposed.trap_geometry": np.zeros((3, 2)),
+        },
+        results={
+            "calibration_image": np.zeros((1, 40, 40)),
+            "roi_sites": FIT_SITES[None],
+        },
+    )
+
+
+def make_fit_panel():
+    panel = make_optimisers_panel(
+        [FIT],
+        [finished_run(42, "completed", "FindTrapSites")],
+        {run_file(42, "FindTrapSites"): fit_measurement()},
+    )
+    panel.select(DEMO, "FindTrapSites")
+    return panel
+
+
+def proposal_texts(panel):
+    return [label.text() for label in panel._proposal_widget.findChildren(QLabel)]
 
 
 def last_run_text(panel, class_name):
@@ -1528,6 +1572,42 @@ def test_run_is_disabled_while_queued_or_running(qapp, status):
     panel.feed.queue_changed.emit({"running": [], "queue": [], "history": [finished]})
     panel.select(DEMO, "DemoStagedScan")
     assert panel.run_button.isEnabled()
+
+
+def test_an_array_proposal_shows_its_shape_and_unit_and_is_accepted_as_a_list(qapp):
+    panel = make_fit_panel()
+    assert "3 × 2 array px" in proposal_texts(panel)
+
+    panel.accept()
+
+    _, values, _, rid = panel.client.calls[-1]
+    assert rid == 42
+    assert values["trap_sites"] == (FIT_SITES + [220, 110]).tolist()
+    assert type(values["trap_window_size"]) is int
+
+
+def test_accept_creates_missing_keys_with_the_optimisers_units_and_group(qapp):
+    panel = make_fit_panel()
+    panel.accept()
+    assert panel.client.set_options == {
+        "create": True,
+        "group": "Tweezer array",
+        "units": FIT["optimiser"]["units"],
+    }
+
+
+def test_a_fit_run_shows_its_image_with_a_square_at_each_site(qapp):
+    panel = make_fit_panel()
+    image, squares = panel._plots.image, panel._plots.squares
+    assert image.image.shape == (40, 40)
+    centres = sorted((point.pos().y(), point.pos().x()) for point in squares.points())
+    assert centres == sorted(map(tuple, FIT_SITES))
+    assert {point.size() for point in squares.points()} == {5}
+
+
+def test_a_fit_plans_one_fit(qapp):
+    panel = make_fit_panel()
+    assert panel.forms[(DEMO, "FindTrapSites")].planned() == "1 fit"
 
 
 def test_accept_writes_only_ticked_rows_with_the_run(qapp):
