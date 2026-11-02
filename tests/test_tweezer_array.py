@@ -488,3 +488,13 @@ def test_tweezer_experiments_offer_counts_and_photon_histograms(rig):
 def test_optimisers_offer_no_default_analyses(rig):
     for cls in (FindTrapSites, OptimiseTweezerImaging, OptimiseMolassesShims):
         assert cls.schema()["analyses"] == []
+
+
+def test_load_tweezers_reports_the_loading_fraction_of_each_shot(rig):
+    measurement = run_local(LoadTweezers, Scan(repetitions=10))
+
+    results = measurement.results
+    np.testing.assert_allclose(
+        results["loading"], results["first_occupied"].mean(axis=1)
+    )
+    assert results["loading"].mean() == pytest.approx(LOADING, abs=0.1)

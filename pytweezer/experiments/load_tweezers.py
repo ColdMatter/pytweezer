@@ -47,7 +47,8 @@ class LoadTweezers(MotMasterExperiment):
     ``trap_sites``, with the ``trap_window_size``, ``trap_feature_size`` and
     occupancy ``threshold`` they are scored with. With them, each point records
     whether each site was occupied in each frame (``first_occupied``,
-    ``second_occupied``: its top-hat filtered photons above the threshold) and,
+    ``second_occupied``: its top-hat filtered photons above the threshold), the
+    fraction of sites occupied in the first frame (``loading``) and,
     with ``save_tweezer_counts``, the sum of the camera's raw pixel values in
     its window (``first_counts``, ``second_counts``). The frames themselves
     (``first_image``, ``second_image``) are recorded only with
@@ -206,6 +207,7 @@ class LoadTweezers(MotMasterExperiment):
             first, second = self.site_photons(frames) > self.trap_threshold
             self.record("first_occupied", first)
             self.record("second_occupied", second)
+            self.record("loading", float(first.mean()))
             if self.save_tweezer_counts:
                 first, second = self.site_counts(frames)
                 self.record("first_counts", first, unit="counts")
