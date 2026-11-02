@@ -9,7 +9,7 @@ from pytweezer.analysis.tweezer_histogram import (
 )
 from pytweezer.experiment import Experiment, ListAxis, Number, Scan, run_local
 from pytweezer.experiments.load_tweezers import LoadTweezers
-from pytweezer.experiments.tweezer_array import TweezerImaging
+from pytweezer.experiments.tweezer_array import MolassesRecapture
 from tests.test_analysis import (
     SITE_CENTRES,
     patterned_frame,
@@ -80,7 +80,7 @@ class PhotonsArray(Experiment):
 def test_a_counts_file_is_histogrammed_in_counts_at_its_recorded_sites(
     rig,  # noqa: F811
 ):
-    measurement = run_local(TweezerImaging, **FAST)
+    measurement = run_local(MolassesRecapture, **FAST)
 
     for image, name in enumerate(["first_counts", "second_counts"]):
         head, values = tweezer_histogram(measurement, HistogramSettings(image=image))
@@ -94,7 +94,7 @@ def test_a_counts_file_is_histogrammed_in_counts_at_its_recorded_sites(
 def test_the_photon_histogram_converts_a_files_counts(rig):  # noqa: F811
     from pytweezer.analysis.analysis import convert_counts_to_photons
 
-    measurement = run_local(TweezerImaging, **FAST)
+    measurement = run_local(MolassesRecapture, **FAST)
 
     head, photons = tweezer_histogram(measurement, HistogramSettings(unit="photons"))
 
@@ -174,7 +174,7 @@ def test_frames_without_the_sites_give_a_header_without_photons():
 
 def test_needed_results_names_only_what_the_source_uses(rig):  # noqa: F811
     assert needed_results(frames_file(Scan())) == ["first_image", "second_image"]
-    assert needed_results(run_local(TweezerImaging, **FAST)) == [
+    assert needed_results(run_local(MolassesRecapture, **FAST)) == [
         "first_counts",
         "second_counts",
     ]
