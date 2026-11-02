@@ -207,6 +207,82 @@ def loading_window(frames, shots=100):
     )
 
 
+def filtered_patterned_frames(n_shots):
+    from pytweezer.analysis import analysis as an
+
+    return [
+        an.morphological_tophat_high_pass(
+            patterned_frame(shot).astype(np.float64), feature_size=10
+        )
+        for shot in range(n_shots)
+    ]
+
+
+def notebook_statistics(frames, sites, threshold):
+    from pytweezer.analysis import analysis as an
+
+    return an.get_array_loading_statistics(
+        frames,
+        sites,
+        threshold=threshold,
+        window_size=5,
+        binning=60,
+        show_histogram=False,
+        threshold_detection=True,
+        verbose=False,
+    )
+
+
+def test_loading_statistics_match_the_notebook_analysis():
+    from pytweezer.analysis.array_loading import (
+        find_sites,
+        loading_statistics,
+        photons_at_sites,
+    )
+
+    frames = filtered_patterned_frames(40)
+    sites = find_sites(np.mean(frames, axis=0), len(SITE_CENTRES), 10)
+    photons = photons_at_sites(frames, sites, window_size=5)
+    head = loading_statistics(photons, sites, fallback_threshold=0.0)
+
+    expected_photons, expected_loading, expected_threshold, expected_fidelity = (
+        notebook_statistics(frames, sites, threshold=0.0)
+    )
+    assert photons == pytest.approx(expected_photons)
+    assert head["threshold"] == pytest.approx(expected_threshold, rel=1e-3)
+    assert head["fidelity"] == pytest.approx(expected_fidelity, rel=1e-3)
+    assert head["site_loading"] == pytest.approx(list(expected_loading))
+
+
+def test_loading_statistics_fall_back_like_the_notebook_analysis(monkeypatch):
+    from pytweezer.analysis import analysis as an
+    from pytweezer.analysis.array_loading import (
+        find_sites,
+        loading_statistics,
+        photons_at_sites,
+    )
+
+    def no_fit(counts):
+        raise ValueError("no fit")
+
+    monkeypatch.setattr(an, "detect_loading_threshold", no_fit)
+    frames = filtered_patterned_frames(40)
+    sites = find_sites(np.mean(frames, axis=0), len(SITE_CENTRES), 10)
+    photons = photons_at_sites(frames, sites, window_size=5)
+    midpoint = float((photons.min() + photons.max()) / 2)
+
+    head = loading_statistics(photons, sites, fallback_threshold=midpoint)
+
+    _, expected_loading, _, expected_fidelity = notebook_statistics(
+        frames, sites, threshold=midpoint
+    )
+    assert head["threshold"] == midpoint
+    assert head["background"] is None
+    assert head["signal"] is None
+    assert head["fidelity"] == pytest.approx(expected_fidelity)
+    assert head["site_loading"] == pytest.approx(list(expected_loading))
+
+
 def test_tweezer_loading_counts_each_site_as_often_as_it_was_full():
     head, photons = loading_window(patterned_frame(shot) for shot in range(40))
 

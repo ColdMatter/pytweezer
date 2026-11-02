@@ -51,10 +51,14 @@ import time
 from collections import deque
 
 import numpy as np
-from scipy.stats import norm
 
 from pytweezer.analysis import analysis as an
 from pytweezer.analysis.analysis_base import ImageAnalysis, run_analysis
+from pytweezer.analysis.array_loading import (
+    find_sites,
+    loading_statistics,
+    photons_at_sites,
+)
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import DataClient, PropertyAttribute
 from pytweezer.servers.device_client import get_device
@@ -63,17 +67,6 @@ LOGGER = get_logger("tweezer_loading")
 
 RIG_REFRESH_S = 10.0
 RIG_TIMEOUT_S = 5.0
-
-
-def find_sites(image, n_sites, step):
-    """``n_sites`` bright spots in ``image`` as ``{index: (row, col)}``, or ``None``."""
-    level = float(image.max())
-    while level >= 1:
-        centres = an.detect_bright_points(image, threshold=level)
-        if len(centres) == n_sites:
-            return {i: (int(row), int(col)) for i, (row, col) in enumerate(centres)}
-        level -= step
-    return None
 
 
 class LoadingStatistics:
@@ -108,51 +101,8 @@ class LoadingStatistics:
         if self.sites is None:
             return head, None
 
-        counts = np.array(
-            [
-                an.sum_pixel_values(frame, self.sites, window_size=window_size)
-                for frame in self.frames
-            ]
-        )
-        photons = an.convert_counts_to_photons(counts).astype(np.float64)
-
-        try:
-            threshold, background, signal = an.detect_loading_threshold(photons.ravel())
-        except (ValueError, TypeError, StopIteration):
-            threshold, background, signal, fidelity = (
-                fallback_threshold,
-                None,
-                None,
-                None,
-            )
-        else:
-            (mu_bg, var_bg, weight_bg), (mu_sig, var_sig, weight_sig) = (
-                background,
-                signal,
-            )
-            false_positive = 1.0 - norm.cdf(threshold, mu_bg, np.sqrt(var_bg))
-            false_negative = norm.cdf(threshold, mu_sig, np.sqrt(var_sig))
-            fidelity = 1.0 - (weight_bg * false_positive + weight_sig * false_negative)
-            fidelity = float(fidelity) if np.isfinite(fidelity) else None
-            background = [float(value) for value in background]
-            signal = [float(value) for value in signal]
-
-        site_loading = (photons > threshold).mean(axis=0)
-        mean_loading = float(site_loading.mean())
-        rows, cols = zip(*(self.sites[i] for i in range(n_sites)), strict=True)
-        head |= {
-            "threshold": float(threshold),
-            "fidelity": fidelity,
-            "loading": mean_loading,
-            "loading_spread": float(site_loading.std() / mean_loading)
-            if mean_loading > 0
-            else None,
-            "site_loading": [float(value) for value in site_loading],
-            "site_rows": list(rows),
-            "site_cols": list(cols),
-            "background": background,
-            "signal": signal,
-        }
+        photons = photons_at_sites(self.frames, self.sites, window_size)
+        head |= loading_statistics(photons, self.sites, fallback_threshold)
         return head, photons
 
 
