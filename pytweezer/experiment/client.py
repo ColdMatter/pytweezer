@@ -18,6 +18,7 @@ import time
 from datetime import datetime
 from typing import Any
 
+import numpy as np
 import zmq
 
 from pytweezer.configuration.config import get_config
@@ -227,12 +228,15 @@ class ExperimentManagerClient:
         create: bool = False,
         group: str = "",
         unit: str = "",
+        units: dict[str, str] | None = None,
         rid: int | None = None,
     ) -> list[SavedParameterChange]:
         reply = self.call(
             "set_saved_parameters",
             values={
-                key: value.item() if hasattr(value, "item") else value
+                key: value.tolist()
+                if isinstance(value, np.ndarray | np.generic)
+                else value
                 for key, value in values.items()
             },
             reason=reason,
@@ -240,6 +244,7 @@ class ExperimentManagerClient:
             create=create,
             group=group,
             unit=unit,
+            units=units,
             rid=rid,
         )
         return [SavedParameterChange.model_validate(c) for c in reply["changes"]]
@@ -439,9 +444,14 @@ def delete_recipe(
 def get_saved_parameters(
     *, client: ExperimentManagerClient | None = None
 ) -> dict[str, Value]:
-    """Every saved parameter's current value, by key."""
+    """Every saved parameter's current value, by key; arrays as ``numpy`` arrays."""
     parameters = (client or ExperimentManagerClient()).saved_parameters()
-    return {parameter.key: parameter.value for parameter in parameters}
+    return {
+        parameter.key: np.asarray(parameter.value, dtype=float)
+        if isinstance(parameter.value, list)
+        else parameter.value
+        for parameter in parameters
+    }
 
 
 def get_saved_parameter(
@@ -472,13 +482,16 @@ def set_saved_parameters(
     create: bool = False,
     group: str = "",
     unit: str = "",
+    units: dict[str, str] | None = None,
     rid: int | None = None,
     client: ExperimentManagerClient | None = None,
 ) -> list[SavedParameterChange]:
     """Set saved parameters for every PC, recording ``reason`` and who set them.
 
     Either every value is set or, if the manager refuses any, none. Unknown keys
-    are refused unless ``create``; ``group`` and ``unit`` apply to created keys.
+    are refused unless ``create``; ``group`` and ``unit`` apply to created keys,
+    and ``units[key]``, if given, replaces ``unit`` for that key. Arrays may be
+    ``numpy`` arrays.
     Returns a change for each value that differs from the stored one or, when
     accepting from run ``rid``, for every key named, so the run is recorded as
     accepted even where its values match those saved.
@@ -490,6 +503,7 @@ def set_saved_parameters(
         create=create,
         group=group,
         unit=unit,
+        units=units,
         rid=rid,
     )
 

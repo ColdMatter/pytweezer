@@ -9,6 +9,7 @@ import math
 import re
 from datetime import datetime
 
+import numpy as np
 from PyQt6 import QtCore, QtGui
 from PyQt6.QtWidgets import (
     QFormLayout,
@@ -45,13 +46,17 @@ _TYPE_WORDS = {
     int: "a whole number",
     float: "a number",
     str: "text",
+    list: "an array",
 }
+_ARRAY_STATUS = "Arrays are set by accepting an optimiser's proposal"
 
 
 def display_value(value: Value) -> str:
-    """``value`` as it is shown and typed: bools as ``true``/``false``."""
+    """``value`` as it is shown and typed: bools as ``true``/``false``, arrays by shape."""
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, list):
+        return " × ".join(map(str, np.shape(value))) + " array"
     return str(value)
 
 
@@ -400,7 +405,11 @@ class SavedParametersPanel(QWidget):
         if self._shown_value is None or self.value_edit.text() == self._shown_value:
             self.value_edit.setText(saved)
         self._shown_value = saved
-        self.apply_button.setEnabled(True)
+        if isinstance(parameter.value, list):
+            self._set_editable(False)
+            self._show_status(_ARRAY_STATUS)
+        else:
+            self.apply_button.setEnabled(True)
 
     def _fetch_history(self):
         key = self._key

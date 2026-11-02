@@ -62,7 +62,9 @@ class ThorCam(Camera):
 
     @requires_camera
     def set_roi(self, x0: int, width: int, y0: int, height: int):
-        self._backend.set_roi(x0, x0 + width, y0, y0 + height)
+        hstart, _, vstart, *_ = self._backend.set_roi(x0, x0 + width, y0, y0 + height)
+        self.roi_origin = (int(hstart), int(vstart))
+        return self.roi_origin
 
     @requires_camera
     def set_trigger_source(self, source: str):

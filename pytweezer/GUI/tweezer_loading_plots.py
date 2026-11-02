@@ -136,9 +136,11 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
         ):
             self.head = None
             self._clear_plots()
-            self.readout.setText(head.get("error") or self._searching(head))
+            self.readout.setText(head.get("error") or "No photons yet")
             return
         self.head = head
+        for plot in (self.site_plot, self.total_plot):
+            plot.setLabel("bottom", head.get("unit", "photons"))
         self._draw_histograms(head, photons)
         self._draw_map()
         self.readout.setText(self._summary(head))
@@ -261,36 +263,26 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
         rid = head.get("rid")
         return f"task {rid}" if rid is not None and rid >= 0 else ""
 
-    @staticmethod
-    def _sites_from(head):
-        return " (from the rig)" if head.get("sites_from") == "rig" else ""
-
-    def _searching(self, head):
-        task = self._task(head)
-        return (
-            f"Looking for {head.get('sites')} trap sites{self._sites_from(head)} in the "
-            f"mean of {head.get('shots')} shots" + (f" of {task}" if task else "")
-        )
-
     def _summary(self, head):
         def percent(value, digits=1):
             return f"{value * 100:.{digits}f} %" if value is not None else "--"
 
+        unit = head.get("unit", "photons")
         parts = [
             f"loading {percent(head['loading'])}",
             f"site spread {percent(head.get('loading_spread'))}",
             f"fidelity {percent(head.get('fidelity'), 3)}",
-            f"threshold {head['threshold']:.1f} photons",
+            f"threshold {head['threshold']:.1f} {unit}",
         ]
         if head.get("background") and head.get("signal"):
             parts.append(
-                f"empty {head['background'][0]:.1f} / full {head['signal'][0]:.1f} photons"
+                f"empty {head['background'][0]:.1f} / full {head['signal'][0]:.1f} {unit}"
             )
         else:
             parts.append("fit failed: fixed threshold")
-        parts.append(
-            f"{head['shots']} shots, {head['sites']} sites{self._sites_from(head)}"
-        )
+        parts.append(f"{head['shots']} shots, {head['sites']} sites")
+        if head.get("sites_match") is False:
+            parts.append("sites fitted to another array than the rig's: refit them")
         if task := self._task(head):
             parts.insert(0, task)
         return "     ".join(parts)

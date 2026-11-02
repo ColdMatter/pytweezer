@@ -23,3 +23,25 @@ def test_plots_show_the_error_of_a_result_without_photons(qapp):
 
     assert plots.readout.text() == "Found no 64 trap sites"
     assert len(plots.site_map.data) == 0
+
+
+def test_plots_warn_when_the_sites_were_fitted_to_another_array(qapp):
+    head, photons = loading_window(patterned_frame(shot) for shot in range(40))
+    plots = TweezerLoadingPlots()
+
+    plots.show_result(head | {"sites_match": False}, photons)
+    assert "fitted to another array" in plots.readout.text()
+
+    plots.show_result(head | {"sites_match": True}, photons)
+    assert "fitted to another array" not in plots.readout.text()
+
+
+def test_plots_label_a_counts_result_in_counts(qapp):
+    head, photons = loading_window(patterned_frame(shot) for shot in range(40))
+    plots = TweezerLoadingPlots()
+
+    plots.show_result(head | {"unit": "counts"}, photons)
+
+    assert "counts" in plots.readout.text()
+    assert "photons" not in plots.readout.text()
+    assert plots.total_plot.getAxis("bottom").labelText == "counts"

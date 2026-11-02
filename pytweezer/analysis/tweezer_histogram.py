@@ -1,12 +1,18 @@
 """The tweezer loading histogram of a measurement file.
 
 The per-file counterpart of the live ``tweezer_loading`` analysis, giving the
-same ``(header, photons)`` pair from what a file recorded:
+same ``(header, values)`` pair from what a file recorded, in the header's
+``unit``:
 
-* ``first_photons``/``second_photons`` per point, with the ``trap_sites`` and
-  ``threshold`` constants (the tweezer-array measurements), or
-* ``first_image``/``second_image`` per point (``LoadTweezers``). The sites are
-  found in the mean of every top-hat filtered first image in the file.
+* ``first_counts``/``second_counts`` per point, each site's summed raw pixel
+  values, with the ``trap_sites`` and ``threshold`` (photons) constants. These
+  are histogrammed in counts, or converted with
+  ``analysis.convert_counts_to_photons`` when ``unit`` is ``"photons"``;
+* ``first_photons``/``second_photons`` per point (files from before raw
+  counts), always in photons; or
+* ``first_image``/``second_image`` per point (``LoadTweezers`` without trap
+  sites), always in photons. The sites are found in the mean of every top-hat
+  filtered first image in the file.
 """
 
 from dataclasses import dataclass
@@ -22,8 +28,10 @@ from pytweezer.analysis.array_loading import (
 from pytweezer.experiment.storage import Measurement
 from pytweezer.experiment.summary import display_value
 
+COUNTS = ("first_counts", "second_counts")
 PHOTONS = ("first_photons", "second_photons")
 FRAMES = ("first_image", "second_image")
+RESULTS = {"counts": COUNTS, "photons": PHOTONS, "frames": FRAMES}
 
 
 @dataclass(frozen=True)
@@ -32,6 +40,8 @@ class HistogramSettings:
 
     Attributes:
         image: 0 for the first image of each shot, 1 for the second.
+        unit: ``"counts"`` or ``"photons"``; a file of recorded counts is
+            histogrammed in this unit, any other file in photons.
         group: Index into :func:`point_groups`; ``None`` for every point.
         sites: Trap sites to find (frames only).
         feature_size: Top-hat filter size in pixels (frames only).
@@ -43,6 +53,7 @@ class HistogramSettings:
     """
 
     image: int = 0
+    unit: str = "counts"
     group: int | None = None
     sites: int = 64
     feature_size: int = 10
@@ -52,8 +63,8 @@ class HistogramSettings:
 
 
 def source(measurement: Measurement) -> str | None:
-    """``"photons"`` or ``"frames"``, by what the file recorded; ``None`` if neither."""
-    for kind, names in (("photons", PHOTONS), ("frames", FRAMES)):
+    """``"counts"``, ``"photons"`` or ``"frames"``, by what the file recorded; ``None`` if none."""
+    for kind, names in RESULTS.items():
         if all(name in measurement.result_shapes for name in names):
             return kind
     return None
@@ -61,7 +72,7 @@ def source(measurement: Measurement) -> str | None:
 
 def needed_results(measurement: Measurement) -> list[str]:
     """The results :func:`tweezer_histogram` reads from this file."""
-    return list({"photons": PHOTONS, "frames": FRAMES}.get(source(measurement), ()))
+    return list(RESULTS.get(source(measurement), ()))
 
 
 def point_groups(measurement: Measurement) -> list[tuple[str, np.ndarray]]:
@@ -89,33 +100,39 @@ def point_groups(measurement: Measurement) -> list[tuple[str, np.ndarray]]:
 def tweezer_histogram(
     measurement: Measurement, settings: HistogramSettings
 ) -> tuple[dict, np.ndarray | None]:
-    """The live analysis's header and ``(shots, sites)`` photons for the selected shots.
+    """The live analysis's header and ``(shots, sites)`` values for the selected shots.
 
-    When there are no shots or the sites cannot be found, the photons are
+    When there are no shots or the sites cannot be found, the values are
     ``None`` and the header's ``"error"`` says why.
 
     Raises:
-        KeyError: If the file recorded neither photons nor frames, or
+        KeyError: If the file recorded no counts, photons or frames, or
             ``measurement`` was loaded without them.
     """
     kind = source(measurement)
     if kind is None:
-        raise KeyError("this file recorded no tweezer images or photons")
+        raise KeyError("this file recorded no tweezer images, counts or photons")
     if settings.group is None:
         mask = np.ones(len(measurement.points["index"]), dtype=bool)
     else:
         mask = point_groups(measurement)[settings.group][1]
-    head = {"shots": 0, "sites": settings.sites, "source": kind}
+    unit = settings.unit if kind == "counts" else "photons"
+    head = {"shots": 0, "sites": settings.sites, "source": kind, "unit": unit}
 
-    if kind == "photons":
-        recorded = np.asarray(measurement.results[PHOTONS[settings.image]], float)
+    if kind in ("counts", "photons"):
+        recorded = np.asarray(measurement.results[RESULTS[kind][settings.image]], float)
         photons = recorded[mask].reshape(-1, recorded.shape[-1])
         sites = {
             i: (int(row), int(col))
             for i, (row, col) in enumerate(measurement.constants["trap_sites"])
         }
-        threshold = measurement.constants.get("threshold", settings.fallback_threshold)
-        fallback_threshold = float(threshold)
+        fallback_threshold = float(
+            measurement.constants.get("threshold", settings.fallback_threshold)
+        )
+        if kind == "counts" and unit == "photons":
+            photons = an.convert_counts_to_photons(photons)
+        elif kind == "counts":
+            fallback_threshold = float(an.convert_photons_to_counts(fallback_threshold))
     else:
         if not mask.any():
             return head | {"error": "No shots in this selection"}, None

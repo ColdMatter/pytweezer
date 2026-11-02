@@ -1,6 +1,7 @@
 """Saved parameters: named calibrated values shared through the Experiment Manager.
 
-A saved parameter is a single float, int, bool or string kept under a key.
+A saved parameter is a single float, int, bool or string, or an array of
+numbers (stored as nested lists of floats), kept under a key.
 :class:`SavedParameterBook` holds the rules for creating and changing them,
 :class:`SavedParameterStore` persists the book as JSON and
 :class:`SavedParameterLog` appends every change to a JSONL file, newest read first.
@@ -11,8 +12,9 @@ import json
 import math
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from pydantic import BaseModel, Field
 
 from pytweezer.experiment.queue import ModelStore, now
@@ -23,7 +25,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-Value = float | int | bool | str
+Value = float | int | bool | str | list[Any]
 
 
 class SavedParameterError(ValueError):
@@ -63,8 +65,11 @@ def _checked(key: str, value: Value, existing: Value | None) -> Value:
     """``value`` as it is to be stored, or :class:`SavedParameterError`.
 
     A key keeps the type of its current value; an int is accepted for a float
-    key and stored as a float.
+    key and stored as a float. An array key also keeps its number of
+    dimensions and every axis length but the first.
     """
+    if isinstance(value, list | tuple | np.ndarray) or isinstance(existing, list):
+        return _checked_array(key, value, existing)
     if isinstance(value, float) and not math.isfinite(value):
         raise SavedParameterError(f"{key!r}: {value} is not a finite number")
     if existing is None:
@@ -81,6 +86,31 @@ def _checked(key: str, value: Value, existing: Value | None) -> Value:
             f"{key!r} holds a {kind.__name__}; {value!r} is a {type(value).__name__}"
         )
     return value
+
+
+def _checked_array(key: str, value: Any, existing: Value | None) -> list:
+    if existing is not None and not isinstance(existing, list):
+        raise SavedParameterError(
+            f"{key!r} holds a {type(existing).__name__}; {value!r} is an array"
+        )
+    try:
+        array = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        raise SavedParameterError(
+            f"{key!r}: {value!r} is not an array of numbers"
+        ) from None
+    if array.ndim == 0:
+        raise SavedParameterError(f"{key!r} holds an array; {value!r} is not one")
+    if not np.isfinite(array).all():
+        raise SavedParameterError(f"{key!r}: the array has non-finite elements")
+    if existing is not None:
+        shape = np.shape(existing)
+        if array.ndim != len(shape) or array.shape[1:] != shape[1:]:
+            raise SavedParameterError(
+                f"{key!r} holds an array of shape {shape}; "
+                f"{array.shape} differs past its first axis"
+            )
+    return array.tolist()
 
 
 class SavedParameterBook:
@@ -115,12 +145,14 @@ class SavedParameterBook:
         create: bool = False,
         group: str = "",
         unit: str = "",
+        units: dict[str, str] | None = None,
         rid: int | None = None,
     ) -> list[SavedParameterChange]:
         """Set every value in ``values`` or, if any is refused, none of them.
 
         Keys that don't exist are refused unless ``create``; ``group`` and
-        ``unit`` apply only to keys created here. Returns a change for each
+        ``unit`` apply only to keys created here, and ``units[key]``, if given,
+        replaces ``unit`` for that key. Returns a change for each
         value that differs from the stored one or, when ``rid`` is given (an
         acceptance from that run), for every key named, unchanged ones with
         ``old == new``. A parameter's ``updated_*`` and ``reason`` change only
@@ -150,7 +182,7 @@ class SavedParameterBook:
                         key=key,
                         value=value,
                         group=group,
-                        unit=unit,
+                        unit=(units or {}).get(key, unit),
                         updated_at=time,
                         updated_by=who,
                         reason=reason,
