@@ -297,9 +297,24 @@ class OptimiseTweezerImaging(BayesianOptimisation, TweezerArrayMeasurement):
         return 0.8 * results["fidelity"]
 
 
-class MolassesRecapture(TweezerArrayMeasurement):
-    """Score the molasses by release and recapture: each point drops the atoms for ``drop_duration`` between images."""
+class OptimiseMolassesShims(BayesianOptimisation, TweezerArrayMeasurement):
+    """Find the molasses shim currents that recapture the most atoms after a drop.
 
+    Each evaluation drops the atoms for ``drop_duration`` between the two
+    images. Below ``loading_floor`` the score is the loading; above it, the
+    floor plus the recapture probability, so every setting that loads the
+    array outscores every one that does not, and among those the coldest wins.
+    """
+
+    objective = "score"
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("shim_x", span=1.0, save_as="tMolassesShimXccValue"),
+        Dimension("shim_y", span=1.0, save_as="tMolassesShimYccValue"),
+        Dimension("shim_z", span=0.25, save_as="tMolassesShimZccValue"),
+    ]
+    n_calls = Integer(50, min=1, group=SEARCH)
+    n_initial = Integer(10, min=1, group=SEARCH)
+    loading_floor = Number(0.5, min=0, max=1, group=SEARCH)
     drop_duration = Integer(
         3, min=0, group="Analysis", tooltip="the script's tDropDuration"
     )
@@ -324,29 +339,6 @@ class MolassesRecapture(TweezerArrayMeasurement):
         return self.score_batch(
             BackgroundDrop=1, tDropDuration=self.drop_duration, **shims
         )
-
-    def run_point(self) -> None:
-        for name, value in self.measure().items():
-            self.record(name, value)
-
-
-class OptimiseMolassesShims(BayesianOptimisation, MolassesRecapture):
-    """Find the molasses shim currents that recapture the most atoms after a drop.
-
-    Below ``loading_floor`` the score is the loading; above it, the floor plus
-    the recapture probability, so every setting that loads the array outscores
-    every one that does not, and among those the coldest wins.
-    """
-
-    objective = "score"
-    dimensions: ClassVar[list[Dimension]] = [
-        Dimension("shim_x", span=1.0, save_as="tMolassesShimXccValue"),
-        Dimension("shim_y", span=1.0, save_as="tMolassesShimYccValue"),
-        Dimension("shim_z", span=0.25, save_as="tMolassesShimZccValue"),
-    ]
-    n_calls = Integer(50, min=1, group=SEARCH)
-    n_initial = Integer(10, min=1, group=SEARCH)
-    loading_floor = Number(0.5, min=0, max=1, group=SEARCH)
 
     def objective_of(self, results: dict[str, float]) -> float:
         if results["loading"] < self.loading_floor:
