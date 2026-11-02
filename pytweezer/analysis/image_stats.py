@@ -44,8 +44,8 @@ class ImageStats(ImageAnalysis):
             "max": float(values.max()),
             "sum": float(values.sum()),
         }
-        if "_imgindex" in head:
-            stats["_imgindex"] = head["_imgindex"]
+        if "index" in head:
+            stats["index"] = head["index"]
         if "timestamp" in head:
             stats["timestamp"] = head["timestamp"]
 

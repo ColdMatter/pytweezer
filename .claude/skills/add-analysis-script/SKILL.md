@@ -114,8 +114,7 @@ reads a shot, counting up from the acquisition start when broadcast live),
 experiment that read it passes one. A change of `rid` is the natural reset for
 anything that accumulates over a task, as `tweezer_loading.py` does. Some
 publishers add `_offset` (pixel origin of a crop within its parent frame) and
-`_imgresolution` (metres per pixel). `_imgindex`, which `data_average.py` and
-`imageselector.py` read, has no current publisher; use `index`.
+`_imgresolution` (metres per pixel).
 
 Saved trap sites (`trap_sites`, fitted by `trap_sites.fit_trap_sites`) are
 full-sensor `(y, x)` pixels; place them in a frame with

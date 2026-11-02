@@ -48,18 +48,13 @@ class DataAverage:
                     if msg != None:
                         msgstr, head, data = msg
                         data = np.copy(data)
-                        # print(head['_imgindex'])
                     else:
                         continue
                 else:
                     continue
-                # print(head['_imgindex'])
-
                 # reset the average when new experiment starts
-                if head["_imgindex"] == 0:
+                if head.get("index") == 0:
                     average = None
-
-                # print('averager:',self._datastreams,'image', head['_imgindex']+1, 'received')
 
                 try:
                     if self._filter == "None":
@@ -89,7 +84,7 @@ class DataAverage:
                     )
                     average = data
 
-                if head["_imgindex"] == n_average - 1:
+                if head.get("index") == n_average - 1:
                     average /= n_average
                     self.dataq.send(head, average, "")
                     self._props.set(

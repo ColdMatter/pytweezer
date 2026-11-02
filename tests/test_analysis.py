@@ -102,7 +102,7 @@ def test_image_stats_publishes_expected_statistics():
     stats_analysis = build(ImageStats)
     frame = np.array([[0, 2], [4, 6]], dtype=np.uint16)
 
-    assert stats_analysis.process({"_imgindex": 3}, frame) is None
+    assert stats_analysis.process({"index": 3}, frame) is None
 
     ((head, data, channel),) = stats_analysis.dataq.sent
     assert data is None
@@ -111,7 +111,45 @@ def test_image_stats_publishes_expected_statistics():
     assert head["sum"] == pytest.approx(12.0)
     assert head["min"] == pytest.approx(0.0)
     assert head["max"] == pytest.approx(6.0)
-    assert head["_imgindex"] == 3
+    assert head["index"] == 3
+
+
+def test_image_selector_passes_only_the_chosen_image_of_each_shot():
+    from pytweezer.analysis.imageselector import ImageSelector
+
+    selector = build(ImageSelector, {"SelectedImage": 1})
+    frame = np.ones((2, 2))
+    assert selector.process({"index": 0}, frame) is None
+    assert selector.process({"index": 1}, frame) == ({"index": 1}, frame)
+    assert selector.process({"timestamp": 1.0}, frame) is None
+
+
+def test_data_average_publishes_the_mean_of_each_shots_frames():
+    from pytweezer.analysis.data_average import DataAverage
+
+    messages = iter(
+        [
+            ("Trace", {"index": 0}, np.array([1.0, 2.0])),
+            ("Trace", {"index": 1}, np.array([3.0, 6.0])),
+            ("Trace", {"timestamp": 1.0}, np.array([9.0, 9.0])),
+        ]
+    )
+
+    def recv():
+        try:
+            return next(messages)
+        except StopIteration:
+            raise _StreamEnded from None
+
+    average = build(DataAverage, {"n_average": 2})
+    average.dataq.has_new_data = lambda: True
+    average.dataq.recv = recv
+    with pytest.raises(_StreamEnded):
+        average.run()
+
+    ((head, data, _),) = average.dataq.sent
+    assert head == {"index": 1}
+    np.testing.assert_array_equal(data, [2.0, 4.0])
 
 
 def test_image_stats_drops_empty_frame():
