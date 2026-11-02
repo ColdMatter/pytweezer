@@ -196,8 +196,8 @@ class OptimiseTweezerImaging(BayesianOptimisation, TweezerImaging):
 
     objective = "score"
     dimensions: ClassVar[list[Dimension]] = [
-        Dimension("imaging_vco", low=0.2, high=4.0, save_as="tImgCoolVCO"),
-        Dimension("imaging_vva", low=0.4, high=2.0, save_as="tImgCoolVVA"),
+        Dimension("imaging_vco", span=0.5, save_as="tImgCoolVCO"),
+        Dimension("imaging_vva", span=0.2, save_as="tImgCoolVVA"),
     ]
     n_initial = Integer(10, min=1)
     fidelity_floor = Number(0.99, min=0, max=1, group="Analysis")
@@ -251,9 +251,9 @@ class OptimiseMolassesShims(BayesianOptimisation, MolassesRecapture):
 
     objective = "score"
     dimensions: ClassVar[list[Dimension]] = [
-        Dimension("shim_x", low=5.0, high=10.0, save_as="tMolassesShimXccValue"),
-        Dimension("shim_y", low=0.0, high=5.0, save_as="tMolassesShimYccValue"),
-        Dimension("shim_z", low=0.0, high=1.0, save_as="tMolassesShimZccValue"),
+        Dimension("shim_x", span=1.0, save_as="tMolassesShimXccValue"),
+        Dimension("shim_y", span=1.0, save_as="tMolassesShimYccValue"),
+        Dimension("shim_z", span=0.25, save_as="tMolassesShimZccValue"),
     ]
     n_calls = Integer(50, min=1)
     n_initial = Integer(10, min=1)

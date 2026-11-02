@@ -24,6 +24,7 @@ import numpy as np
 import skopt
 
 from pytweezer.experiment.arguments import Argument, Integer, Number, collect
+from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.experiment.scan import Point, Scan
 
 
@@ -44,16 +45,19 @@ class Stage:
 
 @dataclass(frozen=True)
 class Dimension:
-    """One setting searched by a :class:`BayesianOptimisation` between ``low`` and ``high``.
+    """One setting searched by a :class:`BayesianOptimisation`.
 
-    Its best value is proposed for the saved parameter ``save_as``.
+    It is searched between ``low`` and ``high`` or, given ``span`` instead,
+    within ``span`` of the value ``save_as`` holds when the run starts. Its best
+    value is proposed for the saved parameter ``save_as``.
     """
 
     setting: str
     _: KW_ONLY
-    low: float
-    high: float
     save_as: str
+    low: float | None = None
+    high: float | None = None
+    span: float | None = None
 
 
 class Optimiser:
@@ -288,8 +292,8 @@ class StagedScan(Optimiser):
 class BayesianOptimisation(Optimiser):
     """Searches every :class:`Dimension` at once with a Gaussian-process model.
 
-    Each dimension adds the arguments ``<setting>_low`` and ``<setting>_high``.
-    The run makes ``n_calls`` evaluations, the first ``n_initial`` of them at
+    Each dimension adds the arguments ``<setting>_low`` and ``<setting>_high``,
+    or ``<setting>_span`` if it declares a span. The run makes ``n_calls`` evaluations, the first ``n_initial`` of them at
     random settings. Each point asks a ``skopt.Optimizer`` (expected
     improvement) for settings, calls ``measure()`` and tells it the objective.
     The exploration parameter ``xi`` falls geometrically from ``xi_start`` to
@@ -299,7 +303,8 @@ class BayesianOptimisation(Optimiser):
     Each point records every setting by name, ``objective``, the ``xi`` its
     settings were chosen with, and every result of ``measure()``, so
     ``measure()`` must not return a result named after a setting, ``objective``
-    or ``xi``. :meth:`finish` records ``evaluations_done`` and ``evaluations_total`` and,
+    or ``xi``. :meth:`prepare` records each setting's ``search_bounds``.
+    :meth:`finish` records ``evaluations_done`` and ``evaluations_total`` and,
     after at least one evaluation, ``proposed.<key>`` for each dimension from
     :meth:`best`.
     """
@@ -326,6 +331,23 @@ class BayesianOptimisation(Optimiser):
         """
         super().check_declarations()
         for dimension in cls.declarations():
+            if dimension.span is not None:
+                if dimension.low is not None or dimension.high is not None:
+                    raise TypeError(
+                        f"{cls.__name__}: dimension {dimension.setting!r} gives "
+                        "both a span and low/high; give one or the other"
+                    )
+                if not dimension.span > 0:
+                    raise TypeError(
+                        f"{cls.__name__}: dimension {dimension.setting!r} has "
+                        f"span {dimension.span}; it must be positive"
+                    )
+                continue
+            if dimension.low is None or dimension.high is None:
+                raise TypeError(
+                    f"{cls.__name__}: dimension {dimension.setting!r} needs "
+                    "low and high, or a span"
+                )
             if not dimension.low < dimension.high:
                 raise TypeError(
                     f"{cls.__name__}: dimension {dimension.setting!r} has low "
@@ -336,9 +358,47 @@ class BayesianOptimisation(Optimiser):
     def generated_arguments(cls) -> dict[str, Argument]:
         arguments: dict[str, Argument] = {}
         for dimension in cls.declarations():
-            arguments[f"{dimension.setting}_low"] = Number(dimension.low)
-            arguments[f"{dimension.setting}_high"] = Number(dimension.high)
+            if dimension.span is not None:
+                arguments[f"{dimension.setting}_span"] = Number(
+                    dimension.span,
+                    min=0,
+                    tooltip=f"searched within this of the saved {dimension.save_as}",
+                )
+            else:
+                arguments[f"{dimension.setting}_low"] = Number(dimension.low)
+                arguments[f"{dimension.setting}_high"] = Number(dimension.high)
         return arguments
+
+    def search_bounds(self) -> dict[str, tuple[float, float]]:
+        """``(low, high)`` of each setting for this run, by setting.
+
+        Raises:
+            ValueError: If a span is not positive.
+            KeyError: If a spanned setting's saved parameter does not exist.
+        """
+        spanned = [d for d in self.dimensions if d.span is not None]
+        saved = get_saved_parameters() if spanned else {}
+        bounds = {}
+        for dimension in self.dimensions:
+            if dimension.span is None:
+                bounds[dimension.setting] = (
+                    getattr(self, f"{dimension.setting}_low"),
+                    getattr(self, f"{dimension.setting}_high"),
+                )
+                continue
+            span = getattr(self, f"{dimension.setting}_span")
+            if not span > 0:
+                raise ValueError(
+                    f"{dimension.setting}_span is {span}; it must be positive"
+                )
+            if dimension.save_as not in saved:
+                raise KeyError(
+                    f"{dimension.setting} is searched around saved parameter "
+                    f"{dimension.save_as!r}, which does not exist"
+                )
+            centre = float(saved[dimension.save_as])
+            bounds[dimension.setting] = (centre - span, centre + span)
+        return bounds
 
     def number_of_points(self) -> int:
         return self.n_calls
@@ -346,14 +406,10 @@ class BayesianOptimisation(Optimiser):
     def prepare(self) -> None:
         self._evaluations: list[tuple[list[float], float]] = []
         self._told: list[float] = []
+        bounds = self.search_bounds()
+        self.record("search_bounds", {s: list(b) for s, b in bounds.items()})
         self._optimizer = skopt.Optimizer(
-            dimensions=[
-                (
-                    getattr(self, f"{dimension.setting}_low"),
-                    getattr(self, f"{dimension.setting}_high"),
-                )
-                for dimension in self.dimensions
-            ],
+            dimensions=[bounds[dimension.setting] for dimension in self.dimensions],
             base_estimator="GP",
             acq_func="EI",
             n_initial_points=self.n_initial,

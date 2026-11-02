@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
-from pytweezer.experiment import run_local
+from pytweezer.experiment import optimisers, run_local
 from pytweezer.experiments import tweezer_array
 from pytweezer.experiments.tweezer_array import (
     SAVED_SEQUENCE_PARAMETERS,
@@ -87,6 +87,7 @@ def rig(monkeypatch):
         lambda name, timeout: devices[name],
     )
     monkeypatch.setattr(tweezer_array, "get_saved_parameters", lambda: SAVED)
+    monkeypatch.setattr(optimisers, "get_saved_parameters", lambda: SAVED)
     return sequencer
 
 

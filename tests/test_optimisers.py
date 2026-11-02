@@ -1,6 +1,7 @@
 import math
 from typing import ClassVar
 
+import numpy as np
 import pytest
 import skopt
 
@@ -11,6 +12,7 @@ from pytweezer.experiment import (
     Scan,
     TaskStatus,
     load_measurement,
+    optimisers,
     run_local,
 )
 from pytweezer.experiment.client import _resolve, recipes, save_recipe
@@ -165,6 +167,23 @@ def test_bayesian_proposes_the_best_measured_point():
     assert m.constants["proposed.demo_power"] == m.results["power"][best]
 
 
+class AroundSavedResonance(DemoBayesian):
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("detuning", span=0.5, save_as="demo_resonance"),
+        Dimension("power", low=0.1, high=1.0, save_as="demo_power"),
+    ]
+
+
+def test_a_spanned_dimension_searches_only_around_its_saved_value(monkeypatch):
+    monkeypatch.setattr(
+        optimisers, "get_saved_parameters", lambda: {"demo_resonance": 2.0}
+    )
+    m = run_local(AroundSavedResonance, n_calls=8, n_initial=4, detuning_span=0.25)
+    assert m.status == "completed", m.attrs["error"]
+    assert np.all(np.abs(m.results["detuning"] - 2.0) <= 0.25)
+    assert list(m.constants["search_bounds"]["detuning"]) == [1.75, 2.25]
+
+
 class LowestCounts(DemoBayesian):
     goal = "min"
 
@@ -296,8 +315,20 @@ def _bayesian(dimensions):
             lambda: _bayesian([Dimension("detuning", low=1, high=1, save_as="a")]),
             "detuning",
         ),
+        (
+            lambda: _bayesian(
+                [Dimension("detuning", low=0, high=1, span=0.5, save_as="a")]
+            ),
+            "both a span and low/high",
+        ),
     ],
-    ids=["duplicate setting", "duplicate save_as", "unknown goal", "empty range"],
+    ids=[
+        "duplicate setting",
+        "duplicate save_as",
+        "unknown goal",
+        "empty range",
+        "span and range",
+    ],
 )
 def test_a_bad_declaration_is_refused_when_the_class_is_defined(define, message):
     with pytest.raises(TypeError, match=message):

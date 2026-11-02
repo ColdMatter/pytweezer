@@ -236,9 +236,9 @@ experiment* to propose saved-parameter values. The measurement provides
 `measure(**settings) -> dict[str, float]`; put the mixin first:
 
 ```python
-class FindResonance(StagedScan, Resonance):        # or BayesianOptimisation
-    objective = "counts"                           # a key of measure()'s results
-    goal = "max"                                   # or "min"
+class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
+    objective = "counts"  # a key of measure()'s results
+    goal = "max"  # or "min"
     stages: ClassVar[list[Stage]] = [
         Stage("detuning", start=-5.0, stop=5.0, points=21, save_as="resonance"),
     ]
@@ -247,8 +247,12 @@ class FindResonance(StagedScan, Resonance):        # or BayesianOptimisation
 
 - Each `Stage` generates `<setting>_start/_stop/_points` arguments (each
   `Dimension` `<setting>_low/_high`); declare one of those names yourself to
-  override it. Duplicate settings or `save_as`, a bad `goal` or `low >= high`
-  raise `TypeError` when the class is defined.
+  override it. `Dimension(..., span=0.5, save_as=...)` instead searches its
+  `save_as` value at the start of the run ± `<setting>_span`; every run
+  records its `search_bounds`. Duplicate settings or `save_as`, a bad `goal`,
+  `low >= high` or a span with bounds raise `TypeError` when the class is
+  defined. `tweezer_array.py` holds the Rb array optimisers (imaging, molasses
+  shims).
 - Override `objective_of(results)` for an objective computed from several
   results, and `best(settings, objectives)` to choose differently; in a
   `StagedScan`, `self.stage` is the `Stage` being chosen for.
