@@ -273,7 +273,7 @@ def test_dropdown_offers_plot_against_then_the_files_analyses(qapp, tmp_path):
     panel.select_path(histogram)
     assert analysis_items(panel) == [
         ("Plot against", True),
-        ("Tweezer loading histogram", True),
+        ("Tweezer loading histogram (counts)", True),
     ]
     panel.select_path(plain)
     assert analysis_items(panel) == [("Plot against", True)]
@@ -297,7 +297,7 @@ def test_analyses_are_disabled_while_the_measurement_runs(qapp, tmp_path):
 
     panel.select_path(path)
 
-    assert analysis_items(panel)[1] == ("Tweezer loading histogram", False)
+    assert analysis_items(panel)[1] == ("Tweezer loading histogram (counts)", False)
 
 
 def test_choosing_an_analysis_shows_its_view(qapp, tmp_path):
@@ -324,4 +324,4 @@ def test_the_choice_is_kept_for_the_next_file_of_the_same_class(qapp, tmp_path):
     panel.select_path(plain)
     assert panel.analysis_choice.currentText() == "Plot against"
     panel.select_path(second)
-    assert panel.analysis_choice.currentText() == "Tweezer loading histogram"
+    assert panel.analysis_choice.currentText() == "Tweezer loading histogram (counts)"

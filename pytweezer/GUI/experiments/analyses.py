@@ -57,12 +57,13 @@ class AnalysisView(QWidget):
 
 
 class TweezerHistogramView(AnalysisView):
-    """The tweezer loading histogram of a file, as the live viewer draws it."""
+    """The tweezer loading histogram of a file, as the live viewer draws it, in ``unit``."""
 
     _result_ready = QtCore.pyqtSignal(int, object)
 
-    def __init__(self, parent=None):
+    def __init__(self, unit="counts", parent=None):
         super().__init__(parent)
+        self.unit = unit
         self._archive = self._clone = None
         self._path = self._measurement = None
         #: The last file loaded with its results, so changing a control doesn't reload.
@@ -159,7 +160,9 @@ class TweezerHistogramView(AnalysisView):
         if kind is None:
             self._generation += 1
             self.plots.show_message("")
-            self.message.setText("This file recorded no tweezer images or photons.")
+            self.message.setText(
+                "This file recorded no tweezer images, counts or photons."
+            )
             return
         self._recompute()
 
@@ -167,6 +170,7 @@ class TweezerHistogramView(AnalysisView):
         group = self.shots_from.currentIndex() - 1
         return HistogramSettings(
             image=self.image.currentIndex(),
+            unit=self.unit,
             group=None if group < 0 else group,
             sites=self.sites.value(),
             feature_size=self.feature_size.value(),
@@ -232,6 +236,11 @@ class AnalysisEntry:
 
 ANALYSES: dict[str, AnalysisEntry] = {
     "tweezer_histogram": AnalysisEntry(
-        "Tweezer loading histogram", TweezerHistogramView
+        "Tweezer loading histogram (counts)",
+        lambda: TweezerHistogramView(unit="counts"),
+    ),
+    "tweezer_photon_histogram": AnalysisEntry(
+        "Tweezer loading histogram (photons)",
+        lambda: TweezerHistogramView(unit="photons"),
     ),
 }

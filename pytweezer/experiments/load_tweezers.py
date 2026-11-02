@@ -46,14 +46,16 @@ class LoadTweezers(MotMasterExperiment):
     :meth:`saved_trap_sites`) and records them in this ROI's pixels as
     ``trap_sites``, with the ``trap_window_size``, ``trap_feature_size`` and
     occupancy ``threshold`` they are scored with. With them, each point records
-    every site's photons in each frame (``first_photons``, ``second_photons``)
-    and whether it was occupied (``first_occupied``, ``second_occupied``). The
-    frames themselves (``first_image``, ``second_image``) are recorded only with
+    whether each site was occupied in each frame (``first_occupied``,
+    ``second_occupied``: its top-hat filtered photons above the threshold) and,
+    with ``save_tweezer_counts``, the sum of the camera's raw pixel values in
+    its window (``first_counts``, ``second_counts``). The frames themselves
+    (``first_image``, ``second_image``) are recorded only with
     ``save_raw_images``, which needs no sites.
     """
 
     rb = MotMaster("Rb MotMaster", script="RbTweezerBasic2026_2")
-    analyses = ("tweezer_histogram",)
+    analyses = ("tweezer_histogram", "tweezer_photon_histogram")
 
     camera: ImagEMX2Camera = Device("Rb HamCam")
     rig: Rearrangement = Device("Rb Rearrangement Rig")
@@ -67,7 +69,13 @@ class LoadTweezers(MotMasterExperiment):
         True,
         group="Camera",
         tooltip="record the camera frames; without them only each site's "
-        "photons and occupancy are kept",
+        "occupancy and counts are kept",
+    )
+    save_tweezer_counts = Bool(
+        True,
+        group="Camera",
+        tooltip="record the sum of the raw pixel values in each site's window, "
+        "beside its occupancy",
     )
 
     def prepare(self) -> None:
@@ -170,6 +178,19 @@ class LoadTweezers(MotMasterExperiment):
         ]
         return photons_at_sites(filtered, self.trap_sites, self.trap_window_size)
 
+    def site_counts(self, frames) -> np.ndarray:
+        """Every site's summed raw pixel values in each of ``frames``: ``(frames, sites)``."""
+        return np.array(
+            [
+                an.sum_pixel_values(
+                    np.asarray(frame),
+                    self.trap_sites,
+                    window_size=self.trap_window_size,
+                )
+                for frame in frames
+            ]
+        )
+
     def run_point(self):
         first_image, second_image = self.shot()
         if self.save_raw_images:
@@ -181,11 +202,14 @@ class LoadTweezers(MotMasterExperiment):
             unit="counts",
         )
         if self.trap_sites is not None:
-            first, second = self.site_photons([first_image, second_image])
-            self.record("first_photons", first, unit="photons")
-            self.record("second_photons", second, unit="photons")
-            self.record("first_occupied", first > self.trap_threshold)
-            self.record("second_occupied", second > self.trap_threshold)
+            frames = [first_image, second_image]
+            first, second = self.site_photons(frames) > self.trap_threshold
+            self.record("first_occupied", first)
+            self.record("second_occupied", second)
+            if self.save_tweezer_counts:
+                first, second = self.site_counts(frames)
+                self.record("first_counts", first, unit="counts")
+                self.record("second_counts", second, unit="counts")
 
     def finish(self) -> None:
         self.camera.stop_acquisition()

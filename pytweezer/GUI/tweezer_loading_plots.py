@@ -139,6 +139,8 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
             self.readout.setText(head.get("error") or "No photons yet")
             return
         self.head = head
+        for plot in (self.site_plot, self.total_plot):
+            plot.setLabel("bottom", head.get("unit", "photons"))
         self._draw_histograms(head, photons)
         self._draw_map()
         self.readout.setText(self._summary(head))
@@ -265,15 +267,16 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
         def percent(value, digits=1):
             return f"{value * 100:.{digits}f} %" if value is not None else "--"
 
+        unit = head.get("unit", "photons")
         parts = [
             f"loading {percent(head['loading'])}",
             f"site spread {percent(head.get('loading_spread'))}",
             f"fidelity {percent(head.get('fidelity'), 3)}",
-            f"threshold {head['threshold']:.1f} photons",
+            f"threshold {head['threshold']:.1f} {unit}",
         ]
         if head.get("background") and head.get("signal"):
             parts.append(
-                f"empty {head['background'][0]:.1f} / full {head['signal'][0]:.1f} photons"
+                f"empty {head['background'][0]:.1f} / full {head['signal'][0]:.1f} {unit}"
             )
         else:
             parts.append("fit failed: fixed threshold")

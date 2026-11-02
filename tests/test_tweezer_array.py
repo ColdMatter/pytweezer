@@ -5,7 +5,7 @@ from pytweezer.analysis import analysis as an
 from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
-from pytweezer.experiment import optimisers, run_local
+from pytweezer.experiment import Scan, optimisers, run_local
 from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiments import load_tweezers, tweezer_array
 from pytweezer.experiments.load_tweezers import LoadTweezers
@@ -343,35 +343,63 @@ def test_the_molasses_score_counts_recapture_only_once_the_array_loads(
     assert results["objective"][0] == pytest.approx(score[expected])
 
 
+def window_sums(frames, window_size=5):
+    """Each frame's summed pixel values in a window at every site, ``(frames, sites)``."""
+    half = window_size // 2
+    return np.array(
+        [
+            [
+                frame[y - half : y + half + 1, x - half : x + half + 1].sum()
+                for y, x in SITES
+            ]
+            for frame in frames
+        ]
+    )
+
+
 @pytest.mark.parametrize("cls", [TweezerImaging, MolassesRecapture])
-def test_each_point_records_every_shots_photons_at_every_site(rig, cls):
+def test_each_point_records_every_shots_counts_and_occupancy_at_every_site(rig, cls):
     measurement = run_local(cls, **FAST)
 
-    first = measurement.results["first_photons"]
-    assert first.shape == (1, FAST["shots"], len(SITES))
-    assert measurement.results["second_photons"].shape == first.shape
-    loaded = first[0] > measurement.constants["threshold"]
-    assert loaded.mean() == pytest.approx(measurement.results["loading"][0], abs=0.05)
+    counts = measurement.results["first_counts"]
+    assert counts.shape == (1, FAST["shots"], len(SITES))
+    assert measurement.results["second_counts"].shape == counts.shape
+    occupied = measurement.results["first_occupied"]
+    assert occupied.shape == counts.shape
+    assert occupied.mean() == pytest.approx(LOADING, abs=0.1)
 
 
-def test_an_optimiser_records_the_photons_of_each_evaluation(rig):
+def test_a_measurements_counts_are_the_raw_pixel_sums_of_its_frames(rig):
+    measurement = run_local(TweezerImaging, **FAST, save_raw_images=True)
+
+    for name in ("first", "second"):
+        np.testing.assert_array_equal(
+            measurement.results[f"{name}_counts"][0],
+            window_sums(measurement.results[f"{name}_images"][0]),
+        )
+
+
+def test_an_optimiser_records_the_counts_of_each_evaluation(rig):
     measurement = run_local(OptimiseTweezerImaging, **FAST, n_calls=2, n_initial=2)
 
-    assert measurement.results["first_photons"].shape == (2, FAST["shots"], len(SITES))
+    assert measurement.results["first_counts"].shape == (2, FAST["shots"], len(SITES))
 
 
-def test_load_tweezers_records_each_sites_photons_and_occupancy(rig):
-    measurement = run_local(LoadTweezers)
+def test_load_tweezers_records_each_sites_raw_counts_and_occupancy(rig):
+    measurement = run_local(LoadTweezers, Scan(repetitions=10))
 
     assert measurement.status == "completed", measurement.attrs.get("error")
-    photons = measurement.results["first_photons"][0]
-    assert photons.shape == (len(SITES),)
-    np.testing.assert_array_equal(
-        measurement.results["first_occupied"][0], photons > SAVED["trap_threshold"]
+    results = measurement.results
+    for name in ("first", "second"):
+        np.testing.assert_array_equal(
+            results[f"{name}_counts"], window_sums(results[f"{name}_image"])
+        )
+    assert results["first_occupied"].shape == (10, len(SITES))
+    assert results["first_occupied"].mean() == pytest.approx(LOADING, abs=0.1)
+    assert results["second_occupied"].mean() == pytest.approx(
+        LOADING * SURVIVAL, abs=0.1
     )
-    assert measurement.results["second_occupied"].shape == (1, len(SITES))
     np.testing.assert_array_equal(measurement.constants["trap_sites"], SITES)
-    assert "first_image" in measurement.results
 
 
 def test_load_tweezers_without_raw_images_records_no_frames(rig):
@@ -389,7 +417,7 @@ def test_load_tweezers_without_saved_sites_records_frames_only(rig):
 
     assert measurement.status == "completed", measurement.attrs.get("error")
     assert "first_image" in measurement.results
-    assert "first_photons" not in measurement.results
+    assert "first_counts" not in measurement.results
     assert "trap_sites" not in measurement.constants
 
 
@@ -417,11 +445,7 @@ def test_a_measurement_records_occupancy_and_frames_only_when_asked(
 ):
     measurement = run_local(TweezerImaging, **FAST, save_raw_images=save_raw_images)
 
-    occupied = measurement.results["first_occupied"]
-    assert occupied.shape == (1, FAST["shots"], len(SITES))
-    np.testing.assert_array_equal(
-        occupied, measurement.results["first_photons"] > SAVED["trap_threshold"]
-    )
+    assert measurement.results["first_occupied"].shape == (1, FAST["shots"], len(SITES))
     assert ("first_images" in measurement.results) == save_raw_images
     if save_raw_images:
         assert measurement.results["first_images"].shape == (1, FAST["shots"], 128, 128)
@@ -433,3 +457,34 @@ def test_sites_are_placed_in_the_roi_the_camera_actually_used(rig):
     np.testing.assert_array_equal(
         measurement.constants["trap_sites"], np.array(SITES) + [0, 2]
     )
+
+
+def test_load_tweezers_without_tweezer_counts_records_only_occupancy(rig):
+    measurement = run_local(LoadTweezers, save_tweezer_counts=False)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert "first_counts" not in measurement.results
+    assert "second_counts" not in measurement.results
+    assert measurement.results["first_occupied"].shape == (1, len(SITES))
+
+
+def test_a_measurement_without_tweezer_counts_still_scores_its_batches(rig):
+    measurement = run_local(TweezerImaging, **FAST, save_tweezer_counts=False)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert "first_counts" not in measurement.results
+    assert measurement.results["first_occupied"].shape == (1, FAST["shots"], len(SITES))
+    assert measurement.results["loading"][0] == pytest.approx(LOADING, abs=0.1)
+
+
+def test_tweezer_experiments_offer_counts_and_photon_histograms(rig):
+    for cls in (LoadTweezers, TweezerImaging, MolassesRecapture):
+        assert cls.schema()["analyses"] == [
+            "tweezer_histogram",
+            "tweezer_photon_histogram",
+        ]
+
+
+def test_optimisers_offer_no_default_analyses(rig):
+    for cls in (FindTrapSites, OptimiseTweezerImaging, OptimiseMolassesShims):
+        assert cls.schema()["analyses"] == []

@@ -117,7 +117,6 @@ class FindTrapSites(Fit, TweezerArrayShots):
     to use.
     """
 
-    analyses = ()
     proposal_units: ClassVar[dict[str, str]] = {
         "trap_sites": "px",
         "trap_threshold": "photons",
@@ -220,10 +219,15 @@ class TweezerArrayMeasurement(TweezerArrayShots):
     def score_batch(self, **sequence) -> dict[str, float]:
         """Loading, survival from the first image to the second, and fidelity, over ``shots`` shots.
 
-        Also records every shot's photons at every site of each image, as
-        ``first_photons`` and ``second_photons``.
+        Also records whether every site was occupied in each shot's images, as
+        ``first_occupied`` and ``second_occupied`` and, with
+        ``save_tweezer_counts``, their raw pixel sums as ``first_counts`` and
+        ``second_counts``.
         """
         firsts, seconds = self._batch(self.shots, **sequence)
+        if self.save_tweezer_counts:
+            self.record("first_counts", self.site_counts(firsts), unit="counts")
+            self.record("second_counts", self.site_counts(seconds), unit="counts")
         firsts = self._filtered(firsts, self.trap_feature_size)
         seconds = self._filtered(seconds, self.trap_feature_size)
         # Loading is judged against a threshold refitted on this batch (the
@@ -250,8 +254,6 @@ class TweezerArrayMeasurement(TweezerArrayShots):
         second_photons = photons_at_sites(
             seconds, self.trap_sites, self.trap_window_size
         )
-        self.record("first_photons", first_photons, unit="photons")
-        self.record("second_photons", second_photons, unit="photons")
         self.record("first_occupied", np.asarray(first_photons) > self.threshold)
         self.record("second_occupied", second_photons > self.threshold)
         return {

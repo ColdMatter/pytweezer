@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from pytweezer.analysis.tweezer_histogram import (
@@ -63,25 +64,64 @@ def test_frames_second_image_is_scored_at_the_first_images_sites():
     )
 
 
-def test_photons_file_uses_the_recorded_sites_and_photons(rig):  # noqa: F811
+class PhotonsArray(Experiment):
+    """Records per-site photons, as tweezer experiments did before raw counts."""
+
+    def prepare(self):
+        self.record("trap_sites", np.array(SITE_CENTRES))
+        self.record("threshold", 50.0, unit="photons")
+
+    def run_point(self):
+        rng = np.random.default_rng(self.point.index)
+        self.record("first_photons", rng.normal(100, 10, (5, len(SITE_CENTRES))))
+        self.record("second_photons", rng.normal(10, 3, (5, len(SITE_CENTRES))))
+
+
+def test_a_counts_file_is_histogrammed_in_counts_at_its_recorded_sites(
+    rig,  # noqa: F811
+):
     measurement = run_local(TweezerImaging, **FAST)
 
-    for image, name in enumerate(["first_photons", "second_photons"]):
-        head, photons = tweezer_histogram(measurement, HistogramSettings(image=image))
-        assert head["source"] == "photons"
-        assert photons == pytest.approx(measurement.results[name][0])
+    for image, name in enumerate(["first_counts", "second_counts"]):
+        head, values = tweezer_histogram(measurement, HistogramSettings(image=image))
+        assert (head["source"], head["unit"]) == ("counts", "counts")
+        assert values == pytest.approx(measurement.results[name][0])
         sites = measurement.constants["trap_sites"]
         assert head["site_rows"] == list(sites[:, 0])
         assert head["site_cols"] == list(sites[:, 1])
 
 
+def test_the_photon_histogram_converts_a_files_counts(rig):  # noqa: F811
+    from pytweezer.analysis.analysis import convert_counts_to_photons
+
+    measurement = run_local(TweezerImaging, **FAST)
+
+    head, photons = tweezer_histogram(measurement, HistogramSettings(unit="photons"))
+
+    assert head["unit"] == "photons"
+    expected = convert_counts_to_photons(measurement.results["first_counts"][0])
+    assert photons == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("unit", ["counts", "photons"])
+def test_a_file_from_before_raw_counts_shows_its_photons(unit):
+    measurement = run_local(PhotonsArray, Scan(repetitions=2))
+
+    head, photons = tweezer_histogram(measurement, HistogramSettings(unit=unit))
+
+    assert (head["source"], head["unit"]) == ("photons", "photons")
+    assert photons == pytest.approx(
+        measurement.results["first_photons"].reshape(-1, len(SITE_CENTRES))
+    )
+
+
 def test_a_load_tweezers_file_is_scored_at_its_recorded_sites(rig):  # noqa: F811
     measurement = run_local(LoadTweezers, Scan(repetitions=3))
 
-    head, photons = tweezer_histogram(measurement, HistogramSettings())
+    head, counts = tweezer_histogram(measurement, HistogramSettings())
 
-    assert head["source"] == "photons"
-    assert photons == pytest.approx(measurement.results["first_photons"])
+    assert head["source"] == "counts"
+    assert counts == pytest.approx(measurement.results["first_counts"])
     sites = measurement.constants["trap_sites"]
     assert head["site_rows"] == list(sites[:, 0])
 
@@ -135,6 +175,6 @@ def test_frames_without_the_sites_give_a_header_without_photons():
 def test_needed_results_names_only_what_the_source_uses(rig):  # noqa: F811
     assert needed_results(frames_file(Scan())) == ["first_image", "second_image"]
     assert needed_results(run_local(TweezerImaging, **FAST)) == [
-        "first_photons",
-        "second_photons",
+        "first_counts",
+        "second_counts",
     ]

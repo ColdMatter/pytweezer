@@ -34,3 +34,14 @@ def test_plots_warn_when_the_sites_were_fitted_to_another_array(qapp):
 
     plots.show_result(head | {"sites_match": True}, photons)
     assert "fitted to another array" not in plots.readout.text()
+
+
+def test_plots_label_a_counts_result_in_counts(qapp):
+    head, photons = loading_window(patterned_frame(shot) for shot in range(40))
+    plots = TweezerLoadingPlots()
+
+    plots.show_result(head | {"unit": "counts"}, photons)
+
+    assert "counts" in plots.readout.text()
+    assert "photons" not in plots.readout.text()
+    assert plots.total_plot.getAxis("bottom").labelText == "counts"

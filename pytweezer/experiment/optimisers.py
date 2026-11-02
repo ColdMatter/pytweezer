@@ -77,6 +77,8 @@ class Optimiser:
     objective: str
     goal: str = "max"
     kind: str = ""
+    #: An optimiser's run is analysed in the Optimisers tab, not the Results tab.
+    analyses: ClassVar[tuple[str, ...]] = ()
     #: Unit of each proposed saved parameter, by key; "" when not listed.
     proposal_units: ClassVar[dict[str, str]] = {}
     #: Group a proposed saved parameter is created in when first accepted.
