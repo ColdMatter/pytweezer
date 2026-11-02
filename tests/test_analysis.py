@@ -56,6 +56,42 @@ def build(cls, props=None):
 
 
 # --------------------------------------------------------------------------- #
+# analysis_base
+# --------------------------------------------------------------------------- #
+
+
+class _StreamEnded(Exception):
+    pass
+
+
+def test_data_analysis_handles_header_only_messages():
+    """Scalar streams (e.g. ImageStats' output) carry a header and no array."""
+    from pytweezer.analysis.analysis_base import DataAnalysis
+
+    class Echo(DataAnalysis):
+        def process(self, head, data):
+            return head, data
+
+    messages = iter([("Stats", {"mean": 3.0}), ("Trace", {"n": 2}, np.arange(2))])
+
+    def recv():
+        try:
+            return next(messages)
+        except StopIteration:
+            raise _StreamEnded from None
+
+    analysis = build(Echo)
+    analysis.client.recv = recv
+    with pytest.raises(_StreamEnded):
+        analysis.run()
+
+    (scalar_head, scalar_data, _), (trace_head, trace_data, _) = analysis.client.sent
+    assert (scalar_head, scalar_data) == ({"mean": 3.0}, None)
+    assert trace_head == {"n": 2}
+    np.testing.assert_array_equal(trace_data, np.arange(2))
+
+
+# --------------------------------------------------------------------------- #
 # image_stats
 # --------------------------------------------------------------------------- #
 

@@ -45,11 +45,9 @@ stream; returning `None` drops it. That's the whole contract. Because
 construction opens sockets and the loop never exits, everything testable lives
 inside `process` — keep it that way and verification stays cheap.
 
-`run()` unpacks every message as three values, but `recv()` returns
-`(channel, header)` for a header-only message, so a `DataAnalysis` whose input
-stream carries scalars (`image_stats.py`, `gaussian_fit.py`) dies with
-`ValueError` on the first message. Consume array-carrying streams only, or
-override `run` to length-check.
+`process` gets `data=None` for a header-only message, which is how scalar
+streams (`image_stats.py`'s output) arrive; check for it if your input stream
+may carry scalars.
 
 ## Pick the base class by what you consume
 

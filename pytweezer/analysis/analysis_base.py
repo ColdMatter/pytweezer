@@ -1,7 +1,7 @@
 """Base classes for streaming analysis processes.
 
 An *analysis process* is a small, long-lived program that subscribes to one or
-more pub/sub streams, receives ``(message, head, data)`` messages in a loop,
+more pub/sub streams, receives ``(message, head[, data])`` messages in a loop,
 transforms each one, and republishes the result on its own name. The existing
 scripts in this package (``data_average.py``, ``imageselector.py``,
 ``subtract_bg.py``, ``rotate_image.py``) all hand-roll the same skeleton:
@@ -27,7 +27,7 @@ To write a new analysis, subclass one of the two and override :meth:`process`::
         _index = PropertyAttribute('SelectedImage', 1)
 
         def process(self, head, data):
-            if head['_imgindex'] == self._index:
+            if head['index'] == self._index:
                 return head, data      # publish this one
             return None                # drop everything else
 
@@ -85,7 +85,7 @@ class AnalysisProcess:
 
         Args:
             head: the message header dict.
-            data: the payload (numpy array for images/data).
+            data: the payload array, or ``None`` for a header-only message.
 
         Returns:
             ``(head, data)`` to republish, or ``None`` to drop the message.
@@ -100,7 +100,8 @@ class AnalysisProcess:
             msg = self.client.recv()
             if msg is None:
                 continue
-            msgstr, head, data = msg
+            # A header-only message (scalar streams) arrives without an array.
+            msgstr, head, data = msg if len(msg) == 3 else (*msg, None)
 
             result = self.process(head, data)
             if result is not None:
