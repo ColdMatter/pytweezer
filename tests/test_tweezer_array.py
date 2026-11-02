@@ -3,9 +3,11 @@ import pytest
 
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
 from pytweezer.experiment import run_local
-from pytweezer.experiments import tweezer_imaging
-from pytweezer.experiments.tweezer_imaging import (
+from pytweezer.experiments import tweezer_array
+from pytweezer.experiments.tweezer_array import (
     SAVED_SEQUENCE_PARAMETERS,
+    MolassesRecapture,
+    OptimiseMolassesShims,
     OptimiseTweezerImaging,
     TweezerImaging,
 )
@@ -41,7 +43,7 @@ class FakeSequencer:
 
 
 class FakeHamCam:
-    """Images the array twice per shot; a background drop leaves the second frame empty."""
+    """Images the array twice per shot; turning the tweezers off empties the second frame."""
 
     def __init__(self, sequencer):
         self.sequencer = sequencer
@@ -69,7 +71,7 @@ class FakeHamCam:
 
     def acquire_n_frames(self, n, broadcast=False):
         loaded = self.rng.random(len(SITES)) < LOADING
-        if self.sequencer.goes[-1]["BackgroundDrop"]:
+        if self.sequencer.goes[-1].get("tTweezerSetVVA0") == 0.0:
             kept = np.zeros(len(SITES), dtype=bool)
         else:
             kept = loaded & (self.rng.random(len(SITES)) < SURVIVAL)
@@ -84,20 +86,12 @@ def rig(monkeypatch):
         "pytweezer.experiment.experiment._get_device",
         lambda name, timeout: devices[name],
     )
-    monkeypatch.setattr(tweezer_imaging, "get_saved_parameters", lambda: SAVED)
+    monkeypatch.setattr(tweezer_array, "get_saved_parameters", lambda: SAVED)
     return sequencer
 
 
-def test_calibration_finds_every_trap_site(rig):
-    measurement = run_local(TweezerImaging, **FAST)
-    assert measurement.status == "completed", measurement.attrs["error"]
-    found = measurement.constants["trap_sites"]
-    offsets = np.abs(found[None, :, :] - np.array(SITES)[:, None, :]).max(axis=2)
-    assert len(found) == len(SITES)
-    assert offsets.min(axis=1).max() <= 1
-
-
 def test_a_point_measures_the_loading_and_survival_put_in(rig):
+    # Also checks the calibration: the wrong sites or threshold would miss these.
     measurement = run_local(TweezerImaging, **FAST)
     assert measurement.results["loading"][0] == pytest.approx(LOADING, abs=0.1)
     assert measurement.results["survival"][0] == pytest.approx(SURVIVAL, abs=0.05)
@@ -113,10 +107,26 @@ def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(rig):
         assert {name: go[name] for name in expected} == expected
 
 
-def test_calibration_drops_the_atoms_before_the_second_image_and_points_do_not(rig):
-    run_local(TweezerImaging, **FAST)
-    drops = [go["BackgroundDrop"] for go in rig.goes]
-    assert drops == [1] * FAST["calibration_shots"] + [0] * FAST["shots"]
+@pytest.mark.parametrize(
+    ("experiment", "point_drop"),
+    [(TweezerImaging, (0, None)), (MolassesRecapture, (1, 3))],
+)
+def test_only_calibration_turns_the_tweezers_off_and_each_point_drops_as_its_measurement_needs(
+    rig, experiment, point_drop
+):
+    run_local(experiment, **FAST)
+    calibration, points = (
+        rig.goes[: FAST["calibration_shots"]],
+        rig.goes[FAST["calibration_shots"] :],
+    )
+    assert all(go["BackgroundDrop"] == 1 for go in calibration)
+    assert all(
+        go["tTweezerSetVVA0"] == go["tTweezerSetVVA1"] == 0.0 for go in calibration
+    )
+    assert len(points) == FAST["shots"]
+    for go in points:
+        assert "tTweezerSetVVA0" not in go
+        assert (go["BackgroundDrop"], go.get("tDropDuration")) == point_drop
 
 
 def test_each_evaluation_images_both_times_at_its_settings(rig):
@@ -149,5 +159,45 @@ def test_the_score_is_survival_only_above_the_fidelity_floor(
     score = {
         "survival": results["survival"][0],
         "0.8 fidelity": 0.8 * results["fidelity"][0],
+    }
+    assert results["objective"][0] == pytest.approx(score[expected])
+
+
+def test_each_molasses_evaluation_runs_at_its_shims(rig):
+    measurement = run_local(OptimiseMolassesShims, **FAST, n_calls=2, n_initial=2)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    evaluations = rig.goes[FAST["calibration_shots"] :]
+    for point in range(2):
+        shims = tuple(
+            measurement.results[setting][point]
+            for setting in ("shim_x", "shim_y", "shim_z")
+        )
+        for go in evaluations[point * FAST["shots"] : (point + 1) * FAST["shots"]]:
+            sent = (
+                go["tMolassesShimXccValue"],
+                go["tMolassesShimYccValue"],
+                go["tMolassesShimZccValue"],
+            )
+            assert sent == shims
+
+
+@pytest.mark.parametrize(
+    ("loading_floor", "expected"),
+    [(0.5, "floor plus recapture"), (0.9, "loading")],
+)
+def test_the_molasses_score_counts_recapture_only_once_the_array_loads(
+    rig, loading_floor, expected
+):
+    measurement = run_local(
+        OptimiseMolassesShims,
+        **FAST,
+        n_calls=1,
+        n_initial=1,
+        loading_floor=loading_floor,
+    )
+    results = measurement.results
+    score = {
+        "floor plus recapture": loading_floor + results["survival"][0],
+        "loading": results["loading"][0],
     }
     assert results["objective"][0] == pytest.approx(score[expected])

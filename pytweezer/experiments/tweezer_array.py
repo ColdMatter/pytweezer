@@ -1,4 +1,4 @@
-"""Score the Rb tweezer imaging over a batch of shots, and optimise the imaging light."""
+"""Score the Rb tweezer array over batches of shots, and optimise its imaging and molasses."""
 
 from typing import ClassVar
 
@@ -41,17 +41,15 @@ SAVED_SEQUENCE_PARAMETERS = {
 }
 
 
-class TweezerImaging(LoadTweezers):
-    """Score the tweezer imaging by loading, survival and detection fidelity.
+class TweezerArrayMeasurement(LoadTweezers):
+    """Calibrate the array once, then score batches of shots by loading and survival.
 
     Every shot runs the sequence at the saved parameters
     (:data:`SAVED_SEQUENCE_PARAMETERS`); a script parameter set in the form
-    wins over its saved value. :meth:`prepare` first takes
-    ``calibration_shots`` with a background drop, finds the ``sites`` trap
-    sites in their mean background-subtracted image and fits the occupancy
-    threshold. Each point then takes ``shots`` shots imaging the atoms twice
-    and records the mean loading probability, the survival from the first
-    image to the second, and the detection fidelity of the first image.
+    wins over its saved value. :meth:`prepare` takes ``calibration_shots``
+    with the tweezers off during the background drop, finds the ``sites``
+    trap sites in their mean background-subtracted image and fits the
+    occupancy threshold, against which every later shot is judged.
     """
 
     shots = Integer(20, min=1, group="Analysis", tooltip="shots per point")
@@ -134,16 +132,9 @@ class TweezerImaging(LoadTweezers):
             for image in images
         ]
 
-    def measure(
-        self, *, imaging_vco: float | None = None, imaging_vva: float | None = None
-    ) -> dict[str, float]:
-        """Loading, survival and fidelity over ``shots`` shots; ``None`` keeps a saved value."""
-        imaging = {}
-        if imaging_vco is not None:
-            imaging |= {"tImgCoolVCO1": imaging_vco, "tImgCoolVCO2": imaging_vco}
-        if imaging_vva is not None:
-            imaging |= {"tImgCoolVVA1": imaging_vva, "tImgCoolVVA2": imaging_vva}
-        firsts, seconds = self._batch(self.shots, BackgroundDrop=0, **imaging)
+    def score_batch(self, **sequence) -> dict[str, float]:
+        """Loading, survival from the first image to the second, and fidelity, over ``shots`` shots."""
+        firsts, seconds = self._batch(self.shots, **sequence)
         firsts, seconds = self._filtered(firsts), self._filtered(seconds)
         # Refitting the threshold here only measures the fidelity; occupancy is
         # always judged against the calibration's threshold.
@@ -170,6 +161,21 @@ class TweezerImaging(LoadTweezers):
             "fidelity": float(fidelity),
         }
 
+
+class TweezerImaging(TweezerArrayMeasurement):
+    """Score the tweezer imaging: each point images the atoms twice with no drop between."""
+
+    def measure(
+        self, *, imaging_vco: float | None = None, imaging_vva: float | None = None
+    ) -> dict[str, float]:
+        """Score the imaging light; ``None`` keeps a saved value."""
+        imaging = {}
+        if imaging_vco is not None:
+            imaging |= {"tImgCoolVCO1": imaging_vco, "tImgCoolVCO2": imaging_vco}
+        if imaging_vva is not None:
+            imaging |= {"tImgCoolVVA1": imaging_vva, "tImgCoolVVA2": imaging_vva}
+        return self.score_batch(BackgroundDrop=0, **imaging)
+
     def run_point(self) -> None:
         for name, value in self.measure().items():
             self.record(name, value)
@@ -195,3 +201,60 @@ class OptimiseTweezerImaging(BayesianOptimisation, TweezerImaging):
         if results["fidelity"] > self.fidelity_floor:
             return results["survival"]
         return 0.8 * results["fidelity"]
+
+
+class MolassesRecapture(TweezerArrayMeasurement):
+    """Score the molasses by release and recapture: each point drops the atoms for ``drop_duration`` between images."""
+
+    drop_duration = Integer(
+        3, min=0, group="Analysis", tooltip="the script's tDropDuration"
+    )
+
+    def measure(
+        self,
+        *,
+        shim_x: float | None = None,
+        shim_y: float | None = None,
+        shim_z: float | None = None,
+    ) -> dict[str, float]:
+        """Score the molasses shims; ``None`` keeps a saved value."""
+        shims = {
+            parameter: value
+            for parameter, value in (
+                ("tMolassesShimXccValue", shim_x),
+                ("tMolassesShimYccValue", shim_y),
+                ("tMolassesShimZccValue", shim_z),
+            )
+            if value is not None
+        }
+        return self.score_batch(
+            BackgroundDrop=1, tDropDuration=self.drop_duration, **shims
+        )
+
+    def run_point(self) -> None:
+        for name, value in self.measure().items():
+            self.record(name, value)
+
+
+class OptimiseMolassesShims(BayesianOptimisation, MolassesRecapture):
+    """Find the molasses shim currents that recapture the most atoms after a drop.
+
+    Below ``loading_floor`` the score is the loading; above it, the floor plus
+    the recapture probability, so every setting that loads the array outscores
+    every one that does not, and among those the coldest wins.
+    """
+
+    objective = "score"
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("shim_x", low=5.0, high=10.0, save_as="tMolassesShimXccValue"),
+        Dimension("shim_y", low=0.0, high=5.0, save_as="tMolassesShimYccValue"),
+        Dimension("shim_z", low=0.0, high=1.0, save_as="tMolassesShimZccValue"),
+    ]
+    n_calls = Integer(50, min=1)
+    n_initial = Integer(10, min=1)
+    loading_floor = Number(0.5, min=0, max=1, group="Analysis")
+
+    def objective_of(self, results: dict[str, float]) -> float:
+        if results["loading"] < self.loading_floor:
+            return results["loading"]
+        return self.loading_floor + results["survival"]
