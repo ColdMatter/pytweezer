@@ -41,7 +41,7 @@ from pytweezer.GUI.experiments.queue_view import (
     queue_summary,
 )
 from pytweezer.GUI.optimisers import OptimisersPanel
-from pytweezer.GUI.saved_parameters import SavedParametersPanel
+from pytweezer.GUI.saved_parameters import SavedParametersPanel, display_value
 from tests.helpers import FakeFeed, until
 
 Left, Right = QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton
@@ -1227,6 +1227,32 @@ def test_a_group_header_cannot_be_made_current_and_keeps_an_unsent_edit(qapp):
     assert panel.tree.currentItem().text(0) == "level"
     assert panel.value_edit.text() == "3.1"
     assert panel.why_edit.text() == "lifetime scan"
+
+
+@pytest.mark.parametrize(
+    "value, shown",
+    [([[1.0, 2.0]] * 64, "64 × 2 array"), ([1.0, 2.0], "2 array")],
+)
+def test_an_array_value_shows_its_shape(value, shown):
+    assert display_value(value) == shown
+
+
+def test_an_array_parameter_is_shown_but_not_editable(qapp):
+    client = FakeSavedParameterClient()
+    client.parameters.append(
+        SavedParameter(
+            key="trap_sites",
+            value=[[1.0, 2.0]] * 3,
+            updated_at=now(),
+            updated_by="me@pc",
+        )
+    )
+    panel = make_saved_panel(client=client)
+    panel.select("trap_sites")
+    assert panel.value_edit.text() == "3 × 2 array"
+    assert not panel.value_edit.isEnabled()
+    assert not panel.apply_button.isEnabled()
+    assert panel.status.text() == "Arrays are set by accepting an optimiser's proposal"
 
 
 def test_an_unreachable_manager_is_said_not_shown_as_current(qapp):
