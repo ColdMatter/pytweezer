@@ -27,6 +27,9 @@ from pytweezer.experiment.arguments import Argument, Integer, Number, collect
 from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.experiment.scan import Point, Scan
 
+#: Argument group of an optimiser's own arguments, shown first in the Optimisers tab.
+SEARCH = "Search"
+
 
 @dataclass(frozen=True)
 class Stage:
@@ -184,7 +187,7 @@ class StagedScan(Optimiser):
     kind = "staged"
     stages: ClassVar[list[Stage]]
     stage: Stage
-    repeats = Integer(1, min=1)
+    repeats = Integer(1, min=1, group=SEARCH)
 
     @classmethod
     def declarations(cls) -> list[Stage]:
@@ -194,9 +197,11 @@ class StagedScan(Optimiser):
     def generated_arguments(cls) -> dict[str, Argument]:
         arguments: dict[str, Argument] = {}
         for stage in cls.declarations():
-            arguments[f"{stage.setting}_start"] = Number(stage.start)
-            arguments[f"{stage.setting}_stop"] = Number(stage.stop)
-            arguments[f"{stage.setting}_points"] = Integer(stage.points, min=1)
+            arguments[f"{stage.setting}_start"] = Number(stage.start, group=SEARCH)
+            arguments[f"{stage.setting}_stop"] = Number(stage.stop, group=SEARCH)
+            arguments[f"{stage.setting}_points"] = Integer(
+                stage.points, min=1, group=SEARCH
+            )
         return arguments
 
     def best(self, settings: list[float], objectives: list[float]) -> float:
@@ -311,11 +316,11 @@ class BayesianOptimisation(Optimiser):
 
     kind = "bayesian"
     dimensions: ClassVar[list[Dimension]]
-    n_calls = Integer(30, min=1)
-    n_initial = Integer(5, min=1)
-    seed = Integer(0)
-    xi_start = Number(0.1)
-    xi_end = Number(0.001)
+    n_calls = Integer(30, min=1, group=SEARCH)
+    n_initial = Integer(5, min=1, group=SEARCH)
+    seed = Integer(0, group=SEARCH)
+    xi_start = Number(0.1, group=SEARCH)
+    xi_end = Number(0.001, group=SEARCH)
 
     @classmethod
     def declarations(cls) -> list[Dimension]:
@@ -362,11 +367,16 @@ class BayesianOptimisation(Optimiser):
                 arguments[f"{dimension.setting}_span"] = Number(
                     dimension.span,
                     min=0,
+                    group=SEARCH,
                     tooltip=f"searched within this of the saved {dimension.save_as}",
                 )
             else:
-                arguments[f"{dimension.setting}_low"] = Number(dimension.low)
-                arguments[f"{dimension.setting}_high"] = Number(dimension.high)
+                arguments[f"{dimension.setting}_low"] = Number(
+                    dimension.low, group=SEARCH
+                )
+                arguments[f"{dimension.setting}_high"] = Number(
+                    dimension.high, group=SEARCH
+                )
         return arguments
 
     def search_bounds(self) -> dict[str, tuple[float, float]]:

@@ -8,7 +8,7 @@ from pytweezer.analysis import analysis as an
 from pytweezer.experiment import Experiment
 from pytweezer.experiment.arguments import Integer, Number
 from pytweezer.experiment.client import get_saved_parameters
-from pytweezer.experiment.optimisers import BayesianOptimisation, Dimension
+from pytweezer.experiment.optimisers import SEARCH, BayesianOptimisation, Dimension
 from pytweezer.experiments.load_tweezers import LoadTweezers
 
 _SAVED_UNDER_OWN_NAME = (
@@ -199,8 +199,8 @@ class OptimiseTweezerImaging(BayesianOptimisation, TweezerImaging):
         Dimension("imaging_vco", span=0.5, save_as="tImgCoolVCO"),
         Dimension("imaging_vva", span=0.2, save_as="tImgCoolVVA"),
     ]
-    n_initial = Integer(10, min=1)
-    fidelity_floor = Number(0.99, min=0, max=1, group="Analysis")
+    n_initial = Integer(10, min=1, group=SEARCH)
+    fidelity_floor = Number(0.99, min=0, max=1, group=SEARCH)
 
     def objective_of(self, results: dict[str, float]) -> float:
         if results["fidelity"] > self.fidelity_floor:
@@ -255,9 +255,9 @@ class OptimiseMolassesShims(BayesianOptimisation, MolassesRecapture):
         Dimension("shim_y", span=1.0, save_as="tMolassesShimYccValue"),
         Dimension("shim_z", span=0.25, save_as="tMolassesShimZccValue"),
     ]
-    n_calls = Integer(50, min=1)
-    n_initial = Integer(10, min=1)
-    loading_floor = Number(0.5, min=0, max=1, group="Analysis")
+    n_calls = Integer(50, min=1, group=SEARCH)
+    n_initial = Integer(10, min=1, group=SEARCH)
+    loading_floor = Number(0.5, min=0, max=1, group=SEARCH)
 
     def objective_of(self, results: dict[str, float]) -> float:
         if results["loading"] < self.loading_floor:

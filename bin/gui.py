@@ -182,16 +182,19 @@ def build_gui(server: bool) -> TabbedGUI:
         logger.exception("Could not set up the Experiment Manager feed")
         feed = None
     experiments = _safe_panel("Experiments", lambda: ExperimentsPanel(feed=feed))
+    optimisers = _safe_panel("Optimisers", lambda: OptimisersPanel(feed=feed))
+
+    def resubmit(request):
+        # Optimisers are set up only in their own tab.
+        if isinstance(optimisers, OptimisersPanel) and optimisers.load_request(request):
+            return
+        if isinstance(experiments, ExperimentsPanel):
+            experiments.load_request(request)
 
     def make_results():
         results = ResultsPanel(feed=feed)
-        if isinstance(experiments, ExperimentsPanel):
-            results.resubmit_requested.connect(experiments.load_request)
+        results.resubmit_requested.connect(resubmit)
         return results
-
-    def make_optimisers():
-        editor = experiments if isinstance(experiments, ExperimentsPanel) else None
-        return OptimisersPanel(feed=feed, experiments_panel=editor)
 
     gui = TabbedGUI(
         f"PyTweezer {name}",
@@ -228,7 +231,7 @@ def build_gui(server: bool) -> TabbedGUI:
                     "Saved parameters", lambda: SavedParametersPanel(feed=feed)
                 ),
             ),
-            ("Optimisers", _safe_panel("Optimisers", make_optimisers)),
+            ("Optimisers", optimisers),
             ("NI Cards", _safe_panel("NI Cards", NICardsPanel)),
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],

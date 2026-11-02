@@ -262,6 +262,12 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
 - An optimiser sets its own points: submitting it with scan axes or
   repetitions is refused. Its proposals are constants `proposed.<key>`;
   nothing is saved until someone accepts them in the **Optimisers** tab.
+- Optimisers are set up and run only in the **Optimisers** tab
+  (`pytweezer/GUI/optimisers.py`); the Experiments tab does not list them, and
+  Results' Resubmit opens an optimiser run there. Its form groups the mixin's
+  own arguments (group `SEARCH`) first, starts from the last run's arguments,
+  and saves presets as recipes. A running optimiser is plotted from the feed's
+  published points; a finished one from its file.
 
 ## Files
 
