@@ -238,7 +238,7 @@ CONFIG = {
             "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
         },
         "IDS-1054B Scope": {
-            "active": True,
+            "active": False,
             "class": "pytweezer.drivers.ids1054b:IDS1054B",
             "sim_class": "pytweezer.drivers.ids1054b:SimulatedIDS1054B",
             "teardown": "close",

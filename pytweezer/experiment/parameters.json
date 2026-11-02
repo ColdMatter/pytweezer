@@ -15,8 +15,8 @@
         "tMOTShimZccValue": -0.4844836103904361,
         "tMOTLoadRepVVA": 0.6526315789473685,
         "tMOTLoadCoolVVA": 0.9210526315789475,
-        "tImgCoolVCO": 3.0,
-        "tImgCoolVVA": 1.5,
+        "tImgCoolVCO": 1.3169754708397166,
+        "tImgCoolVVA": 0.7824703611563533,
         "tMolassesShimXccValue": 5.4965,
         "tMolassesShimYccValue": 3.6861,
         "tMolassesShimZccValue": 0.114
@@ -31,8 +31,8 @@
         "conversion_offset": 1916.7664794921875
     },
     "image_analysis": {
-        "x_centre": 131.49305555555554,
-        "y_centre": 128.21527777777777,
+        "x_centre": 122.984375,
+        "y_centre": 132.3125,
         "orcacam_mm_per_px": 0.007934071518766623,
         "thorcam_mm_per_px": 0.005130761086566129
     }
