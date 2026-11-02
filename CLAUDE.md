@@ -158,6 +158,13 @@ cloned at `~/CaFMOT-LabBook`; read its own `CLAUDE.md` before writing to it.
 - Use `get_logger(name)` from `pytweezer/logging_utils.py`, never bare
   `logging.getLogger` - it adds structured JSONL output under `logs/`
 
+### Notebooks
+
+A notebook is a record of what was done at a particular time: never edit one
+retroactively, even when an API change breaks it. The exception is a notebook
+that demonstrates a feature; keep that one working. When a change breaks other
+notebooks, list them for the user instead.
+
 ### TODO/FIXME Convention
 
 - Use `TODO` for planned improvements
