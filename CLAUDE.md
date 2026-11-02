@@ -115,6 +115,7 @@ cloned at `~/CaFMOT-LabBook`; read its own `CLAUDE.md` before writing to it.
 ### Git branching conventions
 
 - main is protected: every change, however small, goes on a branch and merges through a PR once `pytest` and `dependencies` pass
+- Name every branch for what it changes (e.g. `fix-copier-share-chmod`), including branches only Claude works on - never a session ID, date or `wip`/`tmp`
 - A line `Depends on owner/repo#N` (or `#N`) in a PR description holds it until that PR merges or that issue closes
 - Commit and push as you go: after each coherent, tested step (e.g. one tab restyled), not in one batch at the end. Stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
 - **The main branch should always be deployable** - no broken code or failing tests allowed
