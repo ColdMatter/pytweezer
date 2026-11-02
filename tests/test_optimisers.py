@@ -19,6 +19,7 @@ from pytweezer.experiment.client import _resolve, recipes, save_recipe
 from pytweezer.experiment.optimisers import (
     BayesianOptimisation,
     Dimension,
+    Fit,
     Stage,
     StagedScan,
 )
@@ -262,6 +263,8 @@ def test_the_schema_lists_generated_arguments_and_proposals(
         "objective": "counts",
         "proposes": ["demo_resonance", "demo_power"],
         "settings": ["detuning", "power"],
+        "units": {"demo_resonance": "", "demo_power": ""},
+        "group": "",
     }
 
 
@@ -333,3 +336,44 @@ def _bayesian(dimensions):
 def test_a_bad_declaration_is_refused_when_the_class_is_defined(define, message):
     with pytest.raises(TypeError, match=message):
         define()
+
+
+class DemoFit(Fit, Experiment):
+    proposal_units: ClassVar[dict[str, str]] = {"demo_offset": "V", "demo_grid": "px"}
+    proposal_group = "Demo"
+    fails = Integer(0)
+
+    def fit(self):
+        if self.fails:
+            raise RuntimeError("no fit")
+        self.record("residual", 0.25)
+        return {"demo_offset": 1.5, "demo_grid": np.ones((3, 2))}
+
+
+def test_a_fit_runs_one_point_and_proposes_what_it_returns():
+    measurement = run_local(DemoFit)
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert len(measurement.points["index"]) == 1
+    assert measurement.results["residual"][0] == 0.25
+    assert measurement.constants["proposed.demo_offset"] == 1.5
+    np.testing.assert_array_equal(
+        measurement.constants["proposed.demo_grid"], np.ones((3, 2))
+    )
+
+
+def test_a_fit_that_raises_proposes_nothing():
+    measurement = run_local(DemoFit, fails=1)
+    assert measurement.status == "failed"
+    assert not any(key.startswith("proposed.") for key in measurement.constants)
+
+
+def test_the_schema_gives_a_fits_proposals_with_their_units_and_group():
+    assert DemoFit.schema()["optimiser"] == {
+        "kind": "fit",
+        "goal": "max",
+        "objective": None,
+        "proposes": ["demo_offset", "demo_grid"],
+        "settings": [],
+        "units": {"demo_offset": "V", "demo_grid": "px"},
+        "group": "Demo",
+    }

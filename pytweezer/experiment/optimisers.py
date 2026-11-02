@@ -1,7 +1,7 @@
 """Optimisers: mixins that run a measurement experiment to propose saved parameters.
 
-An optimiser combines a building block with a measurement experiment, which
-provides ``measure(**settings) -> dict[str, float]``::
+A search optimiser combines a building block with a measurement experiment,
+which provides ``measure(**settings) -> dict[str, float]``::
 
     class DemoStagedScan(StagedScan, DemoResonance):
         objective = "counts"
@@ -10,7 +10,8 @@ provides ``measure(**settings) -> dict[str, float]``::
         ]
 
 The mixin comes first, so it sets the points and runs each one; the
-measurement's own ``prepare`` and ``finish`` still run. The values it proposes
+measurement's own ``prepare`` and ``finish`` still run. A :class:`Fit` instead
+runs one point and proposes what its ``fit()`` returns. The values it proposes
 are recorded as constants ``proposed.<saved key>``; nothing is saved until a
 person accepts them.
 """
@@ -76,6 +77,10 @@ class Optimiser:
     objective: str
     goal: str = "max"
     kind: str = ""
+    #: Unit of each proposed saved parameter, by key; "" when not listed.
+    proposal_units: ClassVar[dict[str, str]] = {}
+    #: Group a proposed saved parameter is created in when first accepted.
+    proposal_group: ClassVar[str] = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -133,6 +138,7 @@ class Optimiser:
 
         ``settings[i]`` is the setting whose best value is proposed for
         ``proposes[i]``; ``objective`` is ``None`` for a class that names none.
+        ``units`` and ``group`` are what an accepted proposal is created with.
         """
         return {
             "kind": cls.kind,
@@ -140,6 +146,8 @@ class Optimiser:
             "objective": getattr(cls, "objective", None),
             "proposes": cls.proposes(),
             "settings": [declared.setting for declared in cls.declarations()],
+            "units": {key: cls.proposal_units.get(key, "") for key in cls.proposes()},
+            "group": cls.proposal_group,
         }
 
     def planned_points(self, scan: Scan) -> list[Point]:
@@ -493,5 +501,40 @@ class BayesianOptimisation(Optimiser):
                 best_values = self.best(list(settings), list(objectives))
                 for dimension, value in zip(self.dimensions, best_values, strict=True):
                     self.record(f"proposed.{dimension.save_as}", value)
+        finally:
+            super().finish()
+
+
+class Fit(Optimiser):
+    """Proposes the result of one fit, rather than the best of a search.
+
+    The proposed keys are those of :attr:`proposal_units`. The run has one
+    point, which calls :meth:`fit`; a fit that raises proposes nothing.
+    """
+
+    kind = "fit"
+
+    @classmethod
+    def proposes(cls) -> list[str]:
+        return list(cls.proposal_units)
+
+    def number_of_points(self) -> int:
+        return 1
+
+    def prepare(self) -> None:
+        self._proposed: dict[str, Any] = {}
+        super().prepare()
+
+    def run_point(self) -> None:
+        self._proposed = self.fit()
+
+    def fit(self) -> dict[str, Any]:
+        """The value to propose for each key of :attr:`proposal_units`."""
+        raise NotImplementedError
+
+    def finish(self) -> None:
+        try:
+            for key, value in self._proposed.items():
+                self.record(f"proposed.{key}", value)
         finally:
             super().finish()
