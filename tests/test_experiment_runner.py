@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from pytweezer.experiment import (
@@ -154,3 +156,27 @@ def test_devices_closed_even_on_failure(fake_devices):
 
     assert run_local(UsesDevice).status == "failed"
     assert [client.closed for client in fake_devices] == [True]
+
+
+class DeclaresAnalyses(Experiment):
+    analyses = ("tweezer_histogram",)
+
+    def run_point(self):
+        self.record("y", 1.0)
+
+
+class InheritsAnalyses(DeclaresAnalyses):
+    pass
+
+
+@pytest.mark.parametrize("cls", [DeclaresAnalyses, InheritsAnalyses])
+def test_a_file_records_the_analyses_its_class_declares(tmp_path, cls):
+    measurement = run_local(cls, Scan(), path=tmp_path / "run.h5")
+
+    assert json.loads(measurement.attrs["analyses"]) == ["tweezer_histogram"]
+
+
+def test_a_class_declaring_no_analyses_records_an_empty_list():
+    measurement = run_local(Recorder, Scan())
+
+    assert json.loads(measurement.attrs["analyses"]) == []

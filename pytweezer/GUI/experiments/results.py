@@ -1,5 +1,9 @@
 """The Results tab: browse measurement files, inspect them, quick-plot a result.
 
+The Analysis dropdown offers "Plot against" for every measurement, then the
+analyses its experiment declares (:mod:`pytweezer.GUI.experiments.analyses`),
+which become available once the measurement finishes.
+
 Reads files through an archive (:mod:`pytweezer.experiment.archive`): on the
 Experiment Manager's PC directly, elsewhere fetched from the manager over RPC.
 With an :class:`~pytweezer.GUI.experiments.feed.ExperimentFeed` connected, a
@@ -28,8 +32,10 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QStackedWidget,
     QTreeWidget,
     QTreeWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -41,6 +47,7 @@ from pytweezer.experiment.archive import (
 from pytweezer.experiment.summary import aggregate, describe, display_value
 from pytweezer.experiment.task import TaskRequest, TaskStatus
 from pytweezer.GUI.components import Region, status_icon
+from pytweezer.GUI.experiments.analyses import ANALYSES, declared_analyses
 from pytweezer.GUI.grafana import open_in_browser, run_url
 from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND
 from pytweezer.logging_utils import get_logger
@@ -54,6 +61,8 @@ _POLL_MS = 2000
 _FALLBACK_POLL_S = 30.0
 _NONE = "(none)"
 _POINT_INDEX = "point index"
+_PLOT_AGAINST = "Plot against"
+_PLOT_HINT = "mean and standard error over repetitions"
 _CURVE_COLOURS = ["#5b8def", "#f5a623", "#2ecc71", "#c678dd", "#e5c07b", "#56b6c2"]
 
 
@@ -173,15 +182,35 @@ class ResultsPanel(QWidget):
         self.plot.addLegend()
         self.plot_message = QLabel()
         self.plot_message.setProperty("role", "regionHint")
-        plot_region = Region("well", "Plot", "mean and standard error over repetitions")
-        plot_region.body.addLayout(controls)
-        plot_region.body.addWidget(self.plot, 1)
-        plot_region.body.addWidget(self.plot_message)
+        plot_page = QWidget()
+        plot_layout = QVBoxLayout(plot_page)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+        plot_layout.addLayout(controls)
+        plot_layout.addWidget(self.plot, 1)
+        plot_layout.addWidget(self.plot_message)
+
+        self.analysis_choice = QComboBox()
+        self.analysis_choice.setFixedWidth(220)
+        self.analysis_choice.setToolTip(
+            "Plot a result against the scan, or one of the analyses this "
+            "experiment offers"
+        )
+        self.analysis_choice.addItem(_PLOT_AGAINST, None)
+        self.analysis_choice.currentIndexChanged.connect(self._analysis_chosen)
+        self.analysis_stack = QStackedWidget()
+        self.analysis_stack.addWidget(plot_page)
+        #: Each analysis's view, built the first time it is chosen.
+        self._views = {}
+        #: The analysis last chosen for each experiment class, this session.
+        self._chosen = {}
+        self.plot_region = Region("well", "Analysis", _PLOT_HINT)
+        self.plot_region.header.insertWidget(1, self.analysis_choice)
+        self.plot_region.body.addWidget(self.analysis_stack, 1)
 
         detail = QSplitter(QtCore.Qt.Orientation.Vertical)
         detail.setObjectName("PanelSplitter")
         detail.addWidget(self.detail_region)
-        detail.addWidget(plot_region)
+        detail.addWidget(self.plot_region)
         detail.setStretchFactor(0, 1)
         detail.setStretchFactor(1, 1)
         splitter.addWidget(detail)
@@ -403,7 +432,7 @@ class ResultsPanel(QWidget):
             else "Run with run_local(), so it was never recorded in the database"
         )
         self._fill_choices(keep_selection=not first_load)
-        self.replot()
+        self._fill_analyses()
 
     def _show_progress(self):
         attrs = self.measurement.attrs
@@ -418,6 +447,54 @@ class ResultsPanel(QWidget):
         m = self.measurement
         if m is not None and m.status == "running" and not self.live:
             self.load(self.path)
+
+    # -- analyses ------------------------------------------------------------
+
+    def _fill_analyses(self):
+        """Offer the plot and the measurement's analyses, keeping its class's last choice."""
+        m = self.measurement
+        combo = self.analysis_choice
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(_PLOT_AGAINST, None)
+        for name in declared_analyses(m):
+            entry = ANALYSES.get(name)
+            combo.addItem(entry.label if entry else name, name)
+            item = combo.model().item(combo.count() - 1)
+            if entry is None:
+                item.setEnabled(False)
+                item.setToolTip("Not known to this GUI; update pytweezer")
+            elif m.status == "running":
+                item.setEnabled(False)
+                item.setToolTip("Available when the measurement finishes")
+        index = combo.findData(self._chosen.get(m.attrs.get("class_name")))
+        if index < 0 or not combo.model().item(index).isEnabled():
+            index = 0
+        combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+        self._show_analysis()
+
+    def _analysis_chosen(self):
+        if self.measurement is not None:
+            class_name = self.measurement.attrs.get("class_name")
+            self._chosen[class_name] = self.analysis_choice.currentData()
+        self._show_analysis()
+
+    def _show_analysis(self):
+        name = self.analysis_choice.currentData()
+        if name is None:
+            self.analysis_stack.setCurrentIndex(0)
+            self.plot_region.set_hint(_PLOT_HINT)
+            self.replot()
+            return
+        view = self._views.get(name)
+        if view is None:
+            view = self._views[name] = ANALYSES[name].view()
+            self.analysis_stack.addWidget(view)
+        self.analysis_stack.setCurrentWidget(view)
+        self.plot_region.set_hint("")
+        if self.measurement is not None:
+            view.set_measurement(self.archive, self.path, self.measurement)
 
     # -- plotting ------------------------------------------------------------
 
@@ -449,6 +526,8 @@ class ResultsPanel(QWidget):
             combo.blockSignals(False)
 
     def replot(self):
+        if self.analysis_stack.currentIndex() != 0:
+            return
         self.plot.clear()
         self.plot_message.clear()
         m = self.measurement

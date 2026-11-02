@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from pytweezer.experiment import Choice, Experiment, ListAxis, Number, Scan, run_local
+from pytweezer.GUI.experiments.analyses import AnalysisView
 from pytweezer.GUI.experiments.results import ResultsPanel, aggregate, resubmission
 from tests.helpers import FakeFeed
 
@@ -238,3 +239,89 @@ def test_queue_snapshot_without_running_list_is_tolerated(qapp, tmp_path):
         {"running": None, "queue": [{"rid": 3, "status": "queued"}], "history": []}
     )
     assert panel._task_statuses == {3: "queued"}
+
+
+class HistogramSweep(Sweep):
+    analyses = ("tweezer_histogram",)
+
+
+def make_histogram_file(root, rid, status=None, analyses=None):
+    path = root.joinpath("2026", "10", "07", f"{rid:06d}_HistogramSweep.h5")
+    run_local(HistogramSweep, SCAN, path=path)
+    with h5py.File(path, "r+") as f:
+        if status is not None:
+            f.attrs["status"] = status
+        if analyses is not None:
+            f.attrs["analyses"] = analyses
+    return relpath(root, path)
+
+
+def analysis_items(panel):
+    combo = panel.analysis_choice
+    return [
+        (combo.itemText(i), combo.model().item(i).isEnabled())
+        for i in range(combo.count())
+    ]
+
+
+def test_dropdown_offers_plot_against_then_the_files_analyses(qapp, tmp_path):
+    histogram = make_histogram_file(tmp_path, 1)
+    plain = relpath(tmp_path, make_file(tmp_path, 2))
+    panel = ResultsPanel(root=tmp_path)
+    panel.refresh()
+
+    panel.select_path(histogram)
+    assert analysis_items(panel) == [
+        ("Plot against", True),
+        ("Tweezer loading histogram", True),
+    ]
+    panel.select_path(plain)
+    assert analysis_items(panel) == [("Plot against", True)]
+
+
+def test_unknown_analysis_is_listed_disabled(qapp, tmp_path):
+    path = make_histogram_file(tmp_path, 1, analyses='["from_the_future"]')
+    panel = ResultsPanel(root=tmp_path)
+    panel.refresh()
+
+    panel.select_path(path)
+
+    assert analysis_items(panel) == [("Plot against", True), ("from_the_future", False)]
+
+
+def test_analyses_are_disabled_while_the_measurement_runs(qapp, tmp_path):
+    path = make_histogram_file(tmp_path, 1, status="running")
+    panel = ResultsPanel(root=tmp_path)
+    panel.show_unfinished.setChecked(True)
+    panel.refresh()
+
+    panel.select_path(path)
+
+    assert analysis_items(panel)[1] == ("Tweezer loading histogram", False)
+
+
+def test_choosing_an_analysis_shows_its_view(qapp, tmp_path):
+    path = make_histogram_file(tmp_path, 1)
+    panel = ResultsPanel(root=tmp_path)
+    panel.refresh()
+    panel.select_path(path)
+
+    panel.analysis_choice.setCurrentIndex(1)
+
+    assert isinstance(panel.analysis_stack.currentWidget(), AnalysisView)
+    panel.analysis_choice.setCurrentIndex(0)
+    assert panel.analysis_stack.currentIndex() == 0
+
+
+def test_the_choice_is_kept_for_the_next_file_of_the_same_class(qapp, tmp_path):
+    first, second = make_histogram_file(tmp_path, 1), make_histogram_file(tmp_path, 2)
+    plain = relpath(tmp_path, make_file(tmp_path, 3))
+    panel = ResultsPanel(root=tmp_path)
+    panel.refresh()
+    panel.select_path(first)
+    panel.analysis_choice.setCurrentIndex(1)
+
+    panel.select_path(plain)
+    assert panel.analysis_choice.currentText() == "Plot against"
+    panel.select_path(second)
+    assert panel.analysis_choice.currentText() == "Tweezer loading histogram"

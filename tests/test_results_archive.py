@@ -183,3 +183,13 @@ def test_the_manager_pc_reads_locally_and_others_fetch(monkeypatch, tmp_path):
     conf["host"] = "10.0.0.9"
     monkeypatch.setenv("PYTWEEZER_DATA_DIR", str(tmp_path / "env"))
     assert default_archive().root == tmp_path / "env"
+
+
+def test_a_clone_reads_the_same_archive_over_its_own_connection(tmp_path, remote):
+    make_file(tmp_path)
+
+    for archive in (ResultsArchive(tmp_path), remote):
+        clone = archive.clone()
+        assert clone._lock is not archive._lock
+        day = archive.days()[0]
+        assert clone.runs(day) == archive.runs(day)

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 import numpy as np
 
 from pytweezer.analysis import analysis as an
+from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.experiment import Device, Experiment
 from pytweezer.experiment.arguments import Integer, Number
 from pytweezer.experiment.client import get_saved_parameters
@@ -156,12 +157,18 @@ class TweezerArrayMeasurement(LoadTweezers):
         ]
 
     def score_batch(self, **sequence) -> dict[str, float]:
-        """Loading, survival from the first image to the second, and fidelity, over ``shots`` shots."""
+        """Loading, survival from the first image to the second, and fidelity, over ``shots`` shots.
+
+        Also records every shot's photons at every site of each image, as
+        ``first_photons`` and ``second_photons``.
+        """
         firsts, seconds = self._batch(self.shots, **sequence)
         firsts, seconds = self._filtered(firsts), self._filtered(seconds)
-        # Refitting the threshold here only measures the fidelity; occupancy is
-        # always judged against the calibration's threshold.
-        _, loading, _, fidelity = an.get_array_loading_statistics(
+        # Loading is judged against a threshold refitted on this batch (the
+        # calibration's only if the fit fails), survival against the calibration's.
+        # TODO: check loading is judged against a per-batch refit while survival
+        # uses the calibration threshold (as on rearrangement-optimisation-RnD)
+        first_photons, loading, _, fidelity = an.get_array_loading_statistics(
             firsts,
             self.trap_sites,
             threshold=self.threshold,
@@ -177,6 +184,12 @@ class TweezerArrayMeasurement(LoadTweezers):
             self.trap_sites,
             threshold=self.threshold,
             window_size=self.window_size,
+        )
+        self.record("first_photons", first_photons, unit="photons")
+        self.record(
+            "second_photons",
+            photons_at_sites(seconds, self.trap_sites, self.window_size),
+            unit="photons",
         )
         return {
             "loading": float(np.mean(loading)),
