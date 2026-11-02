@@ -44,7 +44,7 @@ rearrangement-optimisation-RnD is a stripped-down branch for optimisation of twe
 
 This project uses uv; the venv is `.venv` in the repo root, on the Python in
 `.python-version`.
-Code is linted and formatted with ruff. There is a pre-commit hook to run ruff on staged files, but you can also run it manually.
+Code is linted and formatted with ruff, configured in `pyproject.toml`.
 There is a pytest suite under `tests/` — run it after
 touching code it covers, and add cases there instead of writing one-off
 verification scripts when the change fits its scope.
@@ -85,6 +85,34 @@ already in use".
 **Headless/offscreen testing:** PyQt6 windows can't construct without a display.
 Set `QT_QPA_PLATFORM=offscreen` before running any script that imports Qt widgets
 in a non-interactive shell.
+
+
+### Ruff and the pre-commit hook
+
+`.pre-commit-config.yaml` runs `ruff check --fix` then `ruff format` on the
+staged Python files of every commit, using the ruff in `.venv` (the version
+`uv.lock` pins, as VS Code does). Markdown is not formatted. Install the hook
+once per clone with `uv run pre-commit install`; cloud sessions do it in
+`.claude/hooks/session-start.sh`. CI runs `ruff check .` and
+`ruff format --check .` on every push and PR, catching anything that skipped
+the hook.
+
+To commit:
+
+1. Run `uv run ruff check --fix <files>` and `uv run ruff format <files>` on
+   the Python files you changed.
+2. `git add` those files whole. Never commit a file that also has unstaged
+   edits: pre-commit stashes them while it runs, and if ruff then changes the
+   file it prints "Stashed changes conflicted with hook auto-fixes... Rolling
+   back fixes", throws its fixes away and aborts - and the same commit fails
+   the same way every time.
+3. `git commit`. "files were modified by this hook" means the commit did not
+   happen: `git add` the files it names and commit once more. A second failure
+   is something else - read the output rather than retrying.
+4. Never pass `--no-verify`.
+
+The hook does not check files that a clean merge brings in, so after merging
+run `uv run ruff check .` and `uv run ruff format --check .` before pushing.
 
 
 ### Documentation

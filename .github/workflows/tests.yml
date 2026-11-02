@@ -48,3 +48,12 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests/ -q -rs
+
+      # Catches whatever reached the branch without the pre-commit hook.
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: uv run ruff check .
+
+      - name: Check formatting
+        if: ${{ !cancelled() }}
+        run: uv run ruff format --check .

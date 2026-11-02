@@ -52,6 +52,9 @@ pytweezer-kill-stale = "bin.kill_stale:main"
 pytweezer-db-backfill = "pytweezer.database.backfill:main"
 
 [dependency-groups]
+dev = [
+    "pre-commit>=4.7,<5",
+]
 docs = [
     "sphinx",
     "furo",
@@ -98,6 +101,9 @@ target-version = "py311"
 extend-exclude = [
 	"**/archive/**",
 	"**/*.ipynb",
+	# Code in skills and docs is illustrative, often laid out by hand.
+	"**/*.md",
+	"**/*.MD",
 	"pytweezer/drivers/Blink Plus/manual.md", # vendor manual, latin-1 encoded
 ]
 
