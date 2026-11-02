@@ -87,7 +87,9 @@ already in use".
 
 **Headless/offscreen testing:** PyQt6 windows can't construct without a display.
 Set `QT_QPA_PLATFORM=offscreen` before running any script that imports Qt widgets
-in a non-interactive shell.
+in a non-interactive shell. In cloud sessions `.claude/hooks/session-start.sh`
+apt-installs the system libraries PyQt6 needs; if `libEGL.so.1` is still
+missing, it says why at session start.
 
 
 ### Ruff and the pre-commit hook
