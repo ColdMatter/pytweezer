@@ -13,7 +13,7 @@ Rnd-Venv/
 .DS_Store
 Local_files/
 poetry/
-scripts/
+/scripts/
 # compiled extensions / build artifacts (rebuilt per-platform with `make`)
 # .obj/.lib/.exp are the MSVC counterparts of .o — the *.o rule misses them on Windows.
 *.so
