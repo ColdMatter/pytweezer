@@ -92,7 +92,7 @@ class LoadTweezers(MotMasterExperiment):
         self.camera.enable_em_gain(True)
         self.camera.enable_direct_em_gain(True)
         self.camera.set_sensitivity(self.sensitivity)
-        self.camera.setup_acquisition("snap", 2)
+        self.camera.setup_acquisition(2, mode="snap")
 
         self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites()
         if self.trap_sites is None:

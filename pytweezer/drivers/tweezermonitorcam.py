@@ -75,7 +75,7 @@ class ThorCam(Camera):
         self._backend.set_exposure(exposure)
 
     @requires_camera
-    def setup_acquisition(self, nframes: int):
+    def setup_acquisition(self, nframes: int, mode: str = "sequence"):
         self._backend.setup_acquisition(int(nframes))
 
     @requires_camera

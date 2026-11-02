@@ -79,8 +79,8 @@ class ImagEMX2Camera(Camera):
         self._backend.set_exposure(exposure)
 
     @requires_camera
-    def setup_acquisition(self, acq_mode: str, nframes: int):
-        self._backend.setup_acquisition(acq_mode, int(nframes))
+    def setup_acquisition(self, nframes: int, mode: str = "sequence"):
+        self._backend.setup_acquisition(mode, int(nframes))
 
     @requires_camera
     def start_acquisition(self):

@@ -80,12 +80,13 @@ applied in `self.roi_origin` and returns it: `broadcast_image` puts it in every
 frame's header as `roi_x0`/`roi_y0`, which is how analyses place trap sites on
 a cropped frame.
 
-**Match the base class signatures exactly.** `setup_acquisition(self, acq_mode,
-nframes)` takes both arguments. A shim that narrows this to `(self, nframes)`
-will `TypeError` the moment a caller uses the documented interface.
-`thorcam.py` and `tweezermonitorcam.py` currently have this drift (the checker
-flags it); `thorcam.py` also still carries a pre-framework `main()`/`run_server`
-and a hand-built client, none of which a new driver needs.
+**Match the base class signatures exactly.** `setup_acquisition(self, nframes,
+mode="sequence")` takes both, and the base `arm()` calls it; a camera with no
+acquisition modes (the Thorlabs ones) accepts `mode` and ignores it. A shim
+that narrows a signature will `TypeError` the moment a caller uses the
+documented interface; the checker flags it. `thorcam.py` still carries a
+pre-framework `main()`/`run_server` and a hand-built client, none of which a
+new driver needs.
 
 ## Writing a generic driver
 

@@ -117,8 +117,13 @@ class Camera(ABC):
         """Set the per-frame exposure time in seconds."""
 
     @abstractmethod
-    def setup_acquisition(self, acq_mode: str, nframes: int) -> None:
-        """Configure an acquisition of ``nframes`` in ``acq_mode``."""
+    def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
+        """Configure an acquisition of ``nframes``.
+
+        ``mode="sequence"`` keeps acquiring into a ring buffer of ``nframes``;
+        ``"snap"`` stops after ``nframes``. Cameras that only acquire into a
+        ring buffer (Thorlabs) ignore ``mode``.
+        """
 
     @abstractmethod
     def start_acquisition(self) -> None:
@@ -231,7 +236,7 @@ class Camera(ABC):
         with self._lock:
             if self._acquisition_in_progress():
                 return
-            self.setup_acquisition("sequence", int(buffer_frames))
+            self.setup_acquisition(int(buffer_frames))
             self.start_acquisition()
 
     @requires_camera
@@ -372,7 +377,7 @@ class SimulatedCamera(Camera):
     def set_exposure_time(self, exposure: float) -> None:
         self._exposure = float(exposure)
 
-    def setup_acquisition(self, acq_mode: str, nframes: int) -> None:
+    def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
         self._nframes = max(1, int(nframes))
 
     def start_acquisition(self) -> None:

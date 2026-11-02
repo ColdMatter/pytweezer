@@ -486,7 +486,7 @@ def OptimiseMOTShimParameters(
     n_iterations = n_it_per_exp
     exp.set_motmaster_experiment("RbTweezerBasic2026_2")
     exp.set_iterations(n_iterations)
-    hamcam.setup_acquisition("snap", n_iterations * 2)
+    hamcam.setup_acquisition(n_iterations * 2, mode="snap")
 
     @use_named_args(dimensions=dimensions)
     def tweezer_exp_objective(tMOTShimXccValue, tMOTShimYccValue, tMOTShimZccValue):
@@ -605,7 +605,7 @@ def OptimiseMolassesShimParameters(
     n_iterations = n_it_per_exp
     exp.set_motmaster_experiment("RbTweezerBasic2026_2")
     exp.set_iterations(n_iterations)
-    hamcam.setup_acquisition("snap", n_iterations * 2)
+    hamcam.setup_acquisition(n_iterations * 2, mode="snap")
 
     @use_named_args(dimensions=dimensions)
     def tweezer_exp_objective(
