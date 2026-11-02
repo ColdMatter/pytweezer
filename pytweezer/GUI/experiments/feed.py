@@ -85,6 +85,21 @@ class ExperimentFeed(QtCore.QObject):
 
         return self._mirror.read(read)
 
+    def held_points(self):
+        """Every task's held points, ``{rid: [point, ...]}``."""
+
+        def read(state):
+            points = (state or {}).get("points")
+            if not isinstance(points, dict):
+                return {}
+            return {
+                int(rid): copy.deepcopy(rows)
+                for rid, rows in points.items()
+                if str(rid).isdigit() and isinstance(rows, list)
+            }
+
+        return self._mirror.read(read)
+
     def _set_connected(self, connected):
         if connected != self.connected:
             self.connected = connected

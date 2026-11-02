@@ -47,6 +47,8 @@ class SubscriptionEditor(QWidget):
         self.loadSubscriptions()
         layout.addWidget(qlist)
         self.streamlist = QComboBox()
+        # A fixed list may not yet hold the name wanted, so it can be typed.
+        self.streamlist.setEditable(category == "List")
         layout.addWidget(self.streamlist)
         self.update_streamlist()
         addButton = QPushButton("add")

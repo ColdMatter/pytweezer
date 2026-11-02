@@ -120,19 +120,26 @@ class Applet(QtWidgets.QWidget):
 
     # -- shared context-menu dialogs --------------------------------------
 
-    def open_subscription_editor(self, streamkey=None):
+    def open_subscription_editor(self, streamkey=None, choices=None):
         """Pop up the stream-subscription editor, then re-apply subscriptions.
 
         ``streamkey`` overrides which Properties key the list is stored under
         (defaults to ``<stream_category>.lower() + "streams"``). Applets that
         subscribe to more than one kind of stream (e.g. images + masks) pass a
-        different ``streamkey`` per menu action."""
+        different ``streamkey`` per menu action. ``choices`` offers those names
+        instead of the :attr:`stream_category` catalog, for a subscription to
+        something other than a stream."""
         dialog = QDialog(self)
         dialog.setWindowTitle(f"{self.name} — subscriptions")
         layout = QVBoxLayout()
-        editor = SubscriptionEditor(
-            self._props, self.stream_category, streamkey=streamkey
-        )
+        if choices is None:
+            editor = SubscriptionEditor(
+                self._props, self.stream_category, streamkey=streamkey
+            )
+        else:
+            editor = SubscriptionEditor(
+                self._props, "List", streamkey=streamkey, fullList=choices
+            )
         layout.addWidget(editor)
         dialog.setLayout(layout)
         dialog.exec()
