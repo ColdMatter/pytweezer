@@ -73,6 +73,11 @@ _ITEM_LABEL = {"Servers": "Server", "Loggers": "Logger", "Devices": "Device"}
 _CONTROL_WIDTH = 72
 
 
+def _exit_code(code):
+    # Windows reports a native crash as an NTSTATUS, which is looked up in hex.
+    return str(code) if 0 <= code < 256 else f"{code} (0x{code & 0xFFFFFFFF:08X})"
+
+
 def _status_port(params):
     """Return the TCP port to probe for a server, or ``None`` if it has none.
 
@@ -142,6 +147,7 @@ class ManagedRow(QFrame):
         self._self_polling = False
         self._starting_since = None  # monotonic time of last start, or None
         self._stopping_since = None  # monotonic time of a stop the feed hasn't seen
+        self._exit_expected = False
         self.timer = None
 
         self.setObjectName("ProcessTile")
@@ -225,12 +231,32 @@ class ManagedRow(QFrame):
 
     def _poll_self(self):
         if self.process is not None:
-            self._set_state("running" if self.process.poll() is None else "crashed")
+            self._set_state("crashed" if self._owned_process_exited() else "running")
         else:
             self._set_state("stopped")
 
+    def _owned_process_exited(self):
+        """Whether the subprocess this row spawned has exited.
+
+        An exit nobody asked for is logged, once, with its exit code: a driver
+        that crashes in native code (a vendor SDK fail-fast) dies before Python can
+        log anything, so this is the only record of it.
+        """
+        if self.process is None:
+            return False
+        code = self.process.poll()
+        if code is None:
+            return False
+        if not self._exit_expected:
+            self._exit_expected = True
+            logger.error(
+                "%s exited unexpectedly with exit code %s", self.name, _exit_code(code)
+            )
+        return True
+
     def apply_status(self, state, address=None, last_seen=None):
         """Externally driven status update (device feed / reachability probe)."""
+        exited = self._owned_process_exited()
         # While waiting for a just-started service to come up, keep showing
         # "Starting" instead of the feed's transient "down" — otherwise a start
         # reads as stopped → running → stopped → running. A real "up" clears the
@@ -238,7 +264,7 @@ class ManagedRow(QFrame):
         if self._starting_since is not None:
             if state in RUNNING_STATES:
                 self._starting_since = None
-            elif self.process is not None and self.process.poll() is not None:
+            elif exited:
                 # We own this subprocess and it has already exited — the start
                 # failed, so surface it now instead of waiting out the grace.
                 self._starting_since = None
@@ -288,6 +314,7 @@ class ManagedRow(QFrame):
         self.terminateProcess()
         logger.info(f"Starting process {self.name} with script {self.script}")
         self.process = subprocess.Popen([sys.executable, self.script, self.name])
+        self._exit_expected = False
         if self._self_polling:
             # The subprocess *is* the service, so liveness is the truth.
             self._poll_self()
@@ -316,6 +343,7 @@ class ManagedRow(QFrame):
         self._starting_since = None
         if self.process is not None:
             logger.info(f"Stopping process {self.name}")
+            self._exit_expected = True
             self.process.terminate()
             try:
                 self.process.wait(timeout=1)
@@ -329,6 +357,7 @@ class ManagedRow(QFrame):
     def killProcess(self):
         if self.process is not None:
             logger.info(f"Killing process {self.name}")
+            self._exit_expected = True
             self.process.kill()
             if self.process.poll() is not None:
                 self.process = None

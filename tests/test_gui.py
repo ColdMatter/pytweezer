@@ -201,6 +201,25 @@ def test_devices_panel_carries_out_requests_only_for_its_own_devices(
     assert calls == [("start", "Local Cam"), ("stop", "Local Cam")]
 
 
+def test_a_device_process_that_dies_on_start_is_logged_with_its_exit_code(
+    qapp, tmp_path, caplog
+):
+    # A native crash in a driver kills the process before Python can log anything,
+    # so the GUI that spawned it is the only place left to record it.
+    script = tmp_path / "dies.py"
+    script.write_text("import os\nos._exit(3)\n")
+    row = ManagedRow("Crashing Cam", script=str(script))
+    row.startProcess()
+    row.process.wait(timeout=10)
+
+    row.apply_status("down")
+
+    assert row.property("state") == "crashed"
+    [record] = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert "Crashing Cam" in record.getMessage()
+    assert "exit code 3" in record.getMessage()
+
+
 def test_stopping_an_unowned_device_hands_it_to_stop_orphan(make_row):
     orphans = []
     row = make_row(stop_orphan=orphans.append)
