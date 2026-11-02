@@ -27,6 +27,10 @@ the coordinator contract):
   (``OptimisationBasedPhasemaskGeneratorGPU.iter_rearrangement_sequence``) and
   upload it to the SLM concurrently, then grab a reset image. Returns the
   before/after images.
+* :meth:`make_array` — compute the phase mask for a rectangular array and put it
+  on the SLM. :meth:`get_array` then says which array is on the SLM, for
+  analyses and experiments that need the number or positions of the sites; it
+  returns ``None`` once anything else has written the SLM.
 * :meth:`test` / :meth:`status` / :meth:`shutdown`.
 
 Generation and upload are pipelined: the GPU loop pushes each finished frame onto a
@@ -54,6 +58,7 @@ from pytweezer import analysis as an
 from pytweezer.coordinators.base import Coordinator
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.slm import SLM
+from pytweezer.helper_scripts import array_hologram
 
 try:
     import cupy as cp
@@ -183,6 +188,10 @@ class Rearrangement(Coordinator):
         self._initialised = False
         self._state = None  # populated by initialise()
 
+        self._array = None
+        self._array_mask = None
+        self._array_generator = None
+
         #: ``time.perf_counter()`` at which the most recent
         #: :meth:`_play_sequence_pipelined` finished displaying its *first* frame,
         #: or ``None`` if it never did. Frame 0 must be synthesised, copied to the
@@ -234,6 +243,91 @@ class Rearrangement(Coordinator):
         return float(self.slm.get_temperature())
 
     # ------------------------------------------------------------------ #
+    # The array on the SLM
+    # ------------------------------------------------------------------ #
+
+    def make_array(
+        self,
+        rows: int,
+        columns: int,
+        spacing_um: float,
+        angle_deg: float,
+        compensate_envelope: bool = True,
+        blaze_um: tuple[float, float] = (48.0, 4.0),
+        fresnel_focal_length_mm: float = 1125.0,
+        zernike: bool = False,
+        pupil_radius_um: float = 8704.0,
+        pupil_dump_um: tuple[float, float] = (100.0, 0.0),
+        iterations: int = 2000,
+        damping: float = 0.5,
+        phase_randomness: float = 1.0,
+    ) -> dict:
+        """Put a ``rows`` x ``columns`` tweezer array on the SLM and remember it.
+
+        See :mod:`pytweezer.helper_scripts.array_hologram` for the mask. Returns
+        its result: the mask, the trap positions and weights, and the
+        optimisation's final uniformity, min/max ratio and error.
+        """
+        self._require_gpu()
+        if self._array_generator is None:
+            self._array_generator = array_hologram.make_generator()
+        hologram = array_hologram.array_hologram(
+            self._array_generator,
+            rows=int(rows),
+            columns=int(columns),
+            spacing_um=float(spacing_um),
+            angle_deg=float(angle_deg),
+            compensate_envelope=bool(compensate_envelope),
+            blaze_um=tuple(blaze_um),
+            fresnel_focal_length_mm=float(fresnel_focal_length_mm),
+            zernike=bool(zernike),
+            pupil_radius_um=float(pupil_radius_um),
+            pupil_dump_um=tuple(pupil_dump_um),
+            iterations=int(iterations),
+            damping=float(damping),
+            phase_randomness=float(phase_randomness),
+        )
+        self.slm.update_mask(hologram["mask"])
+        self._remember_array(
+            hologram["mask"],
+            x_um=hologram["x_um"],
+            y_um=hologram["y_um"],
+            weights=hologram["weights"],
+            rows=int(rows),
+            columns=int(columns),
+            spacing_um=float(spacing_um),
+            angle_deg=float(angle_deg),
+        )
+        return hologram
+
+    def _remember_array(self, mask, *, x_um, y_um, weights, **geometry) -> None:
+        self._array_mask = np.array(mask, dtype=np.uint8)
+        self._array = {
+            "sites": len(x_um),
+            "x_um": [float(x) for x in x_um],
+            "y_um": [float(y) for y in y_um],
+            "weights": [float(w) for w in weights],
+            **geometry,
+        }
+
+    def get_array(self) -> dict | None:
+        """The array on the SLM, or ``None`` if the rig did not put the SLM's mask there.
+
+        Always carries ``sites`` and the trap ``x_um``/``y_um`` (focal plane,
+        relative to the blaze spot) and ``weights``; an array from
+        :meth:`make_array` also carries ``rows``, ``columns``, ``spacing_um``
+        and ``angle_deg``.
+        """
+        if self._array is None:
+            return None
+        shown = getattr(self.slm, "last_mask", None)
+        if shown is None or not np.array_equal(
+            np.ravel(shown), self._array_mask.ravel()
+        ):
+            return None
+        return dict(self._array)
+
+    # ------------------------------------------------------------------ #
     # Initialise
     # ------------------------------------------------------------------ #
 
@@ -271,6 +365,12 @@ class Rearrangement(Coordinator):
             [pm_array_init, self.pm_gen.fresnel, self.pm_gen.blaze, self.pm_gen.zernike]
         )
         pm_init_uint8 = self.pm_gen.transform_phase_8bit(pm_init).get()
+        self._remember_array(
+            pm_init_uint8,
+            x_um=cp.asnumpy(x1),
+            y_um=cp.asnumpy(y1),
+            weights=cp.asnumpy(w1),
+        )
 
         self._state = {
             "PM": self.pm_gen,

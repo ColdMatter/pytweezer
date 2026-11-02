@@ -296,10 +296,11 @@ class TweezerLoadingViewer(Applet):
         if head is None:
             self.readout.setText(f"Waiting for shots on {', '.join(self.streams)}")
             return
+        sites_from = " (from the rig)" if head.get("sites_from") == "rig" else ""
         if head.get("site_loading") is None:
             self.readout.setText(
-                f"Looking for {head.get('sites')} trap sites in the mean of "
-                f"{head.get('shots')} shots"
+                f"Looking for {head.get('sites')} trap sites{sites_from} in the "
+                f"mean of {head.get('shots')} shots"
             )
             return
 
@@ -318,7 +319,7 @@ class TweezerLoadingViewer(Applet):
             )
         else:
             parts.append("fit failed: fixed threshold")
-        parts.append(f"{head['shots']} shots, {head['sites']} sites")
+        parts.append(f"{head['shots']} shots, {head['sites']} sites{sites_from}")
         self.readout.setText("     ".join(parts))
 
 

@@ -243,14 +243,17 @@ def test_tweezer_loading_scores_only_the_last_shots_in_the_window():
 def test_tweezer_loading_publishes_no_photons_until_it_finds_the_sites():
     from pytweezer.analysis.tweezer_loading import LoadingStatistics, TweezerLoading
 
-    analysis = build(TweezerLoading, {"sites": len(SITE_CENTRES), "detection_step": 10})
+    analysis = build(
+        TweezerLoading,
+        {"rig": "", "sites": len(SITE_CENTRES), "detection_step": 10},
+    )
     analysis.statistics = LoadingStatistics()
 
     analysis.process({"index": 0}, tweezer_frame([]))
 
     ((head, data, _),) = analysis.dataq.sent
     assert data is None
-    assert head == {"shots": 1, "sites": len(SITE_CENTRES)}
+    assert head == {"shots": 1, "sites": len(SITE_CENTRES), "sites_from": "property"}
 
 
 def test_tweezer_loading_ignores_the_second_image_of_a_shot():
@@ -274,3 +277,41 @@ def test_tweezer_loading_restarts_the_window_when_the_frame_size_changes():
     statistics.add(np.zeros((40, 40), dtype=np.uint16), shots=100, feature_size=10)
 
     assert len(statistics.frames) == 1
+
+
+class ArrayRig:
+    def __init__(self, array):
+        self.array = array
+
+    def get_array(self):
+        return self.array
+
+
+def unreachable_rig(name, timeout):
+    raise ConnectionRefusedError(name)
+
+
+@pytest.mark.parametrize(
+    "get_rig, sites, sites_from",
+    [
+        (lambda name, timeout: ArrayRig({"sites": len(SITE_CENTRES)}), 16, "rig"),
+        (lambda name, timeout: ArrayRig(None), 64, "property"),
+        (unreachable_rig, 64, "property"),
+    ],
+    ids=["rig knows", "rig does not know", "rig unreachable"],
+)
+def test_tweezer_loading_takes_the_number_of_sites_from_the_rig_when_it_knows(
+    monkeypatch, get_rig, sites, sites_from
+):
+    from pytweezer.analysis import tweezer_loading
+    from pytweezer.analysis.tweezer_loading import LoadingStatistics, TweezerLoading
+
+    monkeypatch.setattr(tweezer_loading, "get_device", get_rig)
+    analysis = build(TweezerLoading, {"sites": 64, "detection_step": 10})
+    analysis.statistics = LoadingStatistics()
+
+    for shot in range(20):
+        analysis.process({"index": 0}, patterned_frame(shot))
+
+    head, _, _ = analysis.dataq.sent[-1]
+    assert (head["sites"], head["sites_from"]) == (sites, sites_from)

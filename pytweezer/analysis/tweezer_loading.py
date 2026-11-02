@@ -15,15 +15,18 @@ Output:
     ``loading`` (mean over sites), ``loading_spread`` (std/mean over sites),
     ``site_loading``, ``site_rows``/``site_cols`` (pixels in the frame) and the
     fit components ``background``/``signal`` as ``[mean, variance, weight]``.
-    Until the sites are found the message is header-only, with ``shots`` and
-    ``sites``.
+    ``sites_from`` says where the number of sites came from: ``"rig"`` or
+    ``"property"``. Until the sites are found the message is header-only, with
+    ``shots``, ``sites`` and ``sites_from``.
 
 Properties:
     *   imagestreams: ([str]) input image streams.
     *   image_index: (int) which frame of a shot to score, by its ``index``
         header; 0 is the loading image.
     *   shots: (int) frames in the rolling window.
-    *   sites: (int) trap sites in the array.
+    *   rig: (str) device that knows which array is on the SLM, asked for
+        the number of sites; empty to use ``sites`` alone.
+    *   sites: (int) trap sites in the array, when the rig does not know.
     *   feature_size: (int) top-hat filter size in pixels.
     *   window_size: (int) side of the box summed at each site, in pixels.
     *   detection_step: (float) step in counts by which the site-finding level
@@ -31,11 +34,16 @@ Properties:
     *   threshold: (float) occupancy threshold in photons, used only when the
         two-Gaussian fit fails.
 
+The rig is asked at most every ``RIG_REFRESH_S`` seconds, and its last answer
+is kept while it cannot be reached. It does not know the array when the SLM was
+last written by anything but the rig, and ``sites`` is used then.
+
 The sites are re-found in the mean of the window on every frame and kept from
 the last success, so after the array is moved they follow once the old frames
 have left the window. A change of frame size empties the window.
 """
 
+import time
 from collections import deque
 
 import numpy as np
@@ -43,7 +51,14 @@ from scipy.stats import norm
 
 from pytweezer.analysis import analysis as an
 from pytweezer.analysis.analysis_base import ImageAnalysis, run_analysis
+from pytweezer.logging_utils import get_logger
 from pytweezer.servers import DataClient, PropertyAttribute
+from pytweezer.servers.device_client import get_device
+
+LOGGER = get_logger("tweezer_loading")
+
+RIG_REFRESH_S = 10.0
+RIG_TIMEOUT_S = 5.0
 
 
 def find_sites(image, n_sites, step):
@@ -140,17 +155,40 @@ class LoadingStatistics:
 class TweezerLoading(ImageAnalysis):
     _image_index = PropertyAttribute("image_index", 0)
     _shots = PropertyAttribute("shots", 100)
+    _rig = PropertyAttribute("rig", "Rb Rearrangement Rig")
     _sites = PropertyAttribute("sites", 64)
     _feature_size = PropertyAttribute("feature_size", 10)
     _window_size = PropertyAttribute("window_size", 5)
     _detection_step = PropertyAttribute("detection_step", 100.0)
     _threshold = PropertyAttribute("threshold", 100.0)
 
+    _rig_client = None
+    _rig_array = None
+    _rig_asked_at = -np.inf
+
     def __init__(self, name):
         super().__init__(name)
         # Statistics, not a frame, so they go out on the Data hub.
         self.dataq = DataClient(name.split("/")[-1])
         self.statistics = LoadingStatistics()
+
+    def _array_on_rig(self):
+        """The rig's answer to which array is on the SLM, or ``None`` if it does not know."""
+        rig = self._rig
+        if not rig:
+            return None
+        now = time.monotonic()
+        if now - self._rig_asked_at < RIG_REFRESH_S:
+            return self._rig_array
+        self._rig_asked_at = now
+        try:
+            if self._rig_client is None:
+                self._rig_client = get_device(rig, timeout=RIG_TIMEOUT_S)
+            self._rig_array = self._rig_client.get_array()
+        except Exception as error:  # an unreachable rig must not stop the analysis
+            LOGGER.warning("Could not ask %s for its array: %r", rig, error)
+            self._rig_client = None
+        return self._rig_array
 
     def process(self, head, data):
         image_index = int(self._image_index)
@@ -159,12 +197,14 @@ class TweezerLoading(ImageAnalysis):
         self.statistics.add(
             data, shots=max(1, int(self._shots)), feature_size=int(self._feature_size)
         )
+        array = self._array_on_rig()
         out_head, photons = self.statistics.summary(
-            n_sites=int(self._sites),
+            n_sites=array["sites"] if array else int(self._sites),
             window_size=int(self._window_size),
             detection_step=max(1e-3, float(self._detection_step)),
             fallback_threshold=float(self._threshold),
         )
+        out_head["sites_from"] = "rig" if array else "property"
         if "timestamp" in head:
             out_head["timestamp"] = head["timestamp"]
         self.dataq.send(out_head, photons)

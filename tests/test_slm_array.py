@@ -3,7 +3,8 @@
 import numpy as np
 import pytest
 
-from pytweezer.experiments.slm_array import envelope_weights, render_target
+from pytweezer.experiments.slm_array import render_target
+from pytweezer.helper_scripts.array_hologram import envelope_weights
 
 
 def test_envelope_weights_match_the_notebook_calibration_in_array_coordinates():
@@ -57,26 +58,37 @@ def test_each_trap_is_drawn_at_its_weight():
     np.testing.assert_allclose(image.max(axis=0)[columns], weights, rtol=1e-2)
 
 
-class RecordingSLM:
-    def __init__(self):
-        self.shown = []
+class RecordingRig:
+    """Stands in for the rearrangement rig: records what it was asked to make."""
 
-    def update_mask(self, mask):
-        self.shown.append(mask)
+    def __init__(self):
+        self.made = []
+
+    def make_array(self, **array):
+        self.made.append(array)
+        rows, columns = array["rows"], array["columns"]
+        y_um, x_um = np.mgrid[0:rows, 0:columns] * array["spacing_um"]
+        return {
+            "mask": np.full((1024, 1024), len(self.made), dtype=np.uint8),
+            "x_um": x_um.ravel(),
+            "y_um": y_um.ravel(),
+            "weights": np.ones(rows * columns),
+            "focal_pixel_um": 0.5,
+            "uniformity": 0.9,
+            "min_max_ratio": 0.8,
+            "mse": 0.01,
+        }
 
     def close_rpc(self):
         pass
 
 
-def test_mask_on_the_slm_is_the_one_recorded_and_broadcast(monkeypatch):
-    pytest.importorskip("cupy")
-    from pytweezer.experiment import run_local
-    from pytweezer.experiments.slm_array import SlmTweezerArray
-
-    slm = RecordingSLM()
+@pytest.fixture
+def rig_and_streams(monkeypatch):
+    rig = RecordingRig()
     sent = {}
     monkeypatch.setattr(
-        "pytweezer.experiment.experiment._get_device", lambda name, timeout: slm
+        "pytweezer.experiment.experiment._get_device", lambda name, timeout: rig
     )
     monkeypatch.setattr(
         "pytweezer.servers.clients.ImageClient.send",
@@ -84,12 +96,35 @@ def test_mask_on_the_slm_is_the_one_recorded_and_broadcast(monkeypatch):
             self.name + channel, data
         ),
     )
+    return rig, sent
+
+
+def test_rig_is_asked_for_the_array_in_the_form(rig_and_streams):
+    from pytweezer.experiment import run_local
+    from pytweezer.experiments.slm_array import SlmTweezerArray
+
+    rig, _ = rig_and_streams
+
+    measurement = run_local(
+        SlmTweezerArray, rows=2, columns=3, spacing=4e-6, iterations=5
+    )
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    ((array),) = rig.made
+    assert (array["rows"], array["columns"], array["iterations"]) == (2, 3, 5)
+    assert array["spacing_um"] == pytest.approx(4.0)
+
+
+def test_mask_the_rig_made_is_the_one_recorded_and_broadcast(rig_and_streams):
+    from pytweezer.experiment import run_local
+    from pytweezer.experiments.slm_array import SlmTweezerArray
+
+    _, sent = rig_and_streams
 
     measurement = run_local(SlmTweezerArray, rows=2, columns=3, iterations=5)
 
     assert measurement.status == "completed", measurement.attrs.get("error")
-    (mask,) = slm.shown
-    assert mask.dtype == np.uint8 and mask.shape == (1024, 1024)
+    mask = np.full((1024, 1024), 1, dtype=np.uint8)
     np.testing.assert_array_equal(measurement.results["phasemask"][0], mask)
     np.testing.assert_array_equal(sent["slm_phasemask"], mask)
     assert sent["slm_target"].ndim == 2
