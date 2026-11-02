@@ -347,9 +347,11 @@ QTreeWidget#OptimiserTable::item {
 QTreeWidget#OptimiserTable QHeaderView::section {
     padding: 4px 18px 4px 4px;
 }
-QWidget#OptimiserCell,
 QWidget#OptimiserPlots,
-QWidget#OptimiserProposals {
+QWidget#OptimiserProposals,
+QWidget#OptimiserSettings,
+QScrollArea#OptimiserSettingsScroll,
+QScrollArea#OptimiserSettingsScroll > QWidget {
     background: transparent;
 }
 QFrame#Region[kind="well"] QPlainTextEdit {

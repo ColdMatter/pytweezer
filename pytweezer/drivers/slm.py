@@ -13,7 +13,9 @@ to be present. Use :class:`SimulatedSLM` (``simulate: True``) anywhere else.
 
 Masks are ``uint8`` arrays of shape ``(height, width)`` (or a flat
 ``height*width`` buffer) already mapped through the phase LUT by the caller; the
-hardware applies its own voltage LUT on top.
+hardware applies its own voltage LUT on top. ``last_mask`` is the mask most
+recently written, or ``None`` once hardware-triggered playback leaves it unknown
+which preloaded frame is showing.
 """
 
 from __future__ import annotations
@@ -86,6 +88,7 @@ class SLM:
         self.width = None
         self.height = None
         self.depth = None
+        self.last_mask = None
         self._connect()
 
     # ------------------------------------------------------------------ #
@@ -201,6 +204,7 @@ class SLM:
         ret1 = self._lib.ImageWriteComplete(self.board_number, self.timeout_ms)
         if ret1 != 1:
             raise RuntimeError("SLM ImageWriteComplete failed")
+        self.last_mask = mask
         # debug, not info: this runs once per frame on the rearrangement hot path.
         LOGGER.debug(
             "Wrote %dx%d mask to SLM board %d",
@@ -284,6 +288,7 @@ class SLM:
         ret = self._lib.StartAutoIncrement(self.board_number, int(list_length))
         if ret != 1:
             raise RuntimeError("SLM StartAutoIncrement failed")
+        self.last_mask = None
         LOGGER.info("Auto-increment armed over %d frames.", int(list_length))
 
     def stop_auto_increment(self) -> None:
@@ -365,6 +370,7 @@ class SimulatedSLM:
 
     def start_auto_increment(self, list_length: int) -> None:
         self.auto_increment_length = int(list_length)
+        self.last_mask = None
 
     def stop_auto_increment(self) -> None:
         self.auto_increment_length = 0

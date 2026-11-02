@@ -83,7 +83,8 @@ class CatalogueView(QWidget):
             elif module.get("warnings"):
                 module_item.setIcon(0, status_icon("starting"))
                 module_item.setToolTip(0, "\n".join(module["warnings"]))
-            for schema in module.get("classes", []):
+            # Optimisers are configured and run from the Optimisers tab.
+            for schema in _experiments(module):
                 item = QTreeWidgetItem([schema["class_name"]])
                 item.setData(0, _SCHEMA, schema)
                 item.setToolTip(0, schema.get("doc") or schema["class_name"])
@@ -105,7 +106,7 @@ class CatalogueView(QWidget):
     def schema_for(self, module, class_name):
         for entry in self.modules:
             if entry["module"] == module:
-                for schema in entry.get("classes", []):
+                for schema in _experiments(entry):
                     if schema["class_name"] == class_name:
                         return schema
         return None
@@ -206,6 +207,10 @@ class CatalogueView(QWidget):
                 class_item.setHidden(not (class_match or any_recipe))
                 any_class |= class_match or any_recipe
             module_item.setHidden(not (module_match or any_class))
+
+
+def _experiments(module):
+    return [s for s in module.get("classes", []) if not s.get("optimiser")]
 
 
 def _key(schema):

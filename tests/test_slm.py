@@ -62,6 +62,9 @@ class FakeBlinkSDK:
     def ImageWriteComplete(self, board, timeout_ms):
         return 1
 
+    def StartAutoIncrement(self, board, list_length):
+        return 1
+
 
 @pytest.fixture
 def use_fake_sdk(monkeypatch):
@@ -100,6 +103,32 @@ def test_only_one_slm_may_be_open_per_process(use_fake_sdk):
 
     first.close()
     SLM().close()
+
+
+@pytest.mark.parametrize("slm_class", ["real", "simulated"])
+def test_slm_remembers_the_last_mask_written(use_fake_sdk, slm_class):
+    use_fake_sdk()
+    slm = SLM() if slm_class == "real" else SimulatedSLM()
+    first = np.full((1024, 1024), 3, dtype=np.uint8)
+    second = np.full((1024, 1024), 7, dtype=np.uint8)
+    try:
+        slm.update_mask(first)
+        slm.update_mask(second)
+        np.testing.assert_array_equal(slm.last_mask, second)
+    finally:
+        slm.close()
+
+
+@pytest.mark.parametrize("slm_class", ["real", "simulated"])
+def test_hardware_playback_leaves_the_mask_on_show_unknown(use_fake_sdk, slm_class):
+    use_fake_sdk()
+    slm = SLM() if slm_class == "real" else SimulatedSLM()
+    try:
+        slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
+        slm.start_auto_increment(5)
+        assert slm.last_mask is None
+    finally:
+        slm.close()
 
 
 def test_simulated_slm_records_what_was_written():
