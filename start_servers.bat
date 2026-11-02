@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-uv run pytweezer-server
+uv run python -m bin.launch
 
 
 endlocal

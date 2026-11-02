@@ -1,7 +1,9 @@
 __pycache__/
 *.pyc
 configuration/configfile.py
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 venv/
 .venv/
 Image Data/
