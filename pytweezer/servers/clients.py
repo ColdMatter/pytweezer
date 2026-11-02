@@ -185,13 +185,18 @@ class GenericClient:
             else:
                 raise e
 
-    def has_new_data(self):
+    def has_new_data(self, timeout_ms=1):
         """check whether there is unprocessed data in the stream
+
+        Args:
+            timeout_ms: How long to wait for data. The default paces loops that
+                do nothing else; a caller already paced by a timer passes 0,
+                since on Windows any wait lasts a whole timer tick (~16 ms).
 
         Returns:
             bool: Data is available. (the next recv call will not have to wait or timeout)
         """
-        return self.sub_socket.poll(1) == zmq.POLLIN
+        return self.sub_socket.poll(timeout_ms) == zmq.POLLIN
 
     """
     try:

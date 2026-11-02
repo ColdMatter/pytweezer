@@ -112,7 +112,7 @@ class StreamMonitor(QWidget):
 
     def _update_list(self):
         new = []
-        while self.stream.has_new_data():
+        while self.stream.has_new_data(timeout_ms=0):
             msg = self.stream.recv()
             if msg is not None and not self.pause.isChecked():
                 received = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -248,7 +248,7 @@ class LogMonitor(QWidget):
         self.timer.start(_POLL_MS)
 
     def _update_list(self):
-        while self.stream.has_new_data():
+        while self.stream.has_new_data(timeout_ms=0):
             msg = self.stream.recv()
             if msg is None:
                 continue

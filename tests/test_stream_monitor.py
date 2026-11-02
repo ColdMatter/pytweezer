@@ -1,3 +1,7 @@
+import time
+
+import pytest
+
 from pytweezer.GUI import streammonitor as sm
 
 
@@ -8,7 +12,7 @@ class FakeStream:
     def subscribe(self, topic):
         pass
 
-    def has_new_data(self):
+    def has_new_data(self, timeout_ms=1):
         return bool(self.queue)
 
     def recv(self):
@@ -47,3 +51,28 @@ def test_log_monitor_filters_by_level_and_text(qapp, monkeypatch, tmp_path):
     monitor.min_level.setCurrentIndex(0)
     monitor.filter.setText("fine")
     assert hidden() == [True, False]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: sm.StreamMonitor("stall probe", "Data"),
+        lambda: sm.LogMonitor("stall probe"),
+    ],
+    ids=["stream", "log"],
+)
+def test_a_tick_with_no_messages_does_not_wait_for_them(
+    qapp, monkeypatch, tmp_path, build
+):
+    # A 1 ms ZMQ poll blocks for a whole Windows timer tick (~16 ms); with five
+    # monitors on 100 ms timers that stalled the GUI thread most of the time.
+    monkeypatch.setattr(sm, "get_daily_log_path", lambda: tmp_path / "none.jsonl")
+    monitor = build()
+    monitor.timer.stop()
+
+    start = time.perf_counter()
+    for _ in range(10):
+        monitor._update_list()
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.005
