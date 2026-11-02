@@ -67,16 +67,18 @@ def test_a_stale_result_is_discarded(qapp, tmp_path, monkeypatch):
 
     monkeypatch.setattr(analyses, "tweezer_histogram", held_for_the_first)
     view = open_view(archive, first)
+    drawn = []
+    show_result = view.plots.show_result
+    view.plots.show_result = lambda head, photons: (
+        drawn.append(head),
+        show_result(head, photons),
+    )
     view.set_measurement(archive, second, archive.load(second, results=[]))
-    assert until(lambda: "loading" in view.plots.readout.text(), qapp=qapp)
 
     release.set()
 
-    assert not until(
-        lambda: "from the first file" in view.plots.readout.text(),
-        timeout=0.5,
-        qapp=qapp,
-    )
+    assert until(lambda: "loading" in view.plots.readout.text(), qapp=qapp)
+    assert all(head.get("error") != "from the first file" for head in drawn)
 
 
 @pytest.mark.parametrize(
@@ -103,3 +105,52 @@ def test_a_file_without_the_attribute_declares_no_analyses(tmp_path):
     del measurement.attrs["analyses"]
 
     assert declared_analyses(measurement) == []
+
+
+def test_only_one_analysis_runs_at_a_time_and_the_latest_request_wins(
+    qapp, tmp_path, monkeypatch
+):
+    archive = ResultsArchive(tmp_path)
+    relative = frames_file(tmp_path, scan=Scan(repetitions=6))
+    release = threading.Event()
+    running, overlaps, groups = [0], [], []
+    compute = analyses.tweezer_histogram
+
+    def counted(measurement, settings):
+        running[0] += 1
+        overlaps.append(running[0])
+        release.wait(5)
+        groups.append(settings.group)
+        running[0] -= 1
+        return compute(measurement, settings)
+
+    monkeypatch.setattr(analyses, "tweezer_histogram", counted)
+    view = open_view(archive, relative)
+    for index in range(1, 6):
+        view.shots_from.setCurrentIndex(index)
+    release.set()
+
+    assert until(lambda: groups and groups[-1] == 4, qapp=qapp)
+    assert max(overlaps) == 1
+    assert len(groups) <= 2
+
+
+def test_the_previous_files_histogram_is_cleared_while_the_next_loads(
+    qapp, tmp_path, monkeypatch
+):
+    archive = ResultsArchive(tmp_path)
+    first, second = frames_file(tmp_path, 1), frames_file(tmp_path, 2, "second")
+    view = open_view(archive, first)
+    assert until(lambda: "loading" in view.plots.readout.text(), qapp=qapp)
+    release = threading.Event()
+    compute = analyses.tweezer_histogram
+
+    def held(measurement, settings):
+        release.wait(5)
+        return compute(measurement, settings)
+
+    monkeypatch.setattr(analyses, "tweezer_histogram", held)
+    view.set_measurement(archive, second, archive.load(second, results=[]))
+
+    assert view.plots.readout.text() == ""
+    release.set()

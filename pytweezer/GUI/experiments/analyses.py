@@ -68,6 +68,10 @@ class TweezerHistogramView(AnalysisView):
         #: The last file loaded with its results, so changing a control doesn't reload.
         self._loaded = (None, None)
         self._generation = 0
+        # One analysis at a time, each holding a whole file's frames; a request
+        # made meanwhile waits here, replaced by any newer one.
+        self._running = False
+        self._pending = None
         self._result_ready.connect(self._show_result)
         self._recompute_soon = QtCore.QTimer(self)
         self._recompute_soon.setSingleShot(True)
@@ -141,6 +145,8 @@ class TweezerHistogramView(AnalysisView):
     def set_measurement(self, archive, path, measurement):
         if archive is not self._archive:
             self._archive, self._clone = archive, archive.clone()
+        if path != self._path:
+            self.plots.show_message("")
         self._path, self._measurement = path, measurement
         kind = source(measurement)
         for widget in self._frames_only:
@@ -174,11 +180,15 @@ class TweezerHistogramView(AnalysisView):
         self._recompute_soon.stop()
         self._generation += 1
         self.message.setText("Analysing…")
-        threading.Thread(
-            target=self._compute,
-            args=(self._generation, self._path, self._measurement, self._settings()),
-            daemon=True,
-        ).start()
+        request = (self._generation, self._path, self._measurement, self._settings())
+        if self._running:
+            self._pending = request
+        else:
+            self._start(request)
+
+    def _start(self, request):
+        self._running = True
+        threading.Thread(target=self._compute, args=request, daemon=True).start()
 
     def _compute(self, generation, path, measurement, settings):
         try:
@@ -195,6 +205,10 @@ class TweezerHistogramView(AnalysisView):
         self._result_ready.emit(generation, result)
 
     def _show_result(self, generation, result):
+        self._running = False
+        if self._pending is not None:
+            request, self._pending = self._pending, None
+            self._start(request)
         if generation != self._generation:
             return
         if isinstance(result, ArchiveUnavailable):
