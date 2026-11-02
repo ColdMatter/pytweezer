@@ -139,6 +139,25 @@
 - [ ] **Step 5:** `uv run pytest tests/test_tweezer_array.py tests/test_tweezer_histogram.py -q` — PASS.
 - [ ] **Step 6: Commit** "Find trap sites in their own optimiser and measure at the accepted ones".
 
+### Task 5b: Every tweezer file records the accepted sites; the histogram uses them
+
+Added at the user's request (2026-11-02): "the default analysis for load
+tweezer (histograms) uses the stored array sites".
+
+**Files:**
+- Modify: `pytweezer/experiments/load_tweezers.py` (`LoadTweezers.prepare` records the sites)
+- Modify: `pytweezer/experiments/tweezer_array.py` (measurements reuse what `LoadTweezers` loaded; `FindTrapSites` loads none)
+- Modify: `pytweezer/analysis/tweezer_histogram.py` (frames path)
+- Test: `tests/test_tweezer_array.py`, `tests/test_tweezer_histogram.py`
+
+**Interfaces:**
+- Produces: `LoadTweezers.saved_trap_sites(self) -> tuple[np.ndarray | None, str]` — the accepted sites in this ROI's pixels (rounded ints), or `None` and why (none saved, or fitted to another array than the rig shows). `LoadTweezers.prepare` sets `self.trap_sites` from it and, when not `None`, records constants `trap_sites` (ROI px), `trap_window_size`, `trap_feature_size`; when `None` it logs the reason and records nothing. `FindTrapSites.saved_trap_sites` returns `(None, "finds them")` without loading. `TweezerArrayMeasurement.prepare` raises `RuntimeError(reason)` when `self.trap_sites is None`.
+- Produces: `tweezer_histogram` frames path uses the file's `trap_sites`, `trap_window_size`, `trap_feature_size` constants when present; only a file without them falls back to `find_sites`.
+
+- [ ] **Step 1: Failing tests:** `test_load_tweezers_records_the_accepted_sites_in_its_roi(rig)`; `test_load_tweezers_runs_without_saved_sites_and_records_none(rig)`; in `tests/test_tweezer_histogram.py`, `test_a_frames_file_is_scored_at_its_recorded_sites` (sites recorded where `find_sites` would fail, e.g. a mean image with fewer bright spots than sites).
+- [ ] **Step 2:** run — FAIL. **Step 3:** implement. **Step 4:** `uv run pytest tests/test_tweezer_array.py tests/test_tweezer_histogram.py -q` — PASS.
+- [ ] **Step 5: Commit** "Record the accepted trap sites in every tweezer file and histogram at them".
+
 ### Task 6: The Optimisers tab for fits and array proposals
 
 **Files:**
