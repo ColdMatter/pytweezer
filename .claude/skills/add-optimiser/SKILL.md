@@ -95,7 +95,7 @@ fit view draws the results `calibration_image` and `roi_sites`
 ## The Rb tweezer optimisers
 
 The measurements they run (`SlmTweezerArray`, `LoadTweezers`,
-`TweezerArrayShots`) are described under "Tweezer array measurements" in
+`TweezerArrayMeasurement`) are described under "Tweezer array measurements" in
 add-experiment.
 
 - `FindTrapSites` (`Fit`) takes `calibration_shots` with the tweezers off

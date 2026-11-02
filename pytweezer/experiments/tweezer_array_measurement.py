@@ -6,11 +6,12 @@ import numpy as np
 
 from pytweezer.analysis import analysis as an
 from pytweezer.analysis.array_loading import photons_at_sites
-from pytweezer.experiment.arguments import Integer
-from pytweezer.experiments.tweezer_array_shots import TweezerArrayShots
+from pytweezer.experiment import Experiment
+from pytweezer.experiment.arguments import Bool, Integer
+from pytweezer.experiments.load_tweezers import LoadTweezers
 
 
-class TweezerArrayMeasurement(TweezerArrayShots):
+class TweezerArrayMeasurement(LoadTweezers):
     """Score batches of shots at the accepted trap sites, by loading and survival.
 
     The trap sites, summing window, top-hat size and occupancy threshold are
@@ -20,6 +21,15 @@ class TweezerArrayMeasurement(TweezerArrayShots):
     """
 
     shots = Integer(20, min=1, group="Analysis", tooltip="shots per point")
+    save_raw_images = Bool(
+        False,
+        group="Camera",
+        tooltip="record every shot's camera frames as first_images and second_images",
+    )
+
+    # Not LoadTweezers' point: each optimiser measures its own, and this keeps
+    # the class out of the Experiments list.
+    run_point = Experiment.run_point
 
     def prepare(self) -> None:
         super().prepare()
@@ -35,12 +45,12 @@ class TweezerArrayMeasurement(TweezerArrayShots):
         ``save_tweezer_counts``, their raw pixel sums as ``first_counts`` and
         ``second_counts``.
         """
-        firsts, seconds = self._batch(self.shots, **sequence)
+        firsts, seconds = self.take_shots(self.shots, **sequence)
         if self.save_tweezer_counts:
             self.record("first_counts", self.site_counts(firsts), unit="counts")
             self.record("second_counts", self.site_counts(seconds), unit="counts")
-        firsts = self._filtered(firsts, self.trap_feature_size)
-        seconds = self._filtered(seconds, self.trap_feature_size)
+        firsts = self.top_hat(firsts, self.trap_feature_size)
+        seconds = self.top_hat(seconds, self.trap_feature_size)
         # Loading is judged against a threshold refitted on this batch (the
         # accepted one only if the fit fails), survival against the accepted one.
         # TODO: check loading is judged against a per-batch refit while survival

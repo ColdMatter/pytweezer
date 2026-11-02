@@ -6,12 +6,12 @@ import numpy as np
 
 from pytweezer.analysis import analysis as an
 from pytweezer.analysis.trap_sites import default_geometry, fit_trap_sites
-from pytweezer.experiment.arguments import Integer, Number
+from pytweezer.experiment.arguments import Bool, Integer, Number
 from pytweezer.experiment.optimisers import SEARCH, Fit
-from pytweezer.experiments.tweezer_array_shots import TweezerArrayShots
+from pytweezer.experiments.load_tweezers import LoadTweezers
 
 
-class FindTrapSites(Fit, TweezerArrayShots):
+class FindTrapSites(Fit, LoadTweezers):
     """Find the trap sites by fitting the array's geometry to the atoms, and propose them.
 
     Takes ``calibration_shots`` with the tweezers off during the background
@@ -33,6 +33,11 @@ class FindTrapSites(Fit, TweezerArrayShots):
     }
     proposal_group = "Tweezer array"
 
+    save_raw_images = Bool(
+        False,
+        group="Camera",
+        tooltip="record every shot's camera frames as first_images and second_images",
+    )
     calibration_shots = Integer(100, min=1, group=SEARCH)
     window_size = Integer(
         5, min=1, unit="px", group=SEARCH, tooltip="box summed per site"
@@ -50,7 +55,7 @@ class FindTrapSites(Fit, TweezerArrayShots):
     default_columns = Integer(8, min=1, group="Default array")
     default_spacing = Number(5e-6, unit="um", scale=1e-6, min=0, group="Default array")
 
-    def saved_trap_sites(self):
+    def saved_trap_sites(self, saved):
         return None, ""  # it finds them
 
     def prepare(self) -> None:
@@ -65,7 +70,7 @@ class FindTrapSites(Fit, TweezerArrayShots):
         self.record("sites_from", "rig" if array else "default")
 
     def fit(self) -> dict:
-        firsts, backgrounds = self._batch(
+        firsts, backgrounds = self.take_shots(
             self.calibration_shots,
             BackgroundDrop=1,
             tTweezerSetVVA0=0.0,
@@ -86,7 +91,7 @@ class FindTrapSites(Fit, TweezerArrayShots):
             index: (round(y), round(x)) for index, (y, x) in enumerate(found.sites)
         }
         _, _, threshold, fidelity = an.get_array_loading_statistics(
-            self._filtered(firsts, self.feature_size),
+            self.top_hat(firsts, self.feature_size),
             whole_pixels,
             threshold=self.initial_threshold,
             window_size=self.window_size,

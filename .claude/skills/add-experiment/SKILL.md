@@ -72,7 +72,7 @@ Rules that matter:
 - A class only appears in the GUI if it is defined in that module and
   overrides `run_point`, so intermediate base classes stay hidden; a base that
   inherits a concrete `run_point` hides with `run_point = Experiment.run_point`
-  (`TweezerArrayShots`).
+  (`TweezerArrayMeasurement`).
 - `self.rid` is the task's run id (-1 under `run_local`), e.g. to tag broadcast
   frames (`acquire_n_frames(..., broadcast=True, header={"rid": self.rid})`).
 - An experiment that chooses its own points overrides
@@ -112,7 +112,7 @@ values, and unselected ones keep the script's defaults (not recorded in the
 file). `prepare()` sets script, iterations, save toggle and trigger mode on
 every task; repeats come from `Scan(repetitions=...)`, one stored point per
 shot; `run_sequences(**{"rb.tPulse": 3e-5})` overrides parameters for that one
-run (`TweezerArrayShots` runs batches this way). `prepare()` puts followers in trigger mode; `run_sequences()` starts each
+run (`LoadTweezers.shot()` puts the saved sequence parameters under these). `prepare()` puts followers in trigger mode; `run_sequences()` starts each
 follower in a thread, then the master `follower_arm_delay` later
 (`MotMasterExperiment` class attribute, default 0.5 s). A follower still running
 `follower_timeout` (a `MotMaster(...)` keyword, default 60 s) after the master
@@ -306,8 +306,12 @@ The Rb tweezer experiments, in the order a session uses them:
    didn't write the mask).
 2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera
    and proposes the `trap_*` saved parameters.
-3. `LoadTweezers` (`load_tweezers.py`) and everything built on it read them in
-   `prepare()` (`saved_trap_sites()`), moved into this ROI by the origin
+3. `LoadTweezers` (`load_tweezers.py`) runs every shot at the saved
+   sequence parameters (`SAVED_SEQUENCE_PARAMETERS`: script parameter → saved
+   key; a missing key, or an unreachable manager, fails `prepare()`), a script
+   parameter set in the form winning; the values used are the constant
+   `saved_sequence`. It and everything built on it also read the trap sites in
+   `prepare()` (`saved_trap_sites(saved)`), moved into this ROI by the origin
    `camera.set_roi` returned. They are refused when none are saved, when
    `trap_geometry` is not the rig's array (`same_geometry`; an unreachable rig
    is not checked), or when a summing window leaves the ROI. With sites, each
@@ -316,13 +320,13 @@ The Rb tweezer experiments, in the order a session uses them:
    `save_tweezer_counts`; frames are recorded only with `save_raw_images`.
    `LoadTweezers` runs without sites only if it records frames;
    `TweezerArrayMeasurement` always needs them.
-4. `TweezerArrayShots` (`tweezer_array_shots.py`) runs every shot at the saved
-   sequence parameters (`SAVED_SEQUENCE_PARAMETERS`: script parameter → saved
-   key; a missing key fails `prepare()`), a script parameter set in the form
-   winning; the values used are the constant `saved_sequence`. Each point is a
-   batch of shots, so its `first_occupied`/`second_occupied`/`*_counts` are
-   `(shots, sites)`, and `save_raw_images` (off by default here) records
-   `first_images`/`second_images`.
+4. `LoadTweezers.take_shots(n, **sequence)` runs a batch, for the classes
+   whose point is one: `TweezerArrayMeasurement` (`score_batch()`, used by the
+   Bayesian optimisers) and `FindTrapSites`. Their
+   `first_occupied`/`second_occupied`/`*_counts` are `(shots, sites)` per
+   point, and `save_raw_images` (off by default there) records
+   `first_images`/`second_images`. They declare no analyses; `LoadTweezers`
+   itself keeps one shot per point, which the default analyses expect.
 
 Shots broadcast their HamCam frames with `header={"rid": self.rid}`; the live
 tweezer loading analysis (`analysis/tweezer_loading.py`) starts afresh whenever

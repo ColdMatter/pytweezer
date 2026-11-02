@@ -1,4 +1,4 @@
-"""Load the Rb tweezers and image them twice on the HamCam."""
+"""Load the Rb tweezers at the saved sequence parameters and image them twice on the HamCam."""
 
 from __future__ import annotations
 
@@ -28,6 +28,36 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_SAVED_UNDER_OWN_NAME = (
+    "tMOTLoadRepVCO",
+    "tMOTLoadCoolVCO",
+    "tMOTLoadRepVVA",
+    "tMOTLoadCoolVVA",
+    "tMolCoolVCO1",
+    "tMolRepVCO1",
+    "tMolCoolVVA1",
+    "tMolRepVVA1",
+    "tMolCoolVCO2",
+    "tMolRepVCO2",
+    "tMolCoolVVA2",
+    "tMolRepVVA2",
+    "tMOTShimXccValue",
+    "tMOTShimYccValue",
+    "tMOTShimZccValue",
+    "tMolassesShimXccValue",
+    "tMolassesShimYccValue",
+    "tMolassesShimZccValue",
+)
+
+#: Script parameter of RbTweezerBasic2026_2 -> the saved parameter it is set from.
+SAVED_SEQUENCE_PARAMETERS = {
+    **{name: name for name in _SAVED_UNDER_OWN_NAME},
+    "tImgCoolVCO1": "tImgCoolVCO",
+    "tImgCoolVCO2": "tImgCoolVCO",
+    "tImgCoolVVA1": "tImgCoolVVA",
+    "tImgCoolVVA2": "tImgCoolVVA",
+}
+
 #: The saved parameters a trap-site fit is accepted into.
 TRAP_SITE_KEYS = (
     "trap_sites",
@@ -40,6 +70,12 @@ TRAP_SITE_KEYS = (
 
 class LoadTweezers(MotMasterExperiment):
     """Run the Rb tweezer-loading sequence and image the tweezers twice per point.
+
+    Every shot runs the sequence at the saved parameters
+    (:data:`SAVED_SEQUENCE_PARAMETERS`); a script parameter set in the form
+    wins over its saved value, and the values used are recorded as
+    ``saved_sequence``. :meth:`take_shots` runs a batch of shots, for
+    subclasses whose point is one.
 
     ``signal_counts`` is the summed first frame minus the summed second.
     :meth:`prepare` also loads the accepted trap sites (see
@@ -81,6 +117,22 @@ class LoadTweezers(MotMasterExperiment):
 
     def prepare(self) -> None:
         super().prepare()
+        try:
+            saved = get_saved_parameters()
+        except (ManagerUnavailable, ManagerError) as error:
+            raise RuntimeError(
+                f"the saved parameters could not be read: {error}"
+            ) from error
+        missing = sorted(set(SAVED_SEQUENCE_PARAMETERS.values()) - set(saved))
+        if missing:
+            raise KeyError(f"no saved parameter {', '.join(map(repr, missing))}")
+        set_in_form = self.motmaster_parameters()["rb"]
+        self.saved_sequence = {
+            parameter: saved[key]
+            for parameter, key in SAVED_SEQUENCE_PARAMETERS.items()
+            if parameter not in set_in_form
+        }
+        self.record("saved_sequence", self.saved_sequence)
 
         # The camera may round the ROI's corner; sites are placed by the one it used.
         self.roi_origin = tuple(
@@ -94,7 +146,7 @@ class LoadTweezers(MotMasterExperiment):
         self.camera.set_sensitivity(self.sensitivity)
         self.camera.setup_acquisition(2, mode="snap")
 
-        self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites()
+        self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(saved)
         if self.trap_sites is None:
             if not self.no_trap_sites_reason:
                 return
@@ -110,20 +162,18 @@ class LoadTweezers(MotMasterExperiment):
         self.record("trap_feature_size", self.trap_feature_size, unit="px")
         self.record("threshold", self.trap_threshold, unit="photons")
 
-    def saved_trap_sites(self) -> tuple[dict[int, tuple[int, int]] | None, str]:
-        """The accepted trap sites as whole pixels of this ROI, by index; or ``None`` and why.
+    def saved_trap_sites(
+        self, saved: dict
+    ) -> tuple[dict[int, tuple[int, int]] | None, str]:
+        """The accepted trap sites in ``saved`` as whole pixels of this ROI, by index; or ``None`` and why.
 
         An empty reason means the experiment wants none.
 
         Also sets ``trap_window_size``, ``trap_feature_size`` and
-        ``trap_threshold`` from the saved parameters. Sites fitted to another
+        ``trap_threshold`` from ``saved``. Sites fitted to another
         array than the rig has on the SLM are refused; if the rig does not know
         its array, or cannot be reached, the saved sites are used unchecked.
         """
-        try:
-            saved = get_saved_parameters()
-        except (ManagerUnavailable, ManagerError) as error:
-            return None, f"the saved parameters could not be read: {error}"
         if any(key not in saved for key in TRAP_SITE_KEYS):
             return None, (
                 "no trap sites are saved; run FindTrapSites and accept its proposal"
@@ -160,23 +210,45 @@ class LoadTweezers(MotMasterExperiment):
         return {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}, ""
 
     def shot(self, **overrides) -> tuple:
-        """Run the sequence once with ``overrides`` and return the two HamCam frames."""
+        """Run the sequence once at the saved parameters plus ``overrides``; the two HamCam frames.
+
+        ``overrides`` are keyed as for :meth:`run_sequences` (``rb.<parameter>``).
+        """
+        saved = {f"rb.{name}": value for name, value in self.saved_sequence.items()}
         self.camera.start_acquisition()
-        self.run_sequences(**overrides)
+        self.run_sequences(**(saved | overrides))
         first_image, second_image = self.camera.acquire_n_frames(
             2, broadcast=True, header={"rid": self.rid}
         )
         self.camera.stop_acquisition()
         return first_image, second_image
 
-    def site_photons(self, frames) -> np.ndarray:
-        """Every site's photons in each of ``frames``, top-hat filtered: ``(frames, sites)``."""
-        filtered = [
+    def take_shots(self, n_shots: int, **sequence) -> tuple[list, list]:
+        """``n_shots`` shots with script parameters ``sequence``; their first and second frames.
+
+        With ``save_raw_images`` the frames are recorded as ``first_images`` and
+        ``second_images``, ``(shots, height, width)`` per point.
+        """
+        overrides = {f"rb.{name}": value for name, value in sequence.items()}
+        frames = [self.shot(**overrides) for _ in range(n_shots)]
+        firsts, seconds = zip(*frames, strict=True)
+        if self.save_raw_images:
+            self.record("first_images", np.array(firsts))
+            self.record("second_images", np.array(seconds))
+        return list(firsts), list(seconds)
+
+    @staticmethod
+    def top_hat(frames, feature_size: int) -> list[np.ndarray]:
+        return [
             an.morphological_tophat_high_pass(
-                np.asarray(frame, dtype=float), feature_size=self.trap_feature_size
+                np.asarray(frame, dtype=float), feature_size=feature_size
             )
             for frame in frames
         ]
+
+    def site_photons(self, frames) -> np.ndarray:
+        """Every site's photons in each of ``frames``, top-hat filtered: ``(frames, sites)``."""
+        filtered = self.top_hat(frames, self.trap_feature_size)
         return photons_at_sites(filtered, self.trap_sites, self.trap_window_size)
 
     def site_counts(self, frames) -> np.ndarray:

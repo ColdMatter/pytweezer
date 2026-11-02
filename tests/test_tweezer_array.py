@@ -7,10 +7,9 @@ from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
 from pytweezer.experiment import Scan, optimisers, run_local
 from pytweezer.experiment.client import ManagerUnavailable
-from pytweezer.experiments import load_tweezers, tweezer_array_shots
-from pytweezer.experiments.load_tweezers import LoadTweezers
+from pytweezer.experiments import load_tweezers
+from pytweezer.experiments.load_tweezers import SAVED_SEQUENCE_PARAMETERS, LoadTweezers
 from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
-from pytweezer.experiments.tweezer_array_shots import SAVED_SEQUENCE_PARAMETERS
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
 from pytweezer.optimisers.optimise_molasses_shims import OptimiseMolassesShims
 from pytweezer.optimisers.optimise_tweezer_imaging import OptimiseTweezerImaging
@@ -159,7 +158,7 @@ def rig(monkeypatch):
     )
     saved = dict(SAVED)
     sequencer.saved = saved
-    for module in (tweezer_array_shots, load_tweezers, optimisers):
+    for module in (load_tweezers, optimisers):
         monkeypatch.setattr(module, "get_saved_parameters", lambda: saved)
     return sequencer
 
@@ -258,8 +257,13 @@ def test_every_shot_broadcasts_its_frames_tagged_with_the_task(rig):
     assert all(header == {"rid": -1} for header in rig.camera.headers)
 
 
-def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(rig):
-    run_local(ArrayBatch, **FAST, **{"rb.tMolCoolVCO1": 7.5})
+@pytest.mark.parametrize(
+    ("experiment", "args"), [(LoadTweezers, {}), (ArrayBatch, FAST)]
+)
+def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(
+    rig, experiment, args
+):
+    run_local(experiment, **args, **{"rb.tMolCoolVCO1": 7.5})
     expected = {
         parameter: SAVED[key] for parameter, key in SAVED_SEQUENCE_PARAMETERS.items()
     } | {"tMolCoolVCO1": 7.5}
@@ -440,15 +444,23 @@ def test_dropping_raw_images_needs_trap_sites(rig):
     assert "FindTrapSites" in measurement.attrs["error"]
 
 
-def test_load_tweezers_runs_when_the_manager_cannot_be_reached(rig, monkeypatch):
+def test_load_tweezers_needs_the_saved_parameters(rig, monkeypatch):
     def unreachable():
         raise ManagerUnavailable("not responding")
 
     monkeypatch.setattr(load_tweezers, "get_saved_parameters", unreachable)
     measurement = run_local(LoadTweezers)
 
-    assert measurement.status == "completed", measurement.attrs.get("error")
-    assert "first_image" in measurement.results
+    assert measurement.status == "failed"
+    assert "saved parameters could not be read" in measurement.attrs["error"]
+
+
+def test_load_tweezers_needs_every_saved_sequence_parameter(rig):
+    del rig.saved["tImgCoolVCO"]
+    measurement = run_local(LoadTweezers)
+
+    assert measurement.status == "failed"
+    assert "tImgCoolVCO" in measurement.attrs["error"]
 
 
 @pytest.mark.parametrize("save_raw_images", [False, True])
