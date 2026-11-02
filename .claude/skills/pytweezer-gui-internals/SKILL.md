@@ -1,18 +1,27 @@
 ---
 name: pytweezer-gui-internals
-description: How the pytweezer PyQt6 shell is built — TabbedGUI's dock-based tabs, the ManagedRow/ControlPanel/DevicesPanel process tiles, the two different status mechanisms and why they differ, and the deliberate hard-exit teardown. Use when adding or editing a tab or panel in bin/gui.py or bin/managed_panel.py, touching pytweezer/GUI/pytweezerQt.py or device_status.py, debugging a GUI that hangs on exit or loses its window geometry, working out why a row shows the wrong Running/Stopped state, or changing how processes are started and stopped from the GUI. For building a live viewer window, use the add-applet skill instead.
+description: How the pytweezer PyQt6 shell is built — TabbedGUI's dock-based tabs, the ManagedRow/ControlPanel/DevicesPanel process tiles, the two different status mechanisms and why they differ, and the deliberate hard-exit teardown. Use when adding or editing a tab or panel in bin/gui.py or bin/managed_panel.py, touching pytweezer/GUI/pytweezerQt.py or device_status.py, debugging a GUI that hangs on exit, freezes or lags, or loses its window geometry, working out why a row shows the wrong Running/Stopped state, or changing how processes are started and stopped from the GUI. For building a live viewer window, use the add-applet skill instead.
 ---
 
 # GUI internals
 
 `pytweezer-server` and `pytweezer-client` are the same window built by
 `build_gui(server: bool)` in `bin/gui.py`, differing only in whether the
-Servers/Loggers tabs are controllable. Tabs: Servers, Devices, Loggers, Streams,
-Applets, Analysis, Experiments, Results, NI Cards, Properties. NI Cards
-(`pytweezer/GUI/ni_cards/`) drives single NI channels by MOTMaster alias through
-each PC's `NICards` device (`pytweezer/drivers/ni_cards.py`). Experiments and Results
-(`pytweezer/GUI/experiments/`) are covered by the `add-experiment` skill; they
-are built before the list so Results can hand "resubmit" to Experiments.
+Servers/Loggers tabs are controllable (on a client they are view-only, because
+those processes run on the server PC). Tabs are registered, in order, in the
+list `build_gui` passes to `TabbedGUI`: Servers, Devices, Loggers, Streams,
+Applets, Analysis, Experiments, Results, Saved parameters, Optimisers, NI Cards,
+Properties. NI Cards (`pytweezer/GUI/ni_cards/`) drives single NI channels by
+MOTMaster alias through each PC's `NICards` device (`pytweezer/drivers/ni_cards.py`).
+Experiments and Results (`pytweezer/GUI/experiments/`), Saved parameters
+(`pytweezer/GUI/saved_parameters.py`) and Optimisers (`pytweezer/GUI/optimisers.py`)
+are covered by the `add-experiment` skill.
+
+Those four share one `ExperimentFeed` (the manager's published state), made in
+`build_gui` and passed as `feed=`; a panel closes the feed only if it made it
+itself (`_owns_feed`). Experiments and Optimisers are built before the list so
+Results' "resubmit" can be routed: an optimiser's request to Optimisers, any
+other to Experiments.
 
 Each panel is constructed through `_safe_panel`, so one panel that fails to
 build leaves a placeholder instead of killing the whole window.
@@ -54,14 +63,19 @@ what lets a user drag a panel out into its own floating window. Two rules follow
 - Every dock needs a **stable `objectName`** (`f"dock:{label}"`), or
   `saveState()`/`restoreState()` cannot restore the layout.
 - Panels are wrapped in a `QScrollArea` by `_wrap()`, except an already-tabbed
-  widget (the stream monitor), which is added as-is.
+  widget (the stream monitor, NI Cards), which is added as-is.
 
 ## Process tiles: `ManagedRow`
 
 `bin/managed_panel.py`'s `ManagedRow` is one row = one process. It spawns
 `<sys.executable> <script> <name>` (see the `pytweezer-architecture` skill for that launch
 protocol) and owns the Start/Stop toggle and status LED. Rows for entries marked
-`"active": True` auto-start when the panel opens.
+`"active": True` auto-start when the panel opens, on the PC that controls them.
+
+A process a row spawned that exits without being asked is logged once, with its
+exit code (the only record of a driver dying in native code), and the row stays
+**Crashed** — even though the device feed can only say "down" — until it is
+started or stopped again or the feed reports it running.
 
 ## Three status sources, on purpose
 
@@ -71,7 +85,7 @@ the usual cause of a row reporting nonsense:
 | Panel | Rows | Status from |
 | --- | --- | --- |
 | `ControlPanel(name, category, controllable=True)` | Servers, Loggers on the server PC | `enable_self_polling()` — authoritative, this PC owns the subprocess |
-| `ControlPanel(..., controllable=False)` | the client's view-only Servers tab | client-side TCP probe (`_ProbeWorker`) |
+| `ControlPanel(..., controllable=False)` | the client's view-only Servers and Loggers tabs | client-side TCP probe (`_ProbeWorker`) |
 | `DevicesPanel` | every device, on any PC | the server-published `DeviceStatusClient` feed |
 
 They differ because of what each machine can actually see. A client cannot poll
@@ -134,6 +148,20 @@ subprocess. Consequences:
   by a GUI that died), it kills it by exact command-line match
   (`process_cleanup.kill_device_process`). Closing a panel never does that, and
   never sends remote stops.
+
+## Keep the GUI thread free
+
+Every panel shares one GUI thread, so one slow call lags every tab.
+
+- A `QTimer`-paced stream poll checks with `has_new_data(timeout_ms=0)`: on
+  Windows any non-zero ZMQ wait lasts a whole timer tick (~16 ms), and the
+  stream monitors' timers would otherwise hold the thread most of the time.
+- Anything that can block on the network runs off the GUI thread and reports
+  back by signal: `_ProbeWorker` (a `QThread`), NI Cards' `CardsClient` (a
+  worker thread with a call queue), `_stop_orphan` (process listing).
+- A table with `ResizeToContents` columns re-measures the whole column on every
+  `setItem`; for a bulk redraw switch those columns to `Interactive` and back,
+  as `QueueView.set_snapshot` does.
 
 ## Shared vs per-machine state
 

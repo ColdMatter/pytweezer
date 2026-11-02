@@ -173,18 +173,20 @@ forgets the writer.
 uv run python .claude/skills/add-logger/scripts/check_logger.py "Chamber Pressure Logger"
 ```
 
-Then add a case to `tests/test_loggers.py` (copy the starter first if that file
-doesn't exist: `cp .claude/skills/add-logger/assets/test_loggers.py tests/`). Its
-`build(cls, conf)` constructs the logger with the writer stubbed and `simulate`
-on, and `assert_storable(points)` fails on exactly the fields the writer would have
-discarded — worth applying in every logger's test:
+Then add a case to `tests/test_loggers.py`. Its `build` fixture constructs the
+logger with `simulate` on and the writer replaced by `tests.helpers.RecordingDB`;
+comparing the fields with `_coerce_fields(fields)` fails on exactly the ones
+the writer would have discarded — worth doing in every logger's test, as
+`test_simulated_ni_adc_gives_a_storable_field_per_channel` does:
 
 ```python
-def test_chamber_pressure_reads_one_point():
-    points = build(ChamberPressureLogger, {"measurement": "chamber"}).read()
+def test_simulated_chamber_pressure_is_storable(build):
+    ((_measurement, fields, _tags),) = build(
+        ChamberPressureLogger, {"measurement": "chamber"}
+    ).read()
 
-    assert_storable(points)
-    assert points[0][1]["pressure"] > 0
+    assert set(_coerce_fields(fields)) == set(fields), "non-numeric fields"
+    assert fields["pressure"] > 0
 ```
 
 Test what bites: the reading-to-fields mapping, the degenerate case (no channels,

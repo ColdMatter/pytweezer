@@ -66,9 +66,9 @@ Keep both entry points: `main(name)` for tooling that imports the module, and
 the `__main__` guard for the launcher and the command line.
 
 `poll_interval` is a repaint budget, not a data rate — nothing is lost between
-polls because messages queue. The existing viewers use 10 ms because they redraw
-one cheap item; 50–100 ms is kinder for anything that rebuilds a plot, and the
-display still looks live.
+polls because messages queue. The image viewers and Live Plot use 10 ms because
+they redraw one cheap item; 50–100 ms is kinder for anything that rebuilds a plot
+(Scalar History, SLM Monitor, Tweezer Loading), and the display still looks live.
 
 ## Reading a stream without losing or crashing on messages
 
@@ -95,12 +95,14 @@ if message is None or len(message) < 2:  # reading a header field
 channel, head = message[0], message[1]  # tolerate a trailing array
 ```
 
-**Drain the queue with `while`, not `if`.** One `recv()` per poll falls behind
-a stream faster than it arrives and never catches up — the display drifts
-further into the past the longer it runs.
+**Drain the queue with `while`, not `if`, and don't wait.** One `recv()` per
+poll falls behind a stream faster than it arrives and never catches up — the
+display drifts further into the past the longer it runs. `poll` is already paced
+by its timer, so check with a zero timeout: the default 1 ms wait lasts a whole
+timer tick (~16 ms) on Windows, stalling the window's event loop on every poll.
 
 ```python
-while self.stream.has_new_data():
+while self.stream.has_new_data(timeout_ms=0):
     ...
 ```
 
@@ -113,12 +115,17 @@ user just removed. Unsubscribe, clear, re-subscribe, recreate.
 carries. Subscribing to it is harmless, but creating a curve or a row for it puts
 a fake entry in front of the user.
 
-Header keys are all optional — use `head.get(...)`. `_imgindex` (position within
-a shot; `0` marks a new sequence, the natural reset for anything stateful),
-`timestamp`, and the pair `_offset`/`_imgresolution` (pixel origin and metres per
-pixel) are set by some publishers and not others. If you scale an image by
-`_imgresolution`, keep the axis labels honest — an image drawn in metres inside
-a view ranged in pixels shrinks into the corner and looks like a broken applet.
+Header keys are all optional — use `head.get(...)`. A camera frame
+(`Camera.broadcast_image` in `drivers/camera_base.py`) carries `timestamp`,
+`index` (the frame's number as read: its place in the shot when an experiment
+reads a shot, counting up from the acquisition start when broadcast live),
+`roi_x0`/`roi_y0` (the sensor pixel of the frame's corner), and `rid` when the
+experiment that read it passes one (`LoadTweezers` does). The pair `_offset`/`_imgresolution` (pixel origin and metres
+per pixel) is set by some publishers (`roi_slice.py`, `experiments/slm_array.py`)
+and not others. `_imgindex`, which older analyses read, has no current publisher.
+If you scale an image by `_imgresolution`, keep the axis labels honest — an image
+drawn in metres inside a view ranged in pixels shrinks into the corner and looks
+like a broken applet.
 
 Give every stream client a distinct name (`DataClient(self.name + "_left")`).
 The name is the publish channel, and two clients sharing one are indistinguishable
@@ -127,6 +134,34 @@ on the hub.
 Finally, **`poll` must not raise.** It runs from a QTimer; an exception there
 escapes into the Qt loop and, depending on the message, can take the window with
 it. Guard the shape you require and skip anything else.
+
+## Experiment results, saved parameters and trap sites
+
+Not everything worth viewing is a stream:
+
+- **Experiment results.** `ExperimentFeed` (`GUI/experiments/feed.py`) mirrors
+  the Experiment Manager's state on its own Qt timer. `point_received` carries
+  each point a running task measures (`{"rid", "index", "values", "scalars",
+  ...}`); points measured before the window opened are in `held_points()`, to
+  take once, on the first `queue_changed`. Close the feed in `closeEvent`. To let
+  the user pick result names rather than streams, pass them as
+  `open_subscription_editor(streamkey=..., choices=[...])`. `viewers/live_plot.py`
+  does all of this.
+- **Saved parameters.** `get_saved_parameters()` (`experiment/client.py`) is an
+  RPC to the manager: call it at start-up and again when the feed's snapshot
+  carries a new `saved_parameters_version`, never per poll, and catch
+  `ManagerUnavailable`/`ManagerError` so a missing manager leaves the window up.
+- **Trap sites** (`trap_sites`) are saved as full-sensor `(y, x)` pixels. Place
+  them in a frame with `analysis/trap_sites.to_roi(sites, head.get("roi_y0", 0),
+  head.get("roi_x0", 0))`, or they sit off the atoms whenever the camera reads an
+  ROI. The Image Monitor draws frames transposed; to match the Optimisers tab and
+  the notebooks (row 0 at the top), use `show_rows_down` from
+  `viewers/tweezer_monitor.py`, which shows the whole pattern.
+
+A plot that another panel also shows belongs in a widget module under
+`pytweezer/GUI/` that the applet only wraps: `tweezer_loading_plots.py` is drawn
+by both the Tweezer Loading applet and the Results tab's histogram view, so the
+two cannot drift apart.
 
 ## Properties are the user's knobs
 
@@ -223,6 +258,21 @@ The first is how the `recv()` unpack bug surfaces — a traceback rather than a
 picture. Iterate on the code and re-run until the screenshot is something you
 would be happy to put on a lab monitor.
 
+For the sources beyond streams, `--points` emits a synthetic experiment point per tick on
+every `ExperimentFeed`, `--saved KEY=JSON` seeds what `get_saved_parameters`
+returns, and `--roi X0,Y0` moves the image frames' ROI origin, so a site overlay
+can be seen to follow it:
+
+```bash
+... preview_applet.py pytweezer/GUI/viewers/tweezer_monitor.py \
+    --prop 'imagestreams=["Tweezer_cam"]' --roi 20,10 \
+    --saved 'trap_sites=[[40,60],[40,80],[60,60]]' --saved trap_window_size=7
+```
+
+The synthetic messages are generic frames and `[coords, values]` traces. A viewer
+of one analysis's own output (Tweezer Loading) draws nothing from them; test the drawing on that analysis's header instead, as
+`tests/test_tweezer_loading_plots.py` does.
+
 Then run the suite, which covers the framework the applet sits on:
 
 ```bash
@@ -235,13 +285,11 @@ Add an entry to `DEFAULT_APPLETS` in `pytweezer/GUI/applet_launcher.py` so it is
 offered as a template in the **Applets** tab:
 
 ```python
-(
-    {
-        "name": "Atom Count",
-        "script": "pytweezer/GUI/viewers/atom_count.py",
-        "description": "Rolling history of the atom number",
-    },
-)
+{
+    "name": "Atom Count",
+    "script": "pytweezer/GUI/viewers/atom_count.py",
+    "description": "Rolling history of the atom number",
+},
 ```
 
 The list seeds the Properties `"Applets"` key only on a *first* run, so on a
@@ -261,7 +309,7 @@ them set:
 Subscribes to the streams named in ``datastreams`` and plots the header field
 named by ``field`` against arrival order, keeping the last ``history`` points.
 Point it at an analysis that publishes scalars (``image_stats.py``,
-``centre_of_mass.py``).
+``gaussian_fit.py``).
 
 Properties:
     *   datastreams: ([str]) input data streams.
@@ -276,8 +324,15 @@ what was built or why.
 
 ## Reference viewers
 
-- `viewers/live_plot.py` — the smallest complete applet: one curve per data
-  stream, correct drain and unpack handling.
+- `viewers/scalar_history.py` — the smallest complete applet: a header field
+  from each data stream, correct drain and unpack handling.
+- `viewers/live_plot.py` — one curve per data stream plus markers per
+  experiment result from `ExperimentFeed`.
+- `viewers/tweezer_loading.py` — a thin applet around a shared plot widget.
+- `viewers/tweezer_monitor.py` — subclasses the Image Monitor to draw the saved
+  trap sites over each frame by its ROI origin.
+- `viewers/slm_monitor.py` — two image streams side by side, in metres when the
+  header says so.
 - `viewers/image_monitor.py` — image stream, colormap + histogram LUT, ROIs, and
   a hideable sidebar; shows a second stream category (masks) on its own
   `streamkey`.

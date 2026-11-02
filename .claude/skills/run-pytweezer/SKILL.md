@@ -6,9 +6,10 @@ description: Launch, run, and screenshot the pytweezer PyQt6 control GUIs (pytwe
 # Run pytweezer
 
 pytweezer's user-facing app is two PyQt6 windows — `pytweezer-server` (full
-process control, server PC) and `pytweezer-client` (view-only, client PCs) —
-built from `bin/gui.py`. They spawn a window and block forever, so the way to
-drive one non-interactively and *see* it is the screenshot driver at
+process control, server PC) and `pytweezer-client` (client PCs: the same tabs,
+with Servers and Loggers view-only) — built from `bin/gui.py`. They spawn a
+window and block forever, so the way to drive one non-interactively and *see*
+it is the screenshot driver at
 [.claude/skills/run-pytweezer/driver.py](driver.py): it builds a GUI in-process,
 spins the Qt event loop briefly so it fully paints (and, on a networked lab PC,
 fetches live server/device status), then grabs a PNG of the window and of each
@@ -22,23 +23,31 @@ All paths below are relative to the repo root. Everything runs through uv
 - uv with the project env installed. If imports fail, run `uv sync`.
 - On Windows with an active desktop session (a lab PC), no display flags are
   needed — the driver uses the native Qt backend and the window flashes briefly.
-- On a truly headless box (SSH, no session), prefix the run with
-  `QT_QPA_PLATFORM=offscreen` (see Gotchas — text won't render there).
+- On a truly headless box (SSH, no session, or Linux without a display), prefix
+  the run with `QT_QPA_PLATFORM=offscreen` (see Gotchas — on Windows text won't
+  render there).
+- Off the lab network, also set `PYTWEEZER_DATA_DIR` to an empty scratch
+  directory (see Gotchas — the Results tab otherwise stalls the run for minutes).
 
 ## Run (agent path) — screenshot driver
 
-Build the **client** GUI (safe: view-only, spawns no subprocesses) and dump
-screenshots:
+Build the **client** GUI and dump screenshots:
 
 ```bash
 uv run python .claude/skills/run-pytweezer/driver.py client
 ```
 
-Output (7 PNGs) lands in `.claude/skills/run-pytweezer/shots/`:
+The client spawns no servers or loggers, but its Devices tab starts every
+`"active"` device whose `host` is this PC, as the real client does. On a dev
+machine (host not in config) that is nothing; on a lab client PC it starts that
+PC's devices, so don't run it there while that PC's GUI is up.
+
+Output (13 PNGs) lands in `.claude/skills/run-pytweezer/shots/`:
 
 - `client_full.png` — whole window, active tab raised
-- `client_tab_<Label>.png` — one per tab: Server_Status, Devices, Applets,
-  Analysis, Properties, Streams
+- `client_tab_<Label>.png` — one per tab: Servers, Devices, Loggers, Streams,
+  Applets, Analysis, Experiments, Results, Saved_parameters, Optimisers,
+  NI_Cards, Properties
 
 Pass a second arg to redirect the output dir:
 
@@ -46,7 +55,7 @@ Pass a second arg to redirect the output dir:
 uv run python .claude/skills/run-pytweezer/driver.py client /tmp/shots
 ```
 
-On a lab PC the shots show **live** state: e.g. the Server Status tab lists
+On a lab PC the shots show **live** state: e.g. the Servers tab lists
 Imagehub / Commandhub / Datahub / … as "Running" on `10.59.3.1`, and Devices
 shows the real MotMaster / camera status feed. Off-network, rows show
 "Unknown"/"Stopped" but the window still builds and paints.
@@ -74,6 +83,10 @@ uv run pytweezer-client     # or start_client.bat
 uv run pytweezer-server     # or start_servers.bat; simulates off PH-BEAST
 ```
 
+On the lab's Windows PCs, Smart App Control blocks uv's console-script `.exe`
+launchers, so the `.bat` files run `uv run python -m bin.launch` (server) and
+`uv run python -m bin.launch client` instead; use those forms there.
+
 Useless in a non-interactive shell (nothing to look at, blocks forever). Ctrl-C
 to quit. Use the driver instead when you need a screenshot.
 
@@ -99,24 +112,23 @@ the registration script on that PC. SSH hosts: `10.59.3.1` (PH-BEAST, user
 ## Test
 
 ```bash
-uv run pytest tests/ -q --ignore=tests/test_gui.py
+uv run pytest tests/test_gui.py tests/test_experiment_gui.py tests/test_stream_monitor.py -q
 ```
 
-→ `81 passed`. **`tests/test_gui.py` is currently broken** (pre-existing, not
-caused by this skill): it imports `from bin.process_manager import ...`, but that
-module was split into `bin/managed_panel.py` and `bin/process_manager.py` no
-longer exists, so a plain `uv run pytest tests/ -q` aborts at collection with
-`ModuleNotFoundError: No module named 'bin.process_manager'`. Ignore that file
-(as above) to run the rest.
+The GUI tests run offscreen through the `qapp` fixture in `tests/conftest.py`.
 
 ## Gotchas
 
-- **Offscreen renders no text.** Under `QT_QPA_PLATFORM=offscreen` the layout,
-  colors, and status dots draw, but the Windows offscreen font database renders
-  no normal glyphs — every label comes out blank. Only the native backend
-  (default, needs a session) produces readable screenshots. So: prefer the
-  default; reach for `offscreen` only when there is genuinely no display, and
-  expect textless shots.
+- **Offscreen renders no text on Windows.** Under `QT_QPA_PLATFORM=offscreen`
+  the layout, colors, and status dots draw, but the Windows offscreen font
+  database renders no normal glyphs — every label comes out blank. There, only
+  the native backend (default, needs a session) produces readable screenshots,
+  so prefer it. On Linux, offscreen renders text normally.
+- **Off-network, the Results tab stalls the run.** Off the Experiment Manager's
+  PC, Results reads measurement files from it over RPC on the GUI thread, and
+  each refresh waits up to 30 s for an unreachable host, so the driver runs
+  for many minutes. `PYTWEEZER_DATA_DIR=<empty dir>`
+  makes it read local files instead.
 - **`os._exit(0)` swallows piped stdout.** `bin/gui.py` and the driver hard-exit
   after the Qt loop (to skip lingering non-daemon ZMQ threads). The driver
   `flush()`es first, but redirect to a file rather than piping through
@@ -135,9 +147,9 @@ longer exists, so a plain `uv run pytest tests/ -q` aborts at collection with
 
 ## Troubleshooting
 
-- `ModuleNotFoundError: No module named 'bin.process_manager'` — you ran the full
-  `pytest tests/`. Add `--ignore=tests/test_gui.py` (see Test).
-- Blank/textless screenshots — you're on the offscreen backend with no session.
+- Driver hangs after `client_full.png` — the Results tab is waiting on an
+  unreachable Experiment Manager; set `PYTWEEZER_DATA_DIR` (see Gotchas).
+- Blank/textless screenshots — you're on the offscreen backend on Windows.
   Run on a machine with a desktop session, or accept textless layout shots.
 - Empty printed output from the driver — it was piped through `head`; redirect to
   a file instead (the `os._exit` gotcha above).

@@ -201,6 +201,7 @@ Load a skill when you need more than that:
 | How a panel should look, read and behave (layout, styling, wording) | `pytweezer-gui-design` |
 | Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
+| Writing or accepting an optimiser (`StagedScan`, `BayesianOptimisation`, `Fit`), the Optimisers tab | `add-optimiser` |
 | Running shots, scans or auto-tune from a lab-book notebook (`Rig`), MOTMaster zips | `notebook-rig` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 | Writing, reviewing or deleting tests | `write-tests` |

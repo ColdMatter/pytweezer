@@ -24,8 +24,8 @@ code:
    keys whose names match a parameter**. Everything else in the entry
    (`host`, `port`, `class`, …) is dropped simply by not matching.
 3. It calls `cls(**those_kwargs)` — immediately, at server startup.
-4. `simple_server_loop` serves the resulting object; every public method becomes
-   an RPC call.
+4. `serve()` (sipyco's `simple_server_loop`, logging every call that raises)
+   serves the resulting object; every public method becomes an RPC call.
 
 Step 2 is where most mistakes land, and they are silent: a config key that
 doesn't match a constructor parameter is not an error, it just does nothing. The
@@ -41,7 +41,7 @@ bug in your driver. Verify in simulation instead.
 **Cameras** subclass `Camera` from `pytweezer/drivers/camera_base.py`. That base
 already owns image-stream broadcasting, TIFF autosave, the acquisition loop, and
 the connect/relinquish lifecycle. Your driver is a thin shim implementing the
-abstract hooks. Follow `pytweezer/drivers/thorcam.py` as the shortest example.
+abstract hooks. Follow `pytweezer/drivers/orca.py` as the shortest example.
 
 **Everything else** is a plain class with no required base. Public methods become
 RPC methods; that's the whole contract. Follow `pytweezer/drivers/slm.py`.
@@ -70,13 +70,22 @@ ring-buffer acquisition, `frames_acquired()` counts frames since it started,
 saved beside frames in zips, and `start_live()` broadcasts every new frame. The
 defaults assume a pylablib backend; otherwise implement
 `_acquisition_in_progress`, `_count_frames` and `_read_range`. Take
-`self._lock` around backend calls the live thread could race.
+`self._lock` around backend calls the live thread could race. A camera that
+should always stream takes a `live` flag and calls `arm()` and `start_live()`
+at the end of `__init__` (`thorcam.py`).
+
+`set_roi(x0, width, y0, height)` passes pylablib exclusive ends
+(`x0 + width`, not `x0 + width - 1`), stores the corner the camera actually
+applied in `self.roi_origin` and returns it: `broadcast_image` puts it in every
+frame's header as `roi_x0`/`roi_y0`, which is how analyses place trap sites on
+a cropped frame.
 
 **Match the base class signatures exactly.** `setup_acquisition(self, acq_mode,
 nframes)` takes both arguments. A shim that narrows this to `(self, nframes)`
-will `TypeError` the moment a caller uses the documented interface — note that
-`thorcam.py` currently has this drift, so copy its structure but not that
-signature.
+will `TypeError` the moment a caller uses the documented interface.
+`thorcam.py` and `tweezermonitorcam.py` currently have this drift (the checker
+flags it); `thorcam.py` also still carries a pre-framework `main()`/`run_server`
+and a hand-built client, none of which a new driver needs.
 
 ## Writing a generic driver
 
@@ -87,6 +96,17 @@ marshals them over the wire, and a returned SDK handle object will fail there.
 The object must not define `__call__`. sipyco treats a callable target as a
 per-connection factory and would invoke it instead of serving it; the framework
 rejects this for composites but a plain device would fail confusingly at runtime.
+
+`pytweezer/drivers/ni_cards.py` is the example of hardware shared with other
+programs. It enforces its `reserved` and `protected` channels itself, not only
+in its GUI tab, and takes them as parameters with no default, so a misspelt
+config key fails construction instead of leaving channels unguarded. It names
+the MotMaster it defers to by its CONFIG key (`"motmaster"`) and imports
+`pytweezer.drivers.motmaster` only on first use (`ni_cards_sources.py`), since
+importing that module without .NET prints pythonnet's errors in every process
+that loads the driver. Errors that come back through .NET reflection arrive
+wrapped in `TargetInvocationException`; unwrap them (`_unwrapped`) before
+matching on type.
 
 ## The simulated twin
 
@@ -110,15 +130,16 @@ of sync as the real class grows. Stubs must return PYON-safe values, never a
 Add to `CONFIG["Devices"]` in `pytweezer/configuration/config.py`:
 
 ```python
-"Rb ThorLabs Camera": {
+"Rb ORCA": {
     "active": True,
-    "class": "pytweezer.drivers.thorcam:ThorLabsCamera",
-    "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
+    "class": "pytweezer.drivers.orca:ORCACamera",
+    "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
     "teardown": "close",
     "host": SERVER_HOST,
     "port": get_next_port(),
     "simulate": SIMULATING,
-    "stream_name": "rb_thorcam",
+    "serial_number": "280187",
+    "stream_name": "rb_orca",
     "timeout": 5.0,
 },
 ```
@@ -126,10 +147,9 @@ Add to `CONFIG["Devices"]` in `pytweezer/configuration/config.py`:
 - **`host`** decides which PC actually runs the server, independent of where the
   GUI was launched. Use a `HOSTS[...]` entry or `SERVER_HOST`.
 - **`port`** is always `get_next_port()`, never a literal. Ports come from a
-  sequential iterator consumed in file order, so **inserting an entry mid-dict
-  renumbers every device below it**. Append new devices at the end of the
-  `"Devices"` block unless you have a reason not to, and expect to restart
-  servers on other PCs if you do renumber.
+  sequential iterator consumed in file order, so **adding an entry renumbers
+  every entry after it**. Put it where it belongs, then update and restart
+  every PC together; a PC on the old config dials the old ports.
 - **`simulate`** is `SIMULATING` (the module-level flag), not a hardcoded bool.
 - **`teardown`** names a zero-argument method as a *string* (`"close"`,
   `"disconnect"`), called when the server stops. Omit it if the device needs no
@@ -150,12 +170,13 @@ reach the constructor, builds the backend in simulation, and reports the RPC
 surface:
 
 ```bash
-uv run python .claude/skills/add-device-driver/scripts/check_device.py "Rb ThorLabs Camera"
+uv run python .claude/skills/add-device-driver/scripts/check_device.py "Rb ORCA"
 ```
 
-Then add the device to `SIM_CONFS` in `tests/test_simulate_decorator.py` — that
-test PYON-round-trips every simulated method's return value, catching an
-unserializable stub at test time rather than at the first live RPC call. Run:
+`--all` checks every entry. If you hand-wrote a `Simulated*` class, add the
+`(Real, Simulated)` pair to `test_simulated_backend_covers_real_interface` in
+`tests/test_simulate_decorator.py`; for anything else worth testing, see the
+`write-tests` skill. Run:
 
 ```bash
 uv run pytest tests/ -q
