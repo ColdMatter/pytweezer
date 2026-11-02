@@ -1,11 +1,16 @@
+import threading
+import time
+
 import h5py
 import numpy as np
 import pytest
 
 from pytweezer.experiment import Choice, Experiment, ListAxis, Number, Scan, run_local
+from pytweezer.experiment.archive import ResultsArchive
 from pytweezer.GUI.experiments.analyses import AnalysisView
 from pytweezer.GUI.experiments.results import ResultsPanel, aggregate, resubmission
-from tests.helpers import FakeFeed
+from tests.helpers import FakeFeed, until
+from tests.helpers import settle as settle_threads
 
 
 class Sweep(Experiment):
@@ -49,6 +54,36 @@ def relpath(root, path):
     return path.relative_to(root).as_posix()
 
 
+def settle(qapp):
+    settle_threads(qapp, "Results ")
+
+
+def refreshed(panel, qapp):
+    panel.refresh()
+    settle(qapp)
+
+
+def select(panel, qapp, path):
+    panel.select_path(path)
+    settle(qapp)
+    assert panel.path == path
+
+
+class CountingArchive(ResultsArchive):
+    """Local files, counting the measurement loads; one connection serves every read."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.loads = []
+
+    def clone(self):
+        return self
+
+    def load(self, path, results=None):
+        self.loads.append(path)
+        return super().load(path, results)
+
+
 def test_aggregate_means_and_standard_errors():
     curves = aggregate([1, 1, 2, 2, 2], [1.0, 3.0, 4.0, np.nan, 4.0])
     xs, means, sems, counts = curves[0.0]
@@ -77,28 +112,30 @@ def test_panel_lists_days_and_hides_running_files_until_they_finish(qapp, tmp_pa
     with h5py.File(running, "r+") as f:
         f.attrs["status"] = "running"
     panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
+    refreshed(panel, qapp)
     assert days(panel) == ["2026-10-07", "2026-10-06"]
     newest = panel.tree.topLevelItem(0)
     assert children(newest) == ["000001  Sweep"]
 
     panel.show_unfinished.setChecked(True)
+    settle(qapp)
     newest = panel.tree.topLevelItem(0)
     assert [newest.child(i).text(1) for i in range(2)] == ["running", "completed"]
     panel.show_unfinished.setChecked(False)
+    settle(qapp)
     assert newest.childCount() == 1
 
     with h5py.File(running, "r+") as f:
         f.attrs["status"] = "completed"
-    panel.refresh()
+    refreshed(panel, qapp)
     assert children(newest) == ["000003  Sweep", "000001  Sweep"]
 
 
 def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
     path = make_file(tmp_path)
     panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
-    assert panel.select_path(relpath(tmp_path, path))
+    refreshed(panel, qapp)
+    select(panel, qapp, relpath(tmp_path, path))
     text = panel.metadata.toPlainText()
     assert (
         "Status: completed" in text and "gain = 3" in text and "x = (scanned)" in text
@@ -107,6 +144,7 @@ def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
     assert panel.x_choice.currentText() == "x"
 
     panel.series_choice.setCurrentText("mode")
+    settle(qapp)
     curves = [item for item in panel.plot.listDataItems()]
     assert len(curves) == 2
     xs, ys = curves[0].getData()
@@ -115,6 +153,7 @@ def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
 
     panel.x_choice.setCurrentText("mode")  # a categorical axis
     panel.series_choice.setCurrentText("(none)")
+    settle(qapp)
     assert len(panel.plot.listDataItems()) == 1
 
     requests = []
@@ -126,13 +165,13 @@ def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
 def test_tree_updates_in_place_without_a_click(qapp, tmp_path):
     make_file(tmp_path, 1)
     panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
+    refreshed(panel, qapp)
     first = panel.tree.topLevelItem(0)
-    assert panel.select_path("2026/10/07/000001_Sweep.h5")
+    select(panel, qapp, "2026/10/07/000001_Sweep.h5")
 
     make_file(tmp_path, 2)
     make_file(tmp_path, 3, day=("2026", "10", "08"))
-    panel.refresh()  # what the timer does
+    refreshed(panel, qapp)  # what the timer does
     assert days(panel) == ["2026-10-08", "2026-10-07"]
     assert panel.tree.topLevelItem(1) is first  # not rebuilt
     assert children(first) == ["000002  Sweep", "000001  Sweep"]
@@ -147,15 +186,16 @@ def test_selected_running_measurement_reloads_and_keeps_choices(qapp, tmp_path):
         f.attrs["n_done"] = 2
     panel = ResultsPanel(root=tmp_path)
     panel.show_unfinished.setChecked(True)
-    panel.refresh()
-    assert panel.select_path(relpath(tmp_path, path))
+    refreshed(panel, qapp)
+    select(panel, qapp, relpath(tmp_path, path))
     panel.x_choice.setCurrentText("mode")
+    settle(qapp)
     assert "points 2/12" in panel.metadata.toPlainText()
 
     with h5py.File(path, "r+") as f:
         f.attrs["status"] = "completed"
         f.attrs["n_done"] = 12
-    panel.refresh()
+    refreshed(panel, qapp)
     assert "points 12/12" in panel.metadata.toPlainText()
     assert panel.x_choice.currentText() == "mode"
 
@@ -167,20 +207,19 @@ def running_file(root, rid=1):
     return path
 
 
-def test_live_running_measurement_plots_from_the_feed(qapp, tmp_path, monkeypatch):
+def test_live_running_measurement_plots_from_the_feed(qapp, tmp_path):
     path = running_file(tmp_path)
     feed = FakeFeed()
-    panel = ResultsPanel(root=tmp_path, feed=feed)
+    archive = CountingArchive(tmp_path)
+    panel = ResultsPanel(archive=archive, feed=feed)
     panel.show_unfinished.setChecked(True)
-    panel.refresh()
-    assert panel.select_path(relpath(tmp_path, path))
+    refreshed(panel, qapp)
+    select(panel, qapp, relpath(tmp_path, path))
     panel.x_choice.setCurrentText("point index")
+    settle(qapp)
 
-    reads = []
-    real_load = panel.archive.load
-    monkeypatch.setattr(
-        panel.archive, "load", lambda *a, **k: reads.append(a) or real_load(*a, **k)
-    )
+    reads = archive.loads
+    reads.clear()
     feed.rows[1] = [
         {"index": 0, "values": {}, "scalars": {"y": 10.0}},
         {"index": 1, "values": {}, "scalars": {"y": 20.0, "extra": 1.0}},
@@ -194,7 +233,7 @@ def test_live_running_measurement_plots_from_the_feed(qapp, tmp_path, monkeypatc
     ]
     assert "2/12 points" in panel.detail_region.hint.text()
 
-    panel.refresh()
+    refreshed(panel, qapp)
     assert reads == [], "nor by the tree refresh"
 
     with h5py.File(path, "r+") as f:
@@ -202,6 +241,7 @@ def test_live_running_measurement_plots_from_the_feed(qapp, tmp_path, monkeypatc
     feed.queue_changed.emit(
         {"running": [], "queue": [], "history": [{"rid": 1, "status": "completed"}]}
     )
+    settle(qapp)
     assert panel.measurement.status == "completed"
     assert "12/12 points" in panel.detail_region.hint.text()
 
@@ -268,23 +308,23 @@ def test_dropdown_offers_plot_against_then_the_files_analyses(qapp, tmp_path):
     histogram = make_histogram_file(tmp_path, 1)
     plain = relpath(tmp_path, make_file(tmp_path, 2))
     panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
+    refreshed(panel, qapp)
 
-    panel.select_path(histogram)
+    select(panel, qapp, histogram)
     assert analysis_items(panel) == [
         ("Plot against", True),
         ("Tweezer loading histogram (counts)", True),
     ]
-    panel.select_path(plain)
+    select(panel, qapp, plain)
     assert analysis_items(panel) == [("Plot against", True)]
 
 
 def test_unknown_analysis_is_listed_disabled(qapp, tmp_path):
     path = make_histogram_file(tmp_path, 1, analyses='["from_the_future"]')
     panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
+    refreshed(panel, qapp)
 
-    panel.select_path(path)
+    select(panel, qapp, path)
 
     assert analysis_items(panel) == [("Plot against", True), ("from_the_future", False)]
 
@@ -293,9 +333,9 @@ def test_analyses_are_disabled_while_the_measurement_runs(qapp, tmp_path):
     path = make_histogram_file(tmp_path, 1, status="running")
     panel = ResultsPanel(root=tmp_path)
     panel.show_unfinished.setChecked(True)
-    panel.refresh()
+    refreshed(panel, qapp)
 
-    panel.select_path(path)
+    select(panel, qapp, path)
 
     assert analysis_items(panel)[1] == ("Tweezer loading histogram (counts)", False)
 
@@ -303,8 +343,8 @@ def test_analyses_are_disabled_while_the_measurement_runs(qapp, tmp_path):
 def test_choosing_an_analysis_shows_its_view(qapp, tmp_path):
     path = make_histogram_file(tmp_path, 1)
     panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
-    panel.select_path(path)
+    refreshed(panel, qapp)
+    select(panel, qapp, path)
 
     panel.analysis_choice.setCurrentIndex(1)
 
@@ -317,11 +357,47 @@ def test_the_choice_is_kept_for_the_next_file_of_the_same_class(qapp, tmp_path):
     first, second = make_histogram_file(tmp_path, 1), make_histogram_file(tmp_path, 2)
     plain = relpath(tmp_path, make_file(tmp_path, 3))
     panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
-    panel.select_path(first)
+    refreshed(panel, qapp)
+    select(panel, qapp, first)
     panel.analysis_choice.setCurrentIndex(1)
 
-    panel.select_path(plain)
+    select(panel, qapp, plain)
     assert panel.analysis_choice.currentText() == "Plot against"
-    panel.select_path(second)
+    select(panel, qapp, second)
     assert panel.analysis_choice.currentText() == "Tweezer loading histogram (counts)"
+
+
+class StalledArchive(ResultsArchive):
+    """Local files behind a link that answers only once released, like an unreachable manager."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.released = threading.Event()
+
+    def clone(self):
+        return self
+
+    def days(self):
+        self.released.wait(5)
+        return super().days()
+
+    def load(self, path, results=None):
+        self.released.wait(5)
+        return super().load(path, results)
+
+
+def test_a_slow_archive_never_holds_up_the_gui_thread(qapp, tmp_path):
+    path = make_file(tmp_path)
+    archive = StalledArchive(tmp_path)
+    panel = ResultsPanel(archive=archive)
+
+    started = time.monotonic()
+    panel.refresh()
+    panel.load(relpath(tmp_path, path))
+    qapp.processEvents()
+    assert time.monotonic() - started < 1
+    assert days(panel) == []
+
+    archive.released.set()
+    assert until(lambda: days(panel) == ["2026-10-07"], qapp=qapp)
+    assert until(lambda: "Status: completed" in panel.metadata.toPlainText(), qapp=qapp)

@@ -18,13 +18,17 @@ transform and (2) the handful of conventions that decide whether the GUI can see
 your script at all.
 
 An analysis of a *finished measurement file*, offered in the Results tab, is a
-different thing: no process, no stream. Put the computation in a Qt-free module
-under `pytweezer/analysis/` taking a `Measurement` (it is not listed by the
-Analysis Manager, which only lists files with stream properties), write an
-`AnalysisView` for it in `pytweezer/GUI/experiments/analyses.py`, add it to
-`ANALYSES`, and name it in the experiment's `analyses = (...)`.
-`tweezer_histogram.py` is the example; it shares its numbers with the live
-`tweezer_loading.py` through `array_loading.py`, so the two cannot disagree.
+different thing: no process, no stream, nothing in this skill's `process`
+contract applies. Put the computation in a Qt-free module under
+`pytweezer/analysis/` taking a `Measurement` (it is not listed by the Analysis
+Manager, which only lists files with stream properties), write an `AnalysisView`
+for it in `pytweezer/GUI/experiments/analyses.py` — its `set_measurement(archive,
+path, measurement)` loads over its own archive connection and computes off the
+GUI thread — add an `AnalysisEntry` to `ANALYSES`, and name it in the
+experiment's `analyses = (...)` (the experiment side is the `add-experiment`
+skill's). `tweezer_histogram.py` is the example; it shares its numbers with the
+live `tweezer_loading.py` through `array_loading.py`, so the two cannot disagree.
+Do the same whenever a live and a file analysis compute one quantity.
 
 ## How the framework runs your class
 
@@ -40,6 +44,10 @@ msg = client.recv()  →  head, data  →  process(head, data)  →  send_result
 stream; returning `None` drops it. That's the whole contract. Because
 construction opens sockets and the loop never exits, everything testable lives
 inside `process` — keep it that way and verification stays cheap.
+
+`process` gets `data=None` for a header-only message, which is how scalar
+streams (`image_stats.py`'s output) arrive; check for it if your input stream
+may carry scalars.
 
 ## Pick the base class by what you consume
 
@@ -83,24 +91,37 @@ A few conventions that come from the transport rather than the maths:
   after you.
 - **Send scalars in the header with `data=None`.** `DataClient` publishes a
   header-only message fine, and that's how the viewers' data sidebar and
-  `live_plot.py` pick up derived numbers. Values must be JSON-safe — wrap numpy
-  scalars in `float()`/`int()`, or they will not survive the hop.
+  `scalar_history.py` pick up derived numbers. The header goes as JSON: the
+  client converts numpy integers, floats and arrays, but not a numpy bool (any
+  comparison of array values), which raises — wrap it in `bool()`.
 - **Emit 1-D traces as a 2xN `[coords, values]` array**, so `live_plot.py` and
   `gaussian_fit.py` can read `A[0]` as the axis and `A[1]` as the values.
-- **`np.ascontiguousarray` any crop or slice before sending.** A view carries the
-  parent frame's strides, and ZMQ would ship the whole buffer behind it.
 - **Accumulate in `float64`** (`data.sum(axis=0, dtype=np.float64)`) — raw camera
   frames are integer and overflow quietly.
 - **Return `None` rather than raising** on a message you can't handle. An
   exception kills the process, and the GUI shows it as simply stopped.
+- **Ask the Experiment Manager or a device at most every few seconds**, never per
+  frame, and keep the last answer while it cannot be reached:
+  `tweezer_loading.py` reads the saved parameters and the rig that way
+  (`REFRESH_S`), catching `ManagerUnavailable`/`ManagerError` and any device
+  error.
 
-Useful header keys, when present: `_imgindex` (position within a shot, `0` marks
-a new sequence — the natural reset signal for anything stateful), `timestamp`,
-`_offset` (pixel origin of a crop within its parent frame) and `_imgresolution`
-(metres per pixel). Treat all four as optional with `head.get(...)`; not every
-publisher sets them. If your result is a position in the frame, decide whether to
-report pixels or physical units and say which in the docstring — `roi_slice.py`
-shows the conversion both ways.
+Useful header keys, all optional — read them with `head.get(...)`. A camera
+frame (`Camera.broadcast_image` in `drivers/camera_base.py`) carries `timestamp`,
+`index` (the frame's number as read: its place in the shot when an experiment
+reads a shot, counting up from the acquisition start when broadcast live),
+`roi_x0`/`roi_y0` (the sensor pixel of the frame's corner) and `rid` when the
+experiment that read it passes one. A change of `rid` is the natural reset for
+anything that accumulates over a task, as `tweezer_loading.py` does. Some
+publishers add `_offset` (pixel origin of a crop within its parent frame) and
+`_imgresolution` (metres per pixel).
+
+Saved trap sites (`trap_sites`, fitted by `trap_sites.fit_trap_sites`) are
+full-sensor `(y, x)` pixels; place them in a frame with
+`trap_sites.to_roi(sites, head.get("roi_y0", 0), head.get("roi_x0", 0))`. If your
+result is a position in the frame, decide whether to report pixels or physical
+units and say which in the docstring — `roi_slice.py` shows the conversion both
+ways.
 
 ## Properties are the user's knobs
 
@@ -180,15 +201,8 @@ it launches `python <script> Analysis/<Category>/<name>`.
 
 ## Verify it with a test
 
-Add a case to `tests/test_analysis.py`. If that file doesn't exist yet, copy the
-bundled starter first — it carries the helpers plus worked cases for the existing
-analyses:
-
-```bash
-cp .claude/skills/add-analysis-script/assets/test_analysis.py tests/test_analysis.py
-```
-
-`build(cls, props)` allocates the analysis **without running `__init__`**, so no
+Add a case to `tests/test_analysis.py`, which carries the helpers plus worked
+cases for the existing analyses. `build(cls, props)` allocates the analysis **without running `__init__`**, so no
 hubs, no sockets, and no non-daemon threads: it installs a dict-backed fake for
 `_props` (which every `PropertyAttribute` reads through) and recording fakes for
 `client` and `dataq`. You then push a synthetic frame or trace through `process`
@@ -208,6 +222,10 @@ def test_centre_of_mass_finds_a_single_bright_spot():
     assert head["centre_y"] == pytest.approx(5.0)
 ```
 
+Since `__init__` never runs, set by hand anything else it creates; an analysis
+that reads saved parameters gets them by monkeypatching the name it imported.
+`loading_analysis` in that file does both for `tweezer_loading.py`.
+
 Test the cases that actually bite: a known-answer input where you can compute the
 right number by hand, the degenerate input (empty frame, all-background, wrong
 ndim) that must return `None` rather than raise, and any property that changes
@@ -219,9 +237,9 @@ uv run pytest tests/ -q
 
 ## Turning it on
 
-Nothing else to edit. In the GUI's **Analysis** tab, *Add* creates a filter:
-give it a name, pick Image or Data, pick your script from the dropdown, and
-select the input stream. The *Properties* button opens the editor at
+Nothing else to edit. In the GUI's **Analysis** tab, *Add filter* creates a
+filter: give it a name, pick Image or Data, pick your script from the dropdown,
+and select the input stream. Its *Configure…* button opens the editor at
 `/Analysis/<Category>/<name>/` where the defaults you declared appear, ready to
 tune. Starting the filter launches your script as its own process.
 

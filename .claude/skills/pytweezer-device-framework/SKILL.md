@@ -1,16 +1,16 @@
 ---
 name: pytweezer-device-framework
-description: How pytweezer's generic device server and client work — device_server.py building any driver from its CONFIG entry, get_device() addressing, simulation, composite devices and coordinators, and the rules for what blocks what over RPC. Use when calling devices from experiment or notebook code, running calls against several devices concurrently, debugging a device that will not start or resolve, changing device_server.py/device_client.py/simulated_device.py themselves, grouping devices into one process or writing a coordinator, or reasoning about RPC latency and blocking between targets. For writing a brand-new hardware driver, use the add-device-driver skill instead.
+description: How pytweezer's generic device server and client work — device_server.py building any driver from its CONFIG entry, get_device() addressing, simulation, composite devices and coordinators, and the rules for what blocks what over RPC. Use when calling devices from experiment or notebook code, running calls against several devices concurrently, debugging a device that will not start or resolve, changing device_server.py/device_client.py/simulated_device.py themselves, grouping devices into one process or writing a coordinator, working out who may use a device while a task runs (reservations, restrict_devices, UndeclaredDeviceError, a device that stays off hardware a task holds), or reasoning about RPC latency and blocking between targets. For writing a brand-new hardware driver, use the add-device-driver skill instead.
 ---
 
 # The device framework
 
 Every device runs the same launcher. `pytweezer/servers/device_server.py` reads
 `CONFIG["Devices"][name]["class"]` (a `"module.path:ClassName"` string), imports
-it, constructs it from the matching config keys, and serves it with
-`sipyco.pc_rpc.simple_server_loop`. There is no per-driver server script and no
-registry — `"class"` is the only thing that differentiates one device from
-another.
+it, constructs it from the matching config keys, and serves it with `serve()`
+(sipyco's `simple_server_loop`, with the `RPCServer` below). There is no
+per-driver server script and no registry — `"class"` is the only thing that
+differentiates one device from another.
 
 Imports are lazy and per-device, so a missing hardware library (e.g. `pylablib`
 for the ImagEM) never breaks importing the launcher or starting other devices.
@@ -69,9 +69,13 @@ matches a parameter, and silently ignored if it doesn't.
 | `"teardown"` | Name of a zero-arg method to run when the server stops (`"close"`, `"disconnect"`). |
 | `"target_name"` | RPC target label. Cosmetic on a single-device server — clients auto-select the sole target. |
 | `"description"` | sipyco server description. |
+| `"allow_parallel"` | Drop sipyco's per-call lock; inert for plain `def` methods (see "What blocks what"). |
+| `"devices"`, `"coordinator"`, `"coordinator_target_name"`, `"role"` | Composite wiring, below. |
 
-**Append new entries, never insert them.** Ports come from `get_next_port()` in
-declaration order, so inserting an entry renumbers every device below it.
+`"active"` is read by the GUI (auto-start) and by reservations (an inactive
+device cannot be reserved), not by the launcher. **Adding an entry renumbers
+every port after it** (`get_next_port()` hands them out in declaration order),
+so every PC is updated and restarted together; see `pytweezer-architecture`.
 
 ## Composite devices and coordinators
 
@@ -108,15 +112,17 @@ name, so `get_device` on it raises `KeyError` naming its sub-devices.
 
 Subclass `Coordinator` (`pytweezer/coordinators/base.py`), reach backends through
 `self.require_role(<role>)`, and point the composite's `"coordinator"` key at the
-class. `build_spec` constructs it as `cls(roles, conf)`.
-`pytweezer/coordinators/rearrangement.py` is the real worked example.
+class. `build_spec` constructs it as `cls(roles, conf)`; override `shutdown()`
+to release the backends before they are torn down.
+`pytweezer/coordinators/rearrangement.py` is the real worked example (the
+`Rb Rearrangement Rig`); `transport.py` is an unconfigured variant of it.
 
 Three constraints, all consequences of how sipyco serves targets:
 
 - **Every public method is a synchronous RPC method that stalls the entire
   server while it runs.** So a batch method must take a bounded iteration count
-  rather than free-run — `run_n(n)` issues the whole batch in one RPC, with each
-  iteration a direct Python call. It cannot be aborted mid-batch.
+  rather than free-run — e.g. a `run_n(n)` that issues the whole batch in one
+  RPC, with each iteration a direct Python call. It cannot be aborted mid-batch.
 - **Return values cross a PYON boundary.** Plain types, dicts, lists, numpy
   arrays; never exception objects or backend handles. Returning the frame from a
   feedback step would reintroduce exactly the serialization cost the coordinator
@@ -124,10 +130,42 @@ Three constraints, all consequences of how sipyco serves targets:
 - **Never define `__call__` on a target.** sipyco treats a callable target as a
   per-connection factory and would invoke it instead of serving it.
 
+Sub-devices stay reachable on their own, so other clients can change the
+hardware behind the coordinator's back. State a coordinator reports about its
+backends should be checked against them, not just remembered: the
+rearrangement rig owns the tweezer array (`make_array`), and `get_array()`
+returns it only while `slm.last_mask` is still the mask it wrote, `None` once
+anything else has written the SLM. Gate GPU-only methods on a CUDA device
+count, not on `import cupy` succeeding — cupy imports on machines with no
+usable driver.
+
 If a loop ever needs to free-run while the server stays answerable, give the
 coordinator `start`/`stop`/`status` backed by a `threading.Thread` — a thread,
 not an asyncio task, because the drivers are synchronous and a task's cadence
 would be hostage to any other client's blocking RPC.
+
+## Who may use a device
+
+Nothing on a device server knows about experiments: it serves every client,
+and the event loop serialises their calls. Ownership is bookkeeping in the
+Experiment Manager (detail in `add-experiment`):
+
+- A queued task reserves the devices its experiment declares
+  (`pytweezer/experiment/reservations.py`: a composite reserves itself and every
+  sub-device, a sub-device only itself, a linked MotMaster also its
+  `linked_partner`); tasks whose reservations overlap never run together.
+- Its worker calls `restrict_devices(task.devices)`, after which `get_device` /
+  `get_device_async` in that process raise `UndeclaredDeviceError` for any
+  other device. Notebooks, GUI panels and other programs are not restricted.
+- A device that must stay off hardware a task is using reads the manager's
+  state itself: the NI Cards driver holds MOTMaster's pattern boards while that
+  MotMaster runs or a running task reserves it (`ManagerQueue` and
+  `RemotingMotMasterStatus` in `pytweezer/drivers/ni_cards_sources.py`).
+- In simulation (the manager's `simulate`, or `run_local(..., simulate=True)`),
+  `Experiment.device()` returns backends built in-process by `build_spec`
+  (`pytweezer/experiment/simulation.py`), one per owning entry so sub-devices
+  share a rig. Calls are plain Python, so a return value that would not survive
+  PYON still passes there.
 
 ## What blocks what
 
@@ -182,8 +220,10 @@ before awaiting either. Fine from scripts and notebooks; the PyQt6 GUI has no
 
 ## Verifying a change
 
-`.claude/skills/add-device-driver/scripts/check_device.py` builds a device from
-config without hardware and reports the constructor kwargs actually matched —
-useful for any framework change, not just new drivers. The `tests/` suite covers
+`.claude/skills/add-device-driver/scripts/check_device.py` (`--all` for every
+entry) builds each device from config in simulation, composites included, and
+reports config keys that reach no constructor parameter, required parameters
+config doesn't supply, and Camera hook signatures that drift — useful for any
+framework change, not just new drivers. The `tests/` suite covers
 resolution, composites and spec building; extend it there rather than writing
 one-off scripts.

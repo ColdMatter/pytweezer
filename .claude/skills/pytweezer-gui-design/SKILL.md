@@ -109,10 +109,13 @@ Available hooks:
 | --- | --- |
 | `QFrame#Region[kind="well"/"sheet"]` | regions (via `Region`) |
 | `QLabel[role="regionTitle"/"regionHint"/"experimentTitle"/"heading"]` | titles, muted hints |
+| `QLabel[role="regionHint"][state="error"]` | a hint reporting a failure, in red |
 | `QLabel#StatusLabel[state=…]`, `QLabel#SimulationBanner` | status line, simulation tag |
 | `QPushButton#PrimaryButton`, `#DangerButton`, `#ToggleButton[kind="start"/"stop"]` | actions |
 | `QFrame#ProcessTile[state=…]` | process rows (managed_panel) |
 | `QGroupBox#EditorGroup`, `QToolButton#ScanToggle` | grouped form sections, checkable toggles |
+| `QToolButton#PipelineChip`, `#SectionToggle` | filter chips (one checked), collapsible section headers |
+| `QFrame#ChannelCell[state="high"/"watching"/"held"]`, `QLabel#CardBanner` | NI Cards channel cells, warning banner |
 
 Palette (extend with these; don't introduce near-duplicates):
 
@@ -143,7 +146,10 @@ Palette (extend with these; don't introduce near-duplicates):
   transparent. `QGroupBox`, `QStackedWidget` and `QCheckBox` need the rule
   inside regions.
 - **`ResizeToContents` packs cells edge to edge.** Add `::item` padding for that
-  table.
+  table. A table rebuilt live also needs those columns switched to
+  `Interactive` for the redraw (see `pytweezer-gui-internals`).
+- **A parentless widget made visible is a window.** Add it to its layout before
+  calling `setVisible(True)`, or it flashes up as a top-level window.
 - **pyqtgraph** adds SI prefixes to axis units. If values are already in display
   units, call `axis.enableAutoSIPrefix(False)`, or µs becomes "kµs". Embedded
   plots need `background=PLOT_BACKGROUND` (only applets get `apply_theme`'s
@@ -163,7 +169,9 @@ uv run python .claude/skills/pytweezer-gui-design/scripts/shoot.py \
 ```
 
 Then Read the PNG. `--crop X,Y,W,H` zooms in on a region; `--wait` gives feeds
-and polls time to settle. For a panel that needs a server, give it fakes. Write
+and polls time to settle. Off the lab network, set `PYTWEEZER_DATA_DIR` to a
+directory of measurement files for the Results tab (and Optimisers' finished
+runs) to show any; they otherwise fetch them from the Experiment Manager. For a panel that needs a server, give it fakes. Write
 a factory in a scratch directory and pass `--path`:
 
 ```python

@@ -1,47 +1,38 @@
-"""Atom-rearrangement coordinator.
+"""Rearrange-then-transport coordinator for the tweezer array.
 
-Ports the standalone ``rearrangement_node_server.py`` (a ZMQ REP server that held
-its own camera and talked to the SLM over another socket) into a composite-device
-:class:`~pytweezer.coordinators.base.Coordinator`. The camera and SLM are now
-sub-devices of the same process, so this coordinator drives them with direct
-in-process calls: the GPU-computed phase sequence goes straight to
-``slm.update_mask`` with no frame ever serialized onto a socket.
+:class:`Transport` is the 3D sibling of
+:class:`~pytweezer.coordinators.rearrangement.Rearrangement`: it rearranges the
+stochastically loaded array into a defect-free one, then moves that whole array
+to a second pattern (optionally lifting it out of the focal plane), imaging
+between steps. It is built directly in a notebook rather than from
+``CONFIG``, with the phasemask generator passed in as a role.
 
-Roles in the composite's ``"devices"`` block:
+Roles:
 
-* ``slm``    — a :class:`pytweezer.drivers.slm.SLM` (`update_mask`). Required.
-* ``camera`` — an ImagEM-X2-style camera (`setup_acquisition`, `set_roi`,
-  `enable_em_gain`, `acquire_n_frames`, ...). Optional: without it the
-  coordinator constructs SLM-only and :meth:`initialise` raises, but the phase
-  sequence generation and upload path is fully usable. Benchmarks that only
-  time frame delivery run this way.
+* ``slm`` — a :class:`pytweezer.drivers.slm.SLM`. Required.
+* ``camera`` — an ImagEM-X2-style camera. Needed by :meth:`initialise` and the
+  ``arm_*`` calls.
+* ``phasemask_generator`` — an
+  ``OptimisationBasedPhasemaskGeneratorGPU3D`` from
+  :mod:`pytweezer.helper_scripts.phasemask`.
 
-Lifecycle over RPC (all synchronous; each stalls the server for its duration, per
-the coordinator contract):
+Calls (each blocks for its duration):
 
-* :meth:`initialise` — build the GPU phasemask generator, configure the camera,
-  precompute the initial array. Takes the two trap parameter sets (``data1``/
-  ``data2``, shape ``(4, N)``: w, phi, x, y).
-* :meth:`arm_rearrangement` — grab an image, extract the occupancy mask, then
-  generate the interpolated phase sequence
-  (``OptimisationBasedPhasemaskGeneratorGPU.iter_rearrangement_sequence``) and
-  upload it to the SLM concurrently, then grab a reset image. Returns the
-  before/after images.
-* :meth:`test` / :meth:`status` / :meth:`shutdown`.
+* :meth:`initialise` — takes three trap parameter sets (``data1`` loaded,
+  ``data2`` rearranged, ``data3`` transported; each ``(5, N)``: w, phi, x, y,
+  z), the step sizes and the occupancy detection settings, and precomputes the
+  initial array's phase mask.
+* :meth:`arm_transport_pattern` — image, rearrange ``data1`` → ``data2``, image,
+  transport ``data2`` → ``data3`` along ``path_fn`` (``"linear"`` or ``"lift"``),
+  image; frames are uploaded by software as they are generated.
+* :meth:`arm_rearrangement_timings` / :meth:`arm_rearrangement_preload_trigger` —
+  the rearrangement step alone, timed, uploading by software or preloading the
+  SLM's on-board memory and clocking it out with ``pulser``.
+* :meth:`status` / :meth:`test` / :meth:`shutdown`.
 
-Generation and upload are pipelined: the GPU loop pushes each finished frame onto a
-bounded queue and a writer thread copies it to the host and DMAs it to the board, so
-synthesis of frame *n+1* overlaps the upload of frame *n*. The queue depth
-(:data:`UPLOAD_QUEUE_DEPTH`) bounds how far the GPU may run ahead.
-
-``cupy``/``lap`` and the heavy GPU math are imported lazily, so this module imports
-and :meth:`status` works on any machine; :meth:`initialise`/:meth:`arm_rearrangement`
-raise a clear error where the GPU stack is absent.
-
-The remaining timing optimisation — preloading frames into the SLM's on-board memory
-and clocking them out with a hardware trigger (``preload_sequence`` /
-``start_auto_increment``) instead of per-frame software writes — is described in
-``docs/rearrangement_coordinator.md``.
+As in ``rearrangement.py``, generation and upload are pipelined through a
+bounded queue, and the GPU stack is imported lazily so :meth:`status` works on
+any machine; see ``docs/notes/rearrangement_coordinator.md``.
 """
 
 import queue
@@ -167,7 +158,7 @@ def _sum_cpp():
 
 
 class Transport(Coordinator):
-    """Camera + SLM rearrangement loop, run entirely in one process."""
+    """Rearranges the tweezer array, then transports it, in one process."""
 
     camera_role = "camera"
     slm_role = "slm"

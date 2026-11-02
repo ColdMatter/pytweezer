@@ -1,5 +1,7 @@
 """What the camera drivers do with frames and settings on their way through."""
 
+import threading
+
 import numpy as np
 import pytest
 import tifffile
@@ -89,6 +91,15 @@ class FakeVendorCamera:
         self.calls["frames"] = frame_range
         return FRAMES[slice(*frame_range)], None
 
+    def setup_acquisition(self, *args):
+        self.calls["setup"] = args
+
+    def start_acquisition(self):
+        self.calls["started"] = True
+
+    def acquisition_in_progress(self):
+        return "started" in self.calls
+
     def set_roi(self, hstart, hend, vstart, vend):
         self.calls["roi"] = (hstart, hend, vstart, vend)
         # Like DCAM, which moves the ROI to its subarray step; returns get_roi().
@@ -102,6 +113,7 @@ DRIVER_IDS = ["imagemX2", "orca", "thorcam", "tweezermonitorcam"]
 def _driver(cls):
     driver = cls.__new__(cls)
     driver._backend, driver.timeout = FakeVendorCamera(), 1.0
+    driver._lock = threading.RLock()
     return driver
 
 
@@ -125,3 +137,28 @@ def test_drivers_keep_the_roi_origin_the_camera_used(cls):
     driver = _driver(cls)
     assert driver.set_roi(110, 256, 220, 64) == (108, 220)
     assert driver.roi_origin == (108, 220)
+
+
+# pylablib's DCAM cameras take (mode, nframes); its Thorlabs cameras have no
+# modes and take only the ring-buffer size.
+SETUPS = {
+    ImagEMX2Camera: (("sequence", 7), ("snap", 2)),
+    ORCACamera: (("sequence", 7), ("snap", 2)),
+    thorcam.ThorCam: ((7,), (2,)),
+    tweezermonitorcam.ThorCam: ((7,), (2,)),
+}
+
+
+@pytest.mark.parametrize("cls", DRIVERS, ids=DRIVER_IDS)
+def test_arm_starts_a_ring_buffer_of_the_requested_size(cls):
+    driver = _driver(cls)
+    driver.arm(buffer_frames=7)
+    assert driver._backend.calls["setup"] == SETUPS[cls][0]
+    assert driver._backend.calls["started"]
+
+
+@pytest.mark.parametrize("cls", DRIVERS, ids=DRIVER_IDS)
+def test_setup_acquisition_passes_the_mode_only_to_cameras_that_have_one(cls):
+    driver = _driver(cls)
+    driver.setup_acquisition(2, mode="snap")
+    assert driver._backend.calls["setup"] == SETUPS[cls][1]

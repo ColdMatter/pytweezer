@@ -20,8 +20,8 @@ whichever PC the hardware is attached to.
 | `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`, `default_simulated` (auto-generated stand-in when a device has no `sim_class`). |
 | `pytweezer/coordinators/base.py` | `Coordinator` — base for in-process coordination of a composite's backends. |
 | `pytweezer/coordinators/camera_dac_feedback.py` | `CameraDACFeedback` — worked example: frame mean → proportional DAC correction. |
-| `pytweezer/coordinators/rearrangement.py` | `Rearrangement` — camera + SLM atom-rearrangement loop (lazy GPU stack). See `docs/rearrangement_coordinator.md`. |
-| `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`, `requires_camera`. |
+| `pytweezer/coordinators/rearrangement.py` | `Rearrangement` — camera + SLM atom-rearrangement loop (lazy GPU stack). See `docs/notes/rearrangement_coordinator.md`. |
+| `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`. |
 | `pytweezer/drivers/imagemX2.py`, `bfly2.py` | Concrete camera backends on `Camera`, each with `Simulated* = simulated_camera_for(...)` and a legacy standalone `main()` (kept for ad hoc debugging, not on the launch path). |
 | `pytweezer/drivers/ni_dac.py`, `slm.py` | `NIDAC`/`SimulatedNIDAC`; `SLM` (Meadowlark Blink SDK)/`SimulatedSLM`. |
 | `pytweezer/drivers/motmaster.py` | `MotMasterInterface` — MOTMaster sequencer over .NET remoting; no hand-written sim class, so simulation uses the auto-generated stand-in. |
@@ -86,7 +86,7 @@ The result is a `DeviceServerSpec(target_name, target, description,
 teardown=None)`, or `DeviceServerSpec(targets={...}, ...)` for the composite
 multi-target form. Either way `spec.targets` is the normalized
 `{target_name: target}` dict that gets served, and `run_device_server` does the
-generic part: build the spec, hand `spec.targets` to `simple_server_loop`, then run
+generic part: build the spec, hand `spec.targets` to `serve()`, then run
 `spec.teardown()` (if given) in a `finally`.
 
 **Backends are imported lazily**, only when that specific device is actually
@@ -148,12 +148,12 @@ Camera drivers don't each reimplement ROI/trigger/acquisition/broadcast logic.
 
 - `Camera(ABC)` — owns everything generic to a camera server: image broadcasting
   onto the ZMQ stream, TIFF autosave, the autosave/broadcast acquisition loop
-  (`acquire_n_frames`/`acquire_single_frame`), and the connect/relinquish/reacquire
+  (`acquire_n_frames`/`acquire_single_frame`), and the connect/close
   lifecycle. It declares the small set of hardware-specific hooks a concrete
   driver must implement: `_connect`/`_disconnect`, `set_roi`,
   `set_trigger_source`, `set_exposure_time`, `setup_acquisition`,
   `start_acquisition`/`stop_acquisition`, and `_read_frames` (the raw grab). The
-  live hardware handle lives on `self._backend` (`None` == relinquished).
+  live hardware handle lives on `self._backend` (`None` once closed).
 - `SimulatedCamera(Camera)` — a single, one-size-fits-all synthetic backend that
   implements those hooks with generated frames, usable for **any** camera in
   simulation mode.
@@ -180,14 +180,15 @@ new camera type** is: subclass `Camera`, implement the hooks over its SDK, and s
 2. Add device instances to `CONFIG["Devices"]` pointing `"class"` (and, if it has
    one, `"sim_class"`) at those classes.
 
-No factory, no new console script, no new argparse, no `simple_server_loop` call.
+No factory, no new console script, no new argparse, no `serve()` call.
 
 ### Adding a new instance of an existing driver type
 
 Config-only: add an entry to `CONFIG["Devices"]` reusing the same `"class"` (and
 `"sim_class"`) and that backend's expected constructor keys (see its `__init__`).
-**Append it**, don't insert: ports come from `get_next_port()` in declaration
-order, so inserting renumbers every device below.
+Ports come from `get_next_port()` in declaration order across the whole
+`CONFIG` literal, so a new port-owning entry renumbers every port after it and
+every PC must restart together.
 
 ### Launching a device server
 
@@ -435,7 +436,7 @@ imports it and constructs it as `cls(roles, conf)`.
 `measure()`, `control()`, `image_to_dac()`, and `run_n()`.
 `pytweezer/coordinators/rearrangement.py` (`Rearrangement`) is a real one — a
 camera + Blink SLM atom-rearrangement loop, with the GPU stack imported lazily
-so it degrades gracefully off the GPU host; see `docs/rearrangement_coordinator.md`.
+so it degrades gracefully off the GPU host; see `docs/notes/rearrangement_coordinator.md`.
 
 Three constraints, all consequences of how sipyco serves targets:
 

@@ -60,6 +60,13 @@ The camera side is the frame-index protocol on `Camera` (`camera_base.py`):
 `arm`, `frames_acquired`, `read_frames_from`, `settings`, `start_live`/`stop_live`.
 A pylablib-backed driver gets it for free; others implement
 `_acquisition_in_progress`, `_count_frames` and `_read_range`.
+`read_frames_from` raises if the ring buffer has already overwritten frames
+since the mark; give `Rig(buffer_frames=...)` more. `set_roi` returns the
+`(x0, y0)` the camera actually used (kept as `roi_origin`), and every broadcast
+frame's header carries it as `roi_x0`/`roi_y0`. Queued tweezer shots also tag
+theirs with the task's `rid` (`acquire_n_frames(..., header=...)`); frames
+broadcast live during rig shots carry none, so the live tweezer loading
+analysis counts all of them as one run of their own.
 
 ## Zips
 
@@ -98,4 +105,4 @@ servers, or notebooks reach the wrong ports.
 
 Tests: `tests/test_notebook_rig.py` (fake MOTMaster and cameras),
 `tests/test_notebook_zips.py` (a copy of `readFromZip`'s reader proves
-compatibility), `tests/test_camera_frames.py`.
+compatibility), `tests/test_camera_frames.py`, `tests/test_camera.py`.

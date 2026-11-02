@@ -90,13 +90,7 @@ def _set_ccd_mode(cam, em):
         cam.stop_acquisition()
     except Exception:
         pass
-    try:
-        cam.enable_em_gain(em)
-    except Exception:
-        cam.relinquish_camera()
-        time.sleep(1.0)
-        cam.reacquire_camera()
-        cam.enable_em_gain(em)
+    cam.enable_em_gain(em)
 
 
 def _run_client(which, device, nframes, exposure, setup, repeats):

@@ -29,7 +29,6 @@ import os
 import threading
 import time
 from abc import ABC, abstractmethod
-from functools import wraps
 from typing import Any
 
 import numpy as np
@@ -42,17 +41,6 @@ from pytweezer.servers.simulated_device import simulate
 LOGGER = get_logger("camera")
 
 
-def requires_camera(func):
-    """Guard a method so it raises cleanly if the camera has been relinquished."""
-
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        self._require_camera()
-        return func(self, *args, **kwargs)
-
-    return wrapper
-
-
 class Camera(ABC):
     """Abstract base for a single-camera RPC target.
 
@@ -61,9 +49,8 @@ class Camera(ABC):
     connection lifecycle -- lives here so each driver stays a thin translation
     layer over its vendor SDK.
 
-    The connected hardware handle is stored on :attr:`_backend`; ``None`` means
-    the camera has been relinquished. Subclasses set it in :meth:`_connect` and
-    clear it (implicitly, via :meth:`close`) on teardown.
+    The connected hardware handle is stored on :attr:`_backend`; ``None`` once
+    :meth:`close` has run. Subclasses set it in :meth:`_connect`.
     """
 
     #: Filename prefix used by :meth:`save_tiff`; override per driver.
@@ -117,8 +104,13 @@ class Camera(ABC):
         """Set the per-frame exposure time in seconds."""
 
     @abstractmethod
-    def setup_acquisition(self, acq_mode: str, nframes: int) -> None:
-        """Configure an acquisition of ``nframes`` in ``acq_mode``."""
+    def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
+        """Configure an acquisition of ``nframes``.
+
+        ``mode="sequence"`` keeps acquiring into a ring buffer of ``nframes``;
+        ``"snap"`` stops after ``nframes``. Cameras that only acquire into a
+        ring buffer (Thorlabs) ignore ``mode``.
+        """
 
     @abstractmethod
     def start_acquisition(self) -> None:
@@ -152,12 +144,6 @@ class Camera(ABC):
     def is_connected(self) -> bool:
         return self._backend is not None
 
-    def _require_camera(self) -> None:
-        if not self.is_connected():
-            raise RuntimeError(
-                f"{type(self).__name__} connection has been relinquished"
-            )
-
     def close(self) -> None:
         self.stop_live()
         try:
@@ -167,20 +153,10 @@ class Camera(ABC):
         finally:
             self._backend = None
 
-    def relinquish_camera(self) -> dict:
-        self.close()
-        return {"ok": True, "relinquished": True}
-
-    def reacquire_camera(self) -> dict:
-        if self._backend is None:
-            self._connect()
-        return {"ok": True, "relinquished": False}
-
     # ------------------------------------------------------------------ #
     # Acquisition orchestration (generic).
     # ------------------------------------------------------------------ #
 
-    @requires_camera
     def acquire_n_frames(
         self,
         nframes: int,
@@ -204,7 +180,6 @@ class Camera(ABC):
                 self.broadcast_image(image, info)
         return np.asarray(images)
 
-    @requires_camera
     def acquire_single_frame(
         self,
         autosave: bool = False,
@@ -221,7 +196,6 @@ class Camera(ABC):
         )
         return images[0]
 
-    @requires_camera
     def arm(self, buffer_frames: int = 1000) -> None:
         """Start a continuous ring-buffer acquisition unless one is already running.
 
@@ -231,16 +205,14 @@ class Camera(ABC):
         with self._lock:
             if self._acquisition_in_progress():
                 return
-            self.setup_acquisition("sequence", int(buffer_frames))
+            self.setup_acquisition(int(buffer_frames))
             self.start_acquisition()
 
-    @requires_camera
     def frames_acquired(self) -> int:
         """Frames acquired since the current acquisition started."""
         with self._lock:
             return self._count_frames()
 
-    @requires_camera
     def read_frames_from(self, start: int) -> np.ndarray:
         """Every frame from number ``start`` to the latest, as ``(n, H, W)``.
 
@@ -372,7 +344,7 @@ class SimulatedCamera(Camera):
     def set_exposure_time(self, exposure: float) -> None:
         self._exposure = float(exposure)
 
-    def setup_acquisition(self, acq_mode: str, nframes: int) -> None:
+    def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
         self._nframes = max(1, int(nframes))
 
     def start_acquisition(self) -> None:

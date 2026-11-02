@@ -1,7 +1,7 @@
 # Rearrangement rig: SLM device + rearrangement coordinator
 
 How the atom-rearrangement system maps onto the composite-device framework
-(`docs/device_framework.md`), and a proposed simplification of the ARM pipeline to
+(`docs/notes/device_framework.md`), and a proposed simplification of the ARM pipeline to
 do later.
 
 ## What this replaced
@@ -40,7 +40,7 @@ Rb Rearrangement Rig            (composite: has a "devices" sub-dict)
   and calls them in-process. `slm.update_mask(frame)` is now a plain method call;
   no frame is ever serialized.
 
-Addressing (see `docs/device_framework.md` for the general rule):
+Addressing (see `docs/notes/device_framework.md` for the general rule):
 
 ```python
 slm = get_device("Rb SLM")  # the SLM on its own

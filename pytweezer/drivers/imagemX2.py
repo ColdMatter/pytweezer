@@ -8,7 +8,6 @@ from sipyco.pc_rpc import simple_server_loop
 from pytweezer.configuration.config import get_config
 from pytweezer.drivers.camera_base import (
     Camera,
-    requires_camera,
     simulated_camera_for,
 )
 from pytweezer.drivers.hamamatsu import open_dcam_camera
@@ -64,33 +63,26 @@ class ImagEMX2Camera(Camera):
         if self._backend is not None:
             self._backend.close()
 
-    @requires_camera
     def set_roi(self, x0: int, width: int, y0: int, height: int):
         hstart, _, vstart, *_ = self._backend.set_roi(x0, x0 + width, y0, y0 + height)
         self.roi_origin = (int(hstart), int(vstart))
         return self.roi_origin
 
-    @requires_camera
     def set_trigger_source(self, source: str):
         self._backend.set_trigger_mode(source)
 
-    @requires_camera
     def set_exposure_time(self, exposure: float):
         self._backend.set_exposure(exposure)
 
-    @requires_camera
-    def setup_acquisition(self, acq_mode: str, nframes: int):
-        self._backend.setup_acquisition(acq_mode, int(nframes))
+    def setup_acquisition(self, nframes: int, mode: str = "sequence"):
+        self._backend.setup_acquisition(mode, int(nframes))
 
-    @requires_camera
     def start_acquisition(self):
         self._backend.start_acquisition()
 
-    @requires_camera
     def stop_acquisition(self):
         self._backend.stop_acquisition()
 
-    @requires_camera
     def _read_frames(self, nframes: int, start_frame: int):
         self._backend.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
         images, _infos = self._backend.read_multiple_images(
@@ -102,33 +94,26 @@ class ImagEMX2Camera(Camera):
     # ImagEM X2-specific controls (beyond the generic Camera interface)
     # ------------------------------------------------------------------ #
 
-    @requires_camera
     def set_ccd_mode(self, mode: int):
         self._backend.set_attribute_value("ccd_mode", int(mode))
 
-    @requires_camera
     def enable_em_gain(self, enable: bool = True):
         self.set_ccd_mode(2 if enable else 1)
 
-    @requires_camera
     def set_direct_em_gain_mode(self, mode: int):
         self._backend.set_attribute_value("direct_em_gain_mode", int(mode))
 
-    @requires_camera
     def enable_direct_em_gain(self, enable: bool = True):
         self.set_direct_em_gain_mode(2 if enable else 1)
 
-    @requires_camera
     def set_sensitivity(self, sensitivity: int):
         self._backend.set_attribute_value("sensitivity", int(sensitivity))
 
-    @requires_camera
     def set_external_exposure_mode(self):
         self.set_trigger_source("ext")
         self._backend.set_attribute_value("trigger_active", 2)
         self._backend.setup_ext_trigger(invert=True)
 
-    @requires_camera
     def get_conversion_factor(self) -> tuple[float, float]:
         """The camera's photoelectron conversion ``(coefficient, offset)`` at its current settings."""
         return (
@@ -136,7 +121,6 @@ class ImagEMX2Camera(Camera):
             float(self._backend.get_attribute_value("CONVERSION FACTOR OFFSET")),
         )
 
-    @requires_camera
     def get_all_attribute_values(self) -> dict:
         """Every readable DCAM attribute's current value, enums as their text labels."""
         values = self._backend.get_all_attribute_values(enum_as_str=True)

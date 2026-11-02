@@ -1,6 +1,6 @@
 ---
 name: pytweezer-architecture
-description: How the pytweezer system fits together — the one server PC and its arbitrarily many client PCs, CONFIG as the single source of truth for what runs where, the launch protocol every process shares, and the ZMQ messaging fabric. Use when working out which PC a process runs on or binds to, editing pytweezer/configuration/config.py or paths.py, adding or changing an entry under CONFIG["Servers"]/["Devices"]/["Loggers"]/["GUI"], writing or changing a server script's main(), tracing a pub/sub stream from publisher to subscriber, or getting oriented in an unfamiliar corner of the codebase.
+description: How the pytweezer system fits together — the one server PC and its arbitrarily many client PCs, CONFIG as the single source of truth for what runs where, the launch protocol every process shares, and the ZMQ messaging fabric. Use when working out which PC a process runs on or binds to, editing pytweezer/configuration/config.py or paths.py, adding or changing an entry under CONFIG["Servers"]/["Devices"]/["Loggers"]/["GUI"] (including the Experiment Manager's ports and data/copy roots), changing how the GUIs and managed processes are launched (start_*.bat, bin/launch.py), writing or changing a server script's main(), tracing a pub/sub stream from publisher to subscriber, keeping a script's log records off the lab's, or getting oriented in an unfamiliar corner of the codebase.
 ---
 
 # How pytweezer fits together
@@ -20,10 +20,11 @@ list: a new lab PC is just another `HOSTS` entry with devices pointed at it.
 
 What runs where is decided **per config entry**, not per machine. A device's
 `"host"` is what determines which PC its server runs on — independent of where
-the GUI that shows it was launched. A GUI spawns only what `check_host` says is
-local. Servers and loggers elsewhere it merely displays; a device elsewhere it can
-still start and stop, by asking the GUI on that device's host to do it (see the
-`pytweezer-gui-internals` skill).
+the GUI that shows it was launched. The server GUI spawns every `Servers` and
+`Loggers` entry; a client GUI only displays them. Devices are spawned by
+whichever GUI runs on their `host` (`DevicesPanel.check_host`); a device
+elsewhere a GUI can still start and stop, by asking the GUI on that device's
+host to do it (see the `pytweezer-gui-internals` skill).
 
 ## `CONFIG` is the single source of truth
 
@@ -43,8 +44,17 @@ still start and stop, by asking the GUI on that device's host to do it (see the
 - `CONFIG["Servers"]` — hubs (`Imagehub`/`Commandhub`/`Datahub`/`Messagehub`),
   the `Properties` server, the stream loggers, `Analysis Manager`,
   `Device Status`, `Experiment Manager` (queue + h5 measurement storage; see
-  `add-experiment`).
+  `add-experiment`). The manager's entry carries three ports: `port` (ZMQ
+  REQ/REP commands from GUIs, notebooks and workers), `sync_port` (its
+  `sync_struct` state) and `results_port` (the measurement files, served over
+  sipyco RPC so no PC needs a share of its disk); plus `simulate`, `data_root`
+  (`PYTWEEZER_DATA_DIR` overrides it), `copy_root` (where each finished file is
+  copied — the router's `g` share — by `pytweezer/experiment/copier.py`) and
+  `orphan_timeout`.
 - `CONFIG["Devices"]` — one entry per physical device, each with its own `host`.
+  An entry that depends on another device names it by its key
+  (`"motmaster": "CaF MotMaster"` on the NI Cards entries, `"linked_partner"`
+  on a linked MotMaster).
 - `CONFIG["Loggers"]` — database loggers (Postgres + TimescaleDB on the server
   PC; connection string in `DATABASE["dsn"]`).
 - `CONFIG["GUI"]` — standalone GUI tools (StreamMonitor, Applet Launcher, …).
@@ -55,13 +65,11 @@ in `DEVICE_SERVER_SCRIPT` (`pytweezer/configuration/paths.py`) and spawn sites
 (`DevicesPanel`, `process_cleanup`) reference that constant rather than
 `params["script"]`.
 
-**Never insert a port-owning entry above existing ones.** Ports come from
-`get_next_port()` in declaration order across the whole literal, so inserting
-one renumbers every entry below it — and since `Servers` is declared before
-`Devices`, even appending to `Servers` shifts every device port. A new server
-goes after the `CONFIG` literal (`CONFIG["Servers"]["X"] = {...}`, as the
-Experiment Manager does); `tests/test_experiment_manager.py` checks its ports
-come last.
+**Adding a port-owning entry renumbers every port after it.** Ports come from
+`get_next_port()` in declaration order across the whole literal, and `Servers`
+is declared before `Devices`, so a new server shifts every device port. That is
+accepted: put the entry where it belongs, then update and restart every PC
+together, since a PC still on the old config dials the old ports.
 
 `get_config()` — defined next to `CONFIG` itself — is the accessor everything
 uses. Tests monkeypatch it **per importing module** to inject a fake config, so
@@ -78,10 +86,23 @@ startup state) — not the Python `CONFIG` dict.
 
 ## Launch protocol: `python <script> <name>`
 
+`start_servers.bat` / `start_client.bat` run `uv run python -m bin.launch`
+(`client` for the client GUI), not the `pytweezer-*` console scripts: Smart App
+Control blocks uv's unsigned `.exe` launchers, while the signed `python.exe`
+runs the same entry points.
+
+One GUI, server or client, runs per PC: before building anything it takes
+localhost port 7277 (`bin/single_instance.py`, just below the range
+`get_next_port()` hands out), and a second launch is refused and raises the
+running window instead.
+
 `bin/managed_panel.py`'s `ManagedRow` starts every managed process the same way:
 `subprocess.Popen([sys.executable, script, name])`, where `name` is the CONFIG
 key. Use `sys.executable`, never a bare `python3`: uv's `.venv` has no
-`python3.exe` on Windows, so PATH lookup finds some other interpreter.
+`python3.exe` on Windows, so PATH lookup finds some other interpreter. A process
+the GUI started that exits without being asked to is logged with its exit code
+(a native crash's NTSTATUS in hex), since a vendor SDK that fails fast leaves no
+Python traceback.
 
 Every server/device/logger script's `main()` therefore takes that `name` as a
 positional/optional CLI arg and, when given, looks itself up under
@@ -100,7 +121,9 @@ wherever an operator launched it.
 
 - `pytweezer/servers/clients.py` — `GenericClient` and its subclasses
   `DataClient`, `ImageClient`, `CommandClient`: the publish/subscribe helpers
-  used throughout drivers, servers, analyses and applets.
+  used throughout drivers, servers, analyses and applets. A caller already
+  paced by a Qt timer polls with `has_new_data(timeout_ms=0)`: on Windows any
+  wait lasts a whole timer tick (~16 ms), which holds the GUI thread.
 - `pytweezer/servers/properties.py` — `Properties(name)`, the shared key-value
   tree (applet catalogues, stream subscriptions, per-viewer settings). It is
   **shared, always**: every `set()` is sent to the Properties server and
@@ -127,7 +150,8 @@ thread, so they work from threaded and Qt code; mutate a notifier only through
 - **Experiment Manager** — runs queued tasks, one worker process each (one at
   a time per pipeline, in parallel across pipelines unless they reserve a
   common device), and publishes the queue and the running tasks' points as
-  notifier `"experiment"` on `sync_port`; see `add-experiment`.
+  notifier `"experiment"` on `sync_port`. Its `SyncServer` also serves the
+  results archive as an RPC target on `results_port`; see `add-experiment`.
 
 ## Logging
 
@@ -135,7 +159,9 @@ thread, so they work from threaded and Qt code; mutate a notifier only through
 everywhere (not bare `logging.getLogger`) — it adds structured JSONL output
 under `logs/` (or `$PYTWEEZER_LOG_DIR`) alongside console output, and publishes
 each record on the Message hub's `Logs` topic unless `PYTWEEZER_LOG_PUBLISH=0`.
-`tests/conftest.py` sets both, so the suite never touches a running lab's logs.
+`tests/conftest.py` sets both, so the suite never touches a running lab's logs;
+set `PYTWEEZER_LOG_PUBLISH=0` before importing `pytweezer` in any one-off script
+run beside a live lab (the skills' check scripts do).
 
 Do not confuse the pub/sub stream loggers (`datalogger`/`imagelogger`, which
 record which streams are active) with **database** metric logging
@@ -154,6 +180,7 @@ runs; see `docs/notes/database.md`.
 | Add a live viewer window | `add-applet` skill |
 | Add a streaming analysis | `add-analysis-script` skill |
 | Record a value in the database | `add-logger` skill |
+| Experiments, the Experiment Manager, its queue and results | `add-experiment` skill |
 | Run/screenshot the GUI | `run-pytweezer` skill |
 
 Each of those skills is self-contained — the conventions and constraints that

@@ -1,10 +1,10 @@
 """Base classes for streaming analysis processes.
 
 An *analysis process* is a small, long-lived program that subscribes to one or
-more pub/sub streams, receives ``(message, head, data)`` messages in a loop,
+more pub/sub streams, receives ``(message, head[, data])`` messages in a loop,
 transforms each one, and republishes the result on its own name. The existing
-scripts in this package (``data_average.py``, ``imageselector.py``,
-``subtract_bg.py``, ``rotate_image.py``) all hand-roll the same skeleton:
+scripts in this package (``data_average.py``, ``subtract_bg.py``,
+``rotate_image.py``) hand-roll the same skeleton:
 
     * hold a :class:`Properties` connection named after the process,
     * declare the input streams as a :class:`PropertyAttribute`,
@@ -23,16 +23,16 @@ order, so :meth:`AnalysisProcess.send_result` is shared by both subclasses.
 
 To write a new analysis, subclass one of the two and override :meth:`process`::
 
-    class ImageSlice(ImageAnalysis):
+    class ImageSelector(ImageAnalysis):
         _index = PropertyAttribute('SelectedImage', 1)
 
         def process(self, head, data):
-            if head['_imgindex'] == self._index:
+            if head.get('index') == self._index:
                 return head, data      # publish this one
             return None                # drop everything else
 
     if __name__ == '__main__':
-        run_analysis(ImageSlice)
+        run_analysis(ImageSelector)
 """
 
 import argparse
@@ -85,7 +85,7 @@ class AnalysisProcess:
 
         Args:
             head: the message header dict.
-            data: the payload (numpy array for images/data).
+            data: the payload array, or ``None`` for a header-only message.
 
         Returns:
             ``(head, data)`` to republish, or ``None`` to drop the message.
@@ -100,7 +100,8 @@ class AnalysisProcess:
             msg = self.client.recv()
             if msg is None:
                 continue
-            msgstr, head, data = msg
+            # A header-only message (scalar streams) arrives without an array.
+            msgstr, head, data = msg if len(msg) == 3 else (*msg, None)
 
             result = self.process(head, data)
             if result is not None:

@@ -12,6 +12,21 @@ add it to this file - and it would not be used in every run, suggest making a
 skill instead and explain why: lean always-on context plus progressive
 disclosure through skills gets noticeably better performance out of agents.
 
+## Keeping skills current
+
+Whenever a change alters something a skill under `.claude/skills/` describes,
+bring the skill up to date as part of that change:
+
+- **Minor** (a renamed function, file or argument; a corrected signature or
+  path; a line or table row for something new within the skill's existing
+  scope): make the edit yourself, in the same commit as the code.
+- **Significant** (a new section; changing or removing a rule or recommended
+  approach; restructuring or splitting a skill; changing its `description`):
+  tell the user what you would change and why, and wait for their go-ahead.
+- **Not covered by any skill** (a new subsystem, workflow or set of
+  conventions that future agents will need): propose a new skill to the user,
+  naming its scope and trigger, and create it only once they agree.
+
 
 ## What this is
 
@@ -29,7 +44,7 @@ rearrangement-optimisation-RnD is a stripped-down branch for optimisation of twe
 
 This project uses uv; the venv is `.venv` in the repo root, on the Python in
 `.python-version`.
-Code is linted and formatted with ruff. There is a pre-commit hook to run ruff on staged files, but you can also run it manually.
+Code is linted and formatted with ruff, configured in `pyproject.toml`.
 There is a pytest suite under `tests/` — run it after
 touching code it covers, and add cases there instead of writing one-off
 verification scripts when the change fits its scope.
@@ -61,15 +76,46 @@ uv run pytweezer-device <name>  # start one device's RPC server standalone
 uv run pytweezer-logger <name>  # start one database logger standalone
 uv run pytweezer-experiment-manager <name>  # start the experiment queue manager standalone
 uv run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
+uv run pytweezer-db-backfill    # load existing measurement files into the database
 ```
 
-`start_servers.bat` / `start_client.bat` / `kill_stale.bat` wrap the above.
+`start_servers.bat` / `start_client.bat` / `kill_stale.bat` run the same entry
+points as `uv run python -m bin.launch [client]` / `bin.kill_stale`, because
+Windows Smart App Control blocks uv's unsigned `.exe` launchers.
 Run kill-stale after an unclean shutdown, when launch fails with "Address
 already in use".
 
 **Headless/offscreen testing:** PyQt6 windows can't construct without a display.
 Set `QT_QPA_PLATFORM=offscreen` before running any script that imports Qt widgets
 in a non-interactive shell.
+
+
+### Ruff and the pre-commit hook
+
+`.pre-commit-config.yaml` runs `ruff check --fix` then `ruff format` on the
+staged Python files of every commit, using the ruff in `.venv` (the version
+`uv.lock` pins, as VS Code does). Markdown is not formatted. Install the hook
+once per clone with `uv run pre-commit install`; cloud sessions do it in
+`.claude/hooks/session-start.sh`. CI runs `ruff check .` and
+`ruff format --check .` on every push and PR, catching anything that skipped
+the hook.
+
+To commit:
+
+1. Run `uv run ruff check --fix <files>` and `uv run ruff format <files>` on
+   the Python files you changed.
+2. `git add` those files whole. Never commit a file that also has unstaged
+   edits: pre-commit stashes them while it runs, and if ruff then changes the
+   file it prints "Stashed changes conflicted with hook auto-fixes... Rolling
+   back fixes", throws its fixes away and aborts - and the same commit fails
+   the same way every time.
+3. `git commit`. "files were modified by this hook" means the commit did not
+   happen: `git add` the files it names and commit once more. A second failure
+   is something else - read the output rather than retrying.
+4. Never pass `--no-verify`.
+
+The hook does not check files that a clean merge brings in, so after merging
+run `uv run ruff check .` and `uv run ruff format --check .` before pushing.
 
 
 ### Documentation
@@ -111,6 +157,13 @@ cloned at `~/CaFMOT-LabBook`; read its own `CLAUDE.md` before writing to it.
 
 - Use `get_logger(name)` from `pytweezer/logging_utils.py`, never bare
   `logging.getLogger` - it adds structured JSONL output under `logs/`
+
+### Notebooks
+
+A notebook is a record of what was done at a particular time: never edit one
+retroactively, even when an API change breaks it. The exception is a notebook
+that demonstrates a feature; keep that one working. When a change breaks other
+notebooks, list them for the user instead.
 
 ### TODO/FIXME Convention
 
@@ -155,6 +208,7 @@ Load a skill when you need more than that:
 | How a panel should look, read and behave (layout, styling, wording) | `pytweezer-gui-design` |
 | Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
+| Writing or accepting an optimiser (`StagedScan`, `BayesianOptimisation`, `Fit`), the Optimisers tab | `add-optimiser` |
 | Running shots, scans or auto-tune from a lab-book notebook (`Rig`), MOTMaster zips | `notebook-rig` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 | Writing, reviewing or deleting tests | `write-tests` |

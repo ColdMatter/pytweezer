@@ -1,6 +1,6 @@
 ---
 name: add-experiment
-description: Write, run, queue and read back pytweezer experiments — an Experiment subclass in pytweezer/experiments/ with declared arguments and devices, run per scan point by the Experiment Manager (or in-process with run_local), saving one h5 file per measurement. Use whenever the user wants to write, add or change an experiment or measurement sequence (a scan, a MOTMaster sequence plus camera readout, a calibration run), submit or queue one from a notebook (submit/wait), scan an argument, record data from a run, load a measurement file, or work on the Experiment Manager, its worker processes, the queue, or the Experiments/Results GUI tabs — even if they only describe the physics ("scan the tweezer depth and count atoms") without saying "experiment".
+description: Write, run, queue and read back pytweezer experiments — an Experiment subclass in pytweezer/experiments/ with declared arguments and devices, run per scan point by the Experiment Manager (or in-process with run_local), saving one h5 file per measurement — and the saved parameters they read. Use whenever the user wants to write, add or change an experiment or measurement sequence (a scan, a MOTMaster sequence plus camera readout, a calibration, tweezer loading or trap sites), submit or queue one from a notebook (submit/wait), scan an argument, record data from a run, load a measurement file, read or set saved parameters, give an experiment a Results-tab analysis, or work on the Experiment Manager, its workers, pipelines, device reservations or queue, or the Experiments/Results/Saved parameters tabs — even if they only describe the physics ("scan the tweezer depth and count atoms") without saying "experiment".
 ---
 
 # Experiments
@@ -45,7 +45,8 @@ Rules that matter:
 - **Arguments are class attributes** (`Number`, `Integer`, `Bool`, `Choice`,
   `Text` in `pytweezer/experiment/arguments.py`). Values are SI; `unit`/`scale`
   only control display (`Number(5e6, unit="MHz", scale=1e6)` shows "5 MHz").
-  Defaults are validated at import. Submitted values are checked by the GUI
+  `group=` and `tooltip=` lay out the form. Defaults are validated at import.
+  Submitted values are checked by the GUI
   form and by `submit(ExperimentClass, ...)`; anything else (a
   `"module:Class"` string) is only checked when the task starts.
 - **No hardware at module import or class definition.** The manager imports
@@ -68,7 +69,13 @@ Rules that matter:
 - An exception in any hook fails the task (status `failed`, traceback in the
   file and the queue). Don't catch-and-print.
 - A class only appears in the GUI if it is defined in that module and
-  overrides `run_point`, so intermediate base classes stay hidden.
+  overrides `run_point`, so intermediate base classes stay hidden; a base that
+  inherits a concrete `run_point` hides with `run_point = Experiment.run_point`
+  (`TweezerArrayShots`).
+- `self.rid` is the task's run id (-1 under `run_local`), e.g. to tag broadcast
+  frames (`acquire_n_frames(..., broadcast=True, header={"rid": self.rid})`).
+- An experiment that chooses its own points overrides
+  `planned_points(scan)`, raising `ValueError` for a scan it can't honour.
 
 ## MOTMaster sequences
 
@@ -103,7 +110,8 @@ search box. Declared parameters are not searchable, Int32 ones need whole
 values, and unselected ones keep the script's defaults (not recorded in the
 file). `prepare()` sets script, iterations, save toggle and trigger mode on
 every task; repeats come from `Scan(repetitions=...)`, one stored point per
-shot. `prepare()` puts followers in trigger mode; `run_sequences()` starts each
+shot; `run_sequences(**{"rb.tPulse": 3e-5})` overrides parameters for that one
+run (`TweezerArrayShots` runs batches this way). `prepare()` puts followers in trigger mode; `run_sequences()` starts each
 follower in a thread, then the master `follower_arm_delay` later
 (`MotMasterExperiment` class attribute, default 0.5 s). A follower still running
 `follower_timeout` (a `MotMaster(...)` keyword, default 60 s) after the master
@@ -134,13 +142,19 @@ arguments. A running measurement plots live from the manager's published points,
 not by re-reading its file; see "The manager and its workers".
 
 Its **Analysis** dropdown offers "Plot against" for every file, then the
-analyses the experiment declares, e.g. `analyses = ("tweezer_histogram",)` as
-a class attribute (inherited; `LoadTweezers` and the tweezer-array measurements
-declare it). Names map to views in `pytweezer/GUI/experiments/analyses.py`
-(`ANALYSES`); a name this GUI doesn't know is listed disabled, and every
-analysis is disabled until the measurement finishes. An analysis only reads the
-file, through its own archive connection, off the GUI thread. The tab
-remembers the choice per experiment class for the session.
+analyses the experiment declares as a class attribute (inherited), e.g.
+`LoadTweezers`' `analyses = ("tweezer_histogram", "tweezer_photon_histogram")`;
+an optimiser declares none. Each file records the names (root attr
+`analyses`), so the tab never imports the experiment. Names map to views in
+`pytweezer/GUI/experiments/analyses.py` (`ANALYSES`; a new one is a Qt-free
+computation in `pytweezer/analysis/` plus an `AnalysisView` registered there).
+A view reads only what the file recorded, so record what it needs (the tweezer
+histograms take `first_counts`/`second_counts` with `trap_sites` and
+`threshold`, else per-site photons, else frames: `analysis/tweezer_histogram.py`).
+A name this GUI doesn't know is listed disabled, and every analysis is disabled
+until the measurement finishes. An analysis only reads the file, through its
+own archive connection, off the GUI thread. The tab remembers the choice per
+experiment class for the session.
 
 From a notebook or script:
 
@@ -160,18 +174,22 @@ m = fetch_measurement(rid)  # any PC; results=[...] to load a subset
 m.results["atom_number"], m.points["load_time"], m.arguments, m.constants
 
 m = run_local(LoadingCurve, scan)  # in-process, no queue, in memory
+m.status, m.attrs["error"]  # a failure is recorded, not raised
 ```
 
 `submit` needs a class importable by the manager — **not one defined in a
 notebook**; use `run_local` for those (pass `path=` to keep a file). A plain
 `submit()` is refused at once if the class is not in the catalogue, its module
-fails to import, or its devices can't be reserved (unknown or inactive device,
-or `linked=True` on a MOTMaster with no `linked_partner`). While the catalogue
+fails to import, or its devices can't be reserved (`ReservationError`: unknown
+or inactive device, or `linked=True` on a MOTMaster with no `linked_partner`;
+`run_local` raises the same before running). While the catalogue
 is still being read the task is queued and resolved later, failing if it then
 can't be.
-`ExperimentManagerClient` has `pause/resume/terminate/abort/hold/release/
-delete/set_priority/snapshot/history/catalogue/recipes/save_recipe/
-delete_recipe/submit_recipe`.
+`Scan(repeat="scan")` repeats the whole grid rather than each point.
+`ExperimentManagerClient` has `get/pause/resume/terminate/abort/hold/release/
+delete/set_priority/snapshot/history/last_request/catalogue/describe_again/
+recipes/save_recipe/delete_recipe/submit_recipe/saved_parameters/
+set_saved_parameters/saved_parameter_history`.
 
 For analysis, `Dataset` (`pytweezer/experiment/dataset.py`) reads a file by
 rid (or path) and passes attribute access through to its `Measurement`:
@@ -230,53 +248,83 @@ checked when the task runs, as for any submission.
 
 ## Saved parameters
 
-Import with `from pytweezer.experiment.client import get_saved_parameter`, then
-read one: in `prepare()`/`run_point()` for the value
-at run time, or passed to an argument as its default, e.g.
-`level = Number(get_saved_parameter("level"))` (read when the module is
-imported; the form's **Defaults** button has the manager describe the
-experiment again and so re-reads it). Importing such a module contacts the
-manager.
+Named calibrated values (float, int, bool, string, or an array of numbers) kept
+by the Experiment Manager in `{data_root}/saved_parameters.json`, with every
+change appended to `saved_parameters_log.jsonl`, so every PC and every task sees
+the same ones (`pytweezer/experiment/saved_parameters.py`).
+
+```python
+from pytweezer.experiment.client import (
+    get_saved_parameter,
+    get_saved_parameters,
+    saved_parameter_history,
+    set_saved_parameters,
+)
+
+get_saved_parameter("tImgCoolVCO")  # KeyError names close matches
+get_saved_parameters()  # {key: value}; arrays as numpy arrays
+set_saved_parameters({"level": 0.3}, "realigned the probe")  # reason and user logged
+set_saved_parameters({"new_key": 1.0}, "first calibration", create=True, group="MOT", unit="V")
+saved_parameter_history("level", limit=10)  # newest first; rid= for one run's
+```
+
+- A set is all or none. Unknown keys are refused unless `create=True`; a key
+  keeps its type (int accepted for a float), and an array keeps its number of
+  dimensions and every axis length past the first.
+- Read them in `prepare()`/`run_point()` for the value at run time, or as an
+  argument default, `level = Number(get_saved_parameter("level"))` — read at
+  import, so the module contacts the manager when imported and the form's
+  **Defaults** button (which has the manager describe the experiment again)
+  re-reads it.
+- The **Saved parameters** tab edits values by hand with a reason and shows the
+  history; arrays are read-only there. Keys are created only by
+  `create=True`, an accepted `Fit`, or `import_parameters_json(path)` in
+  `saved_parameters.py` (each top-level category of a `parameters.json`
+  becomes a group).
+- A simulating manager keeps its own under `<data_root>/simulated/`, apart
+  from the lab's.
 
 ## Optimisers
 
-An optimiser (`pytweezer/experiment/optimisers.py`) runs a *measurement
-experiment* to propose saved-parameter values. The measurement provides
-`measure(**settings) -> dict[str, float]`; put the mixin first:
+An optimiser (`StagedScan`, `BayesianOptimisation`, `Fit`) runs a measurement
+experiment and proposes saved-parameter values for someone to accept. It is an
+`Experiment`, but writing, running and accepting one is covered by the
+add-optimiser skill; a measurement it runs only needs a
+`measure(**settings) -> dict[str, float]` method.
 
-```python
-class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
-    objective = "counts"  # a key of measure()'s results
-    goal = "max"  # or "min"
-    stages: ClassVar[list[Stage]] = [
-        Stage("detuning", start=-5.0, stop=5.0, points=21, save_as="resonance"),
-    ]
-    # BayesianOptimisation: dimensions = [Dimension("detuning", low=-5, high=5, save_as=...)]
-```
+## Tweezer array measurements
 
-- Each `Stage` generates `<setting>_start/_stop/_points` arguments (each
-  `Dimension` `<setting>_low/_high`); declare one of those names yourself to
-  override it. `Dimension(..., span=0.5, save_as=...)` instead searches its
-  `save_as` value at the start of the run ± `<setting>_span`; every run
-  records its `search_bounds`. Duplicate settings or `save_as`, a bad `goal`,
-  `low >= high` or a span with bounds raise `TypeError` when the class is
-  defined. `tweezer_array.py` holds the Rb array optimisers (imaging, molasses
-  shims).
-- Override `objective_of(results)` for an objective computed from several
-  results, and `best(settings, objectives)` to choose differently; in a
-  `StagedScan`, `self.stage` is the `Stage` being chosen for.
-- The mixins record their own results — `stage`, `setting`, `objective`
-  (staged); each setting name, `objective`, `xi` (Bayesian) — so `measure()`
-  must not return those names.
-- An optimiser sets its own points: submitting it with scan axes or
-  repetitions is refused. Its proposals are constants `proposed.<key>`;
-  nothing is saved until someone accepts them in the **Optimisers** tab.
-- Optimisers are set up and run only in the **Optimisers** tab
-  (`pytweezer/GUI/optimisers.py`); the Experiments tab does not list them, and
-  Results' Resubmit opens an optimiser run there. Its form groups the mixin's
-  own arguments (group `SEARCH`) first, starts from the last run's arguments,
-  and saves presets as recipes. A running optimiser is plotted from the feed's
-  published points; a finished one from its file.
+The Rb tweezer experiments, in the order a session uses them:
+
+1. `SlmTweezerArray` (`slm_array.py`) puts an array on the SLM through
+   `Rb Rearrangement Rig` (`rig.make_array(...)`, one mask per point, shown on
+   the `slm` image stream for the SLM Monitor applet). The rig remembers it:
+   `rig.get_array()` gives `sites` and trap `x_um`/`y_um` (`None` if the rig
+   didn't write the mask).
+2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera
+   and proposes the `trap_*` saved parameters.
+3. `LoadTweezers` (`load_tweezers.py`) and everything built on it read them in
+   `prepare()` (`saved_trap_sites()`), moved into this ROI by the origin
+   `camera.set_roi` returned. They are refused when none are saved, when
+   `trap_geometry` is not the rig's array (`same_geometry`; an unreachable rig
+   is not checked), or when a summing window leaves the ROI. With sites, each
+   point records `first_occupied`/`second_occupied` (bool per site) and
+   `loading`, plus raw `first_counts`/`second_counts` with
+   `save_tweezer_counts`; frames are recorded only with `save_raw_images`.
+   `LoadTweezers` runs without sites only if it records frames;
+   `TweezerArrayMeasurement` always needs them.
+4. `TweezerArrayShots` (`tweezer_array.py`) runs every shot at the saved
+   sequence parameters (`SAVED_SEQUENCE_PARAMETERS`: script parameter → saved
+   key; a missing key fails `prepare()`), a script parameter set in the form
+   winning; the values used are the constant `saved_sequence`. Each point is a
+   batch of shots, so its `first_occupied`/`second_occupied`/`*_counts` are
+   `(shots, sites)`, and `save_raw_images` (off by default here) records
+   `first_images`/`second_images`.
+
+Shots broadcast their HamCam frames with `header={"rid": self.rid}`; the live
+tweezer loading analysis (`analysis/tweezer_loading.py`) starts afresh whenever
+the rid changes and places the saved sites by each frame's
+`roi_x0`/`roi_y0` header.
 
 ## Files
 
@@ -326,13 +374,16 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
 
 - **Published state:** the manager serves sipyco notifier `"experiment"` on
   `sync_port` (layout in the module): the queue snapshot (`running`, a list,
-  `queue`, `history`, `catalogue_version`, `simulated`, `alive`; waiting tasks
-  carry `waiting_for`) and `points`, keyed by rid, every point each running (or
-  last finished) task has measured, with its scanned values and 0-d numeric
+  `queue`, `history`, `simulated`, `alive`, and `catalogue_`/`recipes_`/
+  `saved_parameters_version` counters; waiting tasks carry `waiting_for`) and
+  `points`, keyed by rid, every point each running task (and each pipeline's
+  last finished one) has measured, with its scanned values and 0-d numeric
   results. Only changes are sent; a GUI connecting late gets it all.
   `GUI/experiments/feed.py`'s `ExperimentFeed` is the Qt side (one per GUI,
-  shared by the Experiments and Results tabs): `queue_changed`,
-  `point_received`, `connection_changed` and `points(rid)`. The Results tab
+  shared by its experiment tabs): `queue_changed`, `point_received`,
+  `connection_changed`, `points(rid)` and `held_points()`. The Live Plot applet
+  (`GUI/viewers/live_plot.py`) has its own feed and plots chosen scalar results
+  accumulated across tasks (context menu → *experiment results*). The Results tab
   reads a running file once for metadata and the planned `/points` table
   (`archive.planned_points`), plots from the feed, and reloads the file when the
   task finishes; HDF5 cannot safely be re-read while it is written. Without a
@@ -383,5 +434,8 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
   so `pytweezer-kill-stale` ignores them.
 
 Tests: `tests/test_experiment_*.py`, `tests/test_motmaster_experiment.py`,
-`tests/test_results_browser.py`; `test_experiment_e2e.py` runs a real manager
-and worker subprocesses on localhost.
+`tests/test_results_{browser,archive,analyses}.py`, `tests/test_file_copier.py`,
+`tests/test_saved_parameters.py`; `test_experiment_e2e.py` runs a real manager
+and worker subprocesses on localhost. Tweezer measurements:
+`tests/test_tweezer_array.py`, `tests/test_slm_array.py`,
+`tests/test_tweezer_histogram.py`.

@@ -6,7 +6,8 @@ tab follows the manager's published snapshot through an
 :class:`~pytweezer.GUI.experiments.feed.ExperimentFeed`, refetching the
 catalogue, recipes and saved parameters when their versions change. A running
 optimiser is plotted from the feed's points as they arrive; a finished one from
-its measurement file, read through a results archive as the Results tab does.
+its measurement file, read through a results archive as the Results tab does,
+off the GUI thread.
 """
 
 from dataclasses import dataclass, field
@@ -46,6 +47,7 @@ from pytweezer.experiment.optimisers import SEARCH
 from pytweezer.experiment.queue import now
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.task import Task, TaskRequest, TaskStatus
+from pytweezer.GUI.background import BackgroundReader
 from pytweezer.GUI.components import Region, set_state, status_icon
 from pytweezer.GUI.experiments.arg_editor import ValueField
 from pytweezer.GUI.experiments.feed import ExperimentFeed
@@ -264,6 +266,8 @@ class OptimisersPanel(QWidget):
         self._selected: tuple[str, str] | None = None
         self._tasks: dict[int, Task] = {}
         self._measurements: dict[str, object] = {}
+        self._reader = BackgroundReader(self)
+        self._reading: set[str] = set()
         self._accepted: dict[int, list] = {}
         self._changes = []
         self._parameters = {}
@@ -603,7 +607,7 @@ class OptimisersPanel(QWidget):
             return "not accepted", f"completed {when}, not accepted"
         if status == TaskStatus.TERMINATED:
             measurement = self._measurement(task)
-            if _failed(measurement):
+            if measurement is _READING or _failed(measurement):
                 return "partial", f"terminated {when}"
             label = partial_label(measurement.constants)
             return "partial", f"terminated {when}, {label}"
@@ -616,25 +620,35 @@ class OptimisersPanel(QWidget):
         return "never"
 
     def _measurement(self, task):
-        """The run's measurement, or the exception reading it raised.
+        """The run's measurement, the exception reading it raised, or :data:`_READING`.
 
-        Only finished files are read, so each is read once; one that could not
-        be read is tried again on the next :meth:`refresh`. Any exception is
-        caught, since one escaping a Qt slot aborts the GUI.
+        Only finished files are read, so each is read once, off the GUI thread
+        (over RPC a read can wait out a whole timeout); the tab redraws when it
+        arrives. One that could not be read is tried again on the next
+        :meth:`refresh`.
         """
         path = task.h5_path
         if not path:
             return FileNotFoundError(f"run {task.rid} wrote no file")
-        if path not in self._measurements:
+        if path in self._measurements:
+            return self._measurements[path]
+        if path not in self._reading:
+            self._reading.add(path)
             row = self.rows.get((task.experiment, task.class_name))
-            try:
-                self._measurements[path] = self.archive.load(
-                    path, results=_plotted_names(row.schema) if row else _PLOTTED
-                )
-            except Exception as error:
-                logger.warning("Cannot read %s", path, exc_info=True)
-                self._measurements[path] = error
-        return self._measurements[path]
+            results = _plotted_names(row.schema) if row else _PLOTTED
+            self._reader.start(
+                f"Optimisers read {path}",
+                lambda: self.archive.load(path, results=results),
+                lambda outcome: self._file_arrived(path, outcome),
+            )
+        return _READING
+
+    def _file_arrived(self, path, outcome):
+        self._reading.discard(path)
+        if isinstance(outcome, Exception):
+            logger.warning("Cannot read %s", path, exc_info=outcome)
+        self._measurements[path] = outcome
+        self._update()
 
     def _acceptance(self, rid):
         """The saved-parameter changes accepted from run ``rid``."""
@@ -700,6 +714,11 @@ class OptimisersPanel(QWidget):
             )
             return
         measurement = self._measurement(run)
+        if measurement is _READING:
+            self.run_region.set_hint(f"{run.status}, reading its file…")
+            self._show_plots(None, None)
+            self._show_proposals(None, f"Reading run {run.rid}'s file…")
+            return
         when = when_text(run.t_end or run.t_submit, now())
         hint = f"{run.status} {when}, {run.points_done} points"
         if row.latest.rid != run.rid:
@@ -1318,6 +1337,10 @@ def _plotted_names(schema) -> list[str]:
     if optimiser.get("kind") == "bayesian":
         return [*_PLOTTED, *optimiser["settings"]]
     return list(_PLOTTED)
+
+
+#: What :meth:`OptimisersPanel._measurement` gives while the file is being read.
+_READING = object()
 
 
 def _failed(measurement) -> bool:
