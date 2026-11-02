@@ -248,3 +248,20 @@ def test_the_molasses_score_counts_recapture_only_once_the_array_loads(
         "loading": results["loading"][0],
     }
     assert results["objective"][0] == pytest.approx(score[expected])
+
+
+@pytest.mark.parametrize("cls", [TweezerImaging, MolassesRecapture])
+def test_each_point_records_every_shots_photons_at_every_site(rig, cls):
+    measurement = run_local(cls, **FAST)
+
+    first = measurement.results["first_photons"]
+    assert first.shape == (1, FAST["shots"], len(SITES))
+    assert measurement.results["second_photons"].shape == first.shape
+    loaded = first[0] > measurement.constants["threshold"]
+    assert loaded.mean() == pytest.approx(measurement.results["loading"][0], abs=0.05)
+
+
+def test_an_optimiser_records_the_photons_of_each_evaluation(rig):
+    measurement = run_local(OptimiseTweezerImaging, **FAST, n_calls=2, n_initial=2)
+
+    assert measurement.results["first_photons"].shape == (2, FAST["shots"], len(SITES))
