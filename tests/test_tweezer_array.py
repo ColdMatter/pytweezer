@@ -1,24 +1,30 @@
 import numpy as np
 import pytest
 
+from pytweezer.analysis import analysis as an
+from pytweezer.analysis.array_loading import photons_at_sites
+from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
 from pytweezer.experiment import optimisers, run_local
-from pytweezer.experiments import tweezer_array
+from pytweezer.experiments import load_tweezers, tweezer_array
 from pytweezer.experiments.tweezer_array import (
     SAVED_SEQUENCE_PARAMETERS,
+    FindTrapSites,
     MolassesRecapture,
     OptimiseMolassesShims,
     OptimiseTweezerImaging,
     TweezerImaging,
 )
 
-SITES = [(25 + 10 * row, 25 + 10 * column) for row in range(8) for column in range(8)]
+#: The default 8x8, 5 µm grid at 2 px/µm, in the pixels of the camera's ROI.
+SITES = [
+    (round(y), round(x))
+    for y, x in geometry_to_pixels(default_geometry(), 2.0, 0.0, 60.0, 60.0)
+]
+ROI_ORIGIN = (220, 110)
 LOADING = 0.6
 SURVIVAL = 0.9
-SAVED = {
-    key: 1.0 + index for index, key in enumerate(SAVED_SEQUENCE_PARAMETERS.values())
-}
-FAST = {"calibration_shots": 30, "shots": 10}
+FAST = {"shots": 10}
 
 
 class FakeSequencer:
@@ -93,6 +99,31 @@ class FakeRig:
         return self.array
 
 
+def midpoint_threshold():
+    """Halfway between the photons of an empty and a full site, in the fake camera's frames."""
+    camera = FakeHamCam(None)
+    sites = dict(enumerate(SITES))
+
+    def mean_photons(occupied):
+        frame = an.morphological_tophat_high_pass(
+            camera._frame(occupied).astype(float), feature_size=10
+        )
+        return photons_at_sites([frame], sites, 5).mean()
+
+    return (mean_photons(np.ones(len(SITES))) + mean_photons(np.zeros(len(SITES)))) / 2
+
+
+SAVED = {
+    key: 1.0 + index for index, key in enumerate(SAVED_SEQUENCE_PARAMETERS.values())
+} | {
+    "trap_sites": np.array(SITES, dtype=float) + ROI_ORIGIN,
+    "trap_threshold": midpoint_threshold(),
+    "trap_window_size": 5,
+    "trap_feature_size": 10,
+    "trap_geometry": default_geometry(),
+}
+
+
 @pytest.fixture
 def rig(monkeypatch):
     sequencer = FakeSequencer()
@@ -108,8 +139,10 @@ def rig(monkeypatch):
         "pytweezer.experiment.experiment._get_device",
         lambda name, timeout: devices[name],
     )
-    monkeypatch.setattr(tweezer_array, "get_saved_parameters", lambda: SAVED)
-    monkeypatch.setattr(optimisers, "get_saved_parameters", lambda: SAVED)
+    saved = dict(SAVED)
+    sequencer.saved = saved
+    for module in (tweezer_array, load_tweezers, optimisers):
+        monkeypatch.setattr(module, "get_saved_parameters", lambda: saved)
     return sequencer
 
 
@@ -121,22 +154,73 @@ def test_a_point_measures_the_loading_and_survival_put_in(rig):
     assert measurement.results["fidelity"][0] > 0.99
 
 
-@pytest.mark.parametrize(
-    ("array_on_rig", "sites_from"),
-    [({"sites": len(SITES)}, "rig"), (None, "argument")],
-    ids=["rig knows", "rig does not know"],
-)
-def test_calibration_finds_as_many_sites_as_the_rig_says_are_on_the_slm(
-    rig, array_on_rig, sites_from
-):
-    rig.rearrangement_rig.array = array_on_rig
-    sites_argument = len(SITES) if array_on_rig is None else 10
-
-    measurement = run_local(TweezerImaging, **FAST, sites=sites_argument)
+def test_find_trap_sites_proposes_the_default_grid_where_the_atoms_are(rig):
+    measurement = run_local(FindTrapSites, calibration_shots=30)
 
     assert measurement.status == "completed", measurement.attrs.get("error")
-    assert len(measurement.constants["trap_sites"]) == len(SITES)
-    assert measurement.constants["sites_from"] == sites_from
+    proposed = measurement.constants["proposed.trap_sites"]
+    assert np.abs(proposed - SAVED["trap_sites"]).max() < 0.5
+    np.testing.assert_array_equal(
+        measurement.constants["proposed.trap_geometry"], default_geometry()
+    )
+    assert measurement.constants["sites_from"] == "default"
+
+
+def test_find_trap_sites_keeps_the_rigs_order_of_its_array(rig):
+    order = np.random.default_rng(2).permutation(len(SITES))
+    x_um, y_um = default_geometry()[order].T
+    rig.rearrangement_rig.array = {"sites": len(SITES), "x_um": x_um, "y_um": y_um}
+
+    measurement = run_local(FindTrapSites, calibration_shots=30)
+
+    proposed = measurement.constants["proposed.trap_sites"]
+    assert np.abs(proposed - SAVED["trap_sites"][order]).max() < 0.5
+    assert measurement.constants["sites_from"] == "rig"
+
+
+def test_find_trap_sites_takes_its_shots_with_the_tweezers_off_in_the_background_drop(
+    rig,
+):
+    run_local(FindTrapSites, calibration_shots=30)
+    assert len(rig.goes) == 30
+    assert all(go["BackgroundDrop"] == 1 for go in rig.goes)
+    assert all(go["tTweezerSetVVA0"] == go["tTweezerSetVVA1"] == 0.0 for go in rig.goes)
+
+
+def test_measurements_record_the_saved_sites_in_their_roi(rig):
+    measurement = run_local(TweezerImaging, **FAST)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    np.testing.assert_array_equal(measurement.constants["trap_sites"], SITES)
+    assert measurement.constants["threshold"] == SAVED["trap_threshold"]
+
+
+def test_a_measurement_refuses_without_saved_sites(rig):
+    del rig.saved["trap_sites"]
+    measurement = run_local(TweezerImaging, **FAST)
+    assert measurement.status == "failed"
+    assert "FindTrapSites" in measurement.attrs["error"]
+
+
+def test_a_measurement_refuses_sites_fitted_to_another_array(rig):
+    x_um, y_um = default_geometry().T
+    rig.rearrangement_rig.array = {
+        "sites": len(SITES),
+        "x_um": x_um + 0.5,
+        "y_um": y_um,
+    }
+    measurement = run_local(TweezerImaging, **FAST)
+    assert measurement.status == "failed"
+    assert "another array" in measurement.attrs["error"]
+
+
+def test_a_measurement_refuses_a_site_whose_window_leaves_the_roi(rig):
+    sites = rig.saved["trap_sites"].copy()
+    sites[5] = [ROI_ORIGIN[0] + 1, ROI_ORIGIN[1] + 100]
+    rig.saved["trap_sites"] = sites
+    measurement = run_local(TweezerImaging, **FAST)
+    assert measurement.status == "failed"
+    assert "[5]" in measurement.attrs["error"]
 
 
 def test_every_shot_broadcasts_its_frames_tagged_with_the_task(rig):
@@ -158,20 +242,12 @@ def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(rig):
     ("experiment", "point_drop"),
     [(TweezerImaging, (0, None)), (MolassesRecapture, (1, 3))],
 )
-def test_only_calibration_turns_the_tweezers_off_and_each_point_drops_as_its_measurement_needs(
+def test_each_point_keeps_the_tweezers_on_and_drops_as_its_measurement_needs(
     rig, experiment, point_drop
 ):
     run_local(experiment, **FAST)
-    calibration, points = (
-        rig.goes[: FAST["calibration_shots"]],
-        rig.goes[FAST["calibration_shots"] :],
-    )
-    assert all(go["BackgroundDrop"] == 1 for go in calibration)
-    assert all(
-        go["tTweezerSetVVA0"] == go["tTweezerSetVVA1"] == 0.0 for go in calibration
-    )
-    assert len(points) == FAST["shots"]
-    for go in points:
+    assert len(rig.goes) == FAST["shots"]
+    for go in rig.goes:
         assert "tTweezerSetVVA0" not in go
         assert (go["BackgroundDrop"], go.get("tDropDuration")) == point_drop
 
@@ -179,7 +255,7 @@ def test_only_calibration_turns_the_tweezers_off_and_each_point_drops_as_its_mea
 def test_each_evaluation_images_both_times_at_its_settings(rig):
     measurement = run_local(OptimiseTweezerImaging, **FAST, n_calls=2, n_initial=2)
     assert measurement.status == "completed", measurement.attrs["error"]
-    evaluations = rig.goes[FAST["calibration_shots"] :]
+    evaluations = rig.goes
     for point in range(2):
         vco = measurement.results["imaging_vco"][point]
         vva = measurement.results["imaging_vva"][point]
@@ -213,7 +289,7 @@ def test_the_score_is_survival_only_above_the_fidelity_floor(
 def test_each_molasses_evaluation_runs_at_its_shims(rig):
     measurement = run_local(OptimiseMolassesShims, **FAST, n_calls=2, n_initial=2)
     assert measurement.status == "completed", measurement.attrs["error"]
-    evaluations = rig.goes[FAST["calibration_shots"] :]
+    evaluations = rig.goes
     for point in range(2):
         shims = tuple(
             measurement.results[setting][point]
