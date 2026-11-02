@@ -537,7 +537,6 @@ def OptimiseMOTShimParameters(
         _, loading_probabilities, _, fidelity = an.get_array_loading_statistics(
             imgs_filtered_1,
             ExpParams.get_parameter("site_positions"),
-            ExpParams.get_parameter("array_shape"),
             threshold_detection=False,
             threshold=1.6,
             window_size=ExpParams.get_parameter("sum_window"),
@@ -659,7 +658,6 @@ def OptimiseMolassesShimParameters(
         _, loading_probabilities, threshold, _ = an.get_array_loading_statistics(
             imgs_filtered_1,
             ExpParams.get_parameter("site_positions"),
-            ExpParams.get_parameter("array_shape"),
             threshold_detection=True,
             threshold=ExpParams.get_parameter("threshold"),
             binning=60,
@@ -677,7 +675,6 @@ def OptimiseMolassesShimParameters(
                 imgs_filtered_1,
                 imgs_filtered_2,
                 ExpParams.get_parameter("site_positions"),
-                ExpParams.get_parameter("array_shape"),
                 threshold=ExpParams.get_parameter("threshold"),
                 window_size=ExpParams.get_parameter("sum_window"),
             )

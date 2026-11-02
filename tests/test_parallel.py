@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from pytweezer.parallel import after, run_parallel
+from pytweezer.helper_scripts.parallel import after, run_parallel
 
 
 def test_calls_run_concurrently_and_return_in_call_order():

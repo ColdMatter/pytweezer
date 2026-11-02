@@ -33,12 +33,19 @@ Code is linted and formatted with ruff. There is a pre-commit hook to run ruff o
 There is a pytest suite under `tests/` — run it after
 touching code it covers, and add cases there instead of writing one-off
 verification scripts when the change fits its scope.
+`.github/workflows/tests.yml` runs the suite (against a scratch TimescaleDB) on
+every push to main and every PR.
 
 ```bash
 uv sync                         # install deps, rebuild the C++ extensions and console scripts
 uv run pytest tests/ -q         # run the test suite
 uv run python <script>.py       # run any script inside the venv
 ```
+
+**Tests follow the design, never the other way round.** Design for the lab as
+it runs; when a design breaks an existing test, change or delete the test.
+Do not add parameters, hooks, globals or fallbacks to production code just so
+a test can reach it, or keep a worse design because the suite assumes it.
 
 For behavior the suite doesn't cover (hardware drivers, multi-process
 server/hub interaction, anything needing a real device), fall back to running
@@ -49,7 +56,7 @@ Entry points (`[project.scripts]` in `pyproject.toml`):
 
 ```bash
 uv run pytweezer-server         # full-control GUI; simulates on any PC but the server PC
-uv run pytweezer-client         # view-only GUI, run on client PCs
+uv run pytweezer-client         # client GUI, run on client PCs
 uv run pytweezer-device <name>  # start one device's RPC server standalone
 uv run pytweezer-logger <name>  # start one database logger standalone
 uv run pytweezer-experiment-manager <name>  # start the experiment queue manager standalone
@@ -114,8 +121,11 @@ cloned at `~/CaFMOT-LabBook`; read its own `CLAUDE.md` before writing to it.
 
 - Small, tested fixes may be committed and pushed straight to main, no branch or merge request needed
 - Features, and anything that needs review, go on a feature branch
-- Commit and push as you go: after each coherent, tested step (e.g. one tab restyled), not in one batch at the end. Stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
 - Every feature branch should have an associated merge request
+- Name every branch for what it changes (e.g. `fix-copier-share-chmod`), including branches only Claude works on - never a session ID, date or `wip`/`tmp`
+- A line `Depends on owner/repo#N` (or `#N`) in a PR description holds it until that PR merges or that issue closes
+- Commit and push as you go: after each coherent, tested step (e.g. one tab restyled), not in one batch at the end. Stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
+- `.vscode/settings.json` is shared by everyone who opens the repo. If a commit would include changes to it that the user didn't ask for (often a personal preference saved under the Settings UI's Workspace tab), warn the user and ask before committing them
 - **The main branch should always be deployable** - no broken code or failing tests allowed
 
 

@@ -8,6 +8,7 @@ from pytweezer.experiment import (
     Number,
     Scan,
     TaskStatus,
+    load_measurement,
     run_local,
 )
 from pytweezer.experiment.runner import open_writer, run_points
@@ -18,6 +19,7 @@ class Recorder(Experiment):
     gain = Number(2.0)
     x = Number(0.0)
     fail_at = Integer(-1)
+    fail_in_prepare = Integer(0)
     fail_in_finish = Integer(0)
 
     def __init__(self, args=None):
@@ -26,6 +28,8 @@ class Recorder(Experiment):
 
     def prepare(self):
         self.calls.append("prepare")
+        if self.fail_in_prepare:
+            raise RuntimeError("prepare failed")
         self.record("setup", 1)
 
     def run_point(self):
@@ -74,13 +78,34 @@ def test_run_local_stores_effective_arguments_and_results():
         run_local(Recorder, SCAN, gian=3)
 
 
+def test_run_local_with_a_path_saves_what_it_returns(tmp_path):
+    path = tmp_path / "m.h5"
+    returned = run_local(Recorder, SCAN, path=path, gain=3)
+    saved = load_measurement(path)
+    assert saved.status == returned.status == "completed"
+    assert saved.arguments == returned.arguments
+    assert list(saved.points["x"]) == list(returned.points["x"]) == [1.0, 2.0, 3.0]
+    assert list(saved.results["y"]) == list(returned.results["y"])
+    assert saved.constants == returned.constants
+
+
 @pytest.mark.parametrize(
-    "args, message, n_done",
-    [({"fail_at": 1}, "boom", 1), ({"fail_in_finish": 1}, "finish failed", 3)],
+    "args, message, points_started, n_done",
+    [
+        ({"fail_in_prepare": 1}, "prepare failed", 0, 0),
+        ({"fail_at": 1}, "boom", 2, 1),
+        ({"fail_in_finish": 1}, "finish failed", 3, 3),
+    ],
+    ids=["prepare", "point", "finish"],
 )
-def test_failure_runs_finish_and_keeps_completed_points(args, message, n_done):
+def test_failure_runs_finish_and_keeps_completed_points(
+    args, message, points_started, n_done
+):
     experiment, status, error, attrs, _ = run(**args)
     assert status == TaskStatus.FAILED and message in error
+    assert len([call for call in experiment.calls if call[0] == "point"]) == (
+        points_started
+    )
     assert experiment.calls[-1] == "finish"
     assert attrs["n_done"] == n_done
     assert attrs["status"] == "failed" and message in attrs["error"]

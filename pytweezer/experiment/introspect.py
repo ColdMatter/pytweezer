@@ -43,6 +43,15 @@ def _device_warnings(experiment_cls: type[Experiment]) -> list[str]:
     return warnings
 
 
+def _reservation(experiment_cls: type[Experiment]) -> dict[str, Any]:
+    from pytweezer.experiment.reservations import ReservationError
+
+    try:
+        return {"reserves": experiment_cls.reserved_devices(), "reserve_error": None}
+    except ReservationError as error:
+        return {"reserves": None, "reserve_error": str(error)}
+
+
 def describe(module_name: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "module": module_name,
@@ -53,7 +62,9 @@ def describe(module_name: str) -> dict[str, Any]:
     try:
         module = importlib.import_module(module_name)
         for experiment_cls in runnable_experiments(module):
-            result["classes"].append(experiment_cls.schema())
+            result["classes"].append(
+                experiment_cls.schema() | _reservation(experiment_cls)
+            )
             result["warnings"] += _device_warnings(experiment_cls)
     except BaseException:
         result["error"] = traceback.format_exc()

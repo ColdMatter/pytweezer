@@ -232,7 +232,9 @@ QLabel[role="argument"][state="scanned"] {
     color: #5b8def;
 }
 
-QLabel#StatusLabel[state="crashed"] {
+QLabel#StatusLabel[state="crashed"],
+QLabel#StatusLabel[state="error"],
+QLabel[role="regionHint"][state="error"] {
     color: #e74c3c;
 }
 
@@ -331,6 +333,25 @@ QTableWidget#FeedTable QHeaderView::section {
 QTreeWidget#MeasurementTree::item {
     padding: 3px 6px 3px 0;
 }
+QTreeWidget#SavedParameterTree::item,
+QTreeWidget#SavedParameterHistory::item {
+    padding: 3px 14px 3px 0;
+}
+QTreeWidget#SavedParameterTree QHeaderView::section,
+QTreeWidget#SavedParameterHistory QHeaderView::section {
+    padding: 4px 14px 4px 4px;
+}
+QTreeWidget#OptimiserTable::item {
+    padding: 3px 18px 3px 0;
+}
+QTreeWidget#OptimiserTable QHeaderView::section {
+    padding: 4px 18px 4px 4px;
+}
+QWidget#OptimiserCell,
+QWidget#OptimiserPlots,
+QWidget#OptimiserProposals {
+    background: transparent;
+}
 QFrame#Region[kind="well"] QPlainTextEdit {
     background: transparent;
     border: none;
@@ -367,6 +388,23 @@ QToolButton#ScanToggle:hover {
     border-color: #5b8def;
 }
 QToolButton#ScanToggle:checked {
+    background-color: #5b8def;
+    color: #ffffff;
+    border-color: #5b8def;
+}
+
+QToolButton#PipelineChip {
+    background: transparent;
+    color: #8d8e99;
+    border: 1px solid #44454f;
+    border-radius: 11px;
+    padding: 2px 12px;
+}
+QToolButton#PipelineChip:hover {
+    color: #e6e6e6;
+    border-color: #5b8def;
+}
+QToolButton#PipelineChip:checked {
     background-color: #5b8def;
     color: #ffffff;
     border-color: #5b8def;
@@ -563,6 +601,74 @@ QScrollBar::handle:vertical:hover {
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
+}
+
+/* NI Cards tab (pytweezer.GUI.ni_cards). */
+QScrollArea#NICardsScroll,
+QScrollArea#NICardsScroll > QWidget,
+QWidget#NICardsContent {
+    background: transparent;
+    border: none;
+}
+QFrame#ChannelCell {
+    background-color: #30313b;
+    border: 1px solid #44454f;
+    border-radius: 5px;
+}
+QFrame#ChannelCell[state="high"] {
+    background-color: #1f3a2b;
+    border-color: #2ecc71;
+}
+QFrame#ChannelCell[state="watching"] {
+    border-color: #5b8def;
+}
+QFrame#ChannelCell[state="held"] {
+    background: transparent;
+    border-color: #2c2d35;
+}
+QFrame#ChannelCell QLabel {
+    background: transparent;
+}
+QFrame#ChannelCell QLabel[role="cellName"] {
+    color: #e6e6e6;
+    font-weight: 600;
+}
+QFrame#ChannelCell QLabel[role="cellAddress"],
+QFrame#ChannelCell[state="held"] QLabel {
+    color: #8d8e99;
+    font-size: 8pt;
+}
+QFrame#ChannelCell QLabel[role="cellValue"] {
+    color: #e6e6e6;
+    font-weight: 600;
+}
+QFrame#ChannelCell:disabled {
+    background: transparent;
+    border-color: #2c2d35;
+}
+QFrame#ChannelCell QLabel[role="cellName"]:disabled,
+QFrame#ChannelCell QLabel[role="cellValue"]:disabled {
+    color: #8d8e99;
+}
+QLabel[role="cellSection"] {
+    color: #8d8e99;
+    font-weight: 600;
+}
+QLabel#CardBanner {
+    color: #f5a623;
+    background-color: #3a2f1c;
+    border: 1px solid #f5a623;
+    border-radius: 4px;
+    padding: 3px 8px;
+}
+QToolButton#SectionToggle {
+    color: #8d8e99;
+    background: transparent;
+    border: none;
+    font-weight: 600;
+}
+QToolButton#SectionToggle:hover {
+    color: #e6e6e6;
 }
 
 QScrollBar:horizontal {

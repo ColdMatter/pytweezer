@@ -1,5 +1,3 @@
-import socket
-
 import pytest
 
 from pytweezer.experiment import Device, Experiment, run_local
@@ -116,21 +114,12 @@ def test_manager_tells_guis_it_is_simulating(monkeypatch, tmp_path, recording_db
 
 
 def test_data_root_resolution(monkeypatch, tmp_path):
-    conf = {
-        "host": "10.0.0.9",
-        "data_root": str(tmp_path / "local"),
-        "client_data_root": str(tmp_path / "share"),
-    }
+    conf = {"host": "10.0.0.9", "data_root": str(tmp_path / "local")}
     monkeypatch.setattr(
         "pytweezer.configuration.config.get_config",
         lambda: {"Servers": {"Experiment Manager": conf}},
     )
     monkeypatch.delenv("PYTWEEZER_DATA_DIR", raising=False)
-    # Other PCs find the data on the share; the manager's own PC uses its local root.
-    assert data_root() == tmp_path / "share"
-    monkeypatch.setattr(
-        "pytweezer.configuration.config.HOSTS", {socket.gethostname(): "10.0.0.9"}
-    )
     assert data_root() == tmp_path / "local"
     conf["simulate"] = True
     assert data_root() == tmp_path / "local" / "simulated"

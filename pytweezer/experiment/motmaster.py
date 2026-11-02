@@ -18,7 +18,8 @@ master; the others are armed in trigger mode and started first.
 A MOTMaster in linked mode runs one script across two machines: it claims its
 secondary itself and fires it by TTL, so the experiment declares only the
 primary, and every parameter (both machines', plus ``SecondaryTriggerDelay``)
-belongs to its script::
+belongs to its script. The secondary is named by the primary's ``linked_partner``
+CONFIG key and is reserved along with it::
 
     class LinkedLoad(MotMasterExperiment):
         mm = MotMaster("CaF MotMaster", script="LinkedTweezerLoad", linked=True)
@@ -56,6 +57,24 @@ class MotMaster(Device):
         self.iterations = iterations
         self.save = save
         self.follower_timeout = follower_timeout
+
+    def reserves(self) -> set[str]:
+        from pytweezer.experiment.reservations import (
+            ReservationError,
+            device_reservation,
+        )
+        from pytweezer.servers.device_server import resolve_address
+
+        reserved = super().reserves()
+        if self.linked:
+            partner = resolve_address(self.device_name).conf.get("linked_partner")
+            if not partner:
+                raise ReservationError(
+                    f"{self.device_name!r} is linked but its CONFIG entry has no "
+                    "'linked_partner'"
+                )
+            reserved |= device_reservation(partner)
+        return reserved
 
     def to_schema(self) -> dict[str, Any]:
         return super().to_schema() | {

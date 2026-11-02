@@ -153,14 +153,14 @@ sequence**, so two MotMasters driven one after another run back-to-back, never
 together — and a MotMaster armed in trigger mode blocks until something else
 fires its trigger.
 
-`run_parallel` (`pytweezer/parallel.py`) is the ergonomic answer: it runs
+`run_parallel` (`pytweezer/helper_scripts/parallel.py`) is the ergonomic answer: it runs
 zero-argument callables one thread each and returns results in order. The threads
 overlap for real because each call is a blocking socket round trip whose `recv`
 releases the GIL. `after(delay, call)` staggers a start to win an
 arm-before-trigger race:
 
 ```python
-from pytweezer.parallel import run_parallel, after
+from pytweezer.helper_scripts.parallel import run_parallel, after
 
 frame, _, _ = run_parallel(
     lambda: cam.acquire_n_frames(1),  # blocks reading the frame

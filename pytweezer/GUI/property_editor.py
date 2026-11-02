@@ -1,6 +1,5 @@
 import json
 import sys
-import traceback
 from math import *
 
 import pyqtgraph.parametertree.parameterTypes as pTypes
@@ -167,10 +166,7 @@ class TreeEdit:
                 # if the change results from deleting the path is None
                 if path is not None:
                     childName = "/".join(path)
-                    print("  parameter: %s" % childName)
-                    print("  change:    %s" % change)
-                    print("  data:      %s" % str(data))
-                    print("  ----------")
+                    logger.debug("%s: %s %s", childName, change, data)
                     if param.type() == "str":
                         try:
                             edat = eval(data)
@@ -201,12 +197,9 @@ class TreeEdit:
                         self.props.set("/" + listname, l)
                         # print('setting',listname,'dd',l)
 
-            except Exception as e:
+            except Exception:
                 send_error("change error")
-                logger.error(f"property_editor change error {e!s}")
-                print("sysinfo:", sys.exc_info()[0], path)
-                print("sysinfo:", sys.exc_info()[1], path)
-                traceback.print_tb(sys.exc_info()[2])
+                logger.exception(f"property_editor change error at {path}")
 
     def _update(self, path):
         """update selected entry
@@ -276,7 +269,7 @@ class PropEdit(BWidget):
         :subtree : (string)
             show only properties on this path
         """
-        print("PropertyEditor starting")
+        logger.debug("PropertyEditor starting")
         name = "GUI/PropertyEditor"
         super().__init__(name, parent)
         if subtree[-1] != "/":
@@ -457,7 +450,7 @@ class PropSelector(BWidget):
         :subtree : (string)
             show only properties on this path
         """
-        print("Property Selector starting")
+        logger.debug("Property Selector starting")
         # name='GUI/PropertySelector'
         super().__init__(name, parent)
         if subtree[-1] != "/":

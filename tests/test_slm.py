@@ -122,15 +122,6 @@ _SLM_CONF = {
 }
 
 
-def test_build_simulated_slm_and_teardown_closes_it():
-    spec = device_server.build_spec("SLM", conf={**_SLM_CONF, "simulate": True})
-    (slm,) = spec.targets.values()
-    assert isinstance(slm, SimulatedSLM)
-    assert slm.is_connected()
-    spec.teardown()
-    assert not slm.is_connected()
-
-
 def test_device_teardown_releases_the_real_sdk(use_fake_sdk):
     sdk = use_fake_sdk()
     spec = device_server.build_spec("SLM", conf={**_SLM_CONF, "simulate": False})

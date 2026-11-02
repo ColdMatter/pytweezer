@@ -9,7 +9,9 @@ Lab-book notebooks (`Box\Working folder\cafmot\datasync\ipython_notebooks\...`)
 run on **ph-bonesaw** in the `caftweeznb` uv venv
 (`C:\Users\cafmot\.venvs\caftweeznb`), which installs pytweezer by a git pin to
 `main`. They drive devices directly with `Rig` — no queue, no `Experiment`
-classes (those are `add-experiment`).
+classes (those are `add-experiment`), so the Experiment Manager's device
+reservations don't cover them: don't run a `Rig` shot while a queued task uses
+the same hardware.
 
 ```python
 import numpy as np

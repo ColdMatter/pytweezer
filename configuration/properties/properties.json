@@ -19,7 +19,7 @@
                     "parts": 3
                 },
                 "rb_hamcam": {
-                    "timestamp": 1785501796.1260877,
+                    "timestamp": 1793381362.2613106,
                     "parts": 3
                 },
                 "caf_hamcam": {
@@ -28,6 +28,14 @@
                 },
                 "rb_thorcam": {
                     "timestamp": 1785501794.345277,
+                    "parts": 3
+                },
+                "slm_target": {
+                    "timestamp": 1793376218.19853,
+                    "parts": 3
+                },
+                "slm_phasemask": {
+                    "timestamp": 1793376218.1995342,
                     "parts": 3
                 }
             }
@@ -239,7 +247,7 @@
     },
     "Image Monitor": {
         "imagestreams": [
-            "rb_thorcam"
+            "rb_hamcam"
         ],
         "maskstreams": [
             "--None--"
@@ -308,22 +316,21 @@
         "Applets": {
             "Image Monitor": {
                 "script": "pytweezer/GUI/viewers/image_monitor.py",
-                "active": true,
                 "description": "Display image streams"
             },
             "Live Plot": {
                 "script": "pytweezer/GUI/viewers/live_plot.py",
-                "active": false,
                 "description": "Live plot of data streams"
             },
             "Image Plot Monitor": {
                 "script": "pytweezer/GUI/viewers/image_plot_monitor.py",
-                "active": false,
                 "description": "Image with x/y projection plots linked to the image axes"
             },
             "Image Monitor 2": {
-                "script": "pytweezer/GUI/viewers/image_monitor.py",
-                "active": true
+                "script": "pytweezer/GUI/viewers/image_monitor.py"
+            },
+            "SLM Monitor": {
+                "script": "pytweezer/GUI/viewers/slm_monitor.py"
             }
         }
     },
@@ -339,5 +346,16 @@
                 "active": true
             }
         }
+    },
+    "SLM Monitor": {
+        "targetstreams": [
+            "slm_target"
+        ],
+        "phasestreams": [
+            "slm_phasemask"
+        ],
+        "target_cmap": "magma",
+        "phase_cmap": "twilight",
+        "phase_period": 256.0
     }
 }

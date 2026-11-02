@@ -1,10 +1,14 @@
 """Experiments tab widgets, offscreen, with a fake manager client and feed."""
 
 import threading
+import time
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from PyQt6 import QtCore
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QMessageBox, QWidget
 
 from pytweezer.experiment import (
     Choice,
@@ -15,20 +19,29 @@ from pytweezer.experiment import (
     Number,
     Scan,
 )
-from pytweezer.experiment.client import ManagerError
+from pytweezer.experiment.client import ManagerError, ManagerUnavailable
 from pytweezer.experiment.motmaster import (
     MotMaster,
     MotMasterExperiment,
     MotMasterNumber,
 )
+from pytweezer.experiment.queue import UNKNOWN_DEVICES, now
 from pytweezer.experiment.recipes import Recipe
-from pytweezer.experiment.task import TaskRequest
+from pytweezer.experiment.saved_parameters import SavedParameter, SavedParameterChange
+from pytweezer.experiment.task import Task, TaskRequest
+from pytweezer.experiments.demo import DemoBayesian, DemoStagedScan, RabiDemo
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
 from pytweezer.GUI.experiments.motmaster_params import ParameterFetcher
 from pytweezer.GUI.experiments.panel import ExperimentsPanel
-from pytweezer.GUI.experiments.queue_view import QueueView
+from pytweezer.GUI.experiments.queue_view import (
+    COLUMNS,
+    QueueView,
+    queue_summary,
+)
+from pytweezer.GUI.optimisers import OptimisersPanel
+from pytweezer.GUI.saved_parameters import SavedParametersPanel
 from tests.helpers import FakeFeed, until
 
 Left, Right = QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton
@@ -59,13 +72,19 @@ class FakeClient:
         self.recipes = []
         self.recipes_version = 0
         self.errors = {}
+        self.modules = MODULES
+        self.catalogue_version = 1
 
     def call(self, command, **fields):
         self.calls.append((command, fields))
         if command in self.errors:
             raise ManagerError(self.errors[command])
         if command == "catalogue":
-            return {"ok": True, "modules": MODULES, "version": 1}
+            return {
+                "ok": True,
+                "modules": self.modules,
+                "version": self.catalogue_version,
+            }
         if command == "recipes":
             return {
                 "ok": True,
@@ -101,6 +120,8 @@ def task(rid, status, **kwargs):
         "scan": {"axes": []},
         "priority": 0,
         "label": "",
+        "pipeline": "main",
+        "devices": None,
         "submitter": "me",
         "t_submit": "2026-10-07T12:00:00+01:00",
         "points_done": 1,
@@ -129,6 +150,14 @@ def test_form_shows_display_units_and_returns_si(editor):
     assert request.args == {"detuning": -7.5e6, "shots": 3, "mode": "a"}
     assert request.experiment == SCHEMA["module"]
     assert request.class_name == "Demo"
+
+
+def test_an_optimiser_offers_no_scan_and_says_it_sets_its_own_points(qapp):
+    editor = ArgumentEditor()
+    editor.set_experiment(DemoStagedScan.schema())
+    assert not any(row.scan_button.isEnabled() for row in editor.rows.values())
+    assert not editor.repetitions.isEnabled()
+    assert editor.point_count.text() == "sets its own points"
 
 
 class Tiny(Experiment):
@@ -225,17 +254,49 @@ def test_load_request_round_trips(editor):
     assert editor.rows["shots"].scan.values.text() == "1, 2"
 
 
-def test_the_recipe_name_is_cleared_by_anything_that_replaces_the_form(editor):
-    plain = TaskRequest(experiment=SCHEMA["module"], class_name="Demo")
-    for replace_form in (
-        editor.defaults_button.click,
-        lambda: editor.set_experiment(SCHEMA),
-        lambda: editor.load_request(plain),
-    ):
-        editor.set_recipe_name("MOT check")
-        assert not editor.recipe_label.isHidden()
-        replace_form()
-        assert editor.recipe_name == "" and editor.recipe_label.isHidden()
+def test_form_submits_the_chosen_or_typed_pipeline(editor):
+    assert editor.request().pipeline == "main"
+    editor.pipeline.setCurrentText("CaF")
+    assert editor.request().pipeline == "CaF"
+
+
+def test_load_request_restores_the_pipeline(editor):
+    request = editor.request().model_copy(update={"pipeline": "Rb"})
+    editor.load_request(request)
+    assert editor.pipeline.currentText() == "Rb"
+    assert editor.request().pipeline == "Rb"
+
+
+def test_set_pipelines_sorts_keeps_main_and_keeps_the_typed_name(editor):
+    editor.pipeline.setCurrentText("custom")
+    editor.set_pipelines(["Rb", "CaF"])
+    items = [editor.pipeline.itemText(i) for i in range(editor.pipeline.count())]
+    assert items == ["CaF", "Rb", "main"]
+    assert editor.pipeline.currentText() == "custom"
+
+
+def test_set_pipelines_with_unchanged_names_leaves_the_typing_alone(editor):
+    editor.set_pipelines(["Rb"])
+    line = editor.pipeline.lineEdit()
+    line.setText("CaF2")
+    line.setCursorPosition(2)
+    editor.set_pipelines(["Rb", "main"])
+    assert (line.text(), line.cursorPosition()) == ("CaF2", 2)
+
+
+def test_panel_offers_pipelines_seen_in_the_queue(qapp):
+    panel = ExperimentsPanel(client=FakeClient(), feed=FakeFeed())
+    panel._queue_changed(
+        {
+            "running": [task(1, "running", pipeline="CaF")],
+            "queue": [task(2, "queued", pipeline="Rb")],
+            "history": [task(3, "done", pipeline="old")],
+            "catalogue_version": 1,
+        }
+    )
+    combo = panel.editor.pipeline
+    items = [combo.itemText(i) for i in range(combo.count())]
+    assert items == ["CaF", "Rb", "main", "old"]
 
 
 def test_queue_view_rows_and_buttons(qapp, monkeypatch):
@@ -244,13 +305,14 @@ def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     view = QueueView()
     view.set_snapshot(
         {
-            "running": task(3, "running", t_start="2026-10-07T12:01:00+01:00"),
+            "running": [task(3, "running", t_start="2026-10-07T12:01:00+01:00")],
             "queue": [task(4, "queued"), task(5, "held")],
             "history": [task(2, "failed", error="Traceback\nValueError: bad")],
         }
     )
     assert [view.table.item(r, 0).text() for r in range(4)] == ["3", "4", "5", "2"]
-    assert "ValueError: bad" in view.table.item(3, 3).toolTip()
+    status = COLUMNS.index("Status")
+    assert "ValueError: bad" in view.table.item(3, status).toolTip()
 
     actions = []
     view.action_requested.connect(
@@ -277,8 +339,136 @@ def test_queue_view_rows_and_buttons(qapp, monkeypatch):
     ]
 
     # selection survives a refresh
-    view.set_snapshot({"running": None, "queue": [task(4, "queued")], "history": []})
+    view.set_snapshot({"running": [], "queue": [task(4, "queued")], "history": []})
     assert view.selected_task()["rid"] == 4
+
+
+PIPELINE_SNAPSHOT = {
+    "running": [
+        task(43, "running", pipeline="background", devices=["Rb Camera"]),
+        task(41, "running", pipeline="CaF", devices=["Rb MotMaster"]),
+    ],
+    "queue": [
+        task(44, "queued", pipeline="Rb", waiting_for={"Rb MotMaster": 41}),
+        task(45, "queued", pipeline="CaF"),
+    ],
+    "history": [],
+}
+
+
+def column_texts(view, name):
+    column = COLUMNS.index(name)
+    return [view.table.item(r, column).text() for r in range(view.table.rowCount())]
+
+
+def visible_rids(view):
+    return [
+        view.table.item(r, 0).text()
+        for r in range(view.table.rowCount())
+        if not view.table.isRowHidden(r)
+    ]
+
+
+def test_queue_view_shows_pipeline_and_why_a_task_waits(qapp):
+    view = QueueView()
+    view.set_snapshot(PIPELINE_SNAPSHOT)
+    assert column_texts(view, "RID") == ["41", "43", "44", "45"]
+    assert column_texts(view, "Pipeline") == ["CaF", "background", "Rb", "CaF"]
+    assert column_texts(view, "Status")[2:] == [
+        "waiting: Rb MotMaster (RID 41)",
+        "queued",
+    ]
+    status = COLUMNS.index("Status")
+    blocked, free = (view.table.item(r, status).background() for r in (2, 3))
+    assert blocked != free
+
+
+def test_queue_view_says_when_a_head_waits_for_its_reservation(qapp):
+    view = QueueView()
+    view.set_snapshot(
+        {
+            "running": [],
+            "queue": [
+                task(50, "queued", pipeline="CaF"),
+                task(51, "queued", pipeline="CaF"),
+            ],
+        }
+    )
+    assert column_texts(view, "Status") == ["waiting: reading experiments", "queued"]
+    status = COLUMNS.index("Status")
+    shade = view.table.item(0, status).background().color()
+    assert shade == queue_view._ROW_SHADES["blocked"]
+
+    view.set_snapshot(
+        {
+            "running": [task(41, "running", pipeline="Rb")],
+            "queue": [task(52, "queued", waiting_for={UNKNOWN_DEVICES: 41})],
+        }
+    )
+    assert column_texts(view, "Status")[1] == "waiting: all devices (RID 41)"
+
+
+def test_pipeline_chips_count_and_filter(qapp):
+    view = QueueView()
+    view.set_snapshot(PIPELINE_SNAPSHOT)
+    chips = view.chips
+    assert [b.text() for b in chips.buttons.values()] == [
+        "All",
+        "background ●",
+        "CaF ● 1",
+        "Rb 1",
+    ]
+    assert chips.selected() is None
+    assert visible_rids(view) == ["41", "43", "44", "45"]
+
+    chips.buttons["CaF"].click()
+    assert chips.selected() == "CaF"
+    assert visible_rids(view) == ["41", "45"]
+
+    view.set_snapshot(
+        {**PIPELINE_SNAPSHOT, "running": [PIPELINE_SNAPSHOT["running"][0]]}
+    )
+    assert chips.selected() == "CaF", "45 still waits in CaF"
+    view.set_snapshot({"running": [], "queue": [PIPELINE_SNAPSHOT["queue"][0]]})
+    assert chips.selected() is None
+    assert visible_rids(view) == ["44"]
+
+
+def test_hiding_a_row_drops_its_selection(qapp):
+    view = QueueView()
+    view.set_snapshot(PIPELINE_SNAPSHOT)
+    view.table.selectRow(0)
+    view.chips.buttons["Rb"].click()
+    assert view.selected_task() is None
+
+
+def test_snapshot_without_running_list_renders(qapp):
+    view = QueueView()
+    snapshot = {"running": None, "queue": [task(4, "queued")], "history": []}
+    view.set_snapshot(snapshot)
+    assert column_texts(view, "RID") == ["4"]
+    assert queue_summary(snapshot) == "nothing running, 1 waiting"
+
+
+def test_details_list_pipeline_and_devices(qapp):
+    view = QueueView()
+    view.set_snapshot(PIPELINE_SNAPSHOT)
+    view._show_details(0, 0)
+    view._show_details(3, 0)
+    texts = [box.text() for box in view.findChildren(QMessageBox)]
+    assert any("Pipeline: CaF" in t and "Devices: Rb MotMaster" in t for t in texts)
+    assert any("Devices: not yet known" in t for t in texts)
+    view.set_snapshot({"queue": [task(46, "queued", devices=[])]})
+    view._show_details(0, 0)
+    assert any("Devices: none" in box.text() for box in view.findChildren(QMessageBox))
+
+
+def test_queue_summary_counts_running_tasks():
+    snapshot = {"running": [{"rid": 41}, {"rid": 43}], "queue": [{}] * 3}
+    assert queue_summary(snapshot) == "2 running (41, 43), 3 waiting"
+    assert queue_summary({"running": [], "queue": []}) == (
+        "nothing running, nothing waiting"
+    )
 
 
 def test_queue_view_selects_nothing_when_the_selected_task_disappears(qapp):
@@ -305,7 +495,7 @@ def test_panel_submits_and_forwards_actions(qapp):
 
     feed.queue_changed.emit(
         {
-            "running": task(12, "running"),
+            "running": [task(12, "running")],
             "queue": [],
             "history": [],
             "catalogue_version": 1,
@@ -316,7 +506,7 @@ def test_panel_submits_and_forwards_actions(qapp):
     assert ("terminate", {"rid": 12}) in client.calls
     catalogue_fetches = len(commands(client, "catalogue"))
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [], "catalogue_version": 2}
+        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
     )
     assert len(commands(client, "catalogue")) == catalogue_fetches + 1
 
@@ -338,6 +528,69 @@ def test_panel_prefills_last_request_and_keeps_drafts(qapp):
     assert panel.editor.rows["shots"].value.value() == 8
 
 
+def test_defaults_asks_for_a_fresh_description_and_applies_it(qapp):
+    client, feed = FakeClient(), FakeFeed()
+    panel = ExperimentsPanel(client=client, feed=feed)
+    panel.refresh_catalogue()
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    panel.editor.rows["shots"].value.widget.setValue(9)
+
+    panel.editor.defaults_button.click()
+    assert commands(client, "describe_again") == [{"module": SCHEMA["module"]}]
+    assert panel.editor.rows["shots"].value.value() == 9
+
+    changed = {
+        **SCHEMA,
+        "arguments": {
+            **SCHEMA["arguments"],
+            "shots": {**SCHEMA["arguments"]["shots"], "default": 999},
+        },
+    }
+    client.modules = [{**MODULES[0], "classes": [changed]}, MODULES[1]]
+    client.catalogue_version = 2
+    feed.queue_changed.emit(
+        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+    )
+    assert panel.editor.rows["shots"].value.value() == 999
+
+
+def test_defaults_for_a_module_that_no_longer_imports_shows_its_error(qapp):
+    client, feed = FakeClient(), FakeFeed()
+    panel = ExperimentsPanel(client=client, feed=feed)
+    panel.refresh_catalogue()
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    panel.editor.defaults_button.click()
+
+    client.modules = [
+        {
+            "module": SCHEMA["module"],
+            "classes": [],
+            "warnings": [],
+            "error": "Traceback (most recent call last):\nSyntaxError: oops",
+        },
+        MODULES[1],
+    ]
+    client.catalogue_version = 2
+    feed.queue_changed.emit(
+        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+    )
+    assert "SyntaxError: oops" in panel.status.text()
+    assert panel.status.property("state") == "crashed"
+
+
+def test_defaults_with_the_manager_unreachable_leaves_the_form_alone(qapp):
+    client = FakeClient()
+    client.errors["describe_again"] = "not responding"
+    panel = ExperimentsPanel(client=client, feed=FakeFeed())
+    panel.refresh_catalogue()
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    panel.editor.rows["shots"].value.widget.setValue(77)
+
+    panel.editor.defaults_button.click()
+    assert panel.editor.rows["shots"].value.value() == 77
+    assert "not responding" in panel.status.text()
+
+
 def test_panel_resubmit_selects_the_experiment(qapp):
     panel = ExperimentsPanel(client=FakeClient(), feed=FakeFeed())
     panel.refresh_catalogue()
@@ -350,6 +603,63 @@ def test_panel_resubmit_selects_the_experiment(qapp):
     assert "not in the catalogue" in panel.status.text()
 
 
+class OldManagerMirror:
+    """Holds the state a manager from before pipelines publishes."""
+
+    def __init__(self, host, port, name, keep_mods=False):
+        old_task = {
+            key: value
+            for key, value in task(3, "running").items()
+            if key not in ("pipeline", "devices")
+        }
+        self.state = {
+            "alive": 1.0,
+            "running": old_task,
+            "queue": [{**old_task, "rid": 4, "status": "queued"}],
+            "history": [],
+            "points": {"rid": 3, "rows": [{"index": 0}]},
+        }
+        self.mods = [
+            {"action": "init", "struct": self.state},
+            {"action": "append", "path": ["points", "rows"], "x": {"index": 1}},
+        ]
+        self.connected = True
+
+    def drain(self):
+        mods, self.mods = self.mods, []
+        return mods
+
+    def read(self, fn):
+        return fn(self.state)
+
+    def close(self):
+        pass
+
+
+def test_a_snapshot_from_an_older_manager_still_shows(qapp, monkeypatch):
+    from pytweezer.GUI.experiments import feed as feed_module
+
+    monkeypatch.setattr(feed_module, "SyncMirror", OldManagerMirror)
+    feed = feed_module.ExperimentFeed(address=("old", 0), poll_interval_ms=10_000)
+    snapshots, points = [], []
+    feed.queue_changed.connect(snapshots.append)
+    feed.point_received.connect(points.append)
+    try:
+        feed.poll()
+        [snapshot] = snapshots
+        assert points == [] and feed.points(3) == []
+        assert [t["pipeline"] for t in snapshot["running"]] == ["main"]
+
+        view = QueueView()
+        view.set_snapshot(snapshot)
+        assert column_texts(view, "RID") == ["3", "4"]
+        panel = ExperimentsPanel(client=FakeClient(), feed=FakeFeed())
+        panel._queue_changed(snapshot)
+        assert column_texts(panel.queue_view, "Pipeline") == ["main", "main"]
+    finally:
+        feed.close()
+
+
 def test_real_feed_signals_queue_changes_and_points(qapp):
     from sipyco.sync_struct import Notifier
 
@@ -359,10 +669,10 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
     notifier = Notifier(
         {
             "alive": 0.0,
-            "running": None,
+            "running": [],
             "queue": [],
             "history": [],
-            "points": {"rid": 3, "rows": [{"index": 0, "scalars": {"n": 1.0}}]},
+            "points": {"3": [{"index": 0, "scalars": {"n": 1.0}}]},
         }
     )
     server = SyncServer({"experiment": notifier}, "127.0.0.1", 0)
@@ -380,19 +690,19 @@ def test_real_feed_signals_queue_changes_and_points(qapp):
 
         snapshots.clear()
         server.call(notifier.__setitem__, "alive", 1.0).result()
-        server.call(
-            notifier["points"]["rows"].append, {"index": 1, "scalars": {"n": 2.0}}
-        ).result()
-        assert until(lambda: points, qapp=qapp)
-        assert points == [{"rid": 3, "index": 1, "scalars": {"n": 2.0}}]
-        assert snapshots == [], "an alive bump alone is not a queue change"
+        server.call(notifier["points"]["3"].append, {"index": 1}).result()
+        server.call(notifier["points"].__setitem__, "4", []).result()
+        server.call(notifier["points"]["4"].append, {"index": 0}).result()
+        server.call(notifier["points"].__delitem__, "3").result()
+        assert until(lambda: len(points) == 2, qapp=qapp)
+        assert until(lambda: feed.points(3) == [], qapp=qapp)
+        assert points == [{"rid": 3, "index": 1}, {"rid": 4, "index": 0}]
+        assert snapshots == [], "alive bumps and points are not queue changes"
+        assert feed.points(4) == [{"index": 0}]
 
-        server.call(notifier.__setitem__, "points", {"rid": 4, "rows": []}).result()
-        server.call(notifier["points"]["rows"].append, {"index": 0}).result()
         server.call(notifier.__setitem__, "queue", [{"rid": 5}]).result()
-        assert until(lambda: len(points) == 2 and snapshots, qapp=qapp)
-        assert points[1]["rid"] == 4
-        assert snapshots[-1]["queue"] == [{"rid": 5}]
+        assert until(lambda: snapshots, qapp=qapp)
+        assert snapshots[-1]["queue"] == [{"rid": 5, "pipeline": "main"}]
     finally:
         feed.close()
         server.close()
@@ -562,7 +872,7 @@ def test_the_panel_reads_simulated_sequencers_when_the_manager_simulates(qapp):
     feed = FakeFeed()
     panel = ExperimentsPanel(client=FakeClient(), feed=feed)
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [], "simulated": True}
+        {"running": [], "queue": [], "history": [], "simulated": True}
     )
     parameters = panel.editor.fetcher.source("Rb MotMaster", "RbTweezerBasic")
     assert "tDelay1" in parameters
@@ -688,23 +998,11 @@ def test_selecting_a_recipe_emits_it_and_a_refresh_keeps_it_quietly(qapp):
     assert view.tree.currentItem().text(0) == "b"
 
 
-def test_the_recipe_menu_submits_or_deletes(qapp):
-    recipe = recipe_dict()
-    view = catalogue_with(recipe)
-    actions = []
-    view.recipe_action_requested.connect(lambda *args: actions.append(args))
-    for action in view.recipe_menu(recipe).actions():
-        if not action.isSeparator():
-            action.trigger()
-    assert [a[0] for a in actions] == ["submit", "delete"]
-    assert actions[0][1]["name"] == "check"
-
-
 def test_panel_lists_recipes_and_refetches_when_they_change(qapp):
     panel, client, feed = recipe_panel(recipe_dict("a"))
     assert [r["name"] for r in panel.catalogue.recipes] == ["a"]
     fetches = len(commands(client, "recipes"))
-    snapshot = {"running": None, "queue": [], "history": [], "recipes_version": 0}
+    snapshot = {"running": [], "queue": [], "history": [], "recipes_version": 0}
     feed.queue_changed.emit(snapshot)
     assert len(commands(client, "recipes")) == fetches
     client.recipes = [recipe_dict("a"), recipe_dict("b")]
@@ -725,7 +1023,7 @@ def test_selecting_a_recipe_fills_the_form_and_a_list_refresh_keeps_edits(qapp):
     panel.editor.rows["shots"].value.widget.setValue(8)
     client.recipes = [recipe, recipe_dict("new")]
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [], "recipes_version": 1}
+        {"running": [], "queue": [], "history": [], "recipes_version": 1}
     )
     assert panel.editor.rows["shots"].value.value() == 8
     assert panel.catalogue.tree.currentItem().text(0) == "check"
@@ -828,3 +1126,531 @@ def test_clicks_on_the_catalogue_only_reload_a_recipe_on_a_left_click(qapp):
     panel.catalogue.recipe_selected.connect(loaded.append)
     click(other, Left)
     assert [r["name"] for r in loaded] == ["other"], "loaded exactly once"
+
+
+class FakeSavedParameterClient:
+    def __init__(self):
+        self.calls = []
+        self.unavailable = False
+        self.parameters = [
+            SavedParameter(
+                key=key,
+                value=value,
+                group=group,
+                updated_at=now(),
+                updated_by="me@pc",
+            )
+            for key, value, group in [
+                ("level", 3.0, "Resonances"),
+                ("count", 4, "EMCCD"),
+                ("enabled", True, "EMCCD"),
+            ]
+        ]
+
+    def saved_parameters(self):
+        if self.unavailable:
+            raise ManagerUnavailable("not responding")
+        return [parameter.model_copy() for parameter in self.parameters]
+
+    def saved_parameter_history(self, key=None, *, limit=None):
+        return []
+
+    def set_saved_parameters(self, values, reason, who, **kwargs):
+        self.calls.append(("set_saved_parameters", values, reason))
+        return []
+
+    def close(self):
+        pass
+
+
+def make_saved_panel(client=None, feed=None):
+    panel = SavedParametersPanel(
+        client=client or FakeSavedParameterClient(), feed=feed or FakeFeed()
+    )
+    panel.show()
+    return panel
+
+
+def test_apply_sends_the_value_with_its_reason(qapp):
+    panel = make_saved_panel()
+    panel.select("level")
+    panel.value_edit.setText("3.1")
+    panel.why_edit.setText("lifetime scan")
+    panel.apply()
+    assert panel.client.calls[-1] == (
+        "set_saved_parameters",
+        {"level": 3.1},
+        "set by hand: lifetime scan",
+    )
+
+
+@pytest.mark.parametrize(
+    "key, text", [("level", "4,05"), ("count", "4.5"), ("enabled", "yes")]
+)
+def test_a_value_of_the_wrong_type_is_refused_before_sending(qapp, key, text):
+    panel = make_saved_panel()
+    panel.select(key)
+    panel.value_edit.setText(text)
+    panel.apply()
+    assert panel.client.calls == []
+    assert panel.status.property("state") == "error"
+
+
+def test_a_live_update_keeps_the_selection_and_an_unsent_edit(qapp):
+    feed = FakeFeed()
+    panel = make_saved_panel(feed=feed)
+    panel.select("level")
+    panel.value_edit.setText("3.1")
+    panel.client.parameters[0].value = 3.05
+    feed.queue_changed.emit({"saved_parameters_version": 7})
+    assert panel.selected_key() == "level"
+    assert panel.value_edit.text() == "3.1"
+
+
+def test_a_group_header_cannot_be_made_current_and_keeps_an_unsent_edit(qapp):
+    panel = make_saved_panel()
+    panel.select("level")
+    panel.value_edit.setText("3.1")
+    panel.why_edit.setText("lifetime scan")
+    panel.tree.setCurrentItem(panel.tree.topLevelItem(0))
+    assert panel.selected_key() == "level"
+    assert panel.tree.currentItem().text(0) == "level"
+    assert panel.value_edit.text() == "3.1"
+    assert panel.why_edit.text() == "lifetime scan"
+
+
+def test_an_unreachable_manager_is_said_not_shown_as_current(qapp):
+    client = FakeSavedParameterClient()
+    client.unavailable = True
+    panel = make_saved_panel(client=client)
+    assert (
+        panel.parameters_region.hint.text()
+        == "Saved parameters: the Experiment Manager is not responding"
+    )
+
+
+def test_a_refresh_that_regroups_keys_keeps_the_selection_and_an_unsent_edit(qapp):
+    feed = FakeFeed()
+    panel = make_saved_panel(feed=feed)
+    panel.select("enabled")
+    panel.value_edit.setText("false")
+    panel.why_edit.setText("trap off")
+    level, count, _ = panel.client.parameters
+    level.group = "EMCCD"
+    count.group = "Camera"
+    feed.queue_changed.emit({"saved_parameters_version": 8})
+    assert panel.selected_key() == "enabled"
+    assert panel.value_edit.text() == "false"
+    assert panel.why_edit.text() == "trap off"
+
+
+DEMO = "pytweezer.experiments.demo"
+STAGED = DemoStagedScan.schema()
+BAYESIAN = DemoBayesian.schema()
+
+
+def optimiser_schema(class_name, base=STAGED):
+    return {**base, "class_name": class_name}
+
+
+def run_file(rid, class_name):
+    return f"2026/10/31/{rid:06d}_{class_name}.h5"
+
+
+def finished_run(rid, status, class_name, **kwargs):
+    return Task.model_validate(
+        task(
+            rid,
+            status,
+            experiment=DEMO,
+            class_name=class_name,
+            t_end="2026-10-31T10:41:00+00:00",
+            h5_path=run_file(rid, class_name),
+            **kwargs,
+        )
+    )
+
+
+def staged_measurement(stages_done=2, proposed=None):
+    proposed = (
+        {"demo_resonance": 1.2, "demo_power": 0.9} if proposed is None else proposed
+    )
+    stage = np.repeat([0, 1], 3)[: 3 * stages_done]
+    setting = np.array([0.0, 1.2, 2.4, 0.3, 0.6, 0.9])[: 3 * stages_done]
+    return SimpleNamespace(
+        status="completed",
+        constants={
+            **{f"proposed.{key}": value for key, value in proposed.items()},
+            "stages_done": stages_done,
+            "stages_total": 2,
+        },
+        results={
+            "stage": stage,
+            "setting": setting,
+            "objective": np.linspace(100.0, 600.0, len(stage)),
+        },
+    )
+
+
+def bayesian_measurement():
+    return SimpleNamespace(
+        status="completed",
+        constants={
+            "proposed.demo_resonance": 1.3,
+            "proposed.demo_power": 1.0,
+            "evaluations_done": 3,
+            "evaluations_total": 3,
+        },
+        results={
+            "objective": np.array([300.0, 900.0, 600.0]),
+            "detuning": np.array([0.0, 1.3, 2.0]),
+            "power": np.array([0.5, 1.0, 0.8]),
+        },
+    )
+
+
+class FakeArchive:
+    def __init__(self, files):
+        self.files = files
+
+    def load(self, path, results=None):
+        found = self.files[path]
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+
+class FakeOptimiserClient:
+    def __init__(self, schemas, tasks, accepted_rids=()):
+        self.calls = []
+        self.refusal = None
+        self.recipe_names = []
+        self.schemas = schemas
+        self.tasks = tasks
+        self.changes = [
+            SavedParameterChange(
+                time=now(),
+                who="me@pc",
+                key="demo_resonance",
+                old=1.0,
+                new=1.1,
+                reason=f"accepted from run {rid}",
+                rid=rid,
+            )
+            for rid in accepted_rids
+        ]
+        self.parameters = [
+            SavedParameter(key=key, value=value, updated_at=now(), updated_by="me@pc")
+            for key, value in [("demo_resonance", 1.0), ("demo_power", 0.5)]
+        ]
+
+    def call(self, command, **fields):
+        assert command == "catalogue"
+        return {
+            "ok": True,
+            "version": 1,
+            "modules": [
+                {"module": DEMO, "classes": self.schemas, "warnings": [], "error": None}
+            ],
+        }
+
+    def history(self, before_rid=None, limit=50):
+        return list(self.tasks)
+
+    def recipes(self, experiment=None, class_name=None):
+        return [
+            Recipe(experiment=DEMO, class_name="DemoStagedScan", name=name)
+            for name in self.recipe_names
+        ]
+
+    def submit(self, request):
+        self.calls.append(("submit", request.experiment, request.class_name))
+        return 60
+
+    def submit_recipe(self, experiment, class_name, name, **kwargs):
+        self.calls.append(("submit_recipe", experiment, class_name, name))
+        return 61
+
+    def saved_parameters(self):
+        return list(self.parameters)
+
+    def saved_parameter_history(self, key=None, *, rid=None, limit=None):
+        return [change for change in self.changes if rid in (None, change.rid)]
+
+    def set_saved_parameters(self, values, reason, who, *, rid=None, **kwargs):
+        self.calls.append(("set_saved_parameters", values, reason, rid))
+        if self.refusal:
+            raise ManagerError(self.refusal)
+        saved = {parameter.key: parameter for parameter in self.parameters}
+        changes = [
+            SavedParameterChange(
+                time=now(),
+                who=who,
+                key=key,
+                old=saved[key].value,
+                new=value,
+                reason=reason,
+                rid=rid,
+            )
+            for key, value in values.items()
+        ]
+        for key, value in values.items():
+            saved[key].value = value
+        self.changes = changes + self.changes
+        return changes
+
+    def close(self):
+        pass
+
+
+def make_optimisers_panel(schemas=None, tasks=None, files=None, accepted_rids=()):
+    if schemas is None:
+        schemas = [STAGED, BAYESIAN]
+        tasks = [
+            finished_run(41, "completed", "DemoStagedScan"),
+            finished_run(40, "completed", "DemoBayesian"),
+        ]
+        files = {
+            run_file(41, "DemoStagedScan"): staged_measurement(),
+            run_file(40, "DemoBayesian"): bayesian_measurement(),
+        }
+    panel = OptimisersPanel(
+        client=FakeOptimiserClient(schemas, tasks, accepted_rids),
+        feed=FakeFeed(),
+        archive=FakeArchive(files),
+    )
+    panel.show()
+    return panel
+
+
+def last_run_text(panel, class_name):
+    row = panel.rows[(DEMO, class_name)]
+    return row.item.text(row.LAST_RUN)
+
+
+def test_rows_show_each_run_state(qapp):
+    names = ["Running", "Failed", "Partial", "Accepted", "Unaccepted"]
+    tasks = [
+        finished_run(2, "failed", "Failed"),
+        finished_run(3, "terminated", "Partial"),
+        finished_run(4, "completed", "Accepted"),
+        finished_run(5, "completed", "Unaccepted"),
+    ]
+    files = {
+        run_file(2, "Failed"): staged_measurement(stages_done=0, proposed={}),
+        run_file(3, "Partial"): staged_measurement(
+            stages_done=1, proposed={"demo_resonance": 1.2}
+        ),
+        run_file(4, "Accepted"): staged_measurement(),
+        run_file(5, "Unaccepted"): staged_measurement(),
+    }
+    panel = make_optimisers_panel(
+        [optimiser_schema(name) for name in names], tasks, files, accepted_rids=[4]
+    )
+    running = task(
+        1,
+        "running",
+        experiment=DEMO,
+        class_name="Running",
+        points_done=31,
+        points_total=80,
+    )
+    panel.feed.queue_changed.emit({"running": [running], "queue": [], "history": []})
+    states = {name: panel.rows[(DEMO, name)].state for name in names}
+    assert states == {
+        "Running": "running",
+        "Failed": "failed",
+        "Partial": "partial",
+        "Accepted": "accepted",
+        "Unaccepted": "not accepted",
+    }
+    assert "stage 1 of 2 finished" in last_run_text(panel, "Partial")
+    assert "31 of 80" in last_run_text(panel, "Running")
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_run_is_disabled_while_queued_or_running(qapp, status):
+    panel = make_optimisers_panel()
+    active = task(50, status, experiment=DEMO, class_name="DemoStagedScan")
+    snapshot = {"running": [], "queue": [], "history": []}
+    snapshot["running" if status == "running" else "queue"].append(active)
+    panel.feed.queue_changed.emit(snapshot)
+    assert not panel.rows[(DEMO, "DemoStagedScan")].run_button.isEnabled()
+    assert panel.rows[(DEMO, "DemoBayesian")].run_button.isEnabled()
+
+    finished = {**active, "status": "completed"}
+    panel.feed.queue_changed.emit({"running": [], "queue": [], "history": [finished]})
+    assert panel.rows[(DEMO, "DemoStagedScan")].run_button.isEnabled()
+
+
+def test_accept_writes_only_ticked_rows_with_the_run(qapp):
+    panel = make_optimisers_panel()
+    panel.select(DEMO, "DemoStagedScan")
+    panel.accept_rows["demo_power"].setChecked(False)
+    panel.accept()
+    assert panel.client.calls[-1] == (
+        "set_saved_parameters",
+        {"demo_resonance": 1.2},
+        "accepted from run 41",
+        41,
+    )
+
+
+def test_a_failed_run_offers_no_accept(qapp):
+    panel = make_optimisers_panel(
+        [STAGED],
+        [finished_run(41, "failed", "DemoStagedScan")],
+        {run_file(41, "DemoStagedScan"): staged_measurement(stages_done=1)},
+    )
+    panel.select(DEMO, "DemoStagedScan")
+    assert panel.accept_rows == {}
+    assert not panel.accept_button.isEnabled()
+    panel.accept()
+    assert panel.client.calls == []
+
+
+def test_a_run_with_no_proposals_offers_no_accept(qapp):
+    panel = make_optimisers_panel(
+        [STAGED],
+        [finished_run(41, "terminated", "DemoStagedScan")],
+        {run_file(41, "DemoStagedScan"): staged_measurement(0, proposed={})},
+    )
+    panel.select(DEMO, "DemoStagedScan")
+    assert panel.accept_rows == {}
+    assert not panel.accept_button.isEnabled()
+
+
+def test_a_refused_accept_changes_nothing_and_says_why(qapp):
+    panel = make_optimisers_panel()
+    panel.client.refusal = "no saved parameter 'demo_power'"
+    panel.select(DEMO, "DemoStagedScan")
+    panel.accept()
+    assert len(panel.client.calls) == 1
+    assert panel.status.property("state") == "error"
+    assert "no saved parameter 'demo_power'" in panel.status.text()
+
+
+@pytest.mark.parametrize(
+    ("saved", "status"),
+    [
+        ({"demo_resonance": 1.2, "demo_power": 0.9}, "nothing changed"),
+        ({"demo_resonance": 1.2, "demo_power": 0.5}, "1 value changed"),
+    ],
+)
+def test_accepting_marks_the_run_accepted_and_counts_what_changed(qapp, saved, status):
+    panel = make_optimisers_panel()
+    for parameter in panel.client.parameters:
+        parameter.value = saved[parameter.key]
+    panel.refresh()
+    panel.select(DEMO, "DemoStagedScan")
+    panel.accept()
+    assert panel.rows[(DEMO, "DemoStagedScan")].state == "accepted"
+    assert status in panel.status.text()
+
+
+class UnexpectedRemoteError(Exception):
+    pass
+
+
+def test_a_file_that_raises_anything_shows_as_unreadable(qapp):
+    panel = make_optimisers_panel(
+        [STAGED],
+        [finished_run(41, "completed", "DemoStagedScan")],
+        {run_file(41, "DemoStagedScan"): UnexpectedRemoteError("server fault")},
+    )
+    panel.select(DEMO, "DemoStagedScan")
+    assert "its file cannot be read" in last_run_text(panel, "DemoStagedScan")
+    assert panel.accept_rows == {}
+
+
+@pytest.mark.parametrize(
+    ("goal", "best_so_far"), [("max", [300, 900, 900]), ("min", [300, 300, 300])]
+)
+def test_the_evaluations_plot_follows_the_goal(qapp, goal, best_so_far):
+    schema = {**BAYESIAN, "optimiser": {**BAYESIAN["optimiser"], "goal": goal}}
+    panel = make_optimisers_panel(
+        [schema],
+        [finished_run(40, "completed", "DemoBayesian")],
+        {run_file(40, "DemoBayesian"): bayesian_measurement()},
+    )
+    panel.select(DEMO, "DemoBayesian")
+    plot = panel.plots_layout.itemAt(0).widget()
+    _, best = plot.getPlotItem().listDataItems()
+    assert list(best.yData) == best_so_far
+
+
+@pytest.mark.parametrize(
+    ("preset", "expected"),
+    [
+        ("Defaults", ("submit", DEMO, "DemoStagedScan")),
+        ("quick", ("submit_recipe", DEMO, "DemoStagedScan", "quick")),
+    ],
+)
+def test_run_submits_the_chosen_preset(qapp, preset, expected):
+    panel = make_optimisers_panel()
+    panel.client.recipe_names = ["quick"]
+    panel.refresh()
+    row = panel.rows[(DEMO, "DemoStagedScan")]
+    row.preset.setCurrentText(preset)
+    row.run_button.click()
+    assert panel.client.calls == [expected]
+
+
+def test_discarded_proposals_cannot_be_accepted(qapp, tmp_path):
+    panel = make_optimisers_panel()
+    panel._settings = QtCore.QSettings(
+        str(tmp_path / "optimisers.ini"), QtCore.QSettings.Format.IniFormat
+    )
+    panel.select(DEMO, "DemoStagedScan")
+    panel.discard()
+    panel.accept()
+    assert panel.accept_rows == {}
+    assert panel.client.calls == []
+
+
+class WindowsShown(QtCore.QObject):
+    """Records every top-level window shown while installed on the application."""
+
+    def __init__(self):
+        super().__init__()
+        self.windows = []
+
+    def eventFilter(self, obj, event):
+        if (
+            event.type() == QtCore.QEvent.Type.Show
+            and isinstance(obj, QWidget)
+            and obj.isWindow()
+        ):
+            self.windows.append(obj)
+        return False
+
+
+def test_choosing_an_experiment_opens_no_stray_windows(qapp):
+    editor = ArgumentEditor()
+    editor.show()
+    watcher = WindowsShown()
+    qapp.installEventFilter(watcher)
+    try:
+        editor.set_experiment(RabiDemo.schema())
+    finally:
+        qapp.removeEventFilter(watcher)
+
+    assert watcher.windows == []
+
+
+def test_a_progress_update_redraws_a_full_queue_quickly(qapp):
+    # Rebuilding every cell with the columns auto-sizing took ~0.4 s per point,
+    # which froze the whole GUI while a measurement ran.
+    view = QueueView()
+    view.resize(1500, 600)
+    view.show()
+    history = [task(rid, "done", label=f"run {rid}") for rid in range(2, 52)]
+    snapshot = {"running": [task(52, "running")], "queue": [], "history": history}
+    view.set_snapshot(snapshot)
+    qapp.processEvents()
+
+    start = time.perf_counter()
+    view.set_snapshot(snapshot)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.1

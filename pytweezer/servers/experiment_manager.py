@@ -1,19 +1,25 @@
-"""The Experiment Manager: owns the experiment queue and runs one task at a time.
+"""The Experiment Manager: owns the experiment queue and runs its tasks.
 
 A single-threaded loop serves REQ/REP commands (from GUIs, notebooks and the
-worker) and starts each due task in a fresh worker subprocess
-(:mod:`pytweezer.experiment.worker`). Its state is published as the sipyco
-notifier ``"experiment"`` on ``sync_port`` (see :data:`NOTIFIER_NAME` for the
-layout), so every GUI holds a live copy of the queue and of the points the
-current task has measured so far.
+workers) and starts each task the queue says may start in a fresh worker
+subprocess (:mod:`pytweezer.experiment.worker`), so tasks in different
+pipelines run side by side. Each task reserves the devices its experiment
+declares, as the catalogue describes them, and its worker may use only those.
+Its state is published as the sipyco notifier ``"experiment"`` on
+``sync_port`` (see :data:`NOTIFIER_NAME` for the layout), so every GUI holds a
+live copy of the queue and of the points each task has measured so far. The
+measurement files are served to other PCs on ``results_port``
+(:mod:`pytweezer.experiment.archive`), and each is copied to ``copy_root``
+once its task finishes (:mod:`pytweezer.experiment.copier`).
 
 The queue state is saved after every change: on Windows the GUI stops this
-process with ``TerminateProcess``, so nothing can rely on a clean shutdown. A
-worker survives its manager; on restart the manager adopts it again if it is
-still running, or records how its task ended.
+process with ``TerminateProcess``, so nothing can rely on a clean shutdown.
+Workers survive their manager; on restart the manager adopts each one still
+running, and records how the others' tasks ended.
 """
 
 import argparse
+import copy
 import os
 import secrets
 import signal
@@ -31,8 +37,10 @@ from sipyco.sync_struct import Notifier
 from pytweezer.configuration.config import get_config
 from pytweezer.configuration.paths import tweezerpath
 from pytweezer.database.writer import DBWriter
+from pytweezer.experiment.archive import RPC_TARGET, ArchiveTarget, ResultsArchive
 from pytweezer.experiment.catalogue import Catalogue
 from pytweezer.experiment.client import NOTIFIER_NAME, connect_host
+from pytweezer.experiment.copier import FileCopier
 from pytweezer.experiment.queue import (
     ExperimentQueue,
     QueueError,
@@ -47,6 +55,12 @@ from pytweezer.experiment.recipes import (
     RecipeStore,
     unknown_arguments,
 )
+from pytweezer.experiment.saved_parameters import (
+    SavedParameterBook,
+    SavedParameterChange,
+    SavedParameterLog,
+    SavedParameterStore,
+)
 from pytweezer.experiment.storage import (
     data_root,
     git_provenance,
@@ -55,7 +69,7 @@ from pytweezer.experiment.storage import (
     read_arguments,
     read_header,
 )
-from pytweezer.experiment.task import Action, TaskRequest, TaskStatus
+from pytweezer.experiment.task import Action, Task, TaskRequest, TaskStatus
 from pytweezer.logging_utils import get_daily_log_path, get_logger
 from pytweezer.servers.sync import SyncServer
 
@@ -64,11 +78,14 @@ logger = get_logger("pytweezer.servers.experiment_manager")
 #: The published state (:data:`~pytweezer.experiment.client.NOTIFIER_NAME`)
 #: is laid out as::
 #:
-#:     {"started", "catalogue_version", "recipes_version", "simulated",
+#:     {"started", "catalogue_version", "recipes_version",
+#:      "saved_parameters_version", "simulated",
 #:      "alive",                         # epoch s, at least every PUBLISH_INTERVAL_S
 #:      "running", "queue", "history",   # as ExperimentQueue.snapshot()
-#:      "points": {"rid": int | None,    # the task now (or last) running
-#:                 "rows": [{"index", "values", "scalars", "t_start", "t_end"}]}}
+#:      "points": {str(rid): [{"index", "values", "scalars", "t_start", "t_end"}]}}
+#:
+#: ``"points"`` holds each running task's rows, and the last finished task's
+#: in each pipeline until the next one there starts.
 PUBLISH_INTERVAL_S = 2.0
 CATALOGUE_RESCAN_S = 10.0
 _WORKER_COMMAND = [sys.executable, "-m", "pytweezer.experiment.worker"]
@@ -98,27 +115,42 @@ class ExperimentManager:
         self.queue = ExperimentQueue(self.store.load())
         self.recipe_store = RecipeStore(self.root / "recipes.json")
         self.recipes = RecipeBook(self.recipe_store.load())
+        self.saved_parameter_store = SavedParameterStore(
+            self.root / "saved_parameters.json"
+        )
+        self.saved_parameters = SavedParameterBook(self.saved_parameter_store.load())
+        self.saved_parameter_log = SavedParameterLog(
+            self.root / "saved_parameters_log.jsonl"
+        )
         state = self.queue.state
         state.next_rid = max(state.next_rid, highest_rid(self.root) + 1)
         self.catalogue = catalogue or Catalogue()
         #: Receives a ``runs`` row per start/finish and a ``points`` row per point.
         self.db = db if db is not None else DBWriter()
+        self.copier = None
+        if bind and self.conf.get("copy_root"):
+            copy_root = Path(self.conf["copy_root"])
+            if self.simulate:
+                copy_root /= "simulated"
+            self.copier = FileCopier(self.root, copy_root)
 
-        self.process: psutil.Process | None = None
-        self._abort_requested: int | None = None
+        self.processes: dict[int, psutil.Process] = {}
+        self._abort_requested: set[int] = set()
+        #: The rid whose points are published for each pipeline.
+        self._points_shown: dict[str, int] = {}
         self._running = True
         # Bumped whenever the catalogue changes, so GUIs know to fetch it again.
         self._catalogue_version = 0
         self._recipes_version = 0
+        self._saved_parameters_version = 0
         self._dirty = True
         self._last_publish = 0.0
         self._last_rescan = 0.0
         self.started = now().isoformat()
 
-        #: Without ``bind`` nothing is published and mutations apply directly.
-        self.notifier = Notifier(
-            {**self._snapshot(), "points": {"rid": None, "rows": []}}
-        )
+        #: Without ``bind`` nothing is published, mutations apply directly and
+        #: no files are copied.
+        self.notifier = Notifier({**self._snapshot(), "points": {}})
         self.rep = self.sync = None
         if bind:
             context = zmq.Context.instance()
@@ -126,10 +158,14 @@ class ExperimentManager:
             self.rep.setsockopt(zmq.LINGER, 0)
             self.rep.bind(self.rep_address)
             self.sync = SyncServer(
-                {NOTIFIER_NAME: self.notifier}, host, self.conf["sync_port"]
+                {NOTIFIER_NAME: self.notifier},
+                host,
+                self.conf["sync_port"],
+                rpc_targets={RPC_TARGET: ArchiveTarget(ResultsArchive(self.root))},
+                rpc_port=self.conf["results_port"],
             )
 
-        self._reconcile_worker()
+        self._reconcile_workers()
         self._save()
 
     # -- main loop -----------------------------------------------------------
@@ -149,9 +185,11 @@ class ExperimentManager:
                     self.rep.send_json(self.handle(request))
                 self.tick()
         finally:
-            # Deliberately leave a running worker alone: the next manager adopts it.
+            # Deliberately leave running workers alone: the next manager adopts them.
             self.catalogue.close()
             self.db.close()
+            if self.copier is not None:
+                self.copier.close()
             self.rep.close(linger=0)
             self.sync.close()
 
@@ -159,13 +197,14 @@ class ExperimentManager:
         self._running = False
 
     def tick(self) -> None:
-        self._reap_worker()
-        self._start_next()
+        self._reap_workers()
         monotonic = time.monotonic()
         if monotonic - self._last_rescan > CATALOGUE_RESCAN_S:
             self._last_rescan = monotonic
             self._catalogue_changed(self.catalogue.refresh())
         self._catalogue_changed(self.catalogue.poll())
+        self._resolve_devices()
+        self._start_due()
         if self._dirty or monotonic - self._last_publish > PUBLISH_INTERVAL_S:
             self._publish_queue()
 
@@ -198,6 +237,10 @@ class ExperimentManager:
             "version": self._catalogue_version,
         }
 
+    def _cmd_describe_again(self, request):
+        self.catalogue.describe_again(request["module"])
+        self._catalogue_changed(self.catalogue.refresh())
+
     def _cmd_get(self, request):
         return {"task": self.queue.get(int(request["rid"])).model_dump(mode="json")}
 
@@ -213,7 +256,10 @@ class ExperimentManager:
         return {"request": last.model_dump(mode="json") if last else None}
 
     def _cmd_submit(self, request):
-        task = self.queue.submit(TaskRequest.model_validate(request["request"]))
+        task_request = TaskRequest.model_validate(request["request"])
+        self._refuse_scanned_optimiser(task_request)
+        devices = self._reservation(task_request.experiment, task_request.class_name)
+        task = self.queue.submit(task_request, devices=devices)
         logger.info("Queued task %s: %s.%s", task.rid, task.experiment, task.class_name)
         self._changed()
         return {"rid": task.rid}
@@ -263,6 +309,52 @@ class ExperimentManager:
         )
         self._recipes_changed()
 
+    def _cmd_saved_parameters(self, request):
+        return {
+            "parameters": [
+                parameter.model_dump(mode="json")
+                for parameter in self.saved_parameters.all()
+            ],
+            "version": self._saved_parameters_version,
+        }
+
+    def _cmd_set_saved_parameters(self, request):
+        snapshot = copy.deepcopy(self.saved_parameters.state)
+        changes = self.saved_parameters.set(
+            request["values"],
+            reason=request["reason"],
+            who=request["who"],
+            create=bool(request.get("create")),
+            group=request.get("group", ""),
+            unit=request.get("unit", ""),
+            rid=request.get("rid"),
+        )
+        try:
+            self._saved_parameters_changed(changes)
+        except Exception:
+            self.saved_parameters.state = snapshot
+            try:
+                self.saved_parameter_store.save(snapshot)
+            except Exception:
+                logger.exception("Could not restore saved_parameters.json")
+            raise
+        for change in changes:
+            logger.info(
+                "Saved parameter %r: %r -> %r (%s, %s)",
+                change.key,
+                change.old,
+                change.new,
+                change.who,
+                change.reason,
+            )
+        return {"changes": [change.model_dump(mode="json") for change in changes]}
+
+    def _cmd_saved_parameter_history(self, request):
+        entries = self.saved_parameter_log.read(
+            request.get("key"), rid=request.get("rid"), limit=request.get("limit")
+        )
+        return {"entries": [entry.model_dump(mode="json") for entry in entries]}
+
     def _cmd_submit_recipe(self, request):
         recipe = self.recipes.get(
             request["experiment"], request["class_name"], request["name"]
@@ -272,6 +364,7 @@ class ExperimentManager:
             overrides,
             priority=request.get("priority"),
             label=request.get("label"),
+            pipeline=request.get("pipeline"),
             submitter=request.get("submitter", ""),
         )
         unknown = unknown_arguments(
@@ -284,12 +377,27 @@ class ExperimentManager:
                 f"{recipe.class_name} no longer has argument(s) {unknown}; load "
                 f"recipe {recipe.name!r} into the form, check it and save it again"
             )
-        task = self.queue.submit(task_request)
+        self._refuse_scanned_optimiser(task_request)
+        devices = self._reservation(recipe.experiment, recipe.class_name)
+        task = self.queue.submit(task_request, devices=devices)
         logger.info("Queued task %s from recipe %r", task.rid, recipe.name)
         self._changed()
         return {"rid": task.rid}
 
     def _schema(self, module: str, class_name: str) -> dict[str, Any]:
+        """The catalogue's description of ``module.class_name``.
+
+        Raises:
+            RecipeError: If the module fails to import or the class is not in
+                the catalogue; :class:`_CatalogueBusy` if it may yet appear, or
+                the module is being re-read.
+        """
+        # Starts reading any module not yet described, so ``busy`` is accurate.
+        self._catalogue_changed(self.catalogue.refresh())
+        if self.catalogue.pending(module):
+            raise _CatalogueBusy(
+                f"the manager is still reading {module}, so try again shortly"
+            )
         for entry in self.catalogue.entries():
             if entry["module"] != module:
                 continue
@@ -300,11 +408,65 @@ class ExperimentManager:
                 if schema["class_name"] == class_name:
                     return schema
         if self.catalogue.busy:
-            raise RecipeError(
+            raise _CatalogueBusy(
                 f"{module}.{class_name} is not in the catalogue yet; the manager "
                 "is still reading the experiments, so try again shortly"
             )
         raise RecipeError(f"{module}.{class_name} is not in the catalogue")
+
+    def _refuse_scanned_optimiser(self, request: TaskRequest) -> None:
+        """Refuse an optimiser submitted with scan axes or repetitions.
+
+        Raises:
+            RecipeError: If the catalogue lists the class as an optimiser and
+                the request scans it.
+        """
+        try:
+            schema = self._schema(request.experiment, request.class_name)
+        except _CatalogueBusy:
+            return
+        if schema.get("optimiser") and (
+            request.scan.axes or request.scan.repetitions != 1
+        ):
+            raise RecipeError(
+                f"{request.class_name} sets its own points; submit it without "
+                "scan axes or repetitions"
+            )
+
+    def _reservation(self, module: str, class_name: str) -> list[str] | None:
+        """The canonical device names ``module.class_name`` reserves.
+
+        ``None`` while the class is missing from a catalogue still being read,
+        or its module is being re-read.
+
+        Raises:
+            RecipeError: If the class can't be found, or a declared device
+                can't be reserved.
+        """
+        try:
+            schema = self._schema(module, class_name)
+        except _CatalogueBusy:
+            return None
+        if schema["reserves"] is None:
+            raise RecipeError(
+                f"{module}.{class_name} cannot reserve its devices: "
+                f"{schema['reserve_error']}"
+            )
+        return list(schema["reserves"])
+
+    def _resolve_devices(self) -> None:
+        """Reserve devices for waiting tasks whose class the catalogue lacked at submit."""
+        for task in self.queue.ordered():
+            if task.devices is not None:
+                continue
+            try:
+                devices = self._reservation(task.experiment, task.class_name)
+            except RecipeError as error:
+                self._finish(task.rid, TaskStatus.FAILED, str(error))
+                continue
+            if devices is not None:
+                self.queue.set_devices(task.rid, devices)
+                self._changed()
 
     def _cmd_set_priority(self, request):
         self.queue.set_priority(int(request["rid"]), int(request["priority"]))
@@ -337,24 +499,20 @@ class ExperimentManager:
     def _cmd_abort(self, request):
         """Kill the worker now. A device call already in flight still completes on the device."""
         rid = int(request["rid"])
-        task = self.queue.running
-        if task is None or task.rid != rid:
+        if rid not in {task.rid for task in self.queue.running}:
             raise QueueError(f"cannot abort task {rid}: it is not running")
-        if self.process is None:
+        process = self.processes.get(rid)
+        if process is None:
             self._settle_unreported(rid, TaskStatus.ABORTED, None)
             return
-        self._abort_requested = rid
-        try:
-            self.process.kill()
-            self.process.wait(timeout=5)
-        except psutil.Error:
-            pass
-        self._reap_worker()
+        self._abort_requested.add(rid)
+        _kill(process)
+        self._reap_workers()
 
     def _cmd_worker(self, request):
         rid, token = int(request["rid"]), request.get("token")
-        record = self.queue.state.worker
-        if record is None or record.rid != rid or record.token != token:
+        record = self.queue.worker(rid)
+        if record is None or record.token != token:
             # A worker this manager no longer recognises: stop it.
             return {"action": Action.TERMINATE}
         event = request.get("event")
@@ -402,16 +560,15 @@ class ExperimentManager:
 
     # -- workers -------------------------------------------------------------
 
-    def _start_next(self) -> None:
-        if self.process is not None:
-            return  # the previous worker is still exiting
-        task = self.queue.next_due()
-        if task is None:
-            return
+    def _start_due(self) -> None:
+        for task in self.queue.startable():
+            self._start(task)
+
+    def _start(self, task: Task) -> None:
         token = secrets.token_hex(8)
         relpath = measurement_relpath(task.rid, task.class_name, now())
         try:
-            self.process = self._spawn(task.rid, token)
+            process = self._spawn(task.rid, token)
         except OSError as error:
             self._finish(
                 task.rid, TaskStatus.FAILED, f"could not start worker: {error}"
@@ -420,13 +577,20 @@ class ExperimentManager:
         record = WorkerRecord(
             rid=task.rid,
             token=token,
-            pid=self.process.pid,
-            create_time=self.process.create_time(),
+            pid=process.pid,
+            create_time=process.create_time(),
         )
-        self.queue.mark_started(task.rid, record, relpath.as_posix())
-        self._mutate(self.notifier.__setitem__, "points", {"rid": task.rid, "rows": []})
+        try:
+            self.queue.mark_started(task.rid, record, relpath.as_posix())
+        except QueueError as error:
+            logger.exception("Task %s could not be marked started", task.rid)
+            _kill(process)
+            self._finish(task.rid, TaskStatus.FAILED, f"could not start: {error}")
+            return
+        self.processes[task.rid] = process
+        self._show_points(task)
         self._record_run(task.rid)
-        logger.info("Started task %s (worker pid %s)", task.rid, self.process.pid)
+        logger.info("Started task %s (worker pid %s)", task.rid, process.pid)
         self._changed()
 
     def _spawn(self, rid: int, token: str) -> psutil.Popen:
@@ -455,41 +619,36 @@ class ExperimentManager:
                 **kwargs,
             )
 
-    def _reap_worker(self) -> None:
-        if self.process is None or _alive(self.process):
-            return
-        returncode = getattr(self.process, "returncode", None)
-        self.process = None
-        record = self.queue.state.worker
-        if record is None:
-            return  # the worker reported its own end
-        aborted = self._abort_requested == record.rid
-        self._abort_requested = None
-        status = TaskStatus.ABORTED if aborted else TaskStatus.CRASHED
-        error = (
-            None
-            if aborted
-            else f"worker exited with code {returncode} without reporting"
-        )
-        self._settle_unreported(record.rid, status, error)
+    def _reap_workers(self) -> None:
+        for rid, process in list(self.processes.items()):
+            if _alive(process):
+                continue
+            del self.processes[rid]
+            aborted = rid in self._abort_requested
+            self._abort_requested.discard(rid)
+            if self.queue.worker(rid) is None:
+                continue  # the worker reported its own end
+            returncode = getattr(process, "returncode", None)
+            status = TaskStatus.ABORTED if aborted else TaskStatus.CRASHED
+            error = (
+                None
+                if aborted
+                else f"worker exited with code {returncode} without reporting"
+            )
+            self._settle_unreported(rid, status, error)
 
-    def _reconcile_worker(self) -> None:
-        """After a restart: adopt a still-running worker, or settle its task."""
-        record = self.queue.state.worker
-        if record is not None:
-            try:
-                process = psutil.Process(record.pid)
-                if abs(process.create_time() - record.create_time) < 0.01 and _alive(
-                    process
-                ):
-                    self.process = process
-                    logger.info("Adopted running worker for task %s", record.rid)
-                    return
-            except psutil.Error:
-                pass
-            self._settle_unreported(record.rid, TaskStatus.INTERRUPTED, None)
-        for task in list(self.queue.state.active):
-            if task.status in (TaskStatus.RUNNING, TaskStatus.PAUSED):
+    def _reconcile_workers(self) -> None:
+        """After a restart: adopt each still-running worker; settle the other tasks."""
+        for record in list(self.queue.state.workers):
+            process = _adoptable(record)
+            if process is None:
+                self._settle_unreported(record.rid, TaskStatus.INTERRUPTED, None)
+                continue
+            self.processes[record.rid] = process
+            self._points_shown[self.queue.get(record.rid).pipeline] = record.rid
+            logger.info("Adopted running worker for task %s", record.rid)
+        for task in self.queue.running:
+            if task.rid not in self.processes:
                 self._settle_unreported(task.rid, TaskStatus.INTERRUPTED, None)
 
     def _settle_unreported(
@@ -513,8 +672,11 @@ class ExperimentManager:
         self._finish(rid, status, error)
 
     def _finish(self, rid: int, status: TaskStatus, error: str | None) -> None:
-        self.queue.finish(rid, status, error)
+        task = self.queue.finish(rid, status, error)
         self._record_run(rid)
+        path = self.root / task.h5_path if task.h5_path else None
+        if self.copier is not None and path is not None and path.exists():
+            self.copier.add(task.h5_path)
         logger.info("Task %s %s", rid, status)
         if error:
             logger.warning("Task %s error: %s", rid, error.strip().splitlines()[-1])
@@ -578,14 +740,25 @@ class ExperimentManager:
         self._recipes_version += 1
         self._dirty = True
 
+    def _saved_parameters_changed(self, changes: list[SavedParameterChange]) -> None:
+        if not changes:
+            return
+        self.saved_parameter_store.save(self.saved_parameters.state)
+        self.saved_parameter_log.append(changes)
+        self._saved_parameters_version += 1
+        self._dirty = True
+
     def _save(self) -> None:
         self.store.save(self.queue.state)
 
+    # TODO: a way for the manager (and other servers) to raise popup messages on
+    # every connected client's GUI.
     def _snapshot(self) -> dict[str, Any]:
         return {
             "started": self.started,
             "catalogue_version": self._catalogue_version,
             "recipes_version": self._recipes_version,
+            "saved_parameters_version": self._saved_parameters_version,
             "simulated": self.simulate,
             "alive": time.time(),
             **self.queue.snapshot(),
@@ -602,12 +775,27 @@ class ExperimentManager:
             if current.get(key) != value:
                 self.notifier[key] = value
 
+    def _show_points(self, task: Task) -> None:
+        """Publish an empty list for ``task``'s points, replacing its pipeline's last."""
+        previous = self._points_shown.get(task.pipeline)
+        self._points_shown[task.pipeline] = task.rid
+
+        def show():
+            points = self.notifier["points"]
+            if previous is not None and str(previous) in points.raw_view:
+                del points[str(previous)]
+            points[str(task.rid)] = []
+
+        self._mutate(show)
+
     def _add_point(self, rid: int, row: dict[str, Any]) -> None:
+        key = str(rid)
+
         def add():
-            if self.notifier.raw_view["points"]["rid"] != rid:
-                # A worker adopted after a manager restart.
-                self.notifier["points"] = {"rid": rid, "rows": []}
-            self.notifier["points"]["rows"].append(row)
+            points = self.notifier["points"]
+            if key not in points.raw_view:
+                points[key] = []  # a worker adopted after a manager restart
+            points[key].append(row)
 
         self._mutate(add)
 
@@ -624,6 +812,29 @@ def _log_failure(future) -> None:
         logger.error(
             "Publishing the experiment state failed", exc_info=future.exception()
         )
+
+
+class _CatalogueBusy(RecipeError):
+    """A class is missing from, or out of date in, a catalogue still being read."""
+
+
+def _adoptable(record: WorkerRecord) -> psutil.Process | None:
+    """The worker process ``record`` names, if it is still running."""
+    try:
+        process = psutil.Process(record.pid)
+        if abs(process.create_time() - record.create_time) < 0.01 and _alive(process):
+            return process
+    except psutil.Error:
+        pass
+    return None
+
+
+def _kill(process: psutil.Process) -> None:
+    try:
+        process.kill()
+        process.wait(timeout=5)
+    except psutil.Error:
+        pass
 
 
 def _alive(process: psutil.Process) -> bool:

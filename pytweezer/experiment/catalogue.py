@@ -40,6 +40,8 @@ class Catalogue:
         self._entries: dict[str, dict[str, Any]] = {}
         self._stamps: dict[str, tuple[int, int]] = {}
         self._pending: dict[str, _Pending] = {}
+        self._due: set[str] = set()
+        self._again: set[str] = set()
 
     def modules(self) -> dict[str, tuple[Path, tuple[int, int]]]:
         """``{module name: (file, (mtime_ns, size))}`` for every experiment module."""
@@ -56,6 +58,11 @@ class Catalogue:
     def refresh(self) -> bool:
         """Start describing new or changed modules; forget deleted ones. Returns whether anything was dropped."""
         modules = self.modules()
+        self._due = {
+            module
+            for module, (_path, stamp) in modules.items()
+            if self._stamps.get(module) != stamp
+        }
         dropped = False
         for module in set(self._entries) - set(modules):
             del self._entries[module]
@@ -68,6 +75,22 @@ class Catalogue:
                 break
             self._start(module, stamp)
         return dropped
+
+    def describe_again(self, module: str) -> None:
+        """Make ``module`` due again although its file is unchanged.
+
+        A description already under way is discarded, since it may predate
+        whatever prompted this, and the following :meth:`refresh` starts a new one.
+
+        Raises:
+            KeyError: ``module`` is not an experiment module.
+        """
+        if module not in self.modules():
+            raise KeyError(f"{module} is not an experiment module")
+        self._stamps.pop(module, None)
+        self._due.add(module)
+        if module in self._pending:
+            self._again.add(module)
 
     def _start(self, module: str, stamp: tuple[int, int]) -> None:
         # A file rather than a pipe: a pipe fills up and stalls the child
@@ -103,6 +126,10 @@ class Catalogue:
                     )
             pending.output.close()
             del self._pending[module]
+            if module in self._again:
+                self._again.discard(module)
+                continue
+            self._due.discard(module)
             entry["stamp"] = list(pending.stamp)
             self._entries[module] = entry
             self._stamps[module] = pending.stamp
@@ -113,6 +140,10 @@ class Catalogue:
     def busy(self) -> bool:
         return bool(self._pending)
 
+    def pending(self, module: str) -> bool:
+        """Whether ``module`` is new or changed, as of the last :meth:`refresh`, and not yet read."""
+        return module in self._due or module in self._pending
+
     def entries(self) -> list[dict[str, Any]]:
         return [self._entries[name] for name in sorted(self._entries)]
 
@@ -121,6 +152,7 @@ class Catalogue:
             pending.process.kill()
             pending.output.close()
         self._pending.clear()
+        self._again.clear()
 
 
 def _error_entry(module: str, error: str) -> dict[str, Any]:

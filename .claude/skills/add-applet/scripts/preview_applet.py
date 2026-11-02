@@ -345,7 +345,7 @@ def main():
         # on the desktop — nothing flashes over whatever the user is doing.
         # Preferred over QT_QPA_PLATFORM=offscreen, which on Windows renders no
         # text glyphs and so produces screenshots with every label blank.
-        applet.setAttribute(Qt.WA_DontShowOnScreen, True)
+        applet.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     applet.show()
 
     # Feed on a timer rather than all at once: an applet that keeps history
@@ -363,7 +363,7 @@ def main():
     timer = QTimer()
     timer.timeout.connect(tick)
     timer.start(50)
-    app.exec_()
+    app.exec()
 
     out = args.out or os.path.join(DEFAULT_SHOTS, f"{applet_cls.__name__}.png")
     out = os.path.abspath(out)

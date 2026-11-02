@@ -277,7 +277,7 @@ one's `Go()` has already returned. It's a hard requirement, not just a speed-up,
 when one call cannot return until another fires — e.g. a MotMaster armed in
 trigger mode, whose `Go()` blocks until a second MotMaster's sequence triggers it.
 
-The ergonomic path is `run_parallel` (in `pytweezer/parallel.py`): it runs
+The ergonomic path is `run_parallel` (in `pytweezer/helper_scripts/parallel.py`): it runs
 zero-argument callables in one thread each and returns their results in order.
 Because every device is its own server process, a `get_device` call is just a
 blocking socket round-trip whose `recv` releases the GIL, so the threads overlap
@@ -286,7 +286,7 @@ for real — no `async`/`await`, and it works from the PyQt6 GUI (which has no
 arm-before-trigger race:
 
 ```python
-from pytweezer.parallel import run_parallel, after
+from pytweezer.helper_scripts.parallel import run_parallel, after
 from pytweezer.servers.device_client import get_device
 
 cam = get_device("Rb HamCam")

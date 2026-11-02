@@ -11,6 +11,7 @@ From a notebook::
     rid = submit_recipe(RabiDemo, "nightly check", atoms=300)
 """
 
+import difflib
 import getpass
 import socket
 import time
@@ -22,6 +23,11 @@ import zmq
 from pytweezer.configuration.config import get_config
 from pytweezer.experiment.arguments import coerce_arguments
 from pytweezer.experiment.recipes import Recipe
+from pytweezer.experiment.saved_parameters import (
+    SavedParameter,
+    SavedParameterChange,
+    Value,
+)
 from pytweezer.experiment.scan import Scan
 from pytweezer.experiment.task import Task, TaskRequest
 
@@ -60,6 +66,12 @@ def sync_address(server_name: str = SERVER_NAME) -> tuple[str, int]:
     """``(host, port)`` where the manager publishes its state (sipyco sync_struct)."""
     conf = manager_conf(server_name)
     return connect_host(conf["host"]), conf["sync_port"]
+
+
+def results_address(server_name: str = SERVER_NAME) -> tuple[str, int]:
+    """``(host, port)`` where the manager serves its measurement files (sipyco RPC)."""
+    conf = manager_conf(server_name)
+    return connect_host(conf["host"]), conf["results_port"]
 
 
 class ReqClient:
@@ -108,6 +120,8 @@ _READ_ONLY_COMMANDS = {
     "history",
     "last_request",
     "recipes",
+    "saved_parameters",
+    "saved_parameter_history",
 }
 
 
@@ -140,6 +154,10 @@ class ExperimentManagerClient:
 
     def catalogue(self) -> list[dict[str, Any]]:
         return self.call("catalogue")["modules"]
+
+    def describe_again(self, module: str) -> None:
+        """Have the manager describe ``module`` again, so its defaults are re-read."""
+        self.call("describe_again", module=module)
 
     def submit(self, request: TaskRequest) -> int:
         return self.call("submit", request=request.model_dump(mode="json"))["rid"]
@@ -181,6 +199,7 @@ class ExperimentManagerClient:
         args: dict[str, Any] | None = None,
         priority: int | None = None,
         label: str | None = None,
+        pipeline: str | None = None,
         submitter: str = "",
     ) -> int:
         return self.call(
@@ -191,8 +210,49 @@ class ExperimentManagerClient:
             args=args or {},
             priority=priority,
             label=label,
+            pipeline=pipeline,
             submitter=submitter,
         )["rid"]
+
+    def saved_parameters(self) -> list[SavedParameter]:
+        reply = self.call("saved_parameters")
+        return [SavedParameter.model_validate(p) for p in reply["parameters"]]
+
+    def set_saved_parameters(
+        self,
+        values: dict[str, Value],
+        reason: str,
+        who: str,
+        *,
+        create: bool = False,
+        group: str = "",
+        unit: str = "",
+        rid: int | None = None,
+    ) -> list[SavedParameterChange]:
+        reply = self.call(
+            "set_saved_parameters",
+            values={
+                key: value.item() if hasattr(value, "item") else value
+                for key, value in values.items()
+            },
+            reason=reason,
+            who=who,
+            create=create,
+            group=group,
+            unit=unit,
+            rid=rid,
+        )
+        return [SavedParameterChange.model_validate(c) for c in reply["changes"]]
+
+    def saved_parameter_history(
+        self,
+        key: str | None = None,
+        *,
+        rid: int | None = None,
+        limit: int | None = None,
+    ) -> list[SavedParameterChange]:
+        reply = self.call("saved_parameter_history", key=key, rid=rid, limit=limit)
+        return [SavedParameterChange.model_validate(e) for e in reply["entries"]]
 
     def set_priority(self, rid: int, priority: int) -> None:
         self.call("set_priority", rid=rid, priority=priority)
@@ -236,7 +296,7 @@ def _resolve(
         # Fail here rather than when the task reaches the front of the queue.
         coerce_arguments(experiment, args or {})
         if scan is not None:
-            scan.axis_values(experiment)
+            experiment(args or {}).planned_points(scan)
     if module == "__main__" or "<locals>" in class_name or not class_name:
         raise ValueError(
             f"{experiment!r} can't be imported by the manager; define it in a module "
@@ -252,6 +312,7 @@ def submit(
     priority: int = 0,
     label: str = "",
     due_time: datetime | None = None,
+    pipeline: str = "main",
     client: ExperimentManagerClient | None = None,
     **args: Any,
 ) -> int:
@@ -259,7 +320,9 @@ def submit(
 
     ``experiment`` is an Experiment subclass importable by the manager (so not
     one defined in a notebook: use :func:`~pytweezer.experiment.run_local` for
-    those) or a ``"module:ClassName"`` string.
+    those) or a ``"module:ClassName"`` string. Tasks in one ``pipeline`` run
+    one at a time; tasks in different pipelines may run together when they
+    reserve no device in common.
     """
     scan = scan or Scan()
     module, class_name = _resolve(experiment, scan, args)
@@ -271,6 +334,7 @@ def submit(
         priority=priority,
         label=label,
         due_time=due_time,
+        pipeline=pipeline,
         submitter=submitter_name(),
     )
     client = client or ExperimentManagerClient()
@@ -285,6 +349,7 @@ def save_recipe(
     *,
     priority: int = 0,
     label: str = "",
+    pipeline: str = "main",
     overwrite: bool = False,
     client: ExperimentManagerClient | None = None,
     **args: Any,
@@ -312,6 +377,7 @@ def save_recipe(
         scan=scan,
         priority=priority,
         label=label,
+        pipeline=pipeline,
         submitter=submitter_name(),
     )
     (client or ExperimentManagerClient()).save_recipe(recipe, overwrite)
@@ -324,10 +390,14 @@ def submit_recipe(
     *,
     priority: int | None = None,
     label: str | None = None,
+    pipeline: str | None = None,
     client: ExperimentManagerClient | None = None,
     **args: Any,
 ) -> int:
-    """Queue recipe ``name`` with ``args`` overriding it; return the rid."""
+    """Queue recipe ``name`` with ``args`` overriding it; return the rid.
+
+    ``priority``, ``label`` and ``pipeline`` default to the recipe's own.
+    """
     module, class_name = _resolve(experiment, args=args)
     return (client or ExperimentManagerClient()).submit_recipe(
         module,
@@ -336,6 +406,7 @@ def submit_recipe(
         args=args,
         priority=priority,
         label=label,
+        pipeline=pipeline,
         submitter=submitter_name(),
     )
 
@@ -363,6 +434,81 @@ def delete_recipe(
     """Delete recipe ``name`` of ``experiment`` for every PC."""
     module, class_name = _resolve(experiment)
     (client or ExperimentManagerClient()).delete_recipe(module, class_name, name)
+
+
+def get_saved_parameters(
+    *, client: ExperimentManagerClient | None = None
+) -> dict[str, Value]:
+    """Every saved parameter's current value, by key."""
+    parameters = (client or ExperimentManagerClient()).saved_parameters()
+    return {parameter.key: parameter.value for parameter in parameters}
+
+
+def get_saved_parameter(
+    key: str,
+    /,
+    *,
+    client: ExperimentManagerClient | None = None,
+) -> Value:
+    """The current value of saved parameter ``key``.
+
+    Raises:
+        KeyError: no such key; the message names up to three close matches.
+    """
+    values = get_saved_parameters(client=client)
+    try:
+        return values[key]
+    except KeyError:
+        close = difflib.get_close_matches(key, values, n=3)
+        hint = f"; did you mean {', '.join(map(repr, close))}?" if close else ""
+        raise KeyError(f"no saved parameter {key!r}{hint}") from None
+
+
+def set_saved_parameters(
+    values: dict[str, Value],
+    reason: str,
+    /,
+    *,
+    create: bool = False,
+    group: str = "",
+    unit: str = "",
+    rid: int | None = None,
+    client: ExperimentManagerClient | None = None,
+) -> list[SavedParameterChange]:
+    """Set saved parameters for every PC, recording ``reason`` and who set them.
+
+    Either every value is set or, if the manager refuses any, none. Unknown keys
+    are refused unless ``create``; ``group`` and ``unit`` apply to created keys.
+    Returns a change for each value that differs from the stored one or, when
+    accepting from run ``rid``, for every key named, so the run is recorded as
+    accepted even where its values match those saved.
+    """
+    return (client or ExperimentManagerClient()).set_saved_parameters(
+        values,
+        reason,
+        submitter_name(),
+        create=create,
+        group=group,
+        unit=unit,
+        rid=rid,
+    )
+
+
+def saved_parameter_history(
+    key: str | None = None,
+    /,
+    *,
+    rid: int | None = None,
+    limit: int | None = None,
+    client: ExperimentManagerClient | None = None,
+) -> list[SavedParameterChange]:
+    """Changes to saved parameter ``key`` (every key if ``None``), newest first.
+
+    Only those made by run ``rid`` if given.
+    """
+    return (client or ExperimentManagerClient()).saved_parameter_history(
+        key, rid=rid, limit=limit
+    )
 
 
 def wait(

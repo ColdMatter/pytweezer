@@ -66,7 +66,7 @@ class ImagEMX2Camera(Camera):
 
     @requires_camera
     def set_roi(self, x0: int, width: int, y0: int, height: int):
-        self._backend.set_roi(x0, x0 + width - 1, y0, y0 + height - 1)
+        self._backend.set_roi(x0, x0 + width, y0, y0 + height)
 
     @requires_camera
     def set_trigger_source(self, source: str):
@@ -133,6 +133,12 @@ class ImagEMX2Camera(Camera):
             float(self._backend.get_attribute_value("CONVERSION FACTOR COEFF")),
             float(self._backend.get_attribute_value("CONVERSION FACTOR OFFSET")),
         )
+
+    @requires_camera
+    def get_all_attribute_values(self) -> dict:
+        """Every readable DCAM attribute's current value, enums as their text labels."""
+        values = self._backend.get_all_attribute_values(enum_as_str=True)
+        return values.as_dict(style="flat")
 
     def trigger(self):
         """Send a software trigger to the camera."""

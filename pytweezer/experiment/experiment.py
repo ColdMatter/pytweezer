@@ -9,7 +9,8 @@ from pytweezer.experiment.arguments import (
     coerce_arguments,
     collect,
 )
-from pytweezer.experiment.scan import Point
+from pytweezer.experiment.reservations import canonical_device
+from pytweezer.experiment.scan import Point, Scan
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.experiment")
@@ -50,6 +51,9 @@ class Experiment:
         #: A :class:`~pytweezer.experiment.simulation.SimulatedDevices` when
         #: running in simulation; devices then come from it instead of RPC.
         self.simulated_devices: Any = None
+        #: Canonical names of the devices :meth:`device` may open; ``None``
+        #: means unrestricted.
+        self.allowed_devices: frozenset[str] | None = None
 
     @classmethod
     def arguments(cls) -> dict[str, Argument]:
@@ -60,9 +64,26 @@ class Experiment:
         return collect(cls, Device)
 
     @classmethod
+    def reserved_devices(cls) -> list[str]:
+        """Sorted canonical names of every CONFIG device this experiment occupies.
+
+        Raises:
+            ReservationError: If a declared device is unknown, inactive or
+                mis-configured.
+        """
+        reserved: set[str] = set()
+        for device in cls.devices().values():
+            reserved |= device.reserves()
+        return sorted(reserved)
+
+    @classmethod
     def schema(cls) -> dict[str, Any]:
-        """JSON-serialisable description of the class, for argument editors."""
-        return {
+        """JSON-serialisable description of the class, for argument editors.
+
+        An optimiser that proposes saved parameters also has an ``"optimiser"``
+        entry describing it; a shared optimiser base that proposes none does not.
+        """
+        schema = {
             "class_name": cls.__name__,
             "module": cls.__module__,
             "doc": inspect.getdoc(cls) or "",
@@ -71,6 +92,9 @@ class Experiment:
             },
             "devices": {name: dev.to_schema() for name, dev in cls.devices().items()},
         }
+        if hasattr(cls, "optimiser_schema") and cls.proposes():
+            schema["optimiser"] = cls.optimiser_schema()
+        return schema
 
     @classmethod
     def extra_argument(cls, name: str) -> Argument | None:
@@ -85,6 +109,15 @@ class Experiment:
     def argument_values(self) -> dict[str, Any]:
         names = [*self.arguments(), *self._extra_names]
         return {name: getattr(self, name) for name in names}
+
+    def planned_points(self, scan: Scan) -> list[Point]:
+        """The points to run for the submitted ``scan``.
+
+        The default expands ``scan``. An experiment that chooses its own
+        number of points, which may depend on its argument values, overrides
+        this and raises :class:`ValueError` for a scan it cannot honour.
+        """
+        return scan.points(type(self))
 
     def prepare(self) -> None:
         """Called once before the first point."""
@@ -116,9 +149,23 @@ class Experiment:
 
         Clients are not thread-safe: pass ``fresh=True`` for an extra client
         to use from another thread, e.g. with
-        :func:`pytweezer.parallel.run_parallel`. In simulation every call
+        :func:`pytweezer.helper_scripts.parallel.run_parallel`. In simulation every call
         returns the same in-process simulated backend.
+
+        Raises:
+            UndeclaredDeviceError: If :attr:`allowed_devices` is set and ``name``
+                is not among the devices this experiment declares.
         """
+        if (
+            self.allowed_devices is not None
+            and canonical_device(name) not in self.allowed_devices
+        ):
+            from pytweezer.servers.device_client import UndeclaredDeviceError
+
+            raise UndeclaredDeviceError(
+                f"{type(self).__name__} uses device {name!r} without declaring it; "
+                f"declare it as a class attribute, e.g. camera = Device({name!r})"
+            )
         if self.simulated_devices is not None:
             return self.simulated_devices.get(name)
         if not fresh and name in self._shared_clients:

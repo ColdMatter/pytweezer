@@ -8,8 +8,16 @@ import time
 import pytest
 
 from pytweezer.experiment import ListAxis, Scan, load_measurement
+from pytweezer.experiment.archive import RemoteArchive
 from pytweezer.experiment.catalogue import Catalogue
-from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
+from pytweezer.experiment.client import (
+    ExperimentManagerClient,
+    get_saved_parameters,
+    saved_parameter_history,
+    set_saved_parameters,
+    submit,
+    wait,
+)
 from pytweezer.servers import experiment_manager as em
 from pytweezer.servers.sync import SyncMirror
 from tests.helpers import until
@@ -63,11 +71,12 @@ class Harness:
         (package / "steps.py").write_text(EXPERIMENT)
         monkeypatch.syspath_prepend(str(tmp_path))
         monkeypatch.setenv("PYTHONPATH", str(tmp_path))
-        monkeypatch.setenv("PYTWEEZER_LOG_DIR", str(tmp_path / "logs"))
         self.conf = {
             "host": "127.0.0.1",
             "port": free_port(),
             "sync_port": free_port(),
+            "results_port": free_port(),
+            "copy_root": str(tmp_path / "network"),
             "orphan_timeout": 5.0,
         }
         monkeypatch.setattr(
@@ -120,8 +129,7 @@ def harness(tmp_path, monkeypatch, recording_db):
     harness = Harness(tmp_path, monkeypatch, recording_db)
     harness.start()
     yield harness
-    running = harness.manager.queue.running
-    if running is not None:
+    for running in harness.manager.queue.running:
         harness.client.abort(running.rid)
     harness.stop()
     harness.client.close()
@@ -155,6 +163,93 @@ def test_catalogue_lists_runnable_experiments(harness):
     assert entry["module"] == "labexp.steps"
     assert entry["error"] is None
     assert [c["class_name"] for c in entry["classes"]] == ["Steps", "UsesSequencer"]
+
+
+OPTIM = textwrap.dedent(
+    """
+    from pytweezer.experiments.demo import DemoStagedScan
+
+
+    class Optim(DemoStagedScan):
+        pass
+    """
+)
+
+
+def test_an_optimiser_run_can_be_accepted(harness):
+    (harness.package_dir / "optim.py").write_text(OPTIM)
+    until(
+        lambda: any(e["module"] == "labexp.optim" for e in harness.client.catalogue()),
+        timeout=30,
+    )
+    set_saved_parameters(
+        {"demo_resonance": 0.1, "demo_power": 0.5},
+        "created",
+        create=True,
+        client=harness.client,
+    )
+    rid = submit(
+        "labexp.optim:Optim",
+        client=harness.client,
+        detuning_points=5,
+        power_points=3,
+    )
+    task = until(
+        lambda: (t := harness.client.get(rid)).status == "completed" and t, timeout=30
+    )
+    assert task
+    constants = harness.measurement(task).constants
+    proposals = {
+        name.removeprefix("proposed."): value
+        for name, value in constants.items()
+        if name.startswith("proposed.")
+    }
+    assert set(proposals) == {"demo_resonance", "demo_power"}
+
+    set_saved_parameters(
+        proposals, f"accepted from run {rid}", rid=rid, client=harness.client
+    )
+
+    assert get_saved_parameters(client=harness.client) == pytest.approx(proposals)
+    history = saved_parameter_history(rid=rid, client=harness.client)
+    assert sorted(c.key for c in history) == ["demo_power", "demo_resonance"]
+
+
+FROM_FILE = textwrap.dedent(
+    """
+    from pathlib import Path
+
+    from pytweezer.experiment import Experiment, Number
+
+
+    class FromFile(Experiment):
+        level = Number(float((Path(__file__).parent / "level.txt").read_text()))
+
+        def run_point(self):
+            pass
+    """
+)
+
+
+def write_level(harness, text):
+    (harness.package_dir / "level.txt").write_text(text)
+
+
+def default_of(harness, class_name, argument):
+    for entry in harness.client.catalogue():
+        for described in entry["classes"]:
+            if described["class_name"] == class_name:
+                return described["arguments"][argument]["default"]
+    return None
+
+
+def test_describe_again_picks_up_a_changed_default(harness):
+    write_level(harness, "1.5")
+    (harness.package_dir / "fromfile.py").write_text(FROM_FILE)
+    assert until(lambda: default_of(harness, "FromFile", "level") == 1.5, timeout=30)
+    write_level(harness, "2.5")
+    harness.client.describe_again("labexp.fromfile")
+    assert until(lambda: default_of(harness, "FromFile", "level") == 2.5, timeout=30)
 
 
 def test_pause_resume_and_terminate_at_a_point_boundary(harness):
@@ -199,7 +294,7 @@ def test_worker_survives_a_manager_restart(harness):
     harness.stop()
     time.sleep(0.5)
     harness.start()
-    assert harness.manager.process is not None  # adopted
+    assert rid in harness.manager.processes  # adopted
     task = harness.wait_until(rid, lambda t: t.status.finished)
     assert task.status == "completed"
     assert harness.measurement(task).n_done == 5
@@ -232,10 +327,35 @@ def test_guis_see_the_queue_and_each_point_live(harness):
 
         until(lambda: mirror.read(finished))
         state = mirror.snapshot()
-        assert finished(state) and state["running"] is None
-        rows = state["points"]["rows"]
-        assert state["points"]["rid"] == rid
+        assert finished(state) and state["running"] == []
+        rows = state["points"][str(rid)]
         assert [row["values"]["step"] for row in rows] == [1, 2, 3, 4, 5]
         assert [row["scalars"]["index"] for row in rows] == [0, 1, 2, 3, 4]
     finally:
         mirror.close()
+
+
+def test_other_pcs_fetch_a_finished_measurement_from_the_manager(harness):
+    rid = harness.submit(five_points())
+    task = wait(rid, client=harness.client, poll_s=0.1, timeout_s=30)
+    archive = RemoteArchive(("127.0.0.1", harness.conf["results_port"]))
+    try:
+        assert archive.find(rid) == task.h5_path
+        day = task.h5_path.rsplit("/", 1)[0]
+        assert archive.days() == [day]
+        assert archive.runs(day) == [
+            {"path": task.h5_path, "status": "completed", "label": ""}
+        ]
+        measurement = archive.load(task.h5_path)
+        assert list(measurement.results["index"]) == [0, 1, 2, 3, 4]
+        assert list(measurement.points["step"]) == [1, 2, 3, 4, 5]
+    finally:
+        archive.close()
+
+
+def test_a_finished_measurement_is_copied_to_the_network_drive(harness, tmp_path):
+    rid = harness.submit(five_points())
+    task = wait(rid, client=harness.client, poll_s=0.1, timeout_s=30)
+    copy = tmp_path / "network" / task.h5_path
+    assert until(copy.exists)
+    assert load_measurement(copy).n_done == 5

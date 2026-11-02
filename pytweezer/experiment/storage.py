@@ -51,27 +51,22 @@ class RecordError(ValueError):
 def data_root() -> Path:
     """Root directory of the measurement files on this PC.
 
-    ``PYTWEEZER_DATA_DIR`` wins. Otherwise a PC other than the Experiment
-    Manager's uses ``client_data_root`` from CONFIG (the manager's data share,
-    as mounted here) if set, and the manager's own PC uses ``data_root``. When
-    the manager is simulating, files go in a ``simulated/`` subdirectory, so
-    simulated runs never mix with real data or use up its rids.
+    ``PYTWEEZER_DATA_DIR`` wins, then ``data_root`` from the Experiment
+    Manager's CONFIG entry, then ``<repo>/data``. Other PCs fetch the manager's
+    files through :mod:`~pytweezer.experiment.archive` rather than from here.
+    When the manager is simulating, files go in a ``simulated/`` subdirectory,
+    so simulated runs never mix with real data or use up its rids.
     """
     from pytweezer.configuration.config import get_config
 
     conf = get_config().get("Servers", {}).get("Experiment Manager", {})
     env = os.environ.get("PYTWEEZER_DATA_DIR")
-    client_root = conf.get("client_data_root")
-    if env:
-        root = Path(env)
-    elif client_root and not _is_this_pc(conf.get("host")):
-        root = Path(client_root)
-    else:
-        root = Path(conf.get("data_root") or Path(tweezerpath) / "data")
+    root = Path(env or conf.get("data_root") or Path(tweezerpath) / "data")
     return root / "simulated" if conf.get("simulate") else root
 
 
-def _is_this_pc(host: str | None) -> bool:
+def is_this_pc(host: str | None) -> bool:
+    """Whether CONFIG address ``host`` is this PC."""
     from pytweezer.configuration.config import this_pc_address
 
     if host in (None, "localhost", "127.0.0.1", "*", "0.0.0.0"):

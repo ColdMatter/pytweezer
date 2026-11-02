@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-uv run pytweezer-kill-stale
+uv run python -m bin.kill_stale
 pause
 
 endlocal

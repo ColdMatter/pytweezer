@@ -1,0 +1,80 @@
+name: Dependencies
+
+# Sets a "dependencies" commit status on each open PR: failure while any
+# "Depends on owner/repo#N" (or "Blocked by ...") line in its description
+# names a PR that is not merged or an issue that is not closed. A bare "#N"
+# means this repo. Branch protection requires the status, so such a PR cannot
+# merge. Another repo's PR merging triggers nothing here, hence the schedule.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  statuses: write
+  pull-requests: read
+  issues: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const LINE = /^\s*(?:depends on|blocked by)\b[:\s]*(.*)$/gim;
+            const REF = /(?:([\w.-]+)\/([\w.-]+))?#(\d+)/g;
+
+            async function blockers(body) {
+              const open = [];
+              for (const line of (body || "").matchAll(LINE)) {
+                for (const [, o = owner, r = repo, n] of line[1].matchAll(REF)) {
+                  const name = `${o}/${r}#${n}`;
+                  try {
+                    const { data: issue } = await github.rest.issues.get({
+                      owner: o, repo: r, issue_number: Number(n),
+                    });
+                    if (issue.pull_request) {
+                      const { data: pr } = await github.rest.pulls.get({
+                        owner: o, repo: r, pull_number: Number(n),
+                      });
+                      if (!pr.merged) {
+                        open.push(pr.state === "closed" ? `${name} (closed unmerged)` : name);
+                      }
+                    } else if (issue.state !== "closed") {
+                      open.push(name);
+                    }
+                  } catch (error) {
+                    open.push(`${name} (cannot read: ${error.status ?? error.message})`);
+                  }
+                }
+              }
+              return open;
+            }
+
+            async function update(pr) {
+              const open = await blockers(pr.body);
+              const description = open.length
+                ? `Waiting on ${open.join(", ")}`
+                : "No unmerged dependencies";
+              await github.rest.repos.createCommitStatus({
+                owner, repo, sha: pr.head.sha,
+                state: open.length ? "failure" : "success",
+                context: "dependencies",
+                description: description.slice(0, 140),
+              });
+              core.info(`#${pr.number}: ${description}`);
+            }
+
+            if (context.eventName === "pull_request") {
+              await update(context.payload.pull_request);
+            } else {
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: "open", per_page: 100,
+              });
+              for (const pr of prs) await update(pr);
+            }

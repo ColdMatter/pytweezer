@@ -92,8 +92,8 @@ def test_values_are_coerced_against_the_declared_argument():
 
 
 def test_linear_integer_axis_rounds_and_rejects_duplicates():
-    points = Scan(axes=[LinearAxis(argument="n", start=1, stop=5, n=3)]).points(Grid)
-    assert [p.values["n"] for p in points] == [1, 3, 5]
+    points = Scan(axes=[LinearAxis(argument="n", start=0, stop=10, n=4)]).points(Grid)
+    assert [p.values["n"] for p in points] == [0, 3, 7, 10]
     with pytest.raises(ValueError, match="repeats values"):
         Scan(axes=[LinearAxis(argument="n", start=1, stop=2, n=5)]).points(Grid)
 

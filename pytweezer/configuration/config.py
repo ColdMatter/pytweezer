@@ -113,15 +113,18 @@ CONFIG = {
             # Publishes the queue and the running task's points (sipyco
             # sync_struct).
             "sync_port": get_next_port(),
+            # Serves the measurement files to other PCs (sipyco RPC).
+            "results_port": get_next_port(),
             # Experiments get in-process simulated devices; data goes to
             # <data_root>/simulated.
             "simulate": SIMULATING,
             # Measurement files and the queue state; PYTWEEZER_DATA_DIR overrides it.
             # None means <repo>/data.
             "data_root": None,
-            # The same directory as other PCs see it (e.g. a mapped network
-            # share), for their Results tab. None means they use data_root as well.
-            "client_data_root": None,
+            # Each finished measurement file is copied here, at the same path
+            # (a folder on the router's USB drive, which it shares as "g" -
+            # see the labbook's Lab network overview). None means no copy.
+            "copy_root": r"\\10.59.0.1\g\pytweezer-data",
             # Seconds a worker keeps running without reaching the manager.
             "orphan_timeout": 30.0,
         },
@@ -151,6 +154,7 @@ CONFIG = {
             "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
             "config_file": "caf_mm_config.json",
+            "linked_partner": "Rb MotMaster",
             "host": HOSTS["ph-bonesaw"],
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -234,7 +238,7 @@ CONFIG = {
             "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
         },
         "IDS-1054B Scope": {
-            "active": True,
+            "active": False,
             "class": "pytweezer.drivers.ids1054b:IDS1054B",
             "sim_class": "pytweezer.drivers.ids1054b:SimulatedIDS1054B",
             "teardown": "close",
@@ -259,6 +263,47 @@ CONFIG = {
             "live": True,
             "stream_name": "caf_thorcam",
             "timeout": 5.0,
+        },
+        # The NI Cards tab: channels by MOTMaster alias, from each PC's hardware file.
+        "CaF NI Cards": {
+            "active": True,
+            "class": "pytweezer.drivers.ni_cards:NICards",
+            "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
+            "host": HOSTS["ph-bonesaw"],
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "hardware_file": r"C:\ControlPrograms\EDMSuite\DAQ\MoleculeMOTHardware.cs",
+            "reserved": {
+                "Wavemeter Lock": {
+                    "channels": [
+                        "v00Lock",
+                        "v10Lock",
+                        "v21Lock",
+                        "v32Lock",
+                        "bXLock",
+                        "bXBeastLock",
+                    ]
+                },
+                "Hardware Control": {"cards": ["tclBoard2"]},
+            },
+            # MOTMaster's safe-state channels (DAQMxAnalogSafeState).
+            "protected": ["MOTCoilsCurrent", "transferCoils", "TweezerCoils"],
+            "motmaster": "CaF MotMaster",
+            "teardown": "close",
+        },
+        "Rb NI Cards": {
+            "active": True,
+            "class": "pytweezer.drivers.ni_cards:NICards",
+            "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
+            "host": HOSTS["IC-CZC221CCHS"],
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "hardware_file": r"C:\ControlPrograms\EDMSuite\DAQ\RbTweezerHardware.cs",
+            "reserved": {"Wavemeter Lock": {"channels": ["tRbD1Lock"]}},
+            # Coil currents.
+            "protected": ["tMOTcc", "tMagneticTrapcc"],
+            "motmaster": "Rb MotMaster",
+            "teardown": "close",
         },
     },
     # Background database loggers. Each entry runs pytweezer/servers/logger_server.py,

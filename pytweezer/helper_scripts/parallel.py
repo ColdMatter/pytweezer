@@ -7,7 +7,7 @@ second MotMaster whose sequence emits that trigger. The armed MotMaster's call
 will not return until the second one fires, so the two must be launched
 concurrently::
 
-    from pytweezer.parallel import run_parallel, after
+    from pytweezer.helper_scripts.parallel import run_parallel, after
     from pytweezer.servers.device_client import get_device
 
     cam = get_device("Rb HamCam")

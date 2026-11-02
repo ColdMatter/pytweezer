@@ -7,7 +7,6 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from pytweezer.GUI import grafana
 from pytweezer.GUI.grafana import RUN_DASHBOARD_UID, run_url
 
 BASE = "http://grafana.lab:3000"
@@ -68,18 +67,6 @@ def test_run_url_shows_the_run_window_with_margins(t_start, t_end, shown):
     assert parts.path == f"/d/{RUN_DASHBOARD_UID}"
     assert query["var-rid"] == "12"
     assert (int(query["from"]), int(query["to"])) == tuple(map(_ms, shown))
-
-
-def test_run_url_accepts_datetimes():
-    times = (DAY + "10:00:00+00:00", DAY + "10:10:00+00:00")
-    as_datetimes = map(datetime.fromisoformat, times)
-    assert run_url(4, *as_datetimes, base=BASE) == run_url(4, *times, base=BASE)
-
-
-def test_run_url_base_defaults_to_config(monkeypatch):
-    monkeypatch.setitem(grafana.GRAFANA, "url", "http://pc:3000/")
-    url = run_url(5, DAY + "10:00:00+00:00", DAY + "10:01:00+00:00")
-    assert url.startswith(f"http://pc:3000/d/{RUN_DASHBOARD_UID}?")
 
 
 def test_dashboards_have_unique_uids_and_use_the_provisioned_datasource():

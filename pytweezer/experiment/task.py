@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from pytweezer.experiment.scan import Scan
 
@@ -58,6 +58,15 @@ class TaskRequest(BaseModel):
     due_time: datetime | None = None
     label: str = ""
     submitter: str = ""
+    pipeline: str = Field(
+        "main",
+        description="tasks in one pipeline run one at a time, in queue order",
+    )
+
+    @field_validator("pipeline")
+    @classmethod
+    def _strip_pipeline(cls, pipeline: str) -> str:
+        return pipeline.strip() or "main"
 
     @property
     def key(self) -> str:
@@ -78,3 +87,7 @@ class Task(TaskRequest):
     points_total: int | None = None
     h5_path: str | None = Field(None, description="relative to the data root")
     error: str | None = None
+    devices: list[str] | None = Field(
+        None,
+        description="canonical names of the devices it reserves; None until resolved",
+    )

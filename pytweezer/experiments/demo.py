@@ -1,10 +1,17 @@
 """Device-free experiments for trying out the queue, GUI and storage."""
 
 import time
+from typing import ClassVar
 
 import numpy as np
 
 from pytweezer.experiment import Experiment, Integer, Number
+from pytweezer.experiment.optimisers import (
+    BayesianOptimisation,
+    Dimension,
+    Stage,
+    StagedScan,
+)
 
 
 class RabiDemo(Experiment):
@@ -28,3 +35,46 @@ class RabiDemo(Experiment):
         image = self.rng.poisson(excited * self.cloud / self.cloud.sum() * 50)
         self.record("excited_fraction", excited / self.atoms)
         self.record("image", image.astype(np.uint16))
+
+
+class DemoResonance(Experiment):
+    """Simulated counts on a Lorentzian resonance, scaled by power, with Poisson noise."""
+
+    noise_seed = Integer(0)
+
+    centre = 1.3
+    half_width = 0.8
+    peak_counts = 1000
+
+    def prepare(self):
+        self.rng = np.random.default_rng(self.noise_seed)
+
+    def measure(self, *, detuning: float = 0.0, power: float = 1.0) -> dict[str, float]:
+        lineshape = self.half_width**2 / (
+            (detuning - self.centre) ** 2 + self.half_width**2
+        )
+        return {"counts": float(self.rng.poisson(self.peak_counts * power * lineshape))}
+
+    def run_point(self):
+        for name, value in self.measure().items():
+            self.record(name, value)
+
+
+class DemoStagedScan(StagedScan, DemoResonance):
+    """Finds the demo resonance, then the power at that detuning."""
+
+    objective = "counts"
+    stages: ClassVar[list[Stage]] = [
+        Stage("detuning", start=-5.0, stop=5.0, points=21, save_as="demo_resonance"),
+        Stage("power", start=0.1, stop=1.0, points=10, save_as="demo_power"),
+    ]
+
+
+class DemoBayesian(BayesianOptimisation, DemoResonance):
+    """Finds the demo resonance and power together by Bayesian optimisation."""
+
+    objective = "counts"
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("detuning", low=-5.0, high=5.0, save_as="demo_resonance"),
+        Dimension("power", low=0.1, high=1.0, save_as="demo_power"),
+    ]

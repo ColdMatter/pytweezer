@@ -20,8 +20,13 @@ import numpy as np
 import pandas as pd
 
 from pytweezer.configuration.config import DATABASE
-from pytweezer.database.backfill import load_with_scalars, point_rows
-from pytweezer.experiment.storage import Measurement, data_root
+from pytweezer.database.backfill import (
+    load_with_scalars,
+    point_rows,
+    scalar_result_names,
+)
+from pytweezer.experiment.archive import default_archive
+from pytweezer.experiment.storage import Measurement
 
 
 def _connect(dsn=None):
@@ -102,7 +107,9 @@ def _measurement_for(source, dsn):
             ).fetchone()
         if row is None or row[0] is None:
             raise LookupError(f"no measurement file recorded for rid {source}")
-        source = data_root() / row[0]
+        archive = default_archive()
+        names = scalar_result_names(archive.load(row[0], results=[]))
+        return archive.load(row[0], results=names)
     return load_with_scalars(Path(source))
 
 

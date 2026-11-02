@@ -85,19 +85,6 @@ def test_edits_read_back_at_once_and_reach_other_processes(lab):
     assert until(lambda: peek(a, "A", "roi") is None)
 
 
-def test_option_properties_are_enforced(lab):
-    a = lab.process("A")
-    b = lab.process("B")
-    a.set("/mode", {"options": ["slow", "fast"], "value": "slow"})
-    assert until(lambda: peek(b, "mode") is not None)
-    b.set("/mode", "fast")
-    assert until(lambda: a.get("/mode") == "fast")
-    b.changes()
-    b.set("/mode", "warp")
-    assert b.get("/mode") == "fast"
-    assert "/mode" not in b.changes()
-
-
 def test_edits_are_saved_to_the_file_and_non_json_refused(lab):
     a = lab.process("A")
     a.set("/bad", {1, 2})

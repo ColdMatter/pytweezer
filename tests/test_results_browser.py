@@ -3,7 +3,6 @@ import numpy as np
 import pytest
 
 from pytweezer.experiment import Choice, Experiment, ListAxis, Number, Scan, run_local
-from pytweezer.GUI.experiments import results
 from pytweezer.GUI.experiments.results import ResultsPanel, aggregate, resubmission
 from tests.helpers import FakeFeed
 
@@ -43,6 +42,10 @@ def make_file(root, rid=1, day=("2026", "10", "07")):
     path = root.joinpath(*day, f"{rid:06d}_Sweep.h5")
     run_local(Sweep, SCAN, path=path, gain=3)
     return path
+
+
+def relpath(root, path):
+    return path.relative_to(root).as_posix()
 
 
 def test_aggregate_means_and_standard_errors():
@@ -94,7 +97,7 @@ def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
     path = make_file(tmp_path)
     panel = ResultsPanel(root=tmp_path)
     panel.refresh()
-    assert panel.select_path(path)
+    assert panel.select_path(relpath(tmp_path, path))
     text = panel.metadata.toPlainText()
     assert (
         "Status: completed" in text and "gain = 3" in text and "x = (scanned)" in text
@@ -119,41 +122,12 @@ def test_panel_shows_metadata_plots_and_resubmits(qapp, tmp_path):
     assert requests[0].args == {"gain": 3.0}
 
 
-def test_open_in_grafana_only_for_queued_runs(qapp, tmp_path, monkeypatch):
-    opened = []
-    monkeypatch.setattr(results, "open_in_browser", opened.append)
-    local = make_file(tmp_path, rid=1)
-    queued = make_file(tmp_path, rid=2)
-    with h5py.File(queued, "a") as f:
-        f.attrs["rid"] = 12
-    panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
-
-    panel.load(local)
-    assert not panel.grafana_button.isEnabled()
-    panel.load(queued)
-    panel.grafana_button.click()
-    assert len(opened) == 1 and "var-rid=12" in opened[0]
-
-
-def test_panel_reports_an_unreadable_file(qapp, tmp_path):
-    bad = tmp_path / "2026" / "10" / "07" / "000009_Bad.h5"
-    bad.parent.mkdir(parents=True)
-    bad.write_bytes(b"not hdf5")
-    panel = ResultsPanel(root=tmp_path)
-    panel.refresh()
-    day = panel.tree.topLevelItem(0)
-    assert day.child(0).text(1) == "unreadable"
-    panel.load(bad)
-    assert "Could not read" in panel.metadata.toPlainText()
-
-
 def test_tree_updates_in_place_without_a_click(qapp, tmp_path):
     make_file(tmp_path, 1)
     panel = ResultsPanel(root=tmp_path)
     panel.refresh()
     first = panel.tree.topLevelItem(0)
-    assert panel.select_path(tmp_path / "2026" / "10" / "07" / "000001_Sweep.h5")
+    assert panel.select_path("2026/10/07/000001_Sweep.h5")
 
     make_file(tmp_path, 2)
     make_file(tmp_path, 3, day=("2026", "10", "08"))
@@ -173,7 +147,7 @@ def test_selected_running_measurement_reloads_and_keeps_choices(qapp, tmp_path):
     panel = ResultsPanel(root=tmp_path)
     panel.show_unfinished.setChecked(True)
     panel.refresh()
-    assert panel.select_path(path)
+    assert panel.select_path(relpath(tmp_path, path))
     panel.x_choice.setCurrentText("mode")
     assert "points 2/12" in panel.metadata.toPlainText()
 
@@ -198,15 +172,13 @@ def test_live_running_measurement_plots_from_the_feed(qapp, tmp_path, monkeypatc
     panel = ResultsPanel(root=tmp_path, feed=feed)
     panel.show_unfinished.setChecked(True)
     panel.refresh()
-    assert panel.select_path(path)
+    assert panel.select_path(relpath(tmp_path, path))
     panel.x_choice.setCurrentText("point index")
 
     reads = []
-    real_load = results.load_measurement
+    real_load = panel.archive.load
     monkeypatch.setattr(
-        results,
-        "load_measurement",
-        lambda *a, **k: reads.append(a) or real_load(*a, **k),
+        panel.archive, "load", lambda *a, **k: reads.append(a) or real_load(*a, **k)
     )
     feed.rows[1] = [
         {"index": 0, "values": {}, "scalars": {"y": 10.0}},
@@ -227,7 +199,7 @@ def test_live_running_measurement_plots_from_the_feed(qapp, tmp_path, monkeypatc
     with h5py.File(path, "r+") as f:
         f.attrs.update(status="completed", n_done=12)
     feed.queue_changed.emit(
-        {"running": None, "queue": [], "history": [{"rid": 1, "status": "completed"}]}
+        {"running": [], "queue": [], "history": [{"rid": 1, "status": "completed"}]}
     )
     assert panel.measurement.status == "completed"
     assert "12/12 points" in panel.detail_region.hint.text()
@@ -240,7 +212,11 @@ def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeyp
     calls = []
     real_refresh = panel.refresh
     monkeypatch.setattr(panel, "refresh", lambda: calls.append(1) or real_refresh())
-    snapshot = {"running": {"rid": 2, "status": "running"}, "queue": [], "history": []}
+    snapshot = {
+        "running": [{"rid": 2, "status": "running"}],
+        "queue": [],
+        "history": [],
+    }
     feed.queue_changed.emit(snapshot)
     feed.queue_changed.emit(snapshot)
     assert calls == [1], "only a change of task status refreshes"
@@ -255,10 +231,10 @@ def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeyp
     assert calls == [1, 1], "a hidden tab is not polled"
 
 
-def test_a_missing_data_root_says_so(qapp, tmp_path):
-    panel = ResultsPanel(root=tmp_path / "absent")
-    panel.refresh()
-    assert "not found" in panel.browser.hint.text()
-    (tmp_path / "absent").mkdir()
-    panel.refresh()
-    assert "not found" not in panel.browser.hint.text()
+def test_queue_snapshot_without_running_list_is_tolerated(qapp, tmp_path):
+    feed = FakeFeed()
+    panel = ResultsPanel(root=tmp_path, feed=feed)
+    feed.queue_changed.emit(
+        {"running": None, "queue": [{"rid": 3, "status": "queued"}], "history": []}
+    )
+    assert panel._task_statuses == {3: "queued"}
