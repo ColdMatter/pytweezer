@@ -274,11 +274,11 @@ saved_parameter_history("level", limit=10)  # newest first; rid= for one run's
 - A set is all or none. Unknown keys are refused unless `create=True`; a key
   keeps its type (int accepted for a float), and an array keeps its number of
   dimensions and every axis length past the first.
-- Read them in `prepare()`/`run_point()` for the value at run time, or as an
-  argument default, `level = Number(get_saved_parameter("level"))` — read at
-  import, so the module contacts the manager when imported and the form's
-  **Defaults** button (which has the manager describe the experiment again)
-  re-reads it.
+- Read them in `prepare()`/`run_point()` for the value at run time, or, for a
+  calibration the form may override, declare a saved-backed argument. Never
+  read one into an argument default (`Number(get_saved_parameter(...))`): it is
+  read at import, and recipes and prefilled forms pin the value current then,
+  silently overriding later recalibrations.
 - A saved-backed argument, `blaze = Number(saved="slm_blaze_x", unit="um",
   scale=1e-6)` (a `Number` or `Integer` with `saved=` instead of a default), is
   `None` until the task starts, when `open_writer` gives it the saved value
