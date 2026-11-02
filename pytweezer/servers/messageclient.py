@@ -65,10 +65,13 @@ class MessageClient(GenericClient):
             else:
                 raise e
 
-    def has_new_data(self):
-        """check whether a new message has arrived (without reading it)"""
-        # print('hnd')
-        return self.sub_socket.poll(1) == zmq.POLLIN
+    def has_new_data(self, timeout_ms=1):
+        """check whether a new message has arrived (without reading it)
+
+        ``timeout_ms`` as for
+        :meth:`pytweezer.servers.clients.GenericClient.has_new_data`.
+        """
+        return self.sub_socket.poll(timeout_ms) == zmq.POLLIN
 
 
 _message_client = None
