@@ -75,8 +75,8 @@ without blocking in sequence.
 
 6. **If servers need to stay responsive during a blocking call** (abort a hung
    acquisition, keep status panels alive): make slow methods `async def` +
-   `asyncio.to_thread(...)`, and pass `allow_parallel=True` through
-   `run_device_server()` → `simple_server_loop()` (not currently exposed). Only
+   `asyncio.to_thread(...)`, and set `"allow_parallel": True` in the device's CONFIG entry (or pass
+   `--allow-parallel`), which `run_device_server()` hands to `serve()`. Only
    worth doing if there's a concrete need.
 
 7. **Skip `sipyco.fire_and_forget.FFProxy`** — it drops the return value and

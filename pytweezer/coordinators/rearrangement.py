@@ -45,7 +45,7 @@ raise a clear error where the GPU stack is absent.
 The remaining timing optimisation — preloading frames into the SLM's on-board memory
 and clocking them out with a hardware trigger (``preload_sequence`` /
 ``start_auto_increment``) instead of per-frame software writes — is described in
-``docs/rearrangement_coordinator.md``.
+``docs/notes/rearrangement_coordinator.md``.
 """
 
 import queue

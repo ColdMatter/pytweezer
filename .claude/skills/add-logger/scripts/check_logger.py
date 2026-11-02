@@ -26,6 +26,9 @@ import inspect
 import os
 import sys
 
+# Keep this check's log records off a running lab's Message hub.
+os.environ.setdefault("PYTWEEZER_LOG_PUBLISH", "0")
+
 import pytweezer
 from pytweezer.configuration.config import get_config
 from pytweezer.servers import logger_server

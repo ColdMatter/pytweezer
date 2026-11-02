@@ -11,17 +11,22 @@ are otherwise silent:
   drifts from the base class
 * a callable target, which sipyco would invoke instead of serving
 
+A composite's sub-devices are checked one by one, then built together.
+
 Usage:
-    uv run python check_device.py "Rb ThorLabs Camera"
+    uv run python check_device.py "Rb ORCA"
     uv run python check_device.py --all
 """
 
 import argparse
 import inspect
+import os
 import sys
 
-from pytweezer.servers.configreader import ConfigReader
+# Keep this check's log records off a running lab's Message hub.
+os.environ.setdefault("PYTWEEZER_LOG_PUBLISH", "0")
 
+from pytweezer.configuration.config import get_config
 from pytweezer.servers import device_server
 
 # Keys the framework consumes itself; they are expected not to match a
@@ -42,6 +47,8 @@ FRAMEWORK_KEYS = {
     "coordinator",
     "coordinator_target_name",
     "role",
+    # Read off the entry by pytweezer.experiment.motmaster, not by the driver.
+    "linked_partner",
 }
 
 problems = []
@@ -146,29 +153,39 @@ def check_device(name):
         problem("entry has no 'class' (expected a 'module.path:ClassName' string)")
         return
 
+    # Check each real class's wiring, without constructing it (that would open
+    # hardware). Construction is exercised below against the simulated classes.
     if "devices" in conf:
-        note("composite device - see docs/device_framework.md; checking sub-devices")
-
-    # Check the real class's wiring, without constructing it (that would open
-    # hardware). Construction is exercised below against the simulated class.
-    if conf.get("class"):
+        wired = [(sub, sub_conf) for sub, sub_conf in conf["devices"].items()]
+    else:
+        wired = [(canonical, conf)]
+    for device_name, device_conf in wired:
+        if device_name != canonical:
+            print(f"  -- sub-device {device_name!r}")
         try:
-            real_cls = device_server._load(conf["class"])
+            real_cls = device_server._load(device_conf["class"])
         except Exception as exc:
-            problem(f"cannot import {conf['class']!r}: {exc}")
-            return
+            problem(f"cannot import {device_conf.get('class')!r}: {exc}")
+            continue
         ok(f"real class imports: {real_cls.__module__}:{real_cls.__name__}")
         check_camera_hooks(real_cls)
-        check_config_keys(canonical, conf, real_cls)
+        check_config_keys(device_name, device_conf, real_cls)
 
     # Build in simulation: same code path as production, no hardware.
     sim_conf = dict(conf, simulate=True)
+    if "devices" in conf:
+        sim_conf["devices"] = {
+            sub: dict(sub_conf, simulate=True)
+            for sub, sub_conf in conf["devices"].items()
+        }
     try:
         spec = device_server.build_spec(canonical, conf=sim_conf)
     except Exception as exc:
         problem(f"build_spec failed in simulation: {type(exc).__name__}: {exc}")
         return
     ok(f"builds in simulation; RPC targets: {', '.join(sorted(spec.targets))}")
+    for failed in spec.failed:
+        problem(f"sub-device {failed!r} failed to build in simulation (see log)")
 
     for target_name, target in spec.targets.items():
         if callable(target):
@@ -208,7 +225,7 @@ def main():
     args = parser.parse_args()
 
     if args.all:
-        names = list(ConfigReader.getConfiguration().get("Devices", {}))
+        names = list(get_config().get("Devices", {}))
     elif args.name:
         names = [args.name]
     else:

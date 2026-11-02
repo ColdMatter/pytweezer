@@ -76,9 +76,12 @@ uv run pytweezer-device <name>  # start one device's RPC server standalone
 uv run pytweezer-logger <name>  # start one database logger standalone
 uv run pytweezer-experiment-manager <name>  # start the experiment queue manager standalone
 uv run pytweezer-kill-stale     # kill leftover processes holding ZMQ ports
+uv run pytweezer-db-backfill    # load existing measurement files into the database
 ```
 
-`start_servers.bat` / `start_client.bat` / `kill_stale.bat` wrap the above.
+`start_servers.bat` / `start_client.bat` / `kill_stale.bat` run the same entry
+points as `uv run python -m bin.launch [client]` / `bin.kill_stale`, because
+Windows Smart App Control blocks uv's unsigned `.exe` launchers.
 Run kill-stale after an unclean shutdown, when launch fails with "Address
 already in use".
 

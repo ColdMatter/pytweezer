@@ -9,9 +9,9 @@ Why offscreen + grab instead of ``pytweezer-server``:
   * No display is needed (works over SSH / in a non-interactive shell).
   * ``pytweezer-server``'s ControlPanel is controllable=True and would
     ``subprocess.Popen([sys.executable, ...])`` every active hub on
-    construction — heavy. The *client* GUI is
-    view-only (probes servers over TCP, spawns nothing), so it is the safe
-    default. Pass ``server`` only if you accept those subprocess spawns.
+    construction — heavy. The *client* GUI only probes the servers and loggers
+    over TCP, so it is the default, but its Devices tab still starts this PC's
+    active devices. Pass ``server`` only if you accept the hub spawns too.
 
 Panels that connect to the (usually unreachable) Properties server/Analysis Manager
 are wrapped in ``_safe_panel`` upstream, so they degrade to a placeholder label

@@ -23,6 +23,14 @@ The fakes reproduce the parts of the real transport that applets get wrong:
 * messages arrive in bursts, so several can be waiting per poll.
 * ``props.get(key, default)`` writes the default back, as the real Properties
   does — that is what puts a knob in the configure dialog.
+* image frames carry the camera's ``index``, ``timestamp`` and ROI origin
+  (``roi_x0``/``roi_y0``, set with ``--roi``), as ``Camera.broadcast_image``
+  sends them.
+
+The Experiment Manager is faked too: ``ExperimentFeed`` emits a synthetic
+experiment point per tick with ``--points``, and ``get_saved_parameters``
+returns what ``--saved`` seeds, so viewers of experiment results or of the
+saved trap sites build without a manager.
 
 Options:
     --class NAME        pick one Applet subclass when the module defines several
@@ -30,6 +38,10 @@ Options:
     --name NAME         applet instance name (default: the class name)
     --prop KEY=JSON     seed a property, repeatable (e.g. --prop "rotated=true")
     --scalars           feed header-only messages instead of arrays
+    --physical          add _offset/_imgresolution, placing images in metres
+    --roi X0,Y0         sensor pixel of each image's corner (default 0,0)
+    --points            emit one experiment point per tick on ExperimentFeed
+    --saved KEY=JSON    seed a saved parameter, repeatable
     --ticks N           feed N message bursts before grabbing (default 20)
     --size WxH          resize the window before grabbing
 
@@ -61,6 +73,10 @@ _SEED_PROPS = {}
 # Every fake stream client built during construction, so the feeder can find
 # them without the applet having to expose them.
 _STREAMS = []
+# Seeded by --saved and returned by the fake get_saved_parameters.
+_SEED_SAVED = {}
+# Every fake ExperimentFeed built, so the feeder can emit points on them.
+_FEEDS = []
 
 
 class FakeProperties:
@@ -120,7 +136,7 @@ class FakeStream:
         elif channel in self.subscriptions:
             self.subscriptions.remove(channel)
 
-    def has_new_data(self):
+    def has_new_data(self, timeout_ms=1):
         return bool(self.queue)
 
     def recv(self, flags=0, copy=True, track=False):
@@ -146,19 +162,56 @@ class FakeImageClient(FakeStream):
     kind = "image"
 
 
+def make_fake_feed():
+    """Stand-in for :class:`pytweezer.GUI.experiments.feed.ExperimentFeed`.
+
+    Built lazily because its signals need PyQt6 imported.
+    """
+    from PyQt6 import QtCore
+
+    class FakeExperimentFeed(QtCore.QObject):
+        queue_changed = QtCore.pyqtSignal(dict)
+        point_received = QtCore.pyqtSignal(dict)
+        connection_changed = QtCore.pyqtSignal(bool)
+
+        def __init__(self, address=None, poll_interval_ms=200, parent=None):
+            super().__init__(parent)
+            self.connected = True
+            self.emitted = 0
+            _FEEDS.append(self)
+
+        def snapshot(self):
+            return {}
+
+        def points(self, rid):
+            return []
+
+        def held_points(self):
+            return {}
+
+        def close(self):
+            pass
+
+    return FakeExperimentFeed
+
+
 def install_fakes():
-    """Patch the transport before any GUI module imports it.
+    """Patch the transport and the manager client before any GUI module imports them.
 
     Applet modules do ``from pytweezer.servers import DataClient``, which binds
     the name at import time — so the attributes have to be replaced on the
     package before the applet module is loaded.
     """
     from pytweezer import servers
+    from pytweezer.experiment import client
+    from pytweezer.GUI.experiments import feed
 
     servers.Properties = FakeProperties
     servers.DataClient = FakeDataClient
     servers.ImageClient = FakeImageClient
     servers.CommandClient = FakeDataClient
+    client.get_saved_parameters = lambda *args, **kwargs: copy.deepcopy(_SEED_SAVED)
+    feed.ExperimentFeed = make_fake_feed()
 
 
 def _channel_phase(channel):
@@ -195,13 +248,15 @@ def synth_trace(tick, channel=""):
     return np.vstack([coords, values])
 
 
-def synth_header(tick, channel="", array=None, physical=False):
+def synth_header(tick, channel="", array=None, physical=False, roi=None):
     offset = _channel_phase(channel)
     head = {
         "timestamp": time.time(),
-        "index": 0,
-        "_imgindex": tick % 3,
+        # Frame within a two-image shot, as a camera numbers a shot's frames.
+        "index": tick % 2,
     }
+    if roi is not None:
+        head["roi_x0"], head["roi_y0"] = roi
     if physical:
         # Only some publishers set these; an applet must treat them as optional.
         # They are off by default because a metres-per-pixel scale shrinks the
@@ -220,19 +275,40 @@ def synth_header(tick, channel="", array=None, physical=False):
     return head
 
 
-def feed(tick, scalars=False, physical=False):
+def synth_point(tick):
+    """One experiment point, as ``ExperimentFeed.point_received`` carries it."""
+    detuning = -5e6 + 0.5e6 * tick
+    now = time.time()
+    return {
+        "rid": 1 + tick // 10,
+        "index": tick % 10,
+        "values": {"detuning": detuning},
+        "scalars": {
+            "atom_number": float(100 + 80 * np.exp(-((detuning / 2e6) ** 2))),
+            "loading": float(0.5 + 0.1 * np.sin(tick / 3.0)),
+        },
+        "t_start": now,
+        "t_end": now,
+    }
+
+
+def feed(tick, scalars=False, physical=False, points=False, roi=(0, 0)):
     """Push one message per subscription onto every fake stream."""
+    if points:
+        for experiment_feed in _FEEDS:
+            experiment_feed.point_received.emit(synth_point(tick))
+            experiment_feed.emitted += 1
     for stream in _STREAMS:
         for channel in stream.subscriptions:
             if scalars:
                 # Header-only: recv() gives a 2-tuple, as the real client does.
                 stream.push((channel, synth_header(tick, channel, physical=physical)))
                 continue
-            if stream.kind == "image":
-                array = synth_image(tick, channel)
-            else:
-                array = synth_trace(tick, channel)
-            head = synth_header(tick, channel, array, physical=physical)
+            image = stream.kind == "image"
+            array = synth_image(tick, channel) if image else synth_trace(tick, channel)
+            head = synth_header(
+                tick, channel, array, physical=physical, roi=roi if image else None
+            )
             stream.push((channel, head, array))
 
 
@@ -301,6 +377,24 @@ def main():
         help="include _offset/_imgresolution so coordinates are in metres",
     )
     parser.add_argument(
+        "--roi",
+        default="0,0",
+        metavar="X0,Y0",
+        help="sensor pixel of each image's corner, as roi_x0/roi_y0",
+    )
+    parser.add_argument(
+        "--points",
+        action="store_true",
+        help="emit one synthetic experiment point per tick",
+    )
+    parser.add_argument(
+        "--saved",
+        action="append",
+        default=[],
+        metavar="KEY=JSON",
+        help="seed a saved parameter, repeatable",
+    )
+    parser.add_argument(
         "--ticks", type=int, default=20, help="message bursts before grabbing"
     )
     parser.add_argument(
@@ -313,12 +407,15 @@ def main():
     )
     args = parser.parse_args()
 
-    for item in args.prop:
-        key, _, raw = item.partition("=")
-        try:
-            _SEED_PROPS[key] = json.loads(raw)
-        except json.JSONDecodeError:
-            _SEED_PROPS[key] = raw  # a bare string is the common case
+    for items, seeds in ((args.prop, _SEED_PROPS), (args.saved, _SEED_SAVED)):
+        for item in items:
+            key, _, raw = item.partition("=")
+            try:
+                seeds[key] = json.loads(raw)
+            except json.JSONDecodeError:
+                seeds[key] = raw  # a bare string is the common case
+
+    roi = tuple(int(part) for part in args.roi.split(","))
 
     install_fakes()
 
@@ -354,7 +451,13 @@ def main():
     state = {"tick": 0}
 
     def tick():
-        feed(state["tick"], scalars=args.scalars, physical=args.physical)
+        feed(
+            state["tick"],
+            scalars=args.scalars,
+            physical=args.physical,
+            points=args.points,
+            roi=roi,
+        )
         state["tick"] += 1
         if state["tick"] >= args.ticks:
             timer.stop()
@@ -374,6 +477,7 @@ def main():
     consumed = sum(s.received for s in _STREAMS)
     pending = sum(len(s.queue) for s in _STREAMS)
     published = sum(s.sent for s in _STREAMS)
+    points = sum(f.emitted for f in _FEEDS)
 
     print(f"[preview] {applet_cls.__name__}  ->  {out}")
     print(f"[preview] size        {applet.width()}x{applet.height()}")
@@ -381,6 +485,8 @@ def main():
         f"[preview] subscribed  {subscribed or 'NOTHING - check update_subscriptions()'}"
     )
     print(f"[preview] consumed    {consumed} messages ({pending} left unread)")
+    if _FEEDS:
+        print(f"[preview] experiment  {points} points emitted on the feed")
     if published:
         print(
             f"[preview] published   {published} messages — applets should be consumers only"
