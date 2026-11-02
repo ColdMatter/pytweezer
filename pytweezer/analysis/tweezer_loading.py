@@ -1,4 +1,4 @@
-"""Tweezer-array loading statistics over a rolling window of shots.
+"""Tweezer-array loading statistics over the shots of the current task.
 
 The live counterpart of ``analysis.get_array_loading_statistics`` as run in
 the optimisation notebooks: each frame is top-hat filtered, a box is summed at
@@ -16,14 +16,15 @@ Output:
     ``site_loading``, ``site_rows``/``site_cols`` (pixels in the frame) and the
     fit components ``background``/``signal`` as ``[mean, variance, weight]``.
     ``sites_from`` says where the number of sites came from: ``"rig"`` or
-    ``"property"``. Until the sites are found the message is header-only, with
-    ``shots``, ``sites`` and ``sites_from``.
+    ``"property"``, and ``rid`` is the task the frames came from. Until the
+    sites are found the message is header-only, with ``shots``, ``sites``,
+    ``sites_from`` and ``rid``.
 
 Properties:
     *   imagestreams: ([str]) input image streams.
     *   image_index: (int) which frame of a shot to score, by its ``index``
         header; 0 is the loading image.
-    *   shots: (int) frames in the rolling window.
+    *   shots: (int) most recent frames of the task kept in the window.
     *   rig: (str) device that knows which array is on the SLM, asked for
         the number of sites; empty to use ``sites`` alone.
     *   sites: (int) trap sites in the array, when the rig does not know.
@@ -34,13 +35,16 @@ Properties:
     *   threshold: (float) occupancy threshold in photons, used only when the
         two-Gaussian fit fails.
 
+A frame whose ``rid`` header differs from the last one starts the analysis
+afresh, so each task is analysed on its own shots. Frames without a ``rid``
+(from a notebook, say) count as one run of their own.
+
 The rig is asked at most every ``RIG_REFRESH_S`` seconds, and its last answer
 is kept while it cannot be reached. It does not know the array when the SLM was
 last written by anything but the rig, and ``sites`` is used then.
 
 The sites are re-found in the mean of the window on every frame and kept from
-the last success, so after the array is moved they follow once the old frames
-have left the window. A change of frame size empties the window.
+the last success. A change of frame size empties the window.
 """
 
 import time
@@ -165,6 +169,7 @@ class TweezerLoading(ImageAnalysis):
     _rig_client = None
     _rig_array = None
     _rig_asked_at = -np.inf
+    _rid = None
 
     def __init__(self, name):
         super().__init__(name)
@@ -194,6 +199,12 @@ class TweezerLoading(ImageAnalysis):
         image_index = int(self._image_index)
         if data.ndim != 2 or head.get("index", image_index) != image_index:
             return
+        rid = head.get("rid")
+        if rid != self._rid:
+            self._rid = rid
+            self.statistics = LoadingStatistics()
+            # A new task may have just put a new array on the SLM.
+            self._rig_asked_at = -np.inf
         self.statistics.add(
             data, shots=max(1, int(self._shots)), feature_size=int(self._feature_size)
         )
@@ -205,6 +216,7 @@ class TweezerLoading(ImageAnalysis):
             fallback_threshold=float(self._threshold),
         )
         out_head["sites_from"] = "rig" if array else "property"
+        out_head["rid"] = rid
         if "timestamp" in head:
             out_head["timestamp"] = head["timestamp"]
         self.dataq.send(out_head, photons)

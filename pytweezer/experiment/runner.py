@@ -55,6 +55,7 @@ def open_writer(
     ``allowed_devices`` the experiment may only open those canonical device names.
     """
     experiment = experiment_cls(args)
+    experiment.rid = header.get("rid")
     if allowed_devices is not None:
         experiment.allowed_devices = frozenset(allowed_devices)
     if simulate:

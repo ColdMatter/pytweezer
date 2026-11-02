@@ -249,11 +249,16 @@ def test_tweezer_loading_publishes_no_photons_until_it_finds_the_sites():
     )
     analysis.statistics = LoadingStatistics()
 
-    analysis.process({"index": 0}, tweezer_frame([]))
+    analysis.process({"index": 0, "rid": 4}, tweezer_frame([]))
 
     ((head, data, _),) = analysis.dataq.sent
     assert data is None
-    assert head == {"shots": 1, "sites": len(SITE_CENTRES), "sites_from": "property"}
+    assert head == {
+        "shots": 1,
+        "sites": len(SITE_CENTRES),
+        "sites_from": "property",
+        "rid": 4,
+    }
 
 
 def test_tweezer_loading_ignores_the_second_image_of_a_shot():
@@ -315,3 +320,24 @@ def test_tweezer_loading_takes_the_number_of_sites_from_the_rig_when_it_knows(
 
     head, _, _ = analysis.dataq.sent[-1]
     assert (head["sites"], head["sites_from"]) == (sites, sites_from)
+
+
+def test_tweezer_loading_starts_afresh_when_a_new_task_sends_frames():
+    from pytweezer.analysis.tweezer_loading import LoadingStatistics, TweezerLoading
+
+    analysis = build(
+        TweezerLoading,
+        {"rig": "", "sites": len(SITE_CENTRES), "detection_step": 10, "shots": 100},
+    )
+    analysis.statistics = LoadingStatistics()
+
+    for shot in range(20):
+        analysis.process(
+            {"index": 0, "rid": 1}, tweezer_frame(SITE_CENTRES, seed=100 + shot)
+        )
+    for shot in range(20):
+        analysis.process({"index": 0, "rid": 2}, patterned_frame(shot))
+
+    head, _, _ = analysis.dataq.sent[-1]
+    assert (head["rid"], head["shots"]) == (2, 20)
+    assert head["loading"] == pytest.approx(sum(LOADED_IN_TEN) / 10 / len(SITE_CENTRES))

@@ -38,7 +38,9 @@ class LoadTweezers(MotMasterExperiment):
         """Run the sequence once with ``overrides`` and return the two HamCam frames."""
         self.camera.start_acquisition()
         self.run_sequences(**overrides)
-        first_image, second_image = self.camera.acquire_n_frames(2, broadcast=True)
+        first_image, second_image = self.camera.acquire_n_frames(
+            2, broadcast=True, header={"rid": self.rid}
+        )
         self.camera.stop_acquisition()
         return first_image, second_image
 

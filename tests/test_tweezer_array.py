@@ -47,6 +47,7 @@ class FakeHamCam:
 
     def __init__(self, sequencer):
         self.sequencer = sequencer
+        self.headers = []
         self.rng = np.random.default_rng(1)
         y, x = np.mgrid[:128, :128]
         self.spots = np.array(
@@ -69,7 +70,8 @@ class FakeHamCam:
         atoms = np.tensordot(occupied, self.spots, axes=1)
         return self.rng.poisson(100 + atoms).astype(np.uint16)
 
-    def acquire_n_frames(self, n, broadcast=False):
+    def acquire_n_frames(self, n, broadcast=False, header=None):
+        self.headers.append(header)
         loaded = self.rng.random(len(SITES)) < LOADING
         if self.sequencer.goes[-1].get("tTweezerSetVVA0") == 0.0:
             kept = np.zeros(len(SITES), dtype=bool)
@@ -96,9 +98,10 @@ def rig(monkeypatch):
     sequencer = FakeSequencer()
     rearrangement_rig = FakeRig()
     sequencer.rearrangement_rig = rearrangement_rig
+    sequencer.camera = FakeHamCam(sequencer)
     devices = {
         "Rb MotMaster": sequencer,
-        "Rb HamCam": FakeHamCam(sequencer),
+        "Rb HamCam": sequencer.camera,
         "Rb Rearrangement Rig": rearrangement_rig,
     }
     monkeypatch.setattr(
@@ -134,6 +137,12 @@ def test_calibration_finds_as_many_sites_as_the_rig_says_are_on_the_slm(
     assert measurement.status == "completed", measurement.attrs.get("error")
     assert len(measurement.constants["trap_sites"]) == len(SITES)
     assert measurement.constants["sites_from"] == sites_from
+
+
+def test_every_shot_broadcasts_its_frames_tagged_with_the_task(rig):
+    run_local(TweezerImaging, **FAST)
+    assert rig.camera.headers
+    assert all(header == {"rid": -1} for header in rig.camera.headers)
 
 
 def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(rig):
