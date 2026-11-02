@@ -80,9 +80,7 @@ a cropped frame.
 mode="sequence")` takes both, and the base `arm()` calls it; a camera with no
 acquisition modes (the Thorlabs ones) accepts `mode` and ignores it. A shim
 that narrows a signature will `TypeError` the moment a caller uses the
-documented interface; the checker flags it. `thorcam.py` still carries a
-pre-framework `main()`/`run_server` and a hand-built client, none of which a
-new driver needs.
+documented interface; the checker flags it.
 
 ## Writing a generic driver
 
