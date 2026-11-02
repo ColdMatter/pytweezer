@@ -200,10 +200,7 @@ def loading_window(frames, shots=100):
     for frame in frames:
         statistics.add(frame, shots=shots, feature_size=10)
     return statistics.summary(
-        n_sites=len(SITE_CENTRES),
-        window_size=5,
-        detection_step=10,
-        fallback_threshold=0.0,
+        sites=dict(enumerate(SITE_CENTRES)), window_size=5, fallback_threshold=0.0
     )
 
 
@@ -286,15 +283,7 @@ def test_loading_statistics_fall_back_like_the_notebook_analysis(monkeypatch):
 def test_tweezer_loading_counts_each_site_as_often_as_it_was_full():
     head, photons = loading_window(patterned_frame(shot) for shot in range(40))
 
-    # Each found site is credited to the nearest true centre, so the test does
-    # not depend on how the site finder rounds a spot's position.
-    found = np.column_stack([head["site_rows"], head["site_cols"]])
-    loading = np.zeros(len(SITE_CENTRES))
-    for (row, col), site_loading in zip(found, head["site_loading"], strict=True):
-        distances = np.hypot(*(np.array(SITE_CENTRES) - (row, col)).T)
-        assert distances.min() <= 1.5
-        loading[distances.argmin()] = site_loading
-    assert loading == pytest.approx(np.array(LOADED_IN_TEN) / 10)
+    assert head["site_loading"] == pytest.approx(np.array(LOADED_IN_TEN) / 10)
     assert photons.shape == (40, len(SITE_CENTRES))
 
 
@@ -316,25 +305,68 @@ def test_tweezer_loading_scores_only_the_last_shots_in_the_window():
     assert head["loading"] == pytest.approx(sum(LOADED_IN_TEN) / 10 / len(SITE_CENTRES))
 
 
-def test_tweezer_loading_publishes_no_photons_until_it_finds_the_sites():
+ROI_ORIGIN = {"roi_x0": 50, "roi_y0": 100}
+
+
+def saved_sites(**changes):
+    from pytweezer.analysis.trap_sites import default_geometry
+
+    return {
+        "trap_sites": np.array(SITE_CENTRES, dtype=float)
+        + [ROI_ORIGIN["roi_y0"], ROI_ORIGIN["roi_x0"]],
+        "trap_threshold": 0.0,
+        "trap_window_size": 5,
+        "trap_feature_size": 10,
+        "trap_geometry": default_geometry(4, 4),
+    } | changes
+
+
+def loading_analysis(monkeypatch, saved, **properties):
+    from pytweezer.analysis import tweezer_loading
     from pytweezer.analysis.tweezer_loading import LoadingStatistics, TweezerLoading
 
-    analysis = build(
-        TweezerLoading,
-        {"rig": "", "sites": len(SITE_CENTRES), "detection_step": 10},
-    )
+    monkeypatch.setattr(tweezer_loading, "get_saved_parameters", lambda: saved)
+    analysis = build(TweezerLoading, {"rig": ""} | properties)
     analysis.statistics = LoadingStatistics()
+    return analysis
+
+
+def test_tweezer_loading_scores_the_saved_sites_in_the_frames_roi(monkeypatch):
+    analysis = loading_analysis(monkeypatch, saved_sites())
+
+    for shot in range(20):
+        analysis.process({"index": 0, "rid": 4, **ROI_ORIGIN}, patterned_frame(shot))
+
+    head, photons, _ = analysis.dataq.sent[-1]
+    assert (head["site_rows"], head["site_cols"]) == (
+        [row for row, _ in SITE_CENTRES],
+        [col for _, col in SITE_CENTRES],
+    )
+    assert head["site_loading"] == pytest.approx(np.array(LOADED_IN_TEN) / 10)
+    assert photons.shape == (20, len(SITE_CENTRES))
+
+
+def test_tweezer_loading_publishes_no_photons_without_saved_sites(monkeypatch):
+    analysis = loading_analysis(monkeypatch, {})
 
     analysis.process({"index": 0, "rid": 4}, tweezer_frame([]))
 
     ((head, data, _),) = analysis.dataq.sent
     assert data is None
-    assert head == {
-        "shots": 1,
-        "sites": len(SITE_CENTRES),
-        "sites_from": "property",
-        "rid": 4,
-    }
+    assert head["rid"] == 4
+    assert "FindTrapSites" in head["error"]
+
+
+def test_tweezer_loading_publishes_no_photons_for_sites_outside_the_frame(
+    monkeypatch,
+):
+    analysis = loading_analysis(monkeypatch, saved_sites())
+
+    analysis.process({"index": 0, "roi_x0": 0, "roi_y0": 0}, tweezer_frame([]))
+
+    ((head, data, _),) = analysis.dataq.sent
+    assert data is None
+    assert "outside" in head["error"]
 
 
 def test_tweezer_loading_ignores_the_second_image_of_a_shot():
@@ -373,46 +405,56 @@ def unreachable_rig(name, timeout):
 
 
 @pytest.mark.parametrize(
-    "get_rig, sites, sites_from",
+    "get_rig, match",
     [
-        (lambda name, timeout: ArrayRig({"sites": len(SITE_CENTRES)}), 16, "rig"),
-        (lambda name, timeout: ArrayRig(None), 64, "property"),
-        (unreachable_rig, 64, "property"),
+        (lambda name, timeout: ArrayRig(None), True),
+        (unreachable_rig, True),
+        (
+            lambda name, timeout: ArrayRig(
+                {
+                    "x_um": saved_sites()["trap_geometry"][:, 0],
+                    "y_um": saved_sites()["trap_geometry"][:, 1],
+                }
+            ),
+            True,
+        ),
+        (
+            lambda name, timeout: ArrayRig(
+                {
+                    "x_um": saved_sites()["trap_geometry"][:, 0] + 1.0,
+                    "y_um": saved_sites()["trap_geometry"][:, 1],
+                }
+            ),
+            False,
+        ),
     ],
-    ids=["rig knows", "rig does not know", "rig unreachable"],
+    ids=["rig does not know", "rig unreachable", "same array", "another array"],
 )
-def test_tweezer_loading_takes_the_number_of_sites_from_the_rig_when_it_knows(
-    monkeypatch, get_rig, sites, sites_from
+def test_tweezer_loading_says_whether_the_sites_fit_the_array_on_the_rig(
+    monkeypatch, get_rig, match
 ):
     from pytweezer.analysis import tweezer_loading
-    from pytweezer.analysis.tweezer_loading import LoadingStatistics, TweezerLoading
 
     monkeypatch.setattr(tweezer_loading, "get_device", get_rig)
-    analysis = build(TweezerLoading, {"sites": 64, "detection_step": 10})
-    analysis.statistics = LoadingStatistics()
+    analysis = loading_analysis(monkeypatch, saved_sites(), rig="Rb Rearrangement Rig")
 
-    for shot in range(20):
-        analysis.process({"index": 0}, patterned_frame(shot))
+    for shot in range(5):
+        analysis.process({"index": 0, **ROI_ORIGIN}, patterned_frame(shot))
 
     head, _, _ = analysis.dataq.sent[-1]
-    assert (head["sites"], head["sites_from"]) == (sites, sites_from)
+    assert head["sites_match"] is match
 
 
-def test_tweezer_loading_starts_afresh_when_a_new_task_sends_frames():
-    from pytweezer.analysis.tweezer_loading import LoadingStatistics, TweezerLoading
-
-    analysis = build(
-        TweezerLoading,
-        {"rig": "", "sites": len(SITE_CENTRES), "detection_step": 10, "shots": 100},
-    )
-    analysis.statistics = LoadingStatistics()
+def test_tweezer_loading_starts_afresh_when_a_new_task_sends_frames(monkeypatch):
+    analysis = loading_analysis(monkeypatch, saved_sites(), shots=100)
 
     for shot in range(20):
         analysis.process(
-            {"index": 0, "rid": 1}, tweezer_frame(SITE_CENTRES, seed=100 + shot)
+            {"index": 0, "rid": 1, **ROI_ORIGIN},
+            tweezer_frame(SITE_CENTRES, seed=100 + shot),
         )
     for shot in range(20):
-        analysis.process({"index": 0, "rid": 2}, patterned_frame(shot))
+        analysis.process({"index": 0, "rid": 2, **ROI_ORIGIN}, patterned_frame(shot))
 
     head, _, _ = analysis.dataq.sent[-1]
     assert (head["rid"], head["shots"]) == (2, 20)

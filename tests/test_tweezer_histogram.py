@@ -11,7 +11,6 @@ from pytweezer.experiments.load_tweezers import LoadTweezers
 from pytweezer.experiments.tweezer_array import TweezerImaging
 from tests.test_analysis import (
     SITE_CENTRES,
-    loading_window,
     patterned_frame,
     tweezer_frame,
 )
@@ -34,11 +33,17 @@ def frames_file(scan=None):
     return run_local(ImagesArray, scan or Scan(repetitions=40))
 
 
-def test_frames_file_gives_the_live_analysis_result():
+def test_frames_file_gives_the_live_analysis_result_at_the_sites_it_found():
+    from pytweezer.analysis.tweezer_loading import LoadingStatistics
+
     head, photons = tweezer_histogram(frames_file(), FRAMES_SETTINGS)
 
-    expected_head, expected_photons = loading_window(
-        patterned_frame(shot) for shot in range(40)
+    statistics = LoadingStatistics()
+    for shot in range(40):
+        statistics.add(patterned_frame(shot), shots=100, feature_size=10)
+    found = dict(enumerate(zip(head["site_rows"], head["site_cols"], strict=True)))
+    expected_head, expected_photons = statistics.summary(
+        sites=found, window_size=5, fallback_threshold=0.0
     )
     assert head["source"] == "frames"
     assert photons == pytest.approx(expected_photons)
