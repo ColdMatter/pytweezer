@@ -59,7 +59,7 @@ def open_writer(
         experiment.allowed_devices = frozenset(allowed_devices)
     if simulate:
         experiment.simulated_devices = SimulatedDevices()
-    points = scan.points(experiment_cls)
+    points = experiment.planned_points(scan)
     writer = MeasurementWriter(
         path,
         header={

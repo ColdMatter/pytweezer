@@ -42,6 +42,11 @@ uv run pytest tests/ -q         # run the test suite
 uv run python <script>.py       # run any script inside the venv
 ```
 
+**Tests follow the design, never the other way round.** Design for the lab as
+it runs; when a design breaks an existing test, change or delete the test.
+Do not add parameters, hooks, globals or fallbacks to production code just so
+a test can reach it, or keep a worse design because the suite assumes it.
+
 For behavior the suite doesn't cover (hardware drivers, multi-process
 server/hub interaction, anything needing a real device), fall back to running
 it manually through uv — but check `tests/` first; it may already exercise

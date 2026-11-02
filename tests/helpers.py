@@ -1,5 +1,6 @@
 """Helpers shared by several test modules (fixtures live in conftest.py)."""
 
+import json
 import time
 from contextlib import contextmanager
 
@@ -8,7 +9,9 @@ from PyQt6 import QtCore
 
 from pytweezer.drivers.ni_cards import CardInfo
 from pytweezer.experiment import Experiment, ListAxis, Number, Scan
+from pytweezer.experiment.client import ExperimentManagerClient
 from pytweezer.experiment.runner import open_writer
+from pytweezer.experiments.demo import RabiDemo
 
 
 def until(condition, timeout=5.0, qapp=None):
@@ -239,3 +242,67 @@ class FakeIO:
     def read_di(self, physicals):
         self.calls.append(("read_di", list(physicals)))
         return [True] * len(physicals)
+
+
+DEMO = "pytweezer.experiments.demo"
+BROKEN = {
+    "module": "pytweezer.experiments.broken",
+    "classes": [],
+    "warnings": [],
+    "error": "Traceback (most recent call last):\n  ...\nSyntaxError: invalid syntax\n",
+}
+
+
+class StaticCatalogue:
+    """A catalogue whose entries are given, never read from files."""
+
+    def __init__(self, entries):
+        self._entries = entries
+        self.busy = False
+        self.rereading = set()
+
+    def refresh(self):
+        return False
+
+    def poll(self):
+        return False
+
+    def describe_again(self, module):
+        if module not in {entry["module"] for entry in self._entries}:
+            raise KeyError(module)
+
+    def entries(self):
+        return self._entries
+
+    def pending(self, module):
+        return module in self.rereading
+
+    def close(self):
+        pass
+
+
+def demo_schema(class_name="RabiDemo", reserves=("Rb MotMaster",), error=None):
+    return RabiDemo.schema() | {
+        "class_name": class_name,
+        "reserves": None if reserves is None else list(reserves),
+        "reserve_error": error,
+    }
+
+
+class InProcess:
+    """Routes client requests straight into a manager, through JSON as on the wire."""
+
+    def __init__(self, manager):
+        self.manager = manager
+
+    def request(self, payload, *, retry=True):
+        return self.manager.handle(json.loads(json.dumps(payload)))
+
+    def close(self):
+        pass
+
+
+def in_process_client(manager):
+    client = ExperimentManagerClient(endpoint="tcp://127.0.0.1:1")
+    client._req = InProcess(manager)
+    return client

@@ -10,7 +10,7 @@ from pytweezer.experiment.arguments import (
     collect,
 )
 from pytweezer.experiment.reservations import canonical_device
-from pytweezer.experiment.scan import Point
+from pytweezer.experiment.scan import Point, Scan
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.experiment")
@@ -78,8 +78,12 @@ class Experiment:
 
     @classmethod
     def schema(cls) -> dict[str, Any]:
-        """JSON-serialisable description of the class, for argument editors."""
-        return {
+        """JSON-serialisable description of the class, for argument editors.
+
+        An optimiser that proposes saved parameters also has an ``"optimiser"``
+        entry describing it; a shared optimiser base that proposes none does not.
+        """
+        schema = {
             "class_name": cls.__name__,
             "module": cls.__module__,
             "doc": inspect.getdoc(cls) or "",
@@ -88,6 +92,9 @@ class Experiment:
             },
             "devices": {name: dev.to_schema() for name, dev in cls.devices().items()},
         }
+        if hasattr(cls, "optimiser_schema") and cls.proposes():
+            schema["optimiser"] = cls.optimiser_schema()
+        return schema
 
     @classmethod
     def extra_argument(cls, name: str) -> Argument | None:
@@ -102,6 +109,15 @@ class Experiment:
     def argument_values(self) -> dict[str, Any]:
         names = [*self.arguments(), *self._extra_names]
         return {name: getattr(self, name) for name in names}
+
+    def planned_points(self, scan: Scan) -> list[Point]:
+        """The points to run for the submitted ``scan``.
+
+        The default expands ``scan``. An experiment that chooses its own
+        number of points, which may depend on its argument values, overrides
+        this and raises :class:`ValueError` for a scan it cannot honour.
+        """
+        return scan.points(type(self))
 
     def prepare(self) -> None:
         """Called once before the first point."""
