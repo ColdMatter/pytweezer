@@ -148,6 +148,10 @@ class ManagedRow(QFrame):
         self._starting_since = None  # monotonic time of last start, or None
         self._stopping_since = None  # monotonic time of a stop the feed hasn't seen
         self._exit_expected = False
+        # Set when a process this row spawned exits unasked. The device feed
+        # can only say it is unreachable, so the row keeps showing "crashed"
+        # until it is started or stopped again, or the feed sees it running.
+        self._crashed = False
         self.timer = None
 
         self.setObjectName("ProcessTile")
@@ -249,6 +253,7 @@ class ManagedRow(QFrame):
             return False
         if not self._exit_expected:
             self._exit_expected = True
+            self._crashed = True
             logger.error(
                 "%s exited unexpectedly with exit code %s", self.name, _exit_code(code)
             )
@@ -281,6 +286,10 @@ class ManagedRow(QFrame):
                 state = "stopping"
             else:
                 self._stopping_since = None
+        if state in RUNNING_STATES:
+            self._crashed = False
+        elif self._crashed:
+            state = "crashed"
         self._set_state(state)
         if address is not None:
             self.addressLabel.setText(address)
@@ -341,6 +350,7 @@ class ManagedRow(QFrame):
 
     def terminateProcess(self):
         self._starting_since = None
+        self._crashed = False
         if self.process is not None:
             logger.info(f"Stopping process {self.name}")
             self._exit_expected = True

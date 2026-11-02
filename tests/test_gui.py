@@ -220,6 +220,46 @@ def test_a_device_process_that_dies_on_start_is_logged_with_its_exit_code(
     assert "exit code 3" in record.getMessage()
 
 
+def _crashing_row(tmp_path, delay_s=0.0):
+    script = tmp_path / "dies.py"
+    script.write_text(f"import os, time\ntime.sleep({delay_s})\nos._exit(3)\n")
+    return ManagedRow("Crashing Cam", script=str(script))
+
+
+def test_a_device_that_crashed_on_start_stays_crashed(qapp, tmp_path):
+    row = _crashing_row(tmp_path)
+    row.startProcess()
+    row.process.wait(timeout=10)
+
+    for _ in range(3):
+        row.apply_status("down")
+
+    assert row.property("state") == "crashed"
+
+
+def test_a_device_that_crashes_while_running_shows_crashed(qapp, tmp_path):
+    row = _crashing_row(tmp_path, delay_s=0.5)
+    row.startProcess()
+    row.apply_status("up")
+    row.process.wait(timeout=10)
+
+    row.apply_status("down")
+    row.apply_status("down")
+
+    assert row.property("state") == "crashed"
+
+
+def test_a_crashed_device_reads_running_once_the_feed_sees_it_up(qapp, tmp_path):
+    row = _crashing_row(tmp_path)
+    row.startProcess()
+    row.process.wait(timeout=10)
+    row.apply_status("down")
+
+    row.apply_status("up")  # restarted by another GUI on this PC
+
+    assert row.property("state") == "up"
+
+
 def test_stopping_an_unowned_device_hands_it_to_stop_orphan(make_row):
     orphans = []
     row = make_row(stop_orphan=orphans.append)
