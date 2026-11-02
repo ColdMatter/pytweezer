@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from PyQt6 import QtCore
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMessageBox, QWidget
 
 from pytweezer.experiment import (
     Choice,
@@ -28,7 +28,7 @@ from pytweezer.experiment.queue import UNKNOWN_DEVICES, now
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.saved_parameters import SavedParameter, SavedParameterChange
 from pytweezer.experiment.task import Task, TaskRequest
-from pytweezer.experiments.demo import DemoBayesian, DemoStagedScan
+from pytweezer.experiments.demo import DemoBayesian, DemoStagedScan, RabiDemo
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
@@ -1605,3 +1605,33 @@ def test_discarded_proposals_cannot_be_accepted(qapp, tmp_path):
     panel.accept()
     assert panel.accept_rows == {}
     assert panel.client.calls == []
+
+
+class WindowsShown(QtCore.QObject):
+    """Records every top-level window shown while installed on the application."""
+
+    def __init__(self):
+        super().__init__()
+        self.windows = []
+
+    def eventFilter(self, obj, event):
+        if (
+            event.type() == QtCore.QEvent.Type.Show
+            and isinstance(obj, QWidget)
+            and obj.isWindow()
+        ):
+            self.windows.append(obj)
+        return False
+
+
+def test_choosing_an_experiment_opens_no_stray_windows(qapp):
+    editor = ArgumentEditor()
+    editor.show()
+    watcher = WindowsShown()
+    qapp.installEventFilter(watcher)
+    try:
+        editor.set_experiment(RabiDemo.schema())
+    finally:
+        qapp.removeEventFilter(watcher)
+
+    assert watcher.windows == []

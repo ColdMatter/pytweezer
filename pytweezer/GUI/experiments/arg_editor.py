@@ -93,8 +93,9 @@ class ValueField(QWidget):
         layout.addWidget(widget)
         self.unit = QLabel(schema.get("unit") or "")
         self.unit.setProperty("role", "regionHint")
-        self.unit.setVisible(show_unit)
+        # Parented by the layout first: a parentless widget made visible is a window.
         layout.addWidget(self.unit)
+        self.unit.setVisible(show_unit)
         layout.addStretch(1)
         self.set_value(schema["default"])
 
