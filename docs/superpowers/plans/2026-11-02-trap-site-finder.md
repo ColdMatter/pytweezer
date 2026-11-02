@@ -139,24 +139,26 @@
 - [ ] **Step 5:** `uv run pytest tests/test_tweezer_array.py tests/test_tweezer_histogram.py -q` — PASS.
 - [ ] **Step 6: Commit** "Find trap sites in their own optimiser and measure at the accepted ones".
 
-### Task 5b: Every tweezer file records the accepted sites; the histogram uses them
+### Task 5b: Site occupancy in every tweezer file, and a "save raw images" option
 
-Added at the user's request (2026-11-02): "the default analysis for load
-tweezer (histograms) uses the stored array sites".
+Added at the user's requests (2026-11-02): "the default analysis for load
+tweezer (histograms) uses the stored array sites", and "experiments using the
+camera should have a 'save raw images' option. In tweezer experiments, if
+false, only the site occupancy is saved; camera images are not recorded".
 
 **Files:**
-- Modify: `pytweezer/experiments/load_tweezers.py` (`LoadTweezers.prepare` records the sites)
-- Modify: `pytweezer/experiments/tweezer_array.py` (measurements reuse what `LoadTweezers` loaded; `FindTrapSites` loads none)
-- Modify: `pytweezer/analysis/tweezer_histogram.py` (frames path)
+- Modify: `pytweezer/experiments/load_tweezers.py`, `pytweezer/experiments/tweezer_array.py`
 - Test: `tests/test_tweezer_array.py`, `tests/test_tweezer_histogram.py`
 
 **Interfaces:**
-- Produces: `LoadTweezers.saved_trap_sites(self) -> tuple[np.ndarray | None, str]` — the accepted sites in this ROI's pixels (rounded ints), or `None` and why (none saved, or fitted to another array than the rig shows). `LoadTweezers.prepare` sets `self.trap_sites` from it and, when not `None`, records constants `trap_sites` (ROI px), `trap_window_size`, `trap_feature_size`; when `None` it logs the reason and records nothing. `FindTrapSites.saved_trap_sites` returns `(None, "finds them")` without loading. `TweezerArrayMeasurement.prepare` raises `RuntimeError(reason)` when `self.trap_sites is None`.
-- Produces: `tweezer_histogram` frames path uses the file's `trap_sites`, `trap_window_size`, `trap_feature_size` constants when present; only a file without them falls back to `find_sites`.
+- Produces: `LoadTweezers.save_raw_images = Bool(True, group="Camera")`; `TweezerArrayMeasurement` and `FindTrapSites` override the default to `False` (today neither saves frames).
+- Produces: with accepted sites, `LoadTweezers.prepare` records constants `trap_sites` (ROI px), `trap_window_size`, `trap_feature_size`, `threshold`; each `LoadTweezers` point records `first_photons`/`second_photons` `(sites,)` and `first_occupied`/`second_occupied` (photons > `trap_threshold`); each `TweezerArrayMeasurement` point records `first_occupied`/`second_occupied` `(shots, sites)` beside its photons. With `save_raw_images`, `LoadTweezers` records `first_image`/`second_image` as now and `TweezerArrayShots._batch` records `first_images`/`second_images` `(shots, H, W)`.
+- `save_raw_images=False` with no usable sites: `prepare` raises with the reason. Saved parameters that cannot be read (manager unreachable) count as no sites.
+- `tweezer_histogram` needs no change: a `LoadTweezers` file with photons takes the photons path, at its recorded sites.
 
-- [ ] **Step 1: Failing tests:** `test_load_tweezers_records_the_accepted_sites_in_its_roi(rig)`; `test_load_tweezers_runs_without_saved_sites_and_records_none(rig)`; in `tests/test_tweezer_histogram.py`, `test_a_frames_file_is_scored_at_its_recorded_sites` (sites recorded where `find_sites` would fail, e.g. a mean image with fewer bright spots than sites).
+- [ ] **Step 1: Failing tests:** `test_load_tweezers_records_each_sites_photons_and_occupancy`, `test_load_tweezers_without_raw_images_records_no_frames`, `test_load_tweezers_without_saved_sites_records_frames_only`, `test_dropping_raw_images_needs_trap_sites`, `test_load_tweezers_runs_when_the_manager_cannot_be_reached`, `test_a_measurement_records_occupancy_and_frames_only_when_asked`, and in `tests/test_tweezer_histogram.py` `test_a_load_tweezers_file_is_scored_at_its_recorded_sites`.
 - [ ] **Step 2:** run — FAIL. **Step 3:** implement. **Step 4:** `uv run pytest tests/test_tweezer_array.py tests/test_tweezer_histogram.py -q` — PASS.
-- [ ] **Step 5: Commit** "Record the accepted trap sites in every tweezer file and histogram at them".
+- [ ] **Step 5: Commit** "Record site occupancy in every tweezer file and make raw images optional".
 
 ### Task 6: The Optimisers tab for fits and array proposals
 
