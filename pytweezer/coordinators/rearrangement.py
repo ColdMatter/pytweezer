@@ -63,7 +63,8 @@ from pytweezer.helper_scripts import array_hologram
 try:
     import cupy as cp
 
-    _HAS_CUPY = True
+    # cupy imports without a usable driver; only a device count proves a GPU
+    _HAS_CUPY = cp.cuda.runtime.getDeviceCount() > 0
 except Exception:  # pragma: no cover - depends on the machine's GPU stack
     cp = None
     _HAS_CUPY = False

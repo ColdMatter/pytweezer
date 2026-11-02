@@ -104,7 +104,8 @@ def test_rig_knows_no_array_before_making_one(rig):
 
 
 def test_rig_puts_the_computed_hologram_on_the_slm(rig):
-    pytest.importorskip("cupy")
+    if not rearrangement._HAS_CUPY:
+        pytest.skip("needs a CUDA GPU")
 
     hologram = rig.make_array(
         rows=2, columns=3, spacing_um=5.0, angle_deg=0.0, iterations=5
