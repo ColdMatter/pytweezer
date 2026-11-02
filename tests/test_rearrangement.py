@@ -63,15 +63,34 @@ def fake_gpu(monkeypatch):
         }
 
     monkeypatch.setattr(rearrangement, "_HAS_CUPY", True)
-    monkeypatch.setattr(array_hologram, "make_generator", object)
+    monkeypatch.setattr(array_hologram, "make_generator", lambda settings: object())
     monkeypatch.setattr(array_hologram, "array_hologram", hologram)
 
 
 ARRAY = {"rows": 3, "columns": 4, "spacing_um": 5.0, "angle_deg": 2.5}
+OPTICS = {
+    "generator_settings": {
+        "wavelength_um": 0.852,
+        "focal_length_mm": 17.3,
+        "slm_pitch_um": 17.0,
+        "input_beam_waist_mm": 16.0,
+        "slm_res": (1024, 1024),
+        "zernike_coeff_dict": {5: 1.195},
+    },
+    "envelope": None,
+    "blaze_um": (48.0, 4.0),
+    "fresnel_focal_length_mm": 1125.0,
+    "zernike": False,
+    "pupil_radius_um": 8704.0,
+    "pupil_dump_um": (100.0, 0.0),
+    "iterations": 5,
+    "damping": 0.5,
+    "phase_randomness": 1.0,
+}
 
 
 def test_rig_reports_the_array_it_put_on_the_slm(rig, fake_gpu):
-    hologram = rig.make_array(**ARRAY)
+    hologram = rig.make_array(**ARRAY, **OPTICS)
 
     np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
     array = rig.get_array()
@@ -81,7 +100,7 @@ def test_rig_reports_the_array_it_put_on_the_slm(rig, fake_gpu):
 
 
 def test_rig_does_not_know_the_array_once_something_else_writes_the_slm(rig, fake_gpu):
-    rig.make_array(**ARRAY)
+    rig.make_array(**ARRAY, **OPTICS)
 
     rig.slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
 
@@ -89,7 +108,7 @@ def test_rig_does_not_know_the_array_once_something_else_writes_the_slm(rig, fak
 
 
 def test_rig_knows_its_array_again_when_its_mask_is_put_back(rig, fake_gpu):
-    hologram = rig.make_array(**ARRAY)
+    hologram = rig.make_array(**ARRAY, **OPTICS)
     rig.slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
 
     rig.slm.update_mask(hologram["mask"].copy())
@@ -108,9 +127,27 @@ def test_rig_puts_the_computed_hologram_on_the_slm(rig):
         pytest.skip("needs a CUDA GPU")
 
     hologram = rig.make_array(
-        rows=2, columns=3, spacing_um=5.0, angle_deg=0.0, iterations=5
+        rows=2, columns=3, spacing_um=5.0, angle_deg=0.0, **OPTICS
     )
 
     assert hologram["mask"].dtype == np.uint8 and hologram["mask"].shape == (1024, 1024)
     np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
     assert rig.get_array()["sites"] == 6
+
+
+def test_rig_builds_a_new_generator_only_when_the_optics_change(
+    rig, fake_gpu, monkeypatch
+):
+    built = []
+    monkeypatch.setattr(
+        array_hologram, "make_generator", lambda settings: built.append(settings) or 1
+    )
+
+    rig.make_array(**ARRAY, **OPTICS)
+    rig.make_array(**ARRAY, **OPTICS)
+    rig.make_array(**ARRAY, **(OPTICS | {"blaze_um": (50.0, 4.0)}))
+
+    assert [settings["blaze_dx_dy_um"] for settings in built] == [
+        (48.0, 4.0),
+        (50.0, 4.0),
+    ]

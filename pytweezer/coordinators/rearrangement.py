@@ -192,6 +192,7 @@ class Rearrangement(Coordinator):
         self._array = None
         self._array_mask = None
         self._array_generator = None
+        self._array_settings = None
 
         #: ``time.perf_counter()`` at which the most recent
         #: :meth:`_play_sequence_pipelined` finished displaying its *first* frame,
@@ -253,32 +254,48 @@ class Rearrangement(Coordinator):
         columns: int,
         spacing_um: float,
         angle_deg: float,
-        compensate_envelope: bool = True,
-        blaze_um: tuple[float, float] = (48.0, 4.0),
-        fresnel_focal_length_mm: float = 1125.0,
-        zernike: bool = False,
-        pupil_radius_um: float = 8704.0,
-        pupil_dump_um: tuple[float, float] = (100.0, 0.0),
-        iterations: int = 2000,
-        damping: float = 0.5,
-        phase_randomness: float = 1.0,
+        *,
+        generator_settings: dict,
+        envelope: dict | None,
+        blaze_um: tuple[float, float],
+        fresnel_focal_length_mm: float,
+        zernike: bool,
+        pupil_radius_um: float,
+        pupil_dump_um: tuple[float, float],
+        iterations: int,
+        damping: float,
+        phase_randomness: float,
     ) -> dict:
         """Put a ``rows`` x ``columns`` tweezer array on the SLM and remember it.
 
-        See :mod:`pytweezer.helper_scripts.array_hologram` for the mask. Returns
-        its result: the mask, the trap positions and weights, and the
-        optimisation's final uniformity, min/max ratio and error.
+        See :mod:`pytweezer.helper_scripts.array_hologram` for the mask, and its
+        :func:`~pytweezer.helper_scripts.array_hologram.generator_settings` and
+        :func:`~pytweezer.helper_scripts.array_hologram.envelope` for
+        ``generator_settings`` and ``envelope`` (``None`` leaves the traps
+        unweighted). Returns its result: the mask, the trap positions and
+        weights, and the optimisation's final uniformity, min/max ratio and error.
         """
         self._require_gpu()
-        if self._array_generator is None:
-            self._array_generator = array_hologram.make_generator()
+        settings = {
+            **generator_settings,
+            "slm_res": tuple(generator_settings["slm_res"]),
+            "zernike_coeff_dict": {
+                int(index): float(value)
+                for index, value in generator_settings["zernike_coeff_dict"].items()
+            },
+            "fresnel_f_mm": float(fresnel_focal_length_mm),
+            "blaze_dx_dy_um": tuple(blaze_um),
+        }
+        if self._array_generator is None or settings != self._array_settings:
+            self._array_generator = array_hologram.make_generator(settings)
+            self._array_settings = settings
         hologram = array_hologram.array_hologram(
             self._array_generator,
             rows=int(rows),
             columns=int(columns),
             spacing_um=float(spacing_um),
             angle_deg=float(angle_deg),
-            compensate_envelope=bool(compensate_envelope),
+            envelope=envelope,
             blaze_um=tuple(blaze_um),
             fresnel_focal_length_mm=float(fresnel_focal_length_mm),
             zernike=bool(zernike),

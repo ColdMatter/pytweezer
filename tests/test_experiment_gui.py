@@ -142,6 +142,74 @@ def editor(qapp):
     return editor
 
 
+class Calibrated(Experiment):
+    blaze = Number(saved="slm_blaze_x", unit="um", scale=1e-6)
+
+    def run_point(self):
+        pass
+
+
+CALIBRATED = Calibrated.schema()
+
+
+@pytest.fixture
+def calibrated(qapp):
+    editor = ArgumentEditor()
+    editor.set_saved_parameters({"slm_blaze_x": 48e-6})
+    editor.set_experiment(CALIBRATED)
+    return editor
+
+
+def test_a_saved_backed_field_is_blank_and_shows_the_saved_value(calibrated):
+    field = calibrated.rows["blaze"].value
+    assert field.widget.text() == ""
+    assert field.widget.placeholderText() == "48 um (saved)"
+    assert calibrated.request().args == {"blaze": None}
+
+    field.widget.setText("50")
+    assert calibrated.rows["blaze"].label.property("state") == "modified"
+    assert calibrated.request().args["blaze"] == pytest.approx(50e-6)
+
+    field.widget.setText("fifty")
+    with pytest.raises(ValueError, match="not a number"):
+        calibrated.request()
+
+
+def test_a_saved_value_changed_elsewhere_shows_in_the_blank_field(calibrated):
+    calibrated.set_saved_parameters({})
+    assert (
+        "no saved slm_blaze_x"
+        in calibrated.rows["blaze"].value.widget.placeholderText()
+    )
+    calibrated.set_saved_parameters({"slm_blaze_x": 51e-6})
+    assert calibrated.rows["blaze"].value.widget.placeholderText() == "51 um (saved)"
+
+
+def test_scanning_a_blank_saved_backed_argument_starts_at_its_saved_value(calibrated):
+    row = calibrated.rows["blaze"]
+    row.scan_button.setChecked(True)
+    assert row.scan.start.value() == pytest.approx(48e-6)
+
+
+def test_a_request_that_leaves_it_unset_loads_back_blank(calibrated):
+    calibrated.rows["blaze"].value.widget.setText("50")
+    calibrated.load_request(
+        TaskRequest(experiment=CALIBRATED["module"], class_name="Calibrated")
+    )
+    assert calibrated.rows["blaze"].value.widget.text() == ""
+
+
+def test_panel_refetches_saved_parameters_when_they_change(qapp):
+    client, feed = FakeClient(), FakeFeed()
+    panel = ExperimentsPanel(client=client, feed=feed)
+    panel.refresh_catalogue()
+    fetched = len(commands(client, "saved_parameters"))
+    feed.queue_changed.emit(
+        {"running": [], "queue": [], "history": [], "saved_parameters_version": 7}
+    )
+    assert len(commands(client, "saved_parameters")) == fetched + 1
+
+
 def test_form_shows_display_units_and_returns_si(editor):
     row = editor.rows["detuning"]
     assert row.value.widget.value() == pytest.approx(-5.0)

@@ -22,6 +22,7 @@ for an unreachable manager. Asking again while one is in flight replaces any
 earlier pending request, and only the newest request's answer is shown.
 """
 
+import json
 import time
 from pathlib import PurePosixPath
 
@@ -73,12 +74,21 @@ _CURVE_COLOURS = ["#5b8def", "#f5a623", "#2ecc71", "#c678dd", "#e5c07b", "#56b6c
 
 
 def resubmission(measurement):
-    """A :class:`TaskRequest` that repeats ``measurement``."""
+    """A :class:`TaskRequest` that repeats ``measurement``.
+
+    Arguments the run took from saved parameters are left unset, so they take
+    the saved values current when it runs again.
+    """
     scanned = {axis.argument for axis in measurement.scan.axes}
+    from_saved = json.loads(measurement.attrs.get("saved_arguments", "{}"))
     return TaskRequest(
         experiment=measurement.attrs["experiment"],
         class_name=measurement.attrs["class_name"],
-        args={k: v for k, v in measurement.arguments.items() if k not in scanned},
+        args={
+            k: None if k in from_saved else v
+            for k, v in measurement.arguments.items()
+            if k not in scanned
+        },
         scan=measurement.scan,
         label=str(measurement.attrs.get("label", "")),
     )

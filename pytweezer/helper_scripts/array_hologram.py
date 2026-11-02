@@ -12,52 +12,73 @@ computed, so this module imports anywhere.
 
 import numpy as np
 
-GENERATOR_SETTINGS = {
-    "wavelength_um": 0.852,
-    "focal_length_mm": 17.3,
-    "slm_pitch_um": 17,
-    "slm_res": (1024, 1024),
-    "input_beam_waist_mm": 16,
-    "fresnel_f_mm": 1125,
-    "blaze_dx_dy_um": (48.0, 4.0),
-    "zernike_coeff_dict": {
-        5: 1.195,
-        6: 0.725,
-        7: 0.970,
-        8: 0.478,
-        9: -1.091,
-        10: 0.303,
-        11: 0.021,
-        12: 0.072,
-        13: 0.049,
-    },
+#: Saved parameter (SI) -> generator keyword, and the factor to the generator's unit.
+GENERATOR_PARAMETERS = {
+    "slm_wavelength": ("wavelength_um", 1e6),
+    "slm_focal_length": ("focal_length_mm", 1e3),
+    "slm_pixel_pitch": ("slm_pitch_um", 1e6),
+    "slm_input_beam_waist": ("input_beam_waist_mm", 1e3),
 }
+#: The measured fall-off of trap depth across the focal plane, as
+#: ``offset + amplitude * exp(-r^2 / 2 sigma^2)`` about a centre in
+#: focal-plane coordinates (blaze included). Traps are weighted by it so they
+#: come out equal. Centre and sigma are ``[x, y]`` in metres.
+ENVELOPE_PARAMETERS = (
+    "slm_envelope_amplitude",
+    "slm_envelope_offset",
+    "slm_envelope_centre",
+    "slm_envelope_sigma",
+)
+#: Saved parameters the array needs besides its arguments: the generator's,
+#: the SLM's resolution (``[rows, columns]`` of pixels), the Zernike
+#: correction (rows of ``[index, coefficient]``) and the envelope.
+SAVED_KEYS = (
+    *GENERATOR_PARAMETERS,
+    "slm_resolution",
+    "slm_zernike_coefficients",
+    *ENVELOPE_PARAMETERS,
+)
 
-#: Measured fall-off of trap depth across the focal plane, as
-#: ``offset + amplitude * exp(-r^2 / 2 sigma^2)`` about a centre in focal-plane
-#: coordinates (blaze included). Traps are weighted by it so they come out equal.
-ENVELOPE = {
-    "amplitude": -2.14197604e03,
-    "centre_um": (28.8556150, -5.9008040),
-    "sigma_um": (2.95002910e03, 2.64281503e03),
-    "offset": 2.14239505e03,
-}
+
+def generator_settings(saved: dict) -> dict:
+    """The phase-mask generator's keywords, in its units, from the saved parameters."""
+    settings = {
+        keyword: float(saved[key]) * factor
+        for key, (keyword, factor) in GENERATOR_PARAMETERS.items()
+    }
+    settings["slm_res"] = tuple(int(n) for n in saved["slm_resolution"])
+    settings["zernike_coeff_dict"] = {
+        int(index): float(coefficient)
+        for index, coefficient in saved["slm_zernike_coefficients"]
+    }
+    return settings
 
 
-def envelope_weights(x_um: np.ndarray, y_um: np.ndarray) -> np.ndarray:
-    (x0, y0), (sx, sy) = ENVELOPE["centre_um"], ENVELOPE["sigma_um"]
+def envelope(saved: dict) -> dict:
+    """The depth envelope from the saved parameters, with its centre and sigma in µm."""
+    return {
+        "amplitude": float(saved["slm_envelope_amplitude"]),
+        "offset": float(saved["slm_envelope_offset"]),
+        "centre_um": tuple(float(v) * 1e6 for v in saved["slm_envelope_centre"]),
+        "sigma_um": tuple(float(v) * 1e6 for v in saved["slm_envelope_sigma"]),
+    }
+
+
+def envelope_weights(envelope: dict, x_um: np.ndarray, y_um: np.ndarray) -> np.ndarray:
+    (x0, y0), (sx, sy) = envelope["centre_um"], envelope["sigma_um"]
     gaussian = np.exp(
         -((x_um - x0) ** 2) / (2 * sx**2) - (y_um - y0) ** 2 / (2 * sy**2)
     )
-    return ENVELOPE["amplitude"] * gaussian + ENVELOPE["offset"]
+    return envelope["amplitude"] * gaussian + envelope["offset"]
 
 
-def make_generator():
+def make_generator(settings: dict):
+    """A generator for ``settings``: :func:`generator_settings` plus the Fresnel lens and blaze."""
     from pytweezer.helper_scripts.phasemask import (
         OptimisationBasedPhasemaskGeneratorGPU,
     )
 
-    return OptimisationBasedPhasemaskGeneratorGPU(**GENERATOR_SETTINGS)
+    return OptimisationBasedPhasemaskGeneratorGPU(**settings)
 
 
 def apply_pupil(
@@ -79,7 +100,7 @@ def array_hologram(
     columns: int,
     spacing_um: float,
     angle_deg: float,
-    compensate_envelope: bool,
+    envelope: dict | None,
     blaze_um: tuple[float, float],
     fresnel_focal_length_mm: float,
     zernike: bool,
@@ -89,15 +110,18 @@ def array_hologram(
     damping: float,
     phase_randomness: float,
 ) -> dict:
-    """The 8-bit mask for a ``rows`` x ``columns`` array, its traps and how well it converged."""
+    """The 8-bit mask for a ``rows`` x ``columns`` array, its traps and how well it converged.
+
+    With an ``envelope`` (see :func:`envelope`) the traps are weighted by it.
+    """
     weights, phases, x_um, y_um = generator.generate_weighted_array(
         np.ones((rows, columns)),
         spacing_um,
         init_phase_randomness=phase_randomness,
         angle_deg=angle_deg,
     )
-    if compensate_envelope:
-        weights = envelope_weights(x_um + blaze_um[0], y_um + blaze_um[1])
+    if envelope is not None:
+        weights = envelope_weights(envelope, x_um + blaze_um[0], y_um + blaze_um[1])
 
     array_phase, _, (uniformity, min_max, mse, _) = (
         generator.superposition_optimization(

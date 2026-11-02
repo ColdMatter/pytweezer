@@ -279,6 +279,14 @@ saved_parameter_history("level", limit=10)  # newest first; rid= for one run's
   import, so the module contacts the manager when imported and the form's
   **Defaults** button (which has the manager describe the experiment again)
   re-reads it.
+- A saved-backed argument, `blaze = Number(saved="slm_blaze_x", unit="um",
+  scale=1e-6)` (a `Number` or `Integer` with `saved=` instead of a default), is
+  `None` until the task starts, when `open_writer` gives it the saved value
+  (SI); a missing key fails it before a file exists. A value in the form, a
+  request, a recipe or a scan axis wins. The file's `saved_arguments` header
+  lists the arguments that took saved values, and Results' Resubmit leaves
+  those unset again. The form shows such a field blank, with the saved value
+  greyed in it.
 - The **Saved parameters** tab edits values by hand with a reason and shows the
   history; arrays are read-only there. Keys are created only by
   `create=True`, an accepted `Fit`, or `import_parameters_json(path)` in
@@ -301,7 +309,10 @@ The Rb tweezer experiments, in the order a session uses them:
 
 1. `SlmTweezerArray` (`slm_tweezer_array.py`) puts an array on the SLM through
    `Rb Rearrangement Rig` (`rig.make_array(...)`, one mask per point, shown on
-   the `slm` image stream for the SLM Monitor applet). The rig remembers it:
+   the `slm` image stream for the SLM Monitor applet). Its optics are `slm_*`
+   saved parameters in SI: the blaze, Fresnel lens and pupil as saved-backed
+   arguments, the generator, Zernike rows `[index, coefficient]` and depth
+   envelope from `array_hologram.SAVED_KEYS`. The rig remembers it:
    `rig.get_array()` gives `sites` and trap `x_um`/`y_um` (`None` if the rig
    didn't write the mask).
 2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera

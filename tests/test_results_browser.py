@@ -401,3 +401,14 @@ def test_a_slow_archive_never_holds_up_the_gui_thread(qapp, tmp_path):
     archive.released.set()
     assert until(lambda: days(panel) == ["2026-10-07"], qapp=qapp)
     assert until(lambda: "Status: completed" in panel.metadata.toPlainText(), qapp=qapp)
+
+
+def test_resubmission_leaves_arguments_taken_from_saved_parameters_unset(monkeypatch):
+    from tests.test_experiment_arguments import Calibrated
+
+    monkeypatch.setattr(
+        "pytweezer.experiment.client.get_saved_parameters", lambda: {"blaze": 48e-6}
+    )
+    request = resubmission(run_local(Calibrated, shots=4))
+
+    assert request.args == {"blaze": None, "shots": 4}

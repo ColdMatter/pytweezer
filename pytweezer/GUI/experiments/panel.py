@@ -49,6 +49,7 @@ class ExperimentsPanel(QWidget):
         self.feed = feed or ExperimentFeed()
         self._experiments_version = None
         self._recipes_version = None
+        self._saved_parameters_version = None
         # Unsubmitted edits per experiment, restored when switching back.
         self._drafts = {}
         self._current_key = None
@@ -142,6 +143,7 @@ class ExperimentsPanel(QWidget):
         self.catalogue.set_modules(reply["modules"])
         self._apply_awaited_defaults(reply)
         self.refresh_recipes()
+        self.refresh_saved_parameters()
 
     def refresh_recipes(self):
         reply = self._call("Listing recipes", self.client.call, "recipes")
@@ -149,6 +151,18 @@ class ExperimentsPanel(QWidget):
             return
         self._recipes_version = reply.get("version")
         self.catalogue.set_recipes(reply["recipes"])
+
+    def refresh_saved_parameters(self):
+        """Fetch the saved parameters that saved-backed arguments show in the form."""
+        reply = self._call(
+            "Reading saved parameters", self.client.call, "saved_parameters"
+        )
+        if reply is None:
+            return
+        self._saved_parameters_version = reply.get("version")
+        self.editor.set_saved_parameters(
+            {p["key"]: p["value"] for p in reply.get("parameters", [])}
+        )
 
     def _queue_changed(self, snapshot):
         self._simulated = bool(snapshot.get("simulated"))
@@ -167,6 +181,12 @@ class ExperimentsPanel(QWidget):
         recipes_version = snapshot.get("recipes_version")
         if recipes_version is not None and recipes_version != self._recipes_version:
             self.refresh_recipes()
+        saved_version = snapshot.get("saved_parameters_version")
+        if (
+            saved_version is not None
+            and saved_version != self._saved_parameters_version
+        ):
+            self.refresh_saved_parameters()
 
     def _connection_changed(self, connected):
         if connected:
