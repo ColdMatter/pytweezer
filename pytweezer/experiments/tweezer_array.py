@@ -1,15 +1,21 @@
 """Score the Rb tweezer array over batches of shots, and optimise its imaging and molasses."""
 
-from typing import ClassVar
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
 from pytweezer.analysis import analysis as an
-from pytweezer.experiment import Experiment
+from pytweezer.experiment import Device, Experiment
 from pytweezer.experiment.arguments import Integer, Number
 from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.experiment.optimisers import SEARCH, BayesianOptimisation, Dimension
 from pytweezer.experiments.load_tweezers import LoadTweezers
+
+if TYPE_CHECKING:
+    # Imports cupy where it is installed, so only for the annotation.
+    from pytweezer.coordinators.rearrangement import Rearrangement
 
 _SAVED_UNDER_OWN_NAME = (
     "tMOTLoadRepVCO",
@@ -48,14 +54,22 @@ class TweezerArrayMeasurement(LoadTweezers):
     Every shot runs the sequence at the saved parameters
     (:data:`SAVED_SEQUENCE_PARAMETERS`); a script parameter set in the form
     wins over its saved value. :meth:`prepare` takes ``calibration_shots``
-    with the tweezers off during the background drop, finds the ``sites``
-    trap sites in their mean background-subtracted image and fits the
-    occupancy threshold, against which every later shot is judged.
+    with the tweezers off during the background drop, finds the trap sites in
+    their mean background-subtracted image and fits the occupancy threshold,
+    against which every later shot is judged. The number of sites is the
+    rig's, or ``sites`` when the rig does not know which array is on the SLM.
     """
+
+    rig: Rearrangement = Device("Rb Rearrangement Rig")
 
     shots = Integer(20, min=1, group="Analysis", tooltip="shots per point")
     calibration_shots = Integer(100, min=1, group="Analysis")
-    sites = Integer(64, min=1, group="Analysis", tooltip="trap sites in the array")
+    sites = Integer(
+        64,
+        min=1,
+        group="Analysis",
+        tooltip="trap sites in the array, when the rig does not know",
+    )
     feature_size = Integer(
         10, min=1, unit="px", group="Analysis", tooltip="top-hat filter size"
     )
@@ -95,12 +109,16 @@ class TweezerArrayMeasurement(LoadTweezers):
             tTweezerSetVVA0=0.0,
             tTweezerSetVVA1=0.0,
         )
+        array = self.rig.get_array()
+        n_sites = array["sites"] if array else self.sites
+        self.record("array_sites", n_sites)
+        self.record("sites_from", "rig" if array else "argument")
         average = an.tweezer_show_bg_subtracted(firsts, backgrounds, show=False)
-        positions, _ = an.detect_trap_sites(average, self.sites, detection_step=100)
-        if len(positions) != self.sites:
+        positions, _ = an.detect_trap_sites(average, n_sites, detection_step=100)
+        if len(positions) != n_sites:
             raise RuntimeError(
                 f"found {len(positions)} trap sites in the calibration image, "
-                f"not {self.sites}"
+                f"not {n_sites}"
             )
         # Sites are summed by slicing the image, so they must be whole pixels.
         self.trap_sites = {

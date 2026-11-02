@@ -78,10 +78,29 @@ class FakeHamCam:
         return self._frame(loaded), self._frame(kept)
 
 
+class FakeRig:
+    """Knows no array unless a test gives it one."""
+
+    def __init__(self):
+        self.array = None
+
+    def close_rpc(self):
+        pass
+
+    def get_array(self):
+        return self.array
+
+
 @pytest.fixture
 def rig(monkeypatch):
     sequencer = FakeSequencer()
-    devices = {"Rb MotMaster": sequencer, "Rb HamCam": FakeHamCam(sequencer)}
+    rearrangement_rig = FakeRig()
+    sequencer.rearrangement_rig = rearrangement_rig
+    devices = {
+        "Rb MotMaster": sequencer,
+        "Rb HamCam": FakeHamCam(sequencer),
+        "Rb Rearrangement Rig": rearrangement_rig,
+    }
     monkeypatch.setattr(
         "pytweezer.experiment.experiment._get_device",
         lambda name, timeout: devices[name],
@@ -97,6 +116,24 @@ def test_a_point_measures_the_loading_and_survival_put_in(rig):
     assert measurement.results["loading"][0] == pytest.approx(LOADING, abs=0.1)
     assert measurement.results["survival"][0] == pytest.approx(SURVIVAL, abs=0.05)
     assert measurement.results["fidelity"][0] > 0.99
+
+
+@pytest.mark.parametrize(
+    ("array_on_rig", "sites_from"),
+    [({"sites": len(SITES)}, "rig"), (None, "argument")],
+    ids=["rig knows", "rig does not know"],
+)
+def test_calibration_finds_as_many_sites_as_the_rig_says_are_on_the_slm(
+    rig, array_on_rig, sites_from
+):
+    rig.rearrangement_rig.array = array_on_rig
+    sites_argument = len(SITES) if array_on_rig is None else 10
+
+    measurement = run_local(TweezerImaging, **FAST, sites=sites_argument)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert len(measurement.constants["trap_sites"]) == len(SITES)
+    assert measurement.constants["sites_from"] == sites_from
 
 
 def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(rig):
