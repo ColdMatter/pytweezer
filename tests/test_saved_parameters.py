@@ -3,7 +3,11 @@ import json
 import numpy as np
 import pytest
 
-from pytweezer.experiment.client import saved_parameter_history
+from pytweezer.experiment.client import (
+    get_saved_parameter,
+    saved_parameter_history,
+    set_saved_parameters,
+)
 from pytweezer.experiment.saved_parameters import (
     SavedParameterBook,
     SavedParameterError,
@@ -135,7 +139,7 @@ def test_a_log_line_that_cannot_be_read_is_skipped(tmp_path):
 def test_a_creation_with_an_unstorable_value_creates_nothing():
     book = SavedParameterBook()
     with pytest.raises(SavedParameterError, match="b"):
-        book.set({"a": 1, "b": [1]}, reason="r", who="me", create=True)
+        book.set({"a": 1, "b": {"x": 1}}, reason="r", who="me", create=True)
     assert book.all() == []
 
 
@@ -174,3 +178,76 @@ def test_numpy_scalars_are_stored_as_python_numbers(make_manager):
         "f": float,
         "flag": bool,
     }
+
+
+def test_an_array_is_stored_as_nested_floats_and_reloads(tmp_path):
+    book = book_with(sites=np.array([[1, 2], [3, 4]]))
+    store = SavedParameterStore(tmp_path / "saved.json")
+    store.save(book.state)
+
+    value = SavedParameterBook(store.load()).get("sites").value
+
+    assert value == [[1.0, 2.0], [3.0, 4.0]]
+    assert all(type(x) is float for row in value for x in row)
+
+
+@pytest.mark.parametrize(
+    "new",
+    [[[1.0, 2.0, 3.0]], [1.0, 2.0], 1.0],
+    ids=["other columns", "other dimensions", "scalar"],
+)
+def test_an_array_key_keeps_its_columns_and_dimensions(new):
+    book = book_with(sites=[[1.0, 2.0], [3.0, 4.0]])
+    with pytest.raises(SavedParameterError):
+        book.set({"sites": new}, reason="r", who="me")
+    assert book.get("sites").value == [[1.0, 2.0], [3.0, 4.0]]
+
+
+def test_an_array_key_takes_any_number_of_rows():
+    book = book_with(sites=[[1.0, 2.0], [3.0, 4.0]])
+    book.set({"sites": [[5.0, 6.0]] * 3}, reason="r", who="me")
+    assert book.get("sites").value == [[5.0, 6.0]] * 3
+
+
+def test_a_scalar_key_refuses_an_array():
+    book = book_with(gain=1.0)
+    with pytest.raises(SavedParameterError):
+        book.set({"gain": [1.0]}, reason="r", who="me")
+
+
+@pytest.mark.parametrize("create", [True, False])
+def test_an_array_with_a_non_finite_element_is_refused(create):
+    book = book_with(sites=[[1.0, 2.0]])
+    with pytest.raises(SavedParameterError):
+        book.set(
+            {"new" if create else "sites": [[1.0, float("nan")]]},
+            reason="r",
+            who="me",
+            create=create,
+        )
+    assert [p.key for p in book.all()] == ["sites"]
+    assert book.get("sites").value == [[1.0, 2.0]]
+
+
+def test_units_name_each_created_keys_unit():
+    book = SavedParameterBook()
+    book.set(
+        {"a": 1.0, "b": [[1.0]]},
+        reason="r",
+        who="me",
+        create=True,
+        unit="x",
+        units={"b": "px"},
+    )
+    assert (book.get("a").unit, book.get("b").unit) == ("x", "px")
+
+
+def test_numpy_arrays_round_trip_through_the_manager(make_manager):
+    client = in_process_client(make_manager())
+    sites = np.array([[1.5, 2.0], [3.0, 4.25]])
+    set_saved_parameters({"sites": sites}, "r", create=True, client=client)
+
+    found = get_saved_parameter("sites", client=client)
+
+    assert isinstance(found, np.ndarray)
+    np.testing.assert_array_equal(found, sites)

@@ -327,6 +327,7 @@ class ExperimentManager:
             create=bool(request.get("create")),
             group=request.get("group", ""),
             unit=request.get("unit", ""),
+            units=request.get("units"),
             rid=request.get("rid"),
         )
         try:
