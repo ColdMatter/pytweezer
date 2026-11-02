@@ -21,7 +21,7 @@ whichever PC the hardware is attached to.
 | `pytweezer/coordinators/base.py` | `Coordinator` — base for in-process coordination of a composite's backends. |
 | `pytweezer/coordinators/camera_dac_feedback.py` | `CameraDACFeedback` — worked example: frame mean → proportional DAC correction. |
 | `pytweezer/coordinators/rearrangement.py` | `Rearrangement` — camera + SLM atom-rearrangement loop (lazy GPU stack). See `docs/notes/rearrangement_coordinator.md`. |
-| `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`, `requires_camera`. |
+| `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`. |
 | `pytweezer/drivers/imagemX2.py`, `bfly2.py` | Concrete camera backends on `Camera`, each with `Simulated* = simulated_camera_for(...)` and a legacy standalone `main()` (kept for ad hoc debugging, not on the launch path). |
 | `pytweezer/drivers/ni_dac.py`, `slm.py` | `NIDAC`/`SimulatedNIDAC`; `SLM` (Meadowlark Blink SDK)/`SimulatedSLM`. |
 | `pytweezer/drivers/motmaster.py` | `MotMasterInterface` — MOTMaster sequencer over .NET remoting; no hand-written sim class, so simulation uses the auto-generated stand-in. |
@@ -148,12 +148,12 @@ Camera drivers don't each reimplement ROI/trigger/acquisition/broadcast logic.
 
 - `Camera(ABC)` — owns everything generic to a camera server: image broadcasting
   onto the ZMQ stream, TIFF autosave, the autosave/broadcast acquisition loop
-  (`acquire_n_frames`/`acquire_single_frame`), and the connect/relinquish/reacquire
+  (`acquire_n_frames`/`acquire_single_frame`), and the connect/close
   lifecycle. It declares the small set of hardware-specific hooks a concrete
   driver must implement: `_connect`/`_disconnect`, `set_roi`,
   `set_trigger_source`, `set_exposure_time`, `setup_acquisition`,
   `start_acquisition`/`stop_acquisition`, and `_read_frames` (the raw grab). The
-  live hardware handle lives on `self._backend` (`None` == relinquished).
+  live hardware handle lives on `self._backend` (`None` once closed).
 - `SimulatedCamera(Camera)` — a single, one-size-fits-all synthetic backend that
   implements those hooks with generated frames, usable for **any** camera in
   simulation mode.

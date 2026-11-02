@@ -13,7 +13,7 @@ from pytweezer.servers.simulated_device import public_methods, simulate
 
 
 def _guard(func):
-    """A functools.wraps decorator, like imagemX2's requires_camera."""
+    """A functools.wraps decorator, as a driver may put on its methods."""
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):

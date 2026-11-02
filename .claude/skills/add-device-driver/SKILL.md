@@ -40,7 +40,7 @@ bug in your driver. Verify in simulation instead.
 
 **Cameras** subclass `Camera` from `pytweezer/drivers/camera_base.py`. That base
 already owns image-stream broadcasting, TIFF autosave, the acquisition loop, and
-the connect/relinquish lifecycle. Your driver is a thin shim implementing the
+the connect/close lifecycle. Your driver is a thin shim implementing the
 abstract hooks. Follow `pytweezer/drivers/orca.py` as the shortest example.
 
 **Everything else** is a plain class with no required base. Public methods become
@@ -58,10 +58,6 @@ Implement each abstract hook from `Camera`
 failure set `self._backend = None` and raise — leaving a half-open handle makes
 `is_connected()` lie. `_read_frames(nframes, start_frame)` returns frames stacked
 as `(nframes, H, W)`.
-
-Decorate any method that touches `self._backend` with `@requires_camera`, so a
-call after `relinquish_camera()` raises a clear error rather than an
-`AttributeError` on `None`.
 
 The base also gives every camera a frame-index protocol, which notebooks' `Rig`
 relies on (see `notebook-rig`): `arm(buffer_frames)` starts a continuous

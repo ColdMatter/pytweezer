@@ -9,7 +9,6 @@ from sipyco.pc_rpc import simple_server_loop
 from pytweezer.configuration.config import get_config
 from pytweezer.drivers.camera_base import (
     Camera,
-    requires_camera,
     simulated_camera_for,
 )
 from pytweezer.logging_utils import get_logger
@@ -60,33 +59,26 @@ class ThorCam(Camera):
         if self._backend is not None:
             self._backend.close()
 
-    @requires_camera
     def set_roi(self, x0: int, width: int, y0: int, height: int):
         hstart, _, vstart, *_ = self._backend.set_roi(x0, x0 + width, y0, y0 + height)
         self.roi_origin = (int(hstart), int(vstart))
         return self.roi_origin
 
-    @requires_camera
     def set_trigger_source(self, source: str):
         self._backend.set_trigger_mode(source)
 
-    @requires_camera
     def set_exposure_time(self, exposure: float):
         self._backend.set_exposure(exposure)
 
-    @requires_camera
     def setup_acquisition(self, nframes: int, mode: str = "sequence"):
         self._backend.setup_acquisition(int(nframes))
 
-    @requires_camera
     def start_acquisition(self):
         self._backend.start_acquisition()
 
-    @requires_camera
     def stop_acquisition(self):
         self._backend.stop_acquisition()
 
-    @requires_camera
     def _read_frames(self, nframes: int, start_frame: int):
         self._backend.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
         images, _infos = self._backend.read_multiple_images(
