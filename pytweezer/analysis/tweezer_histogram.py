@@ -4,9 +4,11 @@ The per-file counterpart of the live ``tweezer_loading`` analysis, giving the
 same ``(header, photons)`` pair from what a file recorded:
 
 * ``first_photons``/``second_photons`` per point, with the ``trap_sites`` and
-  ``threshold`` constants (the tweezer-array measurements), or
-* ``first_image``/``second_image`` per point (``LoadTweezers``). The sites are
-  found in the mean of every top-hat filtered first image in the file.
+  ``threshold`` constants (every tweezer experiment run with accepted trap
+  sites), or
+* ``first_image``/``second_image`` per point (``LoadTweezers`` without them).
+  The sites are found in the mean of every top-hat filtered first image in
+  the file.
 """
 
 from dataclasses import dataclass

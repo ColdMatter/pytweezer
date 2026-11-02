@@ -7,6 +7,7 @@ from pytweezer.analysis.tweezer_histogram import (
     tweezer_histogram,
 )
 from pytweezer.experiment import Experiment, ListAxis, Number, Scan, run_local
+from pytweezer.experiments.load_tweezers import LoadTweezers
 from pytweezer.experiments.tweezer_array import TweezerImaging
 from tests.test_analysis import (
     SITE_CENTRES,
@@ -67,6 +68,17 @@ def test_photons_file_uses_the_recorded_sites_and_photons(rig):  # noqa: F811
         sites = measurement.constants["trap_sites"]
         assert head["site_rows"] == list(sites[:, 0])
         assert head["site_cols"] == list(sites[:, 1])
+
+
+def test_a_load_tweezers_file_is_scored_at_its_recorded_sites(rig):  # noqa: F811
+    measurement = run_local(LoadTweezers, Scan(repetitions=3))
+
+    head, photons = tweezer_histogram(measurement, HistogramSettings())
+
+    assert head["source"] == "photons"
+    assert photons == pytest.approx(measurement.results["first_photons"])
+    sites = measurement.constants["trap_sites"]
+    assert head["site_rows"] == list(sites[:, 0])
 
 
 def test_a_scan_value_pools_its_repetitions():

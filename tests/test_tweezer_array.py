@@ -6,7 +6,9 @@ from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
 from pytweezer.experiment import optimisers, run_local
+from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiments import load_tweezers, tweezer_array
+from pytweezer.experiments.load_tweezers import LoadTweezers
 from pytweezer.experiments.tweezer_array import (
     SAVED_SEQUENCE_PARAMETERS,
     FindTrapSites,
@@ -341,3 +343,70 @@ def test_an_optimiser_records_the_photons_of_each_evaluation(rig):
     measurement = run_local(OptimiseTweezerImaging, **FAST, n_calls=2, n_initial=2)
 
     assert measurement.results["first_photons"].shape == (2, FAST["shots"], len(SITES))
+
+
+def test_load_tweezers_records_each_sites_photons_and_occupancy(rig):
+    measurement = run_local(LoadTweezers)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    photons = measurement.results["first_photons"][0]
+    assert photons.shape == (len(SITES),)
+    np.testing.assert_array_equal(
+        measurement.results["first_occupied"][0], photons > SAVED["trap_threshold"]
+    )
+    assert measurement.results["second_occupied"].shape == (1, len(SITES))
+    np.testing.assert_array_equal(measurement.constants["trap_sites"], SITES)
+    assert "first_image" in measurement.results
+
+
+def test_load_tweezers_without_raw_images_records_no_frames(rig):
+    measurement = run_local(LoadTweezers, save_raw_images=False)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert "first_image" not in measurement.results
+    assert "second_image" not in measurement.results
+    assert "first_occupied" in measurement.results
+
+
+def test_load_tweezers_without_saved_sites_records_frames_only(rig):
+    del rig.saved["trap_sites"]
+    measurement = run_local(LoadTweezers)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert "first_image" in measurement.results
+    assert "first_photons" not in measurement.results
+    assert "trap_sites" not in measurement.constants
+
+
+def test_dropping_raw_images_needs_trap_sites(rig):
+    del rig.saved["trap_sites"]
+    measurement = run_local(LoadTweezers, save_raw_images=False)
+    assert measurement.status == "failed"
+    assert "FindTrapSites" in measurement.attrs["error"]
+
+
+def test_load_tweezers_runs_when_the_manager_cannot_be_reached(rig, monkeypatch):
+    def unreachable():
+        raise ManagerUnavailable("not responding")
+
+    monkeypatch.setattr(load_tweezers, "get_saved_parameters", unreachable)
+    measurement = run_local(LoadTweezers)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert "first_image" in measurement.results
+
+
+@pytest.mark.parametrize("save_raw_images", [False, True])
+def test_a_measurement_records_occupancy_and_frames_only_when_asked(
+    rig, save_raw_images
+):
+    measurement = run_local(TweezerImaging, **FAST, save_raw_images=save_raw_images)
+
+    occupied = measurement.results["first_occupied"]
+    assert occupied.shape == (1, FAST["shots"], len(SITES))
+    np.testing.assert_array_equal(
+        occupied, measurement.results["first_photons"] > SAVED["trap_threshold"]
+    )
+    assert ("first_images" in measurement.results) == save_raw_images
+    if save_raw_images:
+        assert measurement.results["first_images"].shape == (1, FAST["shots"], 128, 128)

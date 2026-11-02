@@ -10,7 +10,7 @@ from pytweezer.analysis import analysis as an
 from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.analysis.trap_sites import default_geometry, fit_trap_sites
 from pytweezer.experiment import Experiment
-from pytweezer.experiment.arguments import Integer, Number
+from pytweezer.experiment.arguments import Bool, Integer, Number
 from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.experiment.optimisers import (
     SEARCH,
@@ -59,6 +59,12 @@ class TweezerArrayShots(LoadTweezers):
     wins over its saved value.
     """
 
+    save_raw_images = Bool(
+        False,
+        group="Camera",
+        tooltip="record every shot's camera frames as first_images and second_images",
+    )
+
     # Not LoadTweezers' point: each measurement defines its own, and this keeps
     # the bases out of the Experiments list.
     run_point = Experiment.run_point
@@ -85,6 +91,9 @@ class TweezerArrayShots(LoadTweezers):
         }
         frames = [self.shot(**overrides) for _ in range(n_shots)]
         firsts, seconds = zip(*frames, strict=True)
+        if self.save_raw_images:
+            self.record("first_images", np.array(firsts))
+            self.record("second_images", np.array(seconds))
         return list(firsts), list(seconds)
 
     @staticmethod
@@ -136,7 +145,7 @@ class FindTrapSites(Fit, TweezerArrayShots):
     default_spacing = Number(5e-6, unit="um", scale=1e-6, min=0, group="Default array")
 
     def saved_trap_sites(self):
-        return None, ""
+        return None, ""  # it finds them
 
     def prepare(self) -> None:
         super().prepare()
@@ -205,7 +214,6 @@ class TweezerArrayMeasurement(TweezerArrayShots):
         if self.trap_sites is None:
             raise RuntimeError(self.no_trap_sites_reason)
         self.threshold = self.trap_threshold
-        self.record("threshold", self.threshold, unit="photons")
 
     def score_batch(self, **sequence) -> dict[str, float]:
         """Loading, survival from the first image to the second, and fidelity, over ``shots`` shots.
@@ -237,12 +245,13 @@ class TweezerArrayMeasurement(TweezerArrayShots):
             threshold=self.threshold,
             window_size=self.trap_window_size,
         )
-        self.record("first_photons", first_photons, unit="photons")
-        self.record(
-            "second_photons",
-            photons_at_sites(seconds, self.trap_sites, self.trap_window_size),
-            unit="photons",
+        second_photons = photons_at_sites(
+            seconds, self.trap_sites, self.trap_window_size
         )
+        self.record("first_photons", first_photons, unit="photons")
+        self.record("second_photons", second_photons, unit="photons")
+        self.record("first_occupied", np.asarray(first_photons) > self.threshold)
+        self.record("second_occupied", second_photons > self.threshold)
         return {
             "loading": float(np.mean(loading)),
             "survival": float(survival),

@@ -6,10 +6,16 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from pytweezer.analysis import analysis as an
+from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.analysis.trap_sites import same_geometry, to_roi
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
-from pytweezer.experiment.arguments import Device, Integer
-from pytweezer.experiment.client import get_saved_parameters
+from pytweezer.experiment.arguments import Bool, Device, Integer
+from pytweezer.experiment.client import (
+    ManagerError,
+    ManagerUnavailable,
+    get_saved_parameters,
+)
 from pytweezer.experiment.motmaster import (
     MotMaster,
     MotMasterExperiment,
@@ -33,13 +39,17 @@ TRAP_SITE_KEYS = (
 
 
 class LoadTweezers(MotMasterExperiment):
-    """Run the Rb tweezer-loading sequence and record two HamCam frames per point.
+    """Run the Rb tweezer-loading sequence and image the tweezers twice per point.
 
     ``signal_counts`` is the summed first frame minus the summed second.
     :meth:`prepare` also loads the accepted trap sites (see
     :meth:`saved_trap_sites`) and records them in this ROI's pixels as
-    ``trap_sites``, with the ``trap_window_size`` and ``trap_feature_size``
-    they are scored with.
+    ``trap_sites``, with the ``trap_window_size``, ``trap_feature_size`` and
+    occupancy ``threshold`` they are scored with. With them, each point records
+    every site's photons in each frame (``first_photons``, ``second_photons``)
+    and whether it was occupied (``first_occupied``, ``second_occupied``). The
+    frames themselves (``first_image``, ``second_image``) are recorded only with
+    ``save_raw_images``, which needs no sites.
     """
 
     rb = MotMaster("Rb MotMaster", script="RbTweezerBasic2026_2")
@@ -53,6 +63,12 @@ class LoadTweezers(MotMasterExperiment):
     roi_y0 = Integer(220, min=0, group="Camera")
     roi_width = Integer(256, min=1, group="Camera")
     roi_height = Integer(256, min=1, group="Camera")
+    save_raw_images = Bool(
+        True,
+        group="Camera",
+        tooltip="record the camera frames; without them only each site's "
+        "photons and occupancy are kept",
+    )
 
     def prepare(self) -> None:
         super().prepare()
@@ -66,22 +82,34 @@ class LoadTweezers(MotMasterExperiment):
 
         self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites()
         if self.trap_sites is None:
-            if self.no_trap_sites_reason:
-                logger.info("Recording no trap sites: %s", self.no_trap_sites_reason)
+            if not self.no_trap_sites_reason:
+                return
+            if not self.save_raw_images:
+                raise RuntimeError(
+                    "without raw images only the site occupancy is recorded, "
+                    f"which needs trap sites: {self.no_trap_sites_reason}"
+                )
+            logger.info("Recording no trap sites: %s", self.no_trap_sites_reason)
             return
         self.record("trap_sites", np.array(list(self.trap_sites.values())))
         self.record("trap_window_size", self.trap_window_size, unit="px")
         self.record("trap_feature_size", self.trap_feature_size, unit="px")
+        self.record("threshold", self.trap_threshold, unit="photons")
 
     def saved_trap_sites(self) -> tuple[dict[int, tuple[int, int]] | None, str]:
         """The accepted trap sites as whole pixels of this ROI, by index; or ``None`` and why.
+
+        An empty reason means the experiment wants none.
 
         Also sets ``trap_window_size``, ``trap_feature_size`` and
         ``trap_threshold`` from the saved parameters. Sites fitted to another
         array than the rig has on the SLM are refused; if the rig does not know
         its array, or cannot be reached, the saved sites are used unchecked.
         """
-        saved = get_saved_parameters()
+        try:
+            saved = get_saved_parameters()
+        except (ManagerUnavailable, ManagerError) as error:
+            return None, f"the saved parameters could not be read: {error}"
         if any(key not in saved for key in TRAP_SITE_KEYS):
             return None, (
                 "no trap sites are saved; run FindTrapSites and accept its proposal"
@@ -128,15 +156,32 @@ class LoadTweezers(MotMasterExperiment):
         self.camera.stop_acquisition()
         return first_image, second_image
 
+    def site_photons(self, frames) -> np.ndarray:
+        """Every site's photons in each of ``frames``, top-hat filtered: ``(frames, sites)``."""
+        filtered = [
+            an.morphological_tophat_high_pass(
+                np.asarray(frame, dtype=float), feature_size=self.trap_feature_size
+            )
+            for frame in frames
+        ]
+        return photons_at_sites(filtered, self.trap_sites, self.trap_window_size)
+
     def run_point(self):
         first_image, second_image = self.shot()
-        self.record("first_image", first_image)
-        self.record("second_image", second_image)
+        if self.save_raw_images:
+            self.record("first_image", first_image)
+            self.record("second_image", second_image)
         self.record(
             "signal_counts",
             float(first_image.sum(dtype=float) - second_image.sum(dtype=float)),
             unit="counts",
         )
+        if self.trap_sites is not None:
+            first, second = self.site_photons([first_image, second_image])
+            self.record("first_photons", first, unit="photons")
+            self.record("second_photons", second, unit="photons")
+            self.record("first_occupied", first > self.trap_threshold)
+            self.record("second_occupied", second > self.trap_threshold)
 
     def finish(self) -> None:
         self.camera.stop_acquisition()
