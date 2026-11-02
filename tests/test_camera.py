@@ -91,6 +91,8 @@ class FakeVendorCamera:
 
     def set_roi(self, hstart, hend, vstart, vend):
         self.calls["roi"] = (hstart, hend, vstart, vend)
+        # Like DCAM, which moves the ROI to its subarray step; returns get_roi().
+        return (hstart // 4 * 4, hend, vstart, vend, 1, 1)
 
 
 DRIVERS = [ImagEMX2Camera, ORCACamera, thorcam.ThorCam, tweezermonitorcam.ThorCam]
@@ -116,3 +118,10 @@ def test_drivers_ask_pylablib_for_the_requested_roi(cls):
     driver = _driver(cls)
     driver.set_roi(110, 256, 220, 64)
     assert driver._backend.calls["roi"] == (110, 366, 220, 284)
+
+
+@pytest.mark.parametrize("cls", DRIVERS, ids=DRIVER_IDS)
+def test_drivers_keep_the_roi_origin_the_camera_used(cls):
+    driver = _driver(cls)
+    assert driver.set_roi(110, 256, 220, 64) == (108, 220)
+    assert driver.roi_origin == (108, 220)

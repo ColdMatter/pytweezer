@@ -190,7 +190,7 @@ class FindTrapSites(Fit, TweezerArrayShots):
         self.record("threshold", float(threshold), unit="photons")
         self.record("calibration_fidelity", float(fidelity))
         return {
-            "trap_sites": found.sites + [self.roi_y0, self.roi_x0],
+            "trap_sites": found.sites + self.roi_origin[::-1],
             "trap_threshold": float(threshold),
             "trap_window_size": self.window_size,
             "trap_feature_size": self.feature_size,

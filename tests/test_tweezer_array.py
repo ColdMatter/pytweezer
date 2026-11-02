@@ -65,7 +65,11 @@ class FakeHamCam:
     def close_rpc(self):
         pass
 
-    def set_roi(self, *args): ...
+    def set_roi(self, x0, width, y0, height):
+        return self.roi_origin
+
+    roi_origin = (ROI_ORIGIN[1], ROI_ORIGIN[0])
+
     def set_external_exposure_mode(self): ...
     def enable_em_gain(self, on): ...
     def enable_direct_em_gain(self, on): ...
@@ -410,3 +414,11 @@ def test_a_measurement_records_occupancy_and_frames_only_when_asked(
     assert ("first_images" in measurement.results) == save_raw_images
     if save_raw_images:
         assert measurement.results["first_images"].shape == (1, FAST["shots"], 128, 128)
+
+
+def test_sites_are_placed_in_the_roi_the_camera_actually_used(rig):
+    rig.camera.roi_origin = (ROI_ORIGIN[1] - 2, ROI_ORIGIN[0])
+    measurement = run_local(TweezerImaging, **FAST)
+    np.testing.assert_array_equal(
+        measurement.constants["trap_sites"], np.array(SITES) + [0, 2]
+    )

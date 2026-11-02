@@ -73,7 +73,12 @@ class LoadTweezers(MotMasterExperiment):
     def prepare(self) -> None:
         super().prepare()
 
-        self.camera.set_roi(self.roi_x0, self.roi_width, self.roi_y0, self.roi_height)
+        # The camera may round the ROI's corner; sites are placed by the one it used.
+        self.roi_origin = tuple(
+            self.camera.set_roi(
+                self.roi_x0, self.roi_width, self.roi_y0, self.roi_height
+            )
+        )
         self.camera.set_external_exposure_mode()
         self.camera.enable_em_gain(True)
         self.camera.enable_direct_em_gain(True)
@@ -129,9 +134,8 @@ class LoadTweezers(MotMasterExperiment):
         self.trap_window_size = int(saved["trap_window_size"])
         self.trap_feature_size = int(saved["trap_feature_size"])
         self.trap_threshold = float(saved["trap_threshold"])
-        sites = np.rint(to_roi(saved["trap_sites"], self.roi_y0, self.roi_x0)).astype(
-            int
-        )
+        roi_x0, roi_y0 = self.roi_origin
+        sites = np.rint(to_roi(saved["trap_sites"], roi_y0, roi_x0)).astype(int)
         half = self.trap_window_size // 2
         outside = [
             index

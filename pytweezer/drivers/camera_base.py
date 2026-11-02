@@ -68,6 +68,8 @@ class Camera(ABC):
 
     #: Filename prefix used by :meth:`save_tiff`; override per driver.
     image_prefix: str = "image"
+    #: Sensor pixel ``(x0, y0)`` of the ROI's corner, as the last :meth:`set_roi` left it.
+    roi_origin: tuple[int, int] = (0, 0)
 
     def __init__(
         self,
@@ -99,8 +101,12 @@ class Camera(ABC):
         """Release the hardware handle (called by :meth:`close`)."""
 
     @abstractmethod
-    def set_roi(self, x0: int, width: int, y0: int, height: int) -> None:
-        """Restrict readout to the given region of interest (pixels)."""
+    def set_roi(self, x0: int, width: int, y0: int, height: int) -> tuple[int, int]:
+        """Restrict readout to the given region of interest (pixels).
+
+        Returns the ``(x0, y0)`` the camera used, which it may have rounded,
+        and keeps it as :attr:`roi_origin`.
+        """
 
     @abstractmethod
     def set_trigger_source(self, source: str) -> None:
@@ -297,10 +303,12 @@ class Camera(ABC):
                 sent += 1
 
     def broadcast_image(self, image: np.ndarray, info) -> None:
+        """Send ``image`` on the image hub, its header saying which ROI it was read from."""
         if self.image_client is None:
             LOGGER.error("tried to broadcast image but no client exists")
             return
-        self.image_client.send(info, image)
+        roi_x0, roi_y0 = self.roi_origin
+        self.image_client.send({"roi_x0": roi_x0, "roi_y0": roi_y0, **info}, image)
 
     @classmethod
     def save_tiff(
@@ -353,8 +361,10 @@ class SimulatedCamera(Camera):
     def _disconnect(self) -> None:
         self._running = False
 
-    def set_roi(self, x0: int, width: int, y0: int, height: int) -> None:
+    def set_roi(self, x0: int, width: int, y0: int, height: int) -> tuple[int, int]:
         self._shape = (int(height), int(width))
+        self.roi_origin = (int(x0), int(y0))
+        return self.roi_origin
 
     def set_trigger_source(self, source: str) -> None:
         self._trigger_source = source

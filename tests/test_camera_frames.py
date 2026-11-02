@@ -32,9 +32,11 @@ def camera(clock):
 class Recorder:
     def __init__(self):
         self.indices = []
+        self.headers = []
 
     def send(self, info, image):
         self.indices.append(info["index"])
+        self.headers.append(info)
 
 
 def test_arm_starts_a_stopped_camera_once(camera, monkeypatch):
@@ -70,6 +72,22 @@ def test_live_broadcast_sends_each_new_frame_once(camera, clock):
     time.sleep(0.05)
     camera.stop_live()
     assert recorder.indices == [0, 1, 2]
+
+
+@pytest.mark.parametrize("roi", [None, (110, 256, 220, 128)], ids=["full", "roi"])
+def test_broadcast_frames_say_which_roi_they_were_read_from(camera, clock, roi):
+    recorder = Recorder()
+    camera.image_client = recorder
+    if roi is not None:
+        camera.set_roi(*roi)
+    camera.arm()
+    clock.now += 0.6
+
+    camera.acquire_n_frames(2, broadcast=True, header={"rid": 3})
+
+    expected = (0, 0) if roi is None else (110, 220)
+    assert [(h["roi_x0"], h["roi_y0"]) for h in recorder.headers] == [expected] * 2
+    assert all(h["rid"] == 3 for h in recorder.headers)
 
 
 def test_caf_thorcam_builds_simulated_and_streams_live():
