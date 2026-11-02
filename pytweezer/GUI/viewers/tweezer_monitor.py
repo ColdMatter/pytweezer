@@ -3,7 +3,9 @@
 The Image Monitor, plus the trap sites accepted from ``FindTrapSites``: each is
 drawn as a square the summing window across (``trap_window_size``), so it is
 plain at a glance whether the sites sit on the atoms. Subscribe it to the
-tweezer camera's image stream. The sites are kept in full-sensor pixels and
+tweezer camera's image stream. Frames are drawn row 0 at the top with x along
+the columns, as in the Optimisers tab and the notebooks (the Image Monitor
+draws them transposed). The sites are kept in full-sensor pixels and
 placed in each frame by the ROI origin in its header (``roi_x0``/``roi_y0``; 0
 when missing). They are read from the saved parameters when the viewer starts
 and again whenever the Experiment Manager says they changed; until some are
@@ -47,6 +49,12 @@ def sites_from_saved(saved: dict) -> tuple[np.ndarray | None, int, str]:
     )
 
 
+def show_rows_down(plot, image_item) -> None:
+    """Draw ``image_item``'s frames row 0 at the top, x along columns, as the Optimisers tab does."""
+    image_item.setOpts(axisOrder="row-major")
+    plot.getViewBox().invertY(True)
+
+
 class SiteOverlay:
     """Squares, optional index labels and a message, drawn over an image in ``plot``."""
 
@@ -76,11 +84,12 @@ class SiteOverlay:
             return
         sites = to_roi(self.sites, head.get("roi_y0", 0), head.get("roi_x0", 0))
         # Through the image's own transform, so squares follow however the
-        # frame is placed and scaled; its default column-major order puts
-        # data[row, col] at local (row, col), with pixel centres at +0.5.
+        # frame is placed and scaled. Column-major puts data[row, col] at local
+        # (row, col), row-major at (col, row); pixel centres are at +0.5.
+        if image_item.axisOrder == "row-major":
+            sites = sites[:, ::-1]
         centres = [
-            image_item.mapToParent(QtCore.QPointF(row + 0.5, col + 0.5))
-            for row, col in sites
+            image_item.mapToParent(QtCore.QPointF(u + 0.5, v + 0.5)) for u, v in sites
         ]
         step = image_item.mapToParent(QtCore.QPointF(1, 0)) - image_item.mapToParent(
             QtCore.QPointF(0, 0)
@@ -105,6 +114,7 @@ class TweezerDisplay(ImageDisplay):
 
     def init_gui(self):
         super().init_gui()
+        show_rows_down(self.plot, self.image_item)
         self.overlay = SiteOverlay(self.plot)
         self._saved_version = None
         self._placed = None

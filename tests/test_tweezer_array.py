@@ -172,6 +172,17 @@ def test_find_trap_sites_proposes_the_default_grid_where_the_atoms_are(rig):
     assert measurement.constants["sites_from"] == "default"
 
 
+def test_find_trap_sites_records_the_fitted_transform(rig):
+    measurement = run_local(FindTrapSites, calibration_shots=30)
+    results = measurement.results
+    assert results["scale"][0] == pytest.approx(2.0, rel=0.01)
+    assert results["angle"][0] == pytest.approx(0.0, abs=0.3)
+    assert (results["x0"][0], results["y0"][0]) == (
+        pytest.approx(60.0, abs=0.3),
+        pytest.approx(60.0, abs=0.3),
+    )
+
+
 def test_find_trap_sites_keeps_the_rigs_order_of_its_array(rig):
     order = np.random.default_rng(2).permutation(len(SITES))
     x_um, y_um = default_geometry()[order].T

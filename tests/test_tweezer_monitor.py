@@ -1,25 +1,31 @@
 import numpy as np
 import pyqtgraph as pg
+import pytest
 from PyQt6 import QtCore
 
-from pytweezer.GUI.viewers.tweezer_monitor import SiteOverlay, sites_from_saved
+from pytweezer.GUI.viewers.tweezer_monitor import (
+    SiteOverlay,
+    show_rows_down,
+    sites_from_saved,
+)
 
 SITES = np.array([[10.0, 12.0], [10.0, 22.0], [30.0, 12.0]])
 ROI = {"roi_x0": 50, "roi_y0": 100}
 SAVED = {"trap_sites": SITES + [100, 50], "trap_window_size": 5}
 
 
-def image_view(shape=(64, 48)):
+def image_view(shape=(64, 48), axis_order="col-major"):
     """An ImageItem placed as ImageDisplay places a camera frame."""
     plot = pg.PlotItem()
-    image = pg.ImageItem(np.zeros(shape))
+    image = pg.ImageItem(np.zeros(shape), axisOrder=axis_order)
     image.setRect(QtCore.QRectF(0, 0, shape[1], shape[0]))
     plot.addItem(image)
     return plot, image
 
 
-def test_each_square_sits_on_its_sites_pixel_in_the_frames_roi(qapp):
-    plot, image = image_view()
+@pytest.mark.parametrize("axis_order", ["col-major", "row-major"])
+def test_each_square_sits_on_its_sites_pixel_in_the_frames_roi(qapp, axis_order):
+    plot, image = image_view(axis_order=axis_order)
     overlay = SiteOverlay(plot)
     overlay.set_sites(*sites_from_saved(SAVED)[:2])
 
@@ -28,9 +34,17 @@ def test_each_square_sits_on_its_sites_pixel_in_the_frames_roi(qapp):
     pixels = []
     for point in overlay.squares.points():
         local = image.mapFromParent(point.pos())
-        pixels.append((int(np.floor(local.x())), int(np.floor(local.y()))))
-    # ImageItem's default column-major order puts data[i, j] at local (i, j).
+        x, y = int(np.floor(local.x())), int(np.floor(local.y()))
+        # Column-major puts data[i, j] at local (i, j); row-major at (j, i).
+        pixels.append((x, y) if axis_order == "col-major" else (y, x))
     assert sorted(pixels) == sorted((int(r), int(c)) for r, c in SITES)
+
+
+def test_the_viewer_draws_rows_down_the_screen_like_the_optimisers_tab(qapp):
+    plot, image = image_view()
+    show_rows_down(plot, image)
+    assert image.axisOrder == "row-major"
+    assert plot.getViewBox().yInverted()
 
 
 def test_a_square_is_the_summing_window_across(qapp):

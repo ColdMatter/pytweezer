@@ -1605,6 +1605,33 @@ def test_a_fit_run_shows_its_image_with_a_square_at_each_site(qapp):
     assert {point.size() for point in squares.points()} == {5}
 
 
+def test_a_live_fit_run_plots_nothing_until_its_file_is_read(qapp):
+    from pytweezer.GUI.optimisers import _FitPlots, live_results
+
+    plots = _FitPlots((42, "fit"), FIT)
+    live = live_results(
+        [{"index": 0, "scalars": {"scale": 2.0}}], ["calibration_image", "roi_sites"]
+    )
+    assert plots.update(live, {}) is False
+    assert len(plots.squares.points()) == 0
+
+
+def test_a_fits_values_are_accepted_together(qapp):
+    panel = make_fit_panel()
+    boxes = panel.accept_rows.values()
+    assert all(box.isChecked() and not box.isEnabled() for box in boxes)
+    panel.accept()
+    _, values, _, _ = panel.client.calls[-1]
+    assert set(values) == set(FIT["optimiser"]["proposes"])
+
+
+def test_a_search_creates_no_saved_parameter(qapp):
+    panel = make_optimisers_panel()
+    panel.select(DEMO, "DemoStagedScan")
+    panel.accept()
+    assert panel.client.set_options["create"] is False
+
+
 def test_a_fit_plans_one_fit(qapp):
     panel = make_fit_panel()
     assert panel.forms[(DEMO, "FindTrapSites")].planned() == "1 fit"

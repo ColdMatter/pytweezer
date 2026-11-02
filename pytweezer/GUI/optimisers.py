@@ -747,6 +747,8 @@ class OptimisersPanel(QWidget):
         saved = {key: self._parameters.get(key) for key in proposed}
         row = self._selected_row()
         proposal_units = row.schema["optimiser"].get("units", {}) if row else {}
+        # A fit's values were fitted together, so they are accepted together.
+        together = row is not None and row.schema["optimiser"]["kind"] == "fit"
         shown = (rid, message, proposed, {k: p and p.value for k, p in saved.items()})
         if shown == self._sheet_shown:
             return
@@ -772,8 +774,11 @@ class OptimisersPanel(QWidget):
                 grid.addWidget(heading, 0, column)
         for line, (key, value) in enumerate(proposed.items(), start=1):
             box = QCheckBox()
-            box.setChecked(ticks.get(key, True) if same else True)
-            box.setToolTip(f"Save {key}")
+            box.setChecked(together or not same or ticks.get(key, True))
+            box.setEnabled(not together)
+            box.setToolTip(
+                "A fit's values are saved together" if together else f"Save {key}"
+            )
             box.toggled.connect(self._ticks_changed)
             self.accept_rows[key] = box
             name = QLabel(key)
@@ -1073,9 +1078,9 @@ class OptimisersPanel(QWidget):
     def accept(self) -> None:
         """Save the ticked proposals of the shown run for the whole lab.
 
-        A key not saved yet is created, in the optimiser's group and with its
-        unit. The store sets every value or, refusing any, none; a refusal is
-        shown in the Accept area. The run is recorded as accepted even if every value
+        A fit's keys not saved yet are created, in its group and with their
+        units; a search only sets keys that exist. The store sets every value
+        or, refusing any, none; a refusal is shown in the Accept area. The run is recorded as accepted even if every value
         matches the one saved.
         """
         rid = self._sheet_rid
@@ -1093,7 +1098,7 @@ class OptimisersPanel(QWidget):
                 values,
                 f"accepted from run {rid}",
                 submitter_name(),
-                create=True,
+                create=optimiser["kind"] == "fit",
                 group=optimiser.get("group", ""),
                 units=optimiser.get("units", {}),
                 rid=rid,
@@ -1283,7 +1288,15 @@ class _FitPlots:
     def update(self, results, constants) -> bool:
         images = results.get("calibration_image")
         sites = results.get("roi_sites")
-        if images is None or not len(images):
+        # While the run is live these are the feed's per-point scalars (NaN),
+        # not the recorded image and sites.
+        if (
+            images is None
+            or sites is None
+            or not len(images)
+            or np.ndim(images[-1]) != 2
+            or np.ndim(sites[-1]) != 2
+        ):
             self.image.clear()
             self.squares.clear()
             return False

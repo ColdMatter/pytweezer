@@ -174,6 +174,8 @@ class FindTrapSites(Fit, TweezerArrayShots):
         self.record("roi_sites", found.sites, unit="px")
         self.record("scale", found.scale, unit="px/µm")
         self.record("angle", found.angle_deg, unit="deg")
+        self.record("x0", found.x0, unit="px")
+        self.record("y0", found.y0, unit="px")
         whole_pixels = {
             index: (round(y), round(x)) for index, (y, x) in enumerate(found.sites)
         }
