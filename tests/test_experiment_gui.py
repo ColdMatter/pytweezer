@@ -1,6 +1,7 @@
 """Experiments tab widgets, offscreen, with a fake manager client and feed."""
 
 import threading
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -1635,3 +1636,21 @@ def test_choosing_an_experiment_opens_no_stray_windows(qapp):
         qapp.removeEventFilter(watcher)
 
     assert watcher.windows == []
+
+
+def test_a_progress_update_redraws_a_full_queue_quickly(qapp):
+    # Rebuilding every cell with the columns auto-sizing took ~0.4 s per point,
+    # which froze the whole GUI while a measurement ran.
+    view = QueueView()
+    view.resize(1500, 600)
+    view.show()
+    history = [task(rid, "done", label=f"run {rid}") for rid in range(2, 52)]
+    snapshot = {"running": [task(52, "running")], "queue": [], "history": history}
+    view.set_snapshot(snapshot)
+    qapp.processEvents()
+
+    start = time.perf_counter()
+    view.set_snapshot(snapshot)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.1

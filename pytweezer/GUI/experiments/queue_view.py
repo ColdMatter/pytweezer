@@ -196,6 +196,13 @@ class QueueView(QWidget):
             for task in _heads(running, queue)
             if task.get("devices") is None
         }
+        header = self.table.horizontalHeader()
+        modes = [header.sectionResizeMode(c) for c in range(header.count())]
+        # Auto-sized columns re-measure every row on each setItem, which made
+        # a rebuild O(rows²): ~0.4 s per point for a full history. Size once.
+        for column, mode in enumerate(modes):
+            if mode == QHeaderView.ResizeMode.ResizeToContents:
+                header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
         self.table.setRowCount(len(rows))
         reselect = None
         for row, task in enumerate(rows):
@@ -215,6 +222,8 @@ class QueueView(QWidget):
                 self.table.setItem(row, column, item)
             if task["rid"] == selected_rid:
                 reselect = row
+        for column, mode in enumerate(modes):
+            header.setSectionResizeMode(column, mode)
         self._apply_filter()
         # Qt keeps the selected row index, which may now hold a different task.
         if reselect is None:
