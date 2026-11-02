@@ -5,6 +5,7 @@ from typing import ClassVar
 import numpy as np
 
 from pytweezer.analysis import analysis as an
+from pytweezer.experiment import Experiment
 from pytweezer.experiment.arguments import Integer, Number
 from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.experiment.optimisers import BayesianOptimisation, Dimension
@@ -67,6 +68,10 @@ class TweezerArrayMeasurement(LoadTweezers):
         group="Analysis",
         tooltip="starting guess for the calibration's occupancy threshold fit",
     )
+
+    # Not LoadTweezers' point: each measurement defines its own, and this keeps
+    # the base out of the Experiments list.
+    run_point = Experiment.run_point
 
     def prepare(self) -> None:
         super().prepare()
