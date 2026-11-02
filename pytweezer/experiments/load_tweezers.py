@@ -34,11 +34,16 @@ class LoadTweezers(MotMasterExperiment):
         self.camera.set_sensitivity(self.sensitivity)
         self.camera.setup_acquisition("snap", 2)
 
-    def run_point(self):
+    def shot(self, **overrides) -> tuple:
+        """Run the sequence once with ``overrides`` and return the two HamCam frames."""
         self.camera.start_acquisition()
-        self.run_sequences()
+        self.run_sequences(**overrides)
         first_image, second_image = self.camera.acquire_n_frames(2, broadcast=True)
         self.camera.stop_acquisition()
+        return first_image, second_image
+
+    def run_point(self):
+        first_image, second_image = self.shot()
         self.record("first_image", first_image)
         self.record("second_image", second_image)
         self.record(
