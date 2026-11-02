@@ -52,6 +52,10 @@ class ResultsArchive:
         self._headers: dict[str, tuple[str, str]] = {}
         self._lock = threading.Lock()
 
+    def clone(self) -> "ResultsArchive":
+        """The same archive with its own lock, for slow loads beside quick listings."""
+        return ResultsArchive(self.root)
+
     def days(self) -> list[str]:
         """Days holding at least one measurement, newest first."""
         if not self.root.is_dir():
@@ -161,6 +165,14 @@ class RemoteArchive:
         self.location = f"the Experiment Manager ({self.host}:{self.port})"
         self._client: Client | None = None
         self._lock = threading.Lock()
+
+    def clone(self) -> "RemoteArchive":
+        """The same archive over a connection of its own.
+
+        A call holds the connection for its whole round trip, so a large load
+        on a shared one would stall every listing queued behind it.
+        """
+        return RemoteArchive((self.host, self.port), timeout=self.timeout)
 
     def days(self) -> list[str]:
         return self._call("days")
