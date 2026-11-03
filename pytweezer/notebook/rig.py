@@ -30,8 +30,13 @@ from typing import Any
 import numpy as np
 
 from pytweezer.drivers.shot_frames import settle_frame_counts
+from pytweezer.experiment.archive import fetch_measurement
+from pytweezer.experiment.client import submit, wait
+from pytweezer.experiment.task import TaskStatus
+from pytweezer.experiments.caf_fluorescence import LASERS
 from pytweezer.logging_utils import get_logger
 from pytweezer.notebook import zips
+from pytweezer.optimisers.optimise_mot_lasers import LASER_KEYS, OptimiseMOTLasers
 from pytweezer.servers.device_client import get_device, get_device_config
 
 logger = get_logger("notebook rig")
@@ -245,81 +250,81 @@ class Rig:
             shots.append(shot)
         return shots
 
-    @_reconnect_if_interrupted
     def auto_mot(
         self,
-        script: str,
-        scan_ranges: dict[str, Sequence[float]],
+        stages: Sequence[str],
         *,
-        camera: str | None = None,
-        iterations: int = 1,
-        field_parameter: str = "MOTCoilsCurrentValue",
-        bg_field_value: float = 0.0,
-        mot_field_value: float = 1.0,
-        save: bool = False,
+        spans: dict[str, float] | None = None,
+        points: dict[str, int] | None = None,
+        centres: dict[str, float] | None = None,
         display: bool = False,
+        **arguments: Any,
     ) -> dict[str, dict[str, Any]]:
-        """Tune the wavemeter-lock set points laser by laser for the most fluorescence.
+        """Tune the CaF lasers for the most fluorescence with the queued optimiser.
 
-        A background shot is taken with ``field_parameter`` at ``bg_field_value``;
-        then each laser in ``scan_ranges`` (set points in THz) is scanned with the
-        field at ``mot_field_value`` and left on the point with the most
-        background-subtracted counts before the next laser is scanned.
+        Submits :class:`~pytweezer.optimisers.optimise_mot_lasers.OptimiseMOTLasers`
+        scanning exactly the lasers in ``stages`` and waits for it. The run never
+        accepts its proposals: accept them in the Optimisers tab. It does not use
+        this rig's devices, so it must not run alongside a shot from this rig.
 
         Args:
-            camera: Key of the camera to count on; defaults to :attr:`element`'s.
+            stages: The lasers to scan, a subset of
+                :data:`~pytweezer.experiments.caf_fluorescence.LASERS`; they are
+                scanned in that order whatever order is given here.
+            spans: Half-width of each laser's scan, in THz, by laser; the
+                optimiser's default for lasers not given.
+            points: Number of set points scanned, by laser.
+            centres: Set point each laser's scan is centred on, in THz, by laser;
+                the saved ``caf_laser_*`` for lasers not given.
+            display: Plot the result with :func:`plot_auto_mot_results`.
+            **arguments: Any other argument of the optimiser, e.g. ``mot_field``.
 
         Returns:
-            Per laser: ``scan_range``, ``numbers`` (mean counts over a shot's
-            frames), ``errors`` (their standard error; NaN for one frame),
-            ``set_point`` chosen and ``start_set_point``. Pass it to
-            :func:`plot_auto_mot_results`, or set ``display``.
-        """
-        key = camera or self.element
-        start_set_points = self.laser_set_points()
-        unknown = [laser for laser in scan_ranges if laser not in start_set_points]
-        if unknown:
-            raise KeyError(
-                f"{unknown} not among the MOTMaster's lasers {sorted(start_set_points)}"
-            )
-        background = (
-            self.run(
-                script,
-                save=save,
-                iterations=iterations,
-                **{field_parameter: bg_field_value},
-            )
-            .images[key]
-            .mean(axis=0)
-        )
+            Per laser in ``stages``: ``scan_range`` (set points in THz, one per
+            point), ``numbers`` (background-subtracted counts), ``errors``,
+            ``set_point`` proposed and ``start_set_point`` (the lock's value when
+            the run started). Pass it to :func:`plot_auto_mot_results`, or set
+            ``display``.
 
-        results: dict[str, dict[str, Any]] = {}
-        for laser, scan_range in scan_ranges.items():
-            scan_range = [float(value) for value in scan_range]
-            shots = self.scan_laser(
-                script,
-                laser,
-                scan_range,
-                save=save,
-                iterations=iterations,
-                **{field_parameter: mot_field_value},
+        Raises:
+            KeyError: If a laser is not in ``LASERS``.
+            RuntimeError: If the run did not complete.
+        """
+        spans, points, centres = spans or {}, points or {}, centres or {}
+        named = {*stages, *spans, *points, *centres}
+        if unknown := sorted(named - set(LASERS)):
+            raise KeyError(f"unknown lasers {unknown}; the lasers are {list(LASERS)}")
+        laser_arguments = {f"{laser}_run": laser in stages for laser in LASERS}
+        for suffix, by_laser in (
+            ("span", spans),
+            ("points", points),
+            ("centre", centres),
+        ):
+            laser_arguments.update(
+                {f"{laser}_{suffix}": value for laser, value in by_laser.items()}
             )
-            numbers, errors = [], []
-            for shot in shots:
-                counts = np.sum(shot.images[key] - background, axis=(1, 2))
-                numbers.append(float(np.mean(counts)))
-                errors.append(
-                    float(np.std(counts, ddof=1) / np.sqrt(len(counts)))
-                    if len(counts) > 1
-                    else float("nan")
-                )
-            set_point = scan_range[int(np.argmax(numbers))]
-            self.motmaster.ramp_laser_set_point_wml(laser, set_point)
+        rid = submit(OptimiseMOTLasers, **laser_arguments, **arguments)
+        task = wait(rid)
+        if task.status != TaskStatus.COMPLETED:
+            raise RuntimeError(
+                f"optimiser run {rid} {task.status.value}: {task.error or 'no error recorded'}"
+            )
+
+        measurement = fetch_measurement(rid)
+        recorded = measurement.results
+        start_set_points = measurement.constants["start_set_points"]
+        results: dict[str, dict[str, Any]] = {}
+        for laser in LASERS:
+            if laser not in stages:
+                continue
+            on_laser = recorded["stage"] == LASERS.index(laser)
             results[laser] = {
-                "scan_range": scan_range,
-                "numbers": numbers,
-                "errors": errors,
-                "set_point": set_point,
+                "scan_range": recorded["setting"][on_laser].tolist(),
+                "numbers": recorded["counts"][on_laser].tolist(),
+                "errors": recorded["counts_error"][on_laser].tolist(),
+                "set_point": float(
+                    measurement.constants[f"proposed.{LASER_KEYS[laser]}"]
+                ),
                 "start_set_point": start_set_points[laser],
             }
         if display:
