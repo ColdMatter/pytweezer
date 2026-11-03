@@ -31,7 +31,7 @@ import numpy as np
 
 from pytweezer.drivers.shot_frames import settle_frame_counts
 from pytweezer.experiment.archive import fetch_measurement
-from pytweezer.experiment.client import submit, wait
+from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
 from pytweezer.experiment.task import TaskStatus
 from pytweezer.experiments.caf_fluorescence import LASERS
 from pytweezer.logging_utils import get_logger
@@ -266,6 +266,9 @@ class Rig:
         scanning exactly the lasers in ``stages`` and waits for it. The run never
         accepts its proposals: accept them in the Optimisers tab. It does not use
         this rig's devices, so it must not run alongside a shot from this rig.
+        Interrupting it (Ctrl-C) terminates the run, which then restores the lasers.
+        Run :func:`~pytweezer.optimisers.optimise_mot_lasers.create_saved_set_points`
+        once before the first run.
 
         Args:
             stages: The lasers to scan, a subset of
@@ -287,9 +290,15 @@ class Rig:
             ``display``.
 
         Raises:
+            TypeError: If ``stages`` is a single string.
             KeyError: If a laser is not in ``LASERS``.
             RuntimeError: If the run did not complete.
         """
+        if isinstance(stages, str):
+            raise TypeError(
+                f"auto_mot takes a list of laser names, e.g. ['v0', 'v1'], not "
+                f"{stages!r}; the lasers are {list(LASERS)}"
+            )
         spans, points, centres = spans or {}, points or {}, centres or {}
         named = {*stages, *spans, *points, *centres}
         if unknown := sorted(named - set(LASERS)):
@@ -304,7 +313,20 @@ class Rig:
                 {f"{laser}_{suffix}": value for laser, value in by_laser.items()}
             )
         rid = submit(OptimiseMOTLasers, **laser_arguments, **arguments)
-        task = wait(rid)
+        try:
+            task = wait(rid)
+        except KeyboardInterrupt:
+            client = ExperimentManagerClient()
+            try:
+                client.terminate(rid)
+            finally:
+                client.close()
+            logger.warning(
+                "Terminated optimiser run %d; it is returning the lasers to where "
+                "they started",
+                rid,
+            )
+            raise
         if task.status != TaskStatus.COMPLETED:
             raise RuntimeError(
                 f"optimiser run {rid} {task.status.value}: {task.error or 'no error recorded'}"

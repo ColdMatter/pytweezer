@@ -446,17 +446,47 @@ def test_auto_mot_raises_for_a_run_that_did_not_complete(
 
 def test_auto_mot_does_not_accept(rig_parts, optimiser_run, monkeypatch):
     optimiser_run.measurement = canned_measurement("v0")
-    accepted = []
+    applied = []
     monkeypatch.setattr(
-        "pytweezer.experiment.client.set_saved_parameters",
-        lambda *args, **kwargs: accepted.append(args),
+        OptimiseMOTLasers, "apply", classmethod(lambda cls, values: applied.append(1))
     )
     rig, motmaster, _ = rig_parts()
     rig.auto_mot(["v0"])
     ((_, arguments),) = optimiser_run.submissions
     assert not any("accept" in name for name in arguments)
-    assert accepted == []
+    assert applied == []
     assert motmaster.calls == []
+
+
+@pytest.mark.parametrize("stages", ["v0", "0. DDSFourSidebands5W_noDDS"])
+def test_auto_mot_refuses_a_string_of_stages(rig_parts, optimiser_run, stages):
+    rig, _, _ = rig_parts()
+    with pytest.raises(TypeError, match="list of laser names"):
+        rig.auto_mot(stages)
+    assert optimiser_run.submissions == []
+
+
+def test_interrupting_auto_mot_terminates_its_run(
+    rig_parts, optimiser_run, monkeypatch
+):
+    terminated = []
+
+    class Client:
+        def terminate(self, rid):
+            terminated.append(rid)
+
+        def close(self):
+            pass
+
+    def interrupted(rid):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("pytweezer.notebook.rig.wait", interrupted)
+    monkeypatch.setattr("pytweezer.notebook.rig.ExperimentManagerClient", Client)
+    rig, _, _ = rig_parts()
+    with pytest.raises(KeyboardInterrupt):
+        rig.auto_mot(["v0"])
+    assert terminated == [42]
 
 
 def test_every_changed_frame_count_warns_from_the_callers_line(rig_parts):

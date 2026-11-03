@@ -36,6 +36,8 @@ rig.close()                              # releases the link
 each one's scan and proposed set point for `plot_auto_mot_results`. It never
 accepts the proposals (do that in the Optimisers tab), and it runs through the
 Experiment Manager, so it takes the same device reservations as any queued task.
+Run `create_saved_set_points()` from `pytweezer.optimisers.optimise_mot_lasers`
+once before the first run, or it fails for want of the saved `caf_laser_*` keys.
 
 Moving a pycaf helper over: replace the `for fileno in range(file_start, file_end + 1):
 images, parameters_dict = CaF.readFromZip(fileno)` loop with
