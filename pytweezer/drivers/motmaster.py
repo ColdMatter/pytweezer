@@ -281,7 +281,7 @@ class MotMasterInterface:
         self.script_path = script_path
 
     def get_motmaster_dictionary(self):
-        self.parameter_dictionary = self.motmaster.GetParameters()
+        self.parameter_dictionary = self._get_parameters()
         # self.parameter_dictionary = Dictionary[String, Object]()
         # with open(DEFAULTS_FILE, "r") as f:
         #     default_parameters = json.load(f)
@@ -337,16 +337,20 @@ class MotMasterInterface:
                 "set_linked(True) to claim the secondary again."
             )
         # Go returns once the run, zip included, has finished.
-        if parameters is not None:
-            self.motmaster.Go(self.python_to_cs_dict(parameters))
-        else:
-            self.motmaster.Go()
+        go = getattr(self.motmaster, "GoCached", self.motmaster.Go)
+        go(self.python_to_cs_dict(parameters or {}))
+
+    def _get_parameters(self):
+        # The *Cached methods (EDMSuite#23) reuse the compiled script while its text is
+        # unchanged, saving ~0.16 s per call; MOTMaster builds before them lack them.
+        cached = getattr(self.motmaster, "GetParametersCached", None)
+        return cached() if cached is not None else self.motmaster.GetParameters()
 
     def get_params(self):
-        return dict(self.motmaster.GetParameters())
+        return dict(self._get_parameters())
 
     def get_params_csdict(self):
-        return self.motmaster.GetParameters()
+        return self._get_parameters()
 
     def script_parameters(self, script: str) -> dict[str, Any]:
         """Return ``{name: default}`` for ``script``, leaving the selected script unchanged.

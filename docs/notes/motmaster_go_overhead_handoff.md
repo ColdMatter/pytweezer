@@ -4,6 +4,22 @@ For whoever picks this up on a MOTMaster PC (the Rb PC, IC-CZC221CCHS, is where
 it was measured). Written 2026-11-03 on PH-BEAST, which has no current EDMSuite
 checkout and cannot build MOTMaster.
 
+## Status (2026-11-03, on the Rb PC)
+
+- **Compile cache: done, opt-in.** EDMSuite#23 (`motmaster-script-compile-cache`)
+  adds `GoCached(dict)` and `GetParametersCached()`. `Go`, the Run button and
+  every other caller are unchanged. The pytweezer driver calls the cached
+  methods when MOTMaster has them. The Rb MOTMaster runs that build; CaF's
+  does not yet.
+- **Measured** (`RbTweezerBasic2026_2`, 0.60 s pattern): `Go` 848 ms,
+  `GoCached` 687 ms per shot; `GetParameters` 181 ms, cached 0.9 ms. With five
+  iterations, `Go` takes 3465 ms and `GoCached` 3299 ms. Each extra iteration
+  costs 653 ms, so a cached `Go` pays only ~34 ms once per call.
+- **Sequence cache (step 3): not worth doing**, at ~34 ms per `Go`.
+- **Output unchanged:** zips from `Go` and `GoCached` are byte-identical, with
+  default and scanned parameters, and a cache hit picks up a new value.
+- **Left:** one linked run, after CaF's MOTMaster is rebuilt from the branch.
+
 ## The problem
 
 A pytweezer experiment with N repetitions runs N separate `Go()` calls, one
