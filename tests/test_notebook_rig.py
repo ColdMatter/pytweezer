@@ -4,6 +4,7 @@ from datetime import date
 import numpy as np
 import pytest
 
+from pytweezer.drivers.shot_frames import settle_frame_counts
 from pytweezer.notebook import Rig, zips
 from tests.test_notebook_zips import fake_motmaster_zip, read_zip_like_analysis3
 
@@ -161,6 +162,13 @@ def rig_parts(tmp_path):
         return rig, motmaster, cameras
 
     return make
+
+
+def test_settle_frame_counts_waits_for_a_late_frame():
+    camera = FakeCamera(1, lag_polls=3)
+    camera.trigger(1)
+    settle_frame_counts({"CaF": camera}, 0.05, 2.0, 0.01)
+    assert camera.frames_acquired() == 1
 
 
 def test_run_returns_each_cameras_frames_and_parameters(rig_parts):

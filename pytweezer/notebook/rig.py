@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 
+from pytweezer.drivers.shot_frames import settle_frame_counts
 from pytweezer.logging_utils import get_logger
 from pytweezer.notebook import zips
 from pytweezer.servers.device_client import get_device, get_device_config
@@ -395,20 +396,9 @@ class Rig:
         return shot
 
     def _settle(self) -> None:
-        def counts():
-            return {
-                key: camera.frames_acquired() for key, camera in self.cameras.items()
-            }
-
-        last = counts()
-        now = time.monotonic()
-        stable_since, deadline = now, now + self.frame_timeout_s
-        while now - stable_since < self.frame_settle_s and now < deadline:
-            time.sleep(self.frame_poll_s)
-            current = counts()
-            now = time.monotonic()
-            if current != last:
-                last, stable_since = current, now
+        settle_frame_counts(
+            self.cameras, self.frame_settle_s, self.frame_timeout_s, self.frame_poll_s
+        )
 
     def _check_counts(self, script: str, images: dict[str, np.ndarray]) -> None:
         for key, stack in images.items():
