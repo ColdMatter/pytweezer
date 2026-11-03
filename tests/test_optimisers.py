@@ -163,6 +163,14 @@ def test_a_stage_switched_off_is_not_scanned():
     assert m.constants["stages_total"] == 1
 
 
+def test_a_skipped_first_stage_keeps_the_later_stages_index():
+    m = run_local(DemoStagedScan, detuning_run=False)
+    assert m.status == "completed", m.attrs["error"]
+    assert set(m.results["stage"]) == {1}
+    proposals = [name for name in m.constants if name.startswith("proposed.")]
+    assert proposals == ["proposed.demo_power"]
+
+
 def test_a_later_stage_runs_at_the_best_of_the_enabled_earlier_ones():
     SpyStagedScan.calls.clear()
     run_local(SpyStagedScan, detuning_run=False, power_points=4)
