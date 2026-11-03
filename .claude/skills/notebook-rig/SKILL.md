@@ -33,9 +33,14 @@ rig.close()                              # releases the link
 
 `auto_mot` does not scan lasers itself: it submits the queued
 `OptimiseMOTLasers` (see `add-optimiser`) for the lasers named, waits, and returns
-each one's scan and proposed set point for `plot_auto_mot_results`. It never
-accepts the proposals (do that in the Optimisers tab), and it runs through the
-Experiment Manager, so it takes the same device reservations as any queued task.
+each one's scan and proposed set point for `plot_auto_mot_results`. It accepts
+the proposals only with `accept=True` (otherwise do that in the Optimisers tab),
+exactly as the tab's Accept does (`accept_proposals` in
+`pytweezer/experiment/optimisers.py`), then ramps the lasers to them; the ramp
+is skipped with a warning while another running task uses the optimiser's
+devices, and a failed ramp raises with the values left saved. It runs through
+the Experiment Manager, so it takes the same device reservations as any queued
+task.
 Run `create_saved_set_points()` from `pytweezer.optimisers.optimise_mot_lasers`
 once before the first run, or it fails for want of the saved `caf_laser_*` keys.
 

@@ -32,7 +32,13 @@ import numpy as np
 from pytweezer.drivers.shot_frames import settle_frame_counts
 from pytweezer.experiment.archive import fetch_measurement
 from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
-from pytweezer.experiment.task import TaskStatus
+from pytweezer.experiment.optimisers import (
+    accept_proposals,
+    changed_summary,
+    live_task_using,
+    proposals,
+)
+from pytweezer.experiment.task import Task, TaskStatus
 from pytweezer.experiments.caf_fluorescence import LASERS
 from pytweezer.logging_utils import get_logger
 from pytweezer.notebook import zips
@@ -258,14 +264,16 @@ class Rig:
         points: dict[str, int] | None = None,
         centres: dict[str, float] | None = None,
         display: bool = False,
+        accept: bool = False,
         **arguments: Any,
     ) -> dict[str, dict[str, Any]]:
         """Tune the CaF lasers for the most fluorescence with the queued optimiser.
 
         Submits :class:`~pytweezer.optimisers.optimise_mot_lasers.OptimiseMOTLasers`
-        scanning exactly the lasers in ``stages`` and waits for it. The run never
-        accepts its proposals: accept them in the Optimisers tab. It does not use
-        this rig's devices, so it must not run alongside a shot from this rig.
+        scanning exactly the lasers in ``stages`` and waits for it. Its proposals
+        are saved only with ``accept``, or when accepted in the Optimisers tab.
+        It does not use this rig's devices, so it must not run alongside a shot
+        from this rig.
         Interrupting it (Ctrl-C) terminates the run, which then returns the lasers.
         Run :func:`~pytweezer.optimisers.optimise_mot_lasers.create_saved_set_points`
         once before the first run.
@@ -280,6 +288,11 @@ class Rig:
             centres: Set point each laser's scan is centred on, in THz, by laser;
                 the saved ``caf_laser_*`` for lasers not given.
             display: Plot the result with :func:`plot_auto_mot_results`.
+            accept: Accept every proposal of the run as the Optimisers tab's
+                Accept does, saving it for the whole lab, then ramp each
+                scanned laser to its new set point. The ramp is skipped, with a
+                warning, while a running task uses a device the optimiser
+                reserves.
             **arguments: Any other argument of the optimiser, e.g. ``mot_field``.
 
         Returns:
@@ -292,7 +305,8 @@ class Rig:
         Raises:
             TypeError: If ``stages`` is a single string.
             KeyError: If a laser is not in ``LASERS``.
-            RuntimeError: If the run did not complete.
+            RuntimeError: If the run did not complete, or if accepting, when
+                the lasers could not be ramped; the accepted values stay saved.
         """
         if isinstance(stages, str):
             raise TypeError(
@@ -351,6 +365,8 @@ class Rig:
             }
         if display:
             plot_auto_mot_results(results)
+        if accept:
+            _accept_and_apply(rid, measurement.constants)
         return results
 
     @_reconnect_if_interrupted
@@ -462,6 +478,37 @@ class Rig:
         for client in self._owned:
             client.close_rpc()
         self._owned = []
+
+
+def _accept_and_apply(rid: int, constants: dict[str, Any]) -> None:
+    """Accept every proposal of :class:`OptimiseMOTLasers` run ``rid``, then apply them."""
+    values = proposals(constants, OptimiseMOTLasers.proposes())
+    client = ExperimentManagerClient()
+    try:
+        changes = accept_proposals(
+            values, rid, OptimiseMOTLasers.optimiser_schema(), client=client
+        )
+        snapshot = client.snapshot()
+    finally:
+        client.close()
+    accepted = f"Accepted run {rid}: {changed_summary(changes)}"
+    running = [Task.model_validate(entry) for entry in snapshot.get("running") or []]
+    busy = live_task_using(running, OptimiseMOTLasers.reserved_devices())
+    if busy:
+        busy_rid, shared = busy
+        warnings.warn(
+            f"{accepted}; not applied: run {busy_rid} is using {', '.join(shared)}",
+            stacklevel=_caller_stacklevel(),
+        )
+        return
+    try:
+        OptimiseMOTLasers.apply(values)
+    except Exception as error:
+        reason = str(error) or type(error).__name__
+        raise RuntimeError(
+            f"Accepted run {rid}, but applying OptimiseMOTLasers failed: {reason}"
+        ) from error
+    logger.info("%s and applied: %s", accepted, values)
 
 
 def plot_auto_mot_results(results: dict[str, dict[str, Any]]):

@@ -7,10 +7,12 @@ import pytest
 
 from pytweezer.drivers.shot_frames import settle_frame_counts
 from pytweezer.experiment import run_local
-from pytweezer.experiment.task import TaskStatus
+from pytweezer.experiment.queue import now
+from pytweezer.experiment.task import Task, TaskStatus
 from pytweezer.experiments.caf_fluorescence import LASERS
 from pytweezer.notebook import Rig, plot_auto_mot_results, zips
-from pytweezer.optimisers.optimise_mot_lasers import OptimiseMOTLasers
+from pytweezer.optimisers.optimise_mot_lasers import LASER_KEYS, OptimiseMOTLasers
+from tests.helpers import in_process_client
 from tests.test_caf_fluorescence import START
 from tests.test_notebook_zips import fake_motmaster_zip, read_zip_like_analysis3
 from tests.test_optimise_mot_lasers import caf as caf_experiment  # noqa: F401
@@ -444,18 +446,99 @@ def test_auto_mot_raises_for_a_run_that_did_not_complete(
         rig.auto_mot(["v0"])
 
 
-def test_auto_mot_does_not_accept(rig_parts, optimiser_run, monkeypatch):
-    optimiser_run.measurement = canned_measurement("v0")
-    applied = []
+@pytest.fixture
+def accepting(rig_parts, optimiser_run, make_manager, monkeypatch):
+    """A rig whose auto_mot accepts through an in-process manager and applies to its MOTMaster."""
+    client = in_process_client(make_manager())
+    client.set_saved_parameters(
+        {LASER_KEYS[laser]: START[laser] for laser in LASERS},
+        "initial laser set points",
+        "me",
+        create=True,
+    )
     monkeypatch.setattr(
-        OptimiseMOTLasers, "apply", classmethod(lambda cls, values: applied.append(1))
+        "pytweezer.notebook.rig.ExperimentManagerClient", lambda: client
     )
     rig, motmaster, _ = rig_parts()
-    rig.auto_mot(["v0"])
+    monkeypatch.setattr(
+        "pytweezer.optimisers.optimise_mot_lasers.get_device", lambda name: motmaster
+    )
+    optimiser_run.measurement = canned_measurement("v0", "v1")
+    return SimpleNamespace(rig=rig, motmaster=motmaster, client=client)
+
+
+def saved_values(client):
+    return {parameter.key: parameter.value for parameter in client.saved_parameters()}
+
+
+def test_auto_mot_accepts_nothing_by_default(accepting, optimiser_run):
+    accepting.rig.auto_mot(["v0", "v1"])
     ((_, arguments),) = optimiser_run.submissions
     assert not any("accept" in name for name in arguments)
-    assert applied == []
-    assert motmaster.calls == []
+    assert accepting.client.saved_parameter_history(rid=42) == []
+    assert accepting.motmaster.calls == []
+
+
+def test_accepting_auto_mot_saves_the_runs_proposals_as_the_tab_does(accepting):
+    accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    saved = saved_values(accepting.client)
+    assert (saved["caf_laser_v0"], saved["caf_laser_v1"]) == (2.0, 2.0)
+    assert saved["caf_laser_BX"] == START["BX"]
+    changes = accepting.client.saved_parameter_history(rid=42)
+    assert {change.key for change in changes} == {"caf_laser_v0", "caf_laser_v1"}
+    assert {change.reason for change in changes} == {"accepted from run 42"}
+
+
+def test_accepting_auto_mot_ramps_each_scanned_laser_to_its_proposal(accepting):
+    accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    assert accepting.motmaster.calls == [("ramp", "v0", 2.0), ("ramp", "v1", 2.0)]
+
+
+def test_accepting_auto_mot_does_not_apply_under_a_run_using_its_devices(
+    accepting, monkeypatch
+):
+    running = Task(
+        rid=57,
+        status=TaskStatus.RUNNING,
+        experiment="pytweezer.experiments.other",
+        class_name="Other",
+        t_submit=now(),
+        devices=["CaF MotMaster", "Rb MotMaster"],
+    )
+    monkeypatch.setattr(
+        accepting.client,
+        "snapshot",
+        lambda: {
+            "running": [running.model_dump(mode="json")],
+            "queue": [],
+            "history": [],
+        },
+    )
+    with pytest.warns(
+        UserWarning,
+        match="Accepted run 42: 2 values changed; not applied: run 57 is using "
+        "CaF MotMaster$",
+    ):
+        accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    assert saved_values(accepting.client)["caf_laser_v0"] == 2.0
+    assert accepting.motmaster.calls == []
+
+
+def test_a_failing_auto_mot_apply_leaves_the_values_saved_and_says_so(
+    accepting, monkeypatch
+):
+    def lock_lost(laser, target):
+        raise RuntimeError("wavemeter lock lost")
+
+    monkeypatch.setattr(accepting.motmaster, "ramp_laser_set_point_wml", lock_lost)
+    with pytest.raises(
+        RuntimeError,
+        match="Accepted run 42, but applying OptimiseMOTLasers failed: could not "
+        "ramp lasers",
+    ):
+        accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    assert saved_values(accepting.client)["caf_laser_v1"] == 2.0
+    assert len(accepting.client.saved_parameter_history(rid=42)) == 2
 
 
 @pytest.mark.parametrize("stages", ["v0", "0. DDSFourSidebands5W_noDDS"])
