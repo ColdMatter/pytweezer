@@ -1105,7 +1105,9 @@ class OptimisersPanel(QWidget):
 
         An optimiser that overrides ``apply`` then has it called with the saved
         values on a worker thread; its failure is shown in the Accept area, and
-        the values stay saved.
+        the values stay saved. It is not called while a running task reserves
+        any device the optimiser reserves, since that task may be moving the
+        same hardware; the Accept area says the values were saved but not applied.
         """
         rid = self._sheet_rid
         values = {
@@ -1139,7 +1141,14 @@ class OptimisersPanel(QWidget):
             if changed
             else "Accepted: nothing changed"
         )
-        if optimiser.get("applies"):
+        busy = self._running_task_using(row.schema.get("reserves") or ())
+        if optimiser.get("applies") and busy:
+            busy_rid, shared = busy
+            self._show_status(
+                f"{accepted}; not applied: run {busy_rid} is using {', '.join(shared)}",
+                "error",
+            )
+        elif optimiser.get("applies"):
             self._show_status(f"{accepted}; applying...")
             self._applying = True
             module, class_name = row.key
@@ -1148,7 +1157,7 @@ class OptimisersPanel(QWidget):
                 lambda: getattr(importlib.import_module(module), class_name).apply(
                     values
                 ),
-                lambda outcome: self._applied(accepted, outcome),
+                lambda outcome: self._applied(accepted, outcome, rid, class_name),
             )
         else:
             self._show_status(accepted)
@@ -1156,13 +1165,24 @@ class OptimisersPanel(QWidget):
         self._fetch_stale()
         self._update()
 
-    def _applied(self, accepted, outcome):
+    def _running_task_using(self, devices) -> tuple[int, list[str]] | None:
+        """The rid of a running task reserving any of ``devices``, and which."""
+        for task in sorted(self._tasks.values(), key=lambda t: t.rid):
+            shared = sorted(set(task.devices or ()) & set(devices))
+            if task.status in _LIVE and shared:
+                return task.rid, shared
+        return None
+
+    def _applied(self, accepted, outcome, rid, class_name):
         self._applying = False
         self._ticks_changed()
         if isinstance(outcome, Exception):
             logger.error("Applying accepted values failed", exc_info=outcome)
             reason = str(outcome) or type(outcome).__name__
-            self._show_status(f"Accepted, but applying failed: {reason}", "error")
+            self._show_status(
+                f"Accepted run {rid}, but applying {class_name} failed: {reason}",
+                "error",
+            )
         else:
             self._show_status(f"{accepted} and applied")
 

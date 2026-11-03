@@ -1747,21 +1747,27 @@ class ApplyingStagedScan(DemoStagedScan):
             raise cls.failure
 
 
-@pytest.fixture
-def applying_panel(qapp, monkeypatch):
+def make_applying_panel(monkeypatch, *other_tasks):
     applied.clear()
     monkeypatch.setitem(sys.modules, DEMO, sys.modules[__name__])
     panel = make_optimisers_panel(
         [
-            optimiser_schema(
-                "ApplyingStagedScan", {**ApplyingStagedScan.schema(), "module": DEMO}
-            )
+            {
+                **ApplyingStagedScan.schema(),
+                "module": DEMO,
+                "reserves": ["CaF MotMaster", "CaF ThorCam"],
+            }
         ],
-        [finished_run(41, "completed", "ApplyingStagedScan")],
+        [finished_run(41, "completed", "ApplyingStagedScan"), *other_tasks],
         {run_file(41, "ApplyingStagedScan"): staged_measurement()},
     )
     panel.select(DEMO, "ApplyingStagedScan")
     return panel
+
+
+@pytest.fixture
+def applying_panel(qapp, monkeypatch):
+    return make_applying_panel(monkeypatch)
 
 
 def accept_and_wait(panel):
@@ -1790,8 +1796,34 @@ def test_a_failing_apply_leaves_the_values_saved_and_says_so(
     assert applying_panel.rows[(DEMO, "ApplyingStagedScan")].state == "accepted"
     assert applying_panel.status.property("state") == "error"
     assert applying_panel.status.text() == (
-        "Accepted, but applying failed: wavemeter lock lost"
+        "Accepted run 41, but applying ApplyingStagedScan failed: wavemeter lock lost"
     )
+
+
+@pytest.mark.parametrize(
+    "devices, applies",
+    [(["CaF MotMaster", "Rb MotMaster"], False), (["Rb MotMaster"], True)],
+    ids=["shares-a-device", "shares-none"],
+)
+def test_accepting_does_not_apply_under_a_run_using_the_same_devices(
+    qapp, monkeypatch, devices, applies
+):
+    running = Task.model_validate(
+        task(57, "running", experiment=DEMO, class_name="Other", devices=devices)
+    )
+    panel = make_applying_panel(monkeypatch, running)
+    accept_and_wait(panel)
+    saved = {p.key: p.value for p in panel.client.parameters}
+    assert saved["demo_resonance"] == 1.2
+    if applies:
+        assert applied == [{"demo_resonance": 1.2, "demo_power": 0.9}]
+        assert panel.status.text().endswith("and applied")
+    else:
+        assert applied == []
+        assert panel.status.property("state") == "error"
+        assert panel.status.text() == (
+            "Accepted: 2 values changed; not applied: run 57 is using CaF MotMaster"
+        )
 
 
 def test_an_optimiser_without_apply_is_accepted_without_importing_it(qapp):

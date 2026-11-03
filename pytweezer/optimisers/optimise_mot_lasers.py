@@ -55,16 +55,35 @@ class OptimiseMOTLasers(StagedScan, CaFFluorescence):
     def apply(cls, proposals: dict[str, float]) -> None:
         """Ramp each laser whose saved set point was accepted to its new value.
 
+        Every laser is tried even if one fails.
+
         Args:
             proposals: ``{saved key: THz}``; only these lasers are moved.
+
+        Raises:
+            KeyError: Before any laser moves, if a key is not a ``caf_laser_*``.
+            RuntimeError: Naming the lasers that could not be ramped.
         """
         laser_of = {key: laser for laser, key in LASER_KEYS.items()}
+        if unknown := sorted(set(proposals) - set(laser_of)):
+            raise KeyError(f"not laser set points: {unknown}")
+        targets = {laser_of[key]: float(value) for key, value in proposals.items()}
+        errors: dict[str, Exception] = {}
         motmaster = get_device("CaF MotMaster")
         try:
-            for key, set_point in proposals.items():
-                motmaster.ramp_laser_set_point_wml(laser_of[key], float(set_point))
+            for laser, set_point in targets.items():
+                try:
+                    motmaster.ramp_laser_set_point_wml(laser, set_point)
+                except Exception as error:
+                    logger.exception("Could not ramp %s to %s THz", laser, set_point)
+                    errors[laser] = error
         finally:
             motmaster.close_rpc()
+        if errors:
+            missed = {laser: targets[laser] for laser in errors}
+            raise RuntimeError(
+                f"could not ramp lasers to their accepted set points (THz) {missed}"
+            ) from next(iter(errors.values()))
 
 
 def create_saved_set_points(set_points: dict[str, float] | None = None) -> list[str]:

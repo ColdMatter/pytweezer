@@ -115,6 +115,21 @@ def test_apply_ramps_only_the_accepted_lasers(caf):
     assert caf.motmaster.log == [("ramp", "v0", 494.4319)]
 
 
+def test_apply_moves_nothing_if_a_key_is_not_a_laser(caf):
+    with pytest.raises(KeyError, match="demo_power"):
+        OptimiseMOTLasers.apply({LASER_KEYS["v0"]: 494.4319, "demo_power": 1.0})
+    assert caf.motmaster.log == []
+
+
+def test_apply_tries_every_laser_and_names_the_ones_it_missed(caf):
+    caf.motmaster.refused_ramps = {("v0", 494.4319)}
+    with pytest.raises(RuntimeError, match=r"\{'v0': 494\.4319\}"):
+        OptimiseMOTLasers.apply(
+            {LASER_KEYS["v0"]: 494.4319, LASER_KEYS["BX"]: 564.5824}
+        )
+    assert caf.motmaster.log == [("ramp", "BX", 564.5824)]
+
+
 @pytest.fixture
 def manager_client(make_manager, monkeypatch):
     client = in_process_client(make_manager())
