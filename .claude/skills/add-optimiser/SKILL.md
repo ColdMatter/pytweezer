@@ -14,7 +14,8 @@ queue, files, saved parameters) applies; this skill covers what an optimiser
 adds. Device-free examples: `DemoStagedScan`/`DemoBayesian` in
 `optimisers/demo_staged_scan.py`/`demo_bayesian.py` (over
 `experiments/demo_resonance.py`); real ones `optimisers/find_trap_sites.py`,
-`optimise_tweezer_imaging.py`, `optimise_molasses_shims.py`.
+`optimise_tweezer_imaging.py`, `optimise_molasses_shims.py`,
+`optimise_mot_lasers.py`.
 
 ## Search optimisers
 
@@ -33,15 +34,29 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
     # BayesianOptimisation: dimensions = [Dimension("detuning", low=-5, high=5, save_as=...)]
 ```
 
-- Each `Stage` generates `<setting>_start/_stop/_points` arguments (each
+- Each `Stage` generates `<setting>_run/_start/_stop/_points` arguments (each
   `Dimension` `<setting>_low/_high`); declare one of those names yourself to
   override it. `Dimension(..., span=0.5, save_as=...)` instead searches its
   `save_as` value at the start of the run ± `<setting>_span`; every Bayesian run
   records its `search_bounds`. Duplicate settings or `save_as`, a bad `goal`,
   `low >= high`, neither bounds nor span, a non-positive span, or a span with
-  bounds raise `TypeError` when the class is defined.
-- A `StagedScan` sweeps each stage `repeats` times, then passes the best values
-  of earlier stages to every later stage's `measure()`. A
+  bounds raise `TypeError` when the class is defined (a `Stage` likewise:
+  `start`/`stop` or `span`, not both).
+- `Stage(..., span=s, save_as=...)` is the alternative to `start`/`stop`: it
+  generates `<setting>_span` and `<setting>_centre` instead of
+  `_start/_stop`, and sweeps `centre - span` to `centre + span`. The centre is
+  saved-backed: left empty it is the `save_as` value when the run starts, so
+  every span stage's `save_as` must exist even when the stage is switched off,
+  since the runner resolves it for all stages. A non-positive `_span` raises
+  `ValueError` when the run starts.
+- `Stage(..., run=False)` makes `<setting>_run` default to false; a stage whose
+  `_run` is false is not scanned, passes nothing to later stages and proposes nothing
+  (`enabled_stages()` lists `(index in stages, stage)` for those that run).
+  `stage` records still use the index in `stages`, and `stages_total` counts
+  enabled stages. A run with no stage enabled is refused (`ValueError` in
+  `prepare()`).
+- A `StagedScan` sweeps each enabled stage `repeats` times, then passes the best
+  values of earlier stages to every later stage's `measure()`. A
   `BayesianOptimisation` (skopt GP, expected improvement) makes `n_calls`
   evaluations, the first `n_initial` random, with `xi` falling geometrically
   from `xi_start` to `xi_end`; a non-finite objective is told as the worst so
@@ -57,6 +72,10 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   only sets existing keys, and a span dimension raises `KeyError` at
   `prepare()` without one. Create it first (`set_saved_parameters(...,
   create=True)`).
+- `Optimiser.apply(cls, proposals)`, a classmethod that does nothing by default,
+  puts accepted values to use (e.g. moves hardware); `optimiser_schema()["applies"]`
+  says whether a class overrides it. It receives `{saved key: value}` of the
+  accepted values, after they are saved.
 
 ## Fit
 
@@ -91,6 +110,14 @@ fit view draws the results `calibration_image` and `roi_sites`
   then lists every key named, unchanged ones included, which is how the tab
   knows a run was accepted (`saved_parameter_history(rid=...)`). **Discard**
   hides a run's proposals on that PC only.
+- After saving, the tab calls `apply` with the saved values off the GUI thread
+  if the optimiser `applies`. It skips it, saying "not applied: run N is using
+  X", when a running or paused task reserves any device the optimiser reserves
+  (`live_task_using`). A failing `apply` is reported but never undoes the save.
+- The tab and `Rig.auto_mot(accept=True)` (see notebook-rig) share the helpers
+  in `experiment/optimisers.py`: `proposals`, `accept_proposals`,
+  `changed_summary`, `live_task_using`; keep accept behaviour there, not in
+  either caller.
 
 ## The Rb tweezer optimisers
 
@@ -111,6 +138,23 @@ add-experiment.
   `tMolassesShim{X,Y,Z}ccValue`, scored by `objective_of` with a fidelity or
   loading floor.
 
-Tests: `tests/test_optimisers.py`, `tests/test_tweezer_array.py`,
-`tests/test_trap_sites.py`, `tests/test_saved_parameters.py`; the tab in
-`tests/test_experiment_gui.py`.
+## CaF laser tuning
+
+`OptimiseMOTLasers(StagedScan, CaFFluorescence)`
+(`optimisers/optimise_mot_lasers.py`) scans each CaF laser about its saved set
+point for the most `counts`. Its six span stages are `v0`, `BX`, `v1`, `v2`,
+`v3`, `TCool` (`LASERS` order), proposing the saved keys `caf_laser_<laser>`
+(THz, group `CaF lasers`); `v0`, `v1` and `TCool` are on by default. Its `apply`
+ramps each accepted laser on `CaF MotMaster`, trying every laser and raising
+`RuntimeError` naming any it missed. The measurement `experiments/caf_fluorescence.py`
+restores the lasers it moved in `finish`.
+
+Run `create_saved_set_points()` (from `pytweezer.optimisers.optimise_mot_lasers`)
+once before the first run: it creates the missing `caf_laser_*` keys from the
+lock's current set points and leaves existing ones alone. Without them the run
+fails, even for switched-off stages. From a notebook, `Rig.auto_mot` runs the
+optimiser (see notebook-rig).
+
+Tests: `tests/test_optimisers.py`, `tests/test_optimise_mot_lasers.py`,
+`tests/test_tweezer_array.py`, `tests/test_trap_sites.py`,
+`tests/test_saved_parameters.py`; the tab in `tests/test_experiment_gui.py`.

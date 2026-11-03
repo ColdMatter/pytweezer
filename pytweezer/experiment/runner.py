@@ -159,7 +159,9 @@ def run_points(
         try:
             experiment.finish()
         except Exception:
-            if status != TaskStatus.FAILED:
+            if status == TaskStatus.FAILED:
+                error = f"{error}\nThen, while finishing:\n{traceback.format_exc()}"
+            else:
                 status, error = TaskStatus.FAILED, traceback.format_exc()
         experiment.close_devices()
         experiment._recorder = None

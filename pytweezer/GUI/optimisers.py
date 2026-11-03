@@ -10,6 +10,7 @@ its measurement file, read through a results archive as the Results tab does,
 off the GUI thread.
 """
 
+import importlib
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -43,7 +44,13 @@ from pytweezer.experiment.client import (
     ManagerUnavailable,
     submitter_name,
 )
-from pytweezer.experiment.optimisers import SEARCH
+from pytweezer.experiment.optimisers import (
+    SEARCH,
+    accept_proposals,
+    changed_summary,
+    live_task_using,
+    proposals,
+)
 from pytweezer.experiment.queue import now
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.task import Task, TaskRequest, TaskStatus
@@ -97,16 +104,6 @@ def partial_label(constants: dict) -> str:
             f"{constants['evaluations_total']} evaluations"
         )
     return "partial"
-
-
-def proposals(constants: dict, keys: list[str]) -> dict:
-    """The values a run proposes for ``keys``, as plain Python values; arrays as nested lists."""
-    proposed = {}
-    for key in keys:
-        value = constants.get(f"proposed.{key}")
-        if value is not None:
-            proposed[key] = value.tolist() if hasattr(value, "tolist") else value
-    return proposed
 
 
 def live_results(points: list[dict], names: list[str]) -> dict[str, np.ndarray]:
@@ -268,6 +265,7 @@ class OptimisersPanel(QWidget):
         self._measurements: dict[str, object] = {}
         self._reader = BackgroundReader(self)
         self._reading: set[str] = set()
+        self._applying = False
         self._accepted: dict[int, list] = {}
         self._changes = []
         self._parameters = {}
@@ -827,7 +825,7 @@ class OptimisersPanel(QWidget):
 
     def _ticks_changed(self):
         ticked = sum(box.isChecked() for box in self.accept_rows.values())
-        self.accept_button.setEnabled(ticked > 0)
+        self.accept_button.setEnabled(ticked > 0 and not self._applying)
         self.accept_count.setText(
             f"saves {ticked} value{'' if ticked == 1 else 's'} for the whole lab"
             if self.accept_rows
@@ -1100,6 +1098,12 @@ class OptimisersPanel(QWidget):
         units; a search only sets keys that exist. The store sets every value
         or, refusing any, none; a refusal is shown in the Accept area. The run is recorded as accepted even if every value
         matches the one saved.
+
+        An optimiser that overrides ``apply`` then has it called with the saved
+        values on a worker thread; its failure is shown in the Accept area, and
+        the values stay saved. It is not called while a running task reserves
+        any device the optimiser reserves, since that task may be moving the
+        same hardware; the Accept area says the values were saved but not applied.
         """
         rid = self._sheet_rid
         values = {
@@ -1112,31 +1116,50 @@ class OptimisersPanel(QWidget):
             return
         optimiser = row.schema["optimiser"]
         try:
-            changes = self.client.set_saved_parameters(
-                values,
-                f"accepted from run {rid}",
-                submitter_name(),
-                create=optimiser["kind"] == "fit",
-                group=optimiser.get("group", ""),
-                units=optimiser.get("units", {}),
-                rid=rid,
-            )
+            changes = accept_proposals(values, rid, optimiser, client=self.client)
         except ManagerUnavailable:
             self._show_status(f"Accepting: {NOT_RESPONDING}", "error")
             return
         except ManagerError as error:
             self._show_status(f"Accepting: {error}", "error")
             return
-        changed = sum(change.old != change.new for change in changes)
-        if changed:
+        accepted = f"Accepted: {changed_summary(changes)}"
+        busy = live_task_using(self._tasks.values(), row.schema.get("reserves") or ())
+        if optimiser.get("applies") and busy:
+            busy_rid, shared = busy
             self._show_status(
-                f"Accepted: {changed} value{'' if changed == 1 else 's'} changed"
+                f"{accepted}; not applied: run {busy_rid} is using {', '.join(shared)}",
+                "error",
+            )
+        elif optimiser.get("applies"):
+            self._show_status(f"{accepted}; applying...")
+            self._applying = True
+            module, class_name = row.key
+            self._reader.start(
+                f"Optimisers apply {module}.{class_name}",
+                lambda: getattr(importlib.import_module(module), class_name).apply(
+                    values
+                ),
+                lambda outcome: self._applied(accepted, outcome, rid, class_name),
             )
         else:
-            self._show_status("Accepted: nothing changed")
+            self._show_status(accepted)
         self._stale.add("saved")
         self._fetch_stale()
         self._update()
+
+    def _applied(self, accepted, outcome, rid, class_name):
+        self._applying = False
+        self._ticks_changed()
+        if isinstance(outcome, Exception):
+            logger.error("Applying accepted values failed", exc_info=outcome)
+            reason = str(outcome) or type(outcome).__name__
+            self._show_status(
+                f"Accepted run {rid}, but applying {class_name} failed: {reason}",
+                "error",
+            )
+        else:
+            self._show_status(f"{accepted} and applied")
 
     def discard(self) -> None:
         """Hide the shown run's proposals on this PC; nothing is saved or deleted."""

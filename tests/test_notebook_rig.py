@@ -1,11 +1,23 @@
 import warnings
 from datetime import date
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from pytweezer.notebook import Rig, zips
+from pytweezer.drivers.shot_frames import settle_frame_counts
+from pytweezer.experiment import run_local
+from pytweezer.experiment.client import ManagerUnavailable
+from pytweezer.experiment.queue import now
+from pytweezer.experiment.task import Task, TaskStatus
+from pytweezer.experiments.caf_fluorescence import LASERS
+from pytweezer.notebook import Rig, plot_auto_mot_results, zips
+from pytweezer.optimisers.optimise_mot_lasers import LASER_KEYS, OptimiseMOTLasers
+from tests.helpers import in_process_client
+from tests.test_caf_fluorescence import START
 from tests.test_notebook_zips import fake_motmaster_zip, read_zip_like_analysis3
+from tests.test_optimise_mot_lasers import caf as caf_experiment  # noqa: F401
+from tests.test_optimise_mot_lasers import saved_set_points  # noqa: F401
 
 MONTHS = [
     "Jan",
@@ -163,6 +175,13 @@ def rig_parts(tmp_path):
     return make
 
 
+def test_settle_frame_counts_waits_for_a_late_frame():
+    camera = FakeCamera(1, lag_polls=3)
+    camera.trigger(1)
+    settle_frame_counts({"CaF": camera}, 0.05, 2.0, 0.01)
+    assert camera.frames_acquired() == 1
+
+
 def test_run_returns_each_cameras_frames_and_parameters(rig_parts):
     rig, _, _ = rig_parts()
     shot = rig.run("S", dummy=1.5)
@@ -302,44 +321,270 @@ def test_numpy_values_reach_motmaster_as_python_numbers(rig_parts):
     assert type(motmaster.go_parameters["dummy"]) is int
 
 
-def test_auto_mot_parks_each_laser_on_its_brightest_point(rig_parts):
-    rig, motmaster, cameras = rig_parts()
-    values = [494.42, 494.43, 494.44]
-    cameras["CaF"].value = lambda _index: (
-        10 if motmaster.set_points["v0"] == values[1] else 1
+@pytest.fixture
+def optimiser_run(monkeypatch):
+    """Patch the manager out of ``Rig.auto_mot``; returns the submissions and the task it waits for."""
+    run = SimpleNamespace(
+        submissions=[], task=SimpleNamespace(status=TaskStatus.COMPLETED, error=None)
     )
-    results = rig.auto_mot("S", {"v0": values})
-    assert results["v0"]["set_point"] == values[1]
-    assert results["v0"]["start_set_point"] == 494.43
-    moves = [call for call in motmaster.calls if call[1:2] == ("v0",)]
-    assert moves[-1] == ("ramp", "v0", values[1])
+
+    def submit(experiment, **arguments):
+        run.submissions.append((experiment, arguments))
+        return 42
+
+    monkeypatch.setattr("pytweezer.notebook.rig.submit", submit)
+    monkeypatch.setattr("pytweezer.notebook.rig.wait", lambda rid: run.task)
+    monkeypatch.setattr(
+        "pytweezer.notebook.rig.fetch_measurement", lambda rid: run.measurement
+    )
+    return run
 
 
-@pytest.mark.parametrize(
-    "frame_counts, error", [([2.0], float("nan")), ([0.0, 2.0], 1.0)], ids=["1", "2"]
-)
-def test_auto_mot_error_bars_are_standard_errors_of_the_frames(
-    rig_parts, frame_counts, error
+def canned_measurement(*lasers):
+    """The columns and constants of an OptimiseMOTLasers file that scanned ``lasers``."""
+    stages = np.repeat([LASERS.index(laser) for laser in lasers], 3)
+    return SimpleNamespace(
+        results={
+            "stage": stages,
+            "setting": np.tile([1.0, 2.0, 3.0], len(lasers)),
+            "counts": np.tile([5.0, 9.0, 4.0], len(lasers)),
+            "counts_error": np.full(len(stages), 0.5),
+        },
+        constants={
+            "start_set_points": START,
+            **{f"proposed.caf_laser_{laser}": 2.0 for laser in lasers},
+        },
+    )
+
+
+def test_auto_mot_submits_the_chosen_stages(rig_parts, optimiser_run):
+    rig, _, _ = rig_parts()
+    optimiser_run.measurement = canned_measurement("BX", "v0")
+    rig.auto_mot(
+        ["BX", "v0"],
+        spans={"BX": 20e-6},
+        points={"v0": 12},
+        centres={"v0": 494.4},
+        mot_field=2.0,
+    )
+    ((experiment, arguments),) = optimiser_run.submissions
+    assert experiment is OptimiseMOTLasers
+    assert {laser: arguments[f"{laser}_run"] for laser in LASERS} == {
+        "v0": True,
+        "BX": True,
+        "v1": False,
+        "v2": False,
+        "v3": False,
+        "TCool": False,
+    }
+    assert arguments["BX_span"] == 20e-6
+    assert arguments["v0_points"] == 12
+    assert arguments["v0_centre"] == 494.4
+    assert arguments["mot_field"] == 2.0
+    assert "v1_span" not in arguments
+
+
+@pytest.mark.usefixtures("caf_experiment", "saved_set_points")
+def test_auto_mot_returns_each_stage_in_the_shape_the_plot_takes(
+    rig_parts, optimiser_run
 ):
-    rig, _, cameras = rig_parts(caf=len(frame_counts))
-    camera = cameras["CaF"]
-    camera.shape = (1, 1)
-    background = [0.0] * len(frame_counts)
-    camera.value = lambda index: (background + frame_counts)[index]
-    results = rig.auto_mot("S", {"v0": [494.43]})
-    assert results["v0"]["errors"] == [pytest.approx(error, nan_ok=True)]
-
-
-def test_auto_mot_does_not_save_by_default(rig_parts, tmp_path):
+    optimiser_run.measurement = run_local(
+        OptimiseMOTLasers,
+        frame_settle_s=0.0,
+        v0_run=True,
+        BX_run=True,
+        v1_run=False,
+        TCool_run=False,
+        v0_points=5,
+        BX_points=4,
+    )
+    assert optimiser_run.measurement.status == "completed"
     rig, _, _ = rig_parts()
-    rig.auto_mot("S", {"v0": [494.43]})
-    assert not list(tmp_path.rglob("*.zip"))
+    results = rig.auto_mot(["BX", "v0"])
+    assert list(results) == ["v0", "BX"]
+    measurement = optimiser_run.measurement
+    for laser, n_points in (("BX", 4), ("v0", 5)):
+        stage = results[laser]
+        assert set(stage) == {
+            "scan_range",
+            "numbers",
+            "errors",
+            "set_point",
+            "start_set_point",
+        }
+        assert len(stage["scan_range"]) == len(stage["numbers"]) == n_points
+        assert len(stage["errors"]) == n_points
+        assert stage["start_set_point"] == START[laser]
+        assert (
+            stage["set_point"] == measurement.constants[f"proposed.caf_laser_{laser}"]
+        )
+    on_v0 = measurement.results["stage"] == LASERS.index("v0")
+    assert results["v0"]["scan_range"] == measurement.results["setting"][on_v0].tolist()
+    assert results["v0"]["numbers"] == measurement.results["counts"][on_v0].tolist()
+    plt = pytest.importorskip("matplotlib.pyplot")
+    plt.switch_backend("Agg")
+    fig, axes = plot_auto_mot_results(results)
+    assert axes.size >= len(results)
+    plt.close(fig)
 
 
-def test_auto_mot_names_the_known_lasers_for_an_unknown_one(rig_parts):
+def test_auto_mot_refuses_an_unknown_laser(rig_parts, optimiser_run):
     rig, _, _ = rig_parts()
-    with pytest.raises(KeyError, match="BX"):
-        rig.auto_mot("S", {"v00": [1.0]})
+    with pytest.raises(KeyError, match="TCool"):
+        rig.auto_mot(["v00"])
+    with pytest.raises(KeyError, match="v00"):
+        rig.auto_mot(["v0"], spans={"v00": 1e-6})
+    assert optimiser_run.submissions == []
+
+
+@pytest.mark.parametrize("status", [TaskStatus.FAILED, TaskStatus.TERMINATED])
+def test_auto_mot_raises_for_a_run_that_did_not_complete(
+    rig_parts, optimiser_run, status
+):
+    optimiser_run.task = SimpleNamespace(status=status, error="no frames")
+    rig, _, _ = rig_parts()
+    with pytest.raises(RuntimeError, match=f"{status.value}.*no frames"):
+        rig.auto_mot(["v0"])
+
+
+@pytest.fixture
+def accepting(rig_parts, optimiser_run, make_manager, monkeypatch):
+    """A rig whose auto_mot accepts through an in-process manager and applies to its MOTMaster."""
+    client = in_process_client(make_manager())
+    client.set_saved_parameters(
+        {LASER_KEYS[laser]: START[laser] for laser in LASERS},
+        "initial laser set points",
+        "me",
+        create=True,
+    )
+    monkeypatch.setattr(
+        "pytweezer.notebook.rig.ExperimentManagerClient", lambda: client
+    )
+    rig, motmaster, _ = rig_parts()
+    monkeypatch.setattr(
+        "pytweezer.optimisers.optimise_mot_lasers.get_device", lambda name: motmaster
+    )
+    optimiser_run.measurement = canned_measurement("v0", "v1")
+    return SimpleNamespace(rig=rig, motmaster=motmaster, client=client)
+
+
+def saved_values(client):
+    return {parameter.key: parameter.value for parameter in client.saved_parameters()}
+
+
+def test_auto_mot_accepts_nothing_by_default(accepting, optimiser_run):
+    accepting.rig.auto_mot(["v0", "v1"])
+    ((_, arguments),) = optimiser_run.submissions
+    assert not any("accept" in name for name in arguments)
+    assert accepting.client.saved_parameter_history(rid=42) == []
+    assert accepting.motmaster.calls == []
+
+
+def test_accepting_auto_mot_saves_the_runs_proposals_as_the_tab_does(accepting):
+    accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    saved = saved_values(accepting.client)
+    assert (saved["caf_laser_v0"], saved["caf_laser_v1"]) == (2.0, 2.0)
+    assert saved["caf_laser_BX"] == START["BX"]
+    changes = accepting.client.saved_parameter_history(rid=42)
+    assert {change.key for change in changes} == {"caf_laser_v0", "caf_laser_v1"}
+    assert {change.reason for change in changes} == {"accepted from run 42"}
+
+
+def test_accepting_auto_mot_ramps_each_scanned_laser_to_its_proposal(accepting):
+    accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    assert accepting.motmaster.calls == [("ramp", "v0", 2.0), ("ramp", "v1", 2.0)]
+
+
+def test_accepting_auto_mot_does_not_apply_under_a_run_using_its_devices(
+    accepting, monkeypatch
+):
+    running = Task(
+        rid=57,
+        status=TaskStatus.RUNNING,
+        experiment="pytweezer.experiments.other",
+        class_name="Other",
+        t_submit=now(),
+        devices=["CaF MotMaster", "Rb MotMaster"],
+    )
+    monkeypatch.setattr(
+        accepting.client,
+        "snapshot",
+        lambda: {
+            "running": [running.model_dump(mode="json")],
+            "queue": [],
+            "history": [],
+        },
+    )
+    with pytest.warns(
+        UserWarning,
+        match="Accepted run 42: 2 values changed; not applied: run 57 is using "
+        "CaF MotMaster$",
+    ):
+        accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    assert saved_values(accepting.client)["caf_laser_v0"] == 2.0
+    assert accepting.motmaster.calls == []
+
+
+def test_a_failing_auto_mot_apply_leaves_the_values_saved_and_says_so(
+    accepting, monkeypatch
+):
+    def lock_lost(laser, target):
+        raise RuntimeError("wavemeter lock lost")
+
+    monkeypatch.setattr(accepting.motmaster, "ramp_laser_set_point_wml", lock_lost)
+    with pytest.raises(
+        RuntimeError,
+        match="Accepted run 42, but applying OptimiseMOTLasers failed: could not "
+        "ramp lasers",
+    ):
+        accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    assert saved_values(accepting.client)["caf_laser_v1"] == 2.0
+    assert len(accepting.client.saved_parameter_history(rid=42)) == 2
+
+
+def test_accepting_auto_mot_saves_nothing_when_the_running_tasks_cannot_be_read(
+    accepting, monkeypatch
+):
+    def not_responding():
+        raise ManagerUnavailable("no reply")
+
+    monkeypatch.setattr(accepting.client, "snapshot", not_responding)
+    with pytest.raises(ManagerUnavailable):
+        accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    assert accepting.client.saved_parameter_history(rid=42) == []
+    assert saved_values(accepting.client)["caf_laser_v0"] == START["v0"]
+    assert accepting.motmaster.calls == []
+
+
+@pytest.mark.parametrize("stages", ["v0", "0. DDSFourSidebands5W_noDDS"])
+def test_auto_mot_refuses_a_string_of_stages(rig_parts, optimiser_run, stages):
+    rig, _, _ = rig_parts()
+    with pytest.raises(TypeError, match="list of laser names"):
+        rig.auto_mot(stages)
+    assert optimiser_run.submissions == []
+
+
+def test_interrupting_auto_mot_terminates_its_run(
+    rig_parts, optimiser_run, monkeypatch
+):
+    terminated = []
+
+    class Client:
+        def terminate(self, rid):
+            terminated.append(rid)
+
+        def close(self):
+            pass
+
+    def interrupted(rid):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("pytweezer.notebook.rig.wait", interrupted)
+    monkeypatch.setattr("pytweezer.notebook.rig.ExperimentManagerClient", Client)
+    rig, _, _ = rig_parts()
+    with pytest.raises(KeyboardInterrupt):
+        rig.auto_mot(["v0"])
+    assert terminated == [42]
 
 
 def test_every_changed_frame_count_warns_from_the_callers_line(rig_parts):

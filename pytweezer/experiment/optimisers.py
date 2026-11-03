@@ -13,20 +13,28 @@ The mixin comes first, so it sets the points and runs each one; the
 measurement's own ``prepare`` and ``finish`` still run. A :class:`Fit` instead
 runs one point and proposes what its ``fit()`` returns. The values it proposes
 are recorded as constants ``proposed.<saved key>``; nothing is saved until a
-person accepts them.
+person accepts them, in the Optimisers tab or with ``Rig.auto_mot(accept=True)``,
+both through :func:`accept_proposals`.
 """
 
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import KW_ONLY, dataclass
 from typing import Any, ClassVar
 
 import numpy as np
 import skopt
 
-from pytweezer.experiment.arguments import Argument, Integer, Number, collect
-from pytweezer.experiment.client import get_saved_parameters
+from pytweezer.experiment.arguments import Argument, Bool, Integer, Number, collect
+from pytweezer.experiment.client import (
+    ExperimentManagerClient,
+    get_saved_parameters,
+    submitter_name,
+)
+from pytweezer.experiment.saved_parameters import SavedParameterChange
 from pytweezer.experiment.scan import Point, Scan
+from pytweezer.experiment.task import Task, TaskStatus
 
 #: Argument group of an optimiser's own arguments, shown first in the Optimisers tab.
 SEARCH = "Search"
@@ -36,15 +44,21 @@ SEARCH = "Search"
 class Stage:
     """One setting of a :class:`StagedScan`, swept from ``start`` to ``stop``.
 
-    Its best value is proposed for the saved parameter ``save_as``.
+    Given ``span`` instead, it is swept within ``span`` of its centre, which
+    is the value ``save_as`` holds when the run starts unless the run sets it.
+    Its best value is proposed for the saved parameter ``save_as``. ``run`` is
+    the default of the stage's ``<setting>_run`` argument; a stage switched off
+    is neither scanned nor proposed.
     """
 
     setting: str
     _: KW_ONLY
-    start: float
-    stop: float
     points: int
     save_as: str
+    span: float | None = None
+    start: float | None = None
+    stop: float | None = None
+    run: bool = True
 
 
 @dataclass(frozen=True)
@@ -141,6 +155,7 @@ class Optimiser:
         ``settings[i]`` is the setting whose best value is proposed for
         ``proposes[i]``; ``objective`` is ``None`` for a class that names none.
         ``units`` and ``group`` are what an accepted proposal is created with.
+        ``applies`` is true when the class overrides :meth:`apply`.
         """
         return {
             "kind": cls.kind,
@@ -150,7 +165,21 @@ class Optimiser:
             "settings": [declared.setting for declared in cls.declarations()],
             "units": {key: cls.proposal_units.get(key, "") for key in cls.proposes()},
             "group": cls.proposal_group,
+            "applies": cls.apply.__func__ is not Optimiser.apply.__func__,
         }
+
+    @classmethod
+    def apply(cls, proposals: dict[str, Any]) -> None:
+        """Put accepted proposals to use, after they are saved; does nothing by default.
+
+        Called once the accepted values are saved, by the Optimisers tab (on a
+        worker thread) and by ``Rig.auto_mot(accept=True)``, neither of which
+        undoes the save if it raises; neither calls it while a running task
+        reserves one of the optimiser's devices (:func:`live_task_using`).
+
+        Args:
+            proposals: ``{saved key: value}`` of the values accepted.
+        """
 
     def planned_points(self, scan: Scan) -> list[Point]:
         if scan.axes or scan.repetitions != 1:
@@ -179,16 +208,24 @@ class Optimiser:
 class StagedScan(Optimiser):
     """Scans one setting per stage, each at the best values of the stages before.
 
-    Each :class:`Stage` adds the arguments ``<setting>_start``,
-    ``<setting>_stop`` and ``<setting>_points``. Within a stage the sweep runs
-    ``repeats`` times. When a stage's points are done, :meth:`best` gives its
-    proposal, which every later stage passes to ``measure()``.
+    Each :class:`Stage` adds the arguments ``<setting>_run`` and
+    ``<setting>_points``, then ``<setting>_start`` and ``<setting>_stop``, or
+    ``<setting>_span`` and ``<setting>_centre`` if it declares a span. The
+    centre takes the saved parameter ``save_as`` when it is not set, so the
+    saved parameter must exist; it is read for every span stage, enabled or
+    not. The sweep of a span stage runs from ``centre - span`` to
+    ``centre + span``. Only
+    enabled stages (:meth:`enabled_stages`) are scanned, and at least one must
+    be. Within a stage the sweep runs ``repeats`` times. When a stage's points
+    are done, :meth:`best` gives its proposal, which every later enabled stage
+    passes to ``measure()``.
 
-    Each point records ``stage`` (its index), ``setting``, ``objective`` and
-    every result of ``measure()``, so ``measure()`` must not return a result
-    named ``stage``, ``setting`` or ``objective``. :meth:`finish` records
-    ``proposed.<key>`` for each finished stage, ``stages_done`` and
-    ``stages_total``.
+    Each point records ``stage`` (its index in ``stages``, whether or not the
+    others are enabled), ``setting``, ``objective`` and every result of
+    ``measure()``, so ``measure()`` must not return a result named ``stage``,
+    ``setting`` or ``objective``. :meth:`finish` records ``proposed.<key>`` for
+    each finished stage, and ``stages_done`` and ``stages_total`` counting
+    enabled stages.
 
     While a run is in progress, :attr:`stage` is the :class:`Stage` being
     scanned, so an overridden :meth:`best` can tell which stage it chooses for.
@@ -204,11 +241,53 @@ class StagedScan(Optimiser):
         return list(getattr(cls, "stages", []))
 
     @classmethod
+    def check_declarations(cls) -> None:
+        """Refuse declarations that cannot run.
+
+        Raises:
+            TypeError: As :meth:`Optimiser.check_declarations`, or if a stage
+                does not give exactly one of a positive ``span`` or both
+                ``start`` and ``stop``.
+        """
+        super().check_declarations()
+        for stage in cls.declarations():
+            if stage.span is not None:
+                if stage.start is not None or stage.stop is not None:
+                    raise TypeError(
+                        f"{cls.__name__}: stage {stage.setting!r} gives "
+                        "both a span and start/stop; give one or the other"
+                    )
+                if not stage.span > 0:
+                    raise TypeError(
+                        f"{cls.__name__}: stage {stage.setting!r} has "
+                        f"span {stage.span}; it must be positive"
+                    )
+            elif stage.start is None or stage.stop is None:
+                raise TypeError(
+                    f"{cls.__name__}: stage {stage.setting!r} needs "
+                    "start and stop, or a span"
+                )
+
+    @classmethod
     def generated_arguments(cls) -> dict[str, Argument]:
         arguments: dict[str, Argument] = {}
         for stage in cls.declarations():
-            arguments[f"{stage.setting}_start"] = Number(stage.start, group=SEARCH)
-            arguments[f"{stage.setting}_stop"] = Number(stage.stop, group=SEARCH)
+            arguments[f"{stage.setting}_run"] = Bool(stage.run, group=SEARCH)
+            if stage.span is not None:
+                arguments[f"{stage.setting}_span"] = Number(
+                    stage.span,
+                    min=0,
+                    group=SEARCH,
+                    tooltip="scanned within this of the centre",
+                )
+                arguments[f"{stage.setting}_centre"] = Number(
+                    saved=stage.save_as,
+                    group=SEARCH,
+                    tooltip=f"the saved {stage.save_as} unless set",
+                )
+            else:
+                arguments[f"{stage.setting}_start"] = Number(stage.start, group=SEARCH)
+                arguments[f"{stage.setting}_stop"] = Number(stage.stop, group=SEARCH)
             arguments[f"{stage.setting}_points"] = Integer(
                 stage.points, min=1, group=SEARCH
             )
@@ -240,25 +319,45 @@ class StagedScan(Optimiser):
         choose = {"max": max, "min": min}[self.goal]
         return float(choose(means, key=means.__getitem__))
 
+    def enabled_stages(self) -> list[tuple[int, Stage]]:
+        """``(index in stages, stage)`` for each stage whose ``<setting>_run`` is set."""
+        return [
+            (index, stage)
+            for index, stage in enumerate(self.stages)
+            if getattr(self, f"{stage.setting}_run")
+        ]
+
     def number_of_points(self) -> int:
         return len(self._schedule())
 
     def _schedule(self) -> list[tuple[int, float]]:
         """``(stage index, setting value)`` for every point, in run order."""
         schedule = []
-        for index, stage in enumerate(self.stages):
+        for index, stage in self.enabled_stages():
+            if stage.span is None:
+                start = getattr(self, f"{stage.setting}_start")
+                stop = getattr(self, f"{stage.setting}_stop")
+            else:
+                span = getattr(self, f"{stage.setting}_span")
+                if not span > 0:
+                    raise ValueError(
+                        f"{stage.setting}_span is {span}; it must be positive"
+                    )
+                centre = getattr(self, f"{stage.setting}_centre")
+                start, stop = centre - span, centre + span
             values = np.linspace(
-                getattr(self, f"{stage.setting}_start"),
-                getattr(self, f"{stage.setting}_stop"),
-                getattr(self, f"{stage.setting}_points"),
+                start, stop, getattr(self, f"{stage.setting}_points")
             ).tolist()
             for _ in range(self.repeats):
                 schedule.extend((index, value) for value in values)
         return schedule
 
     def prepare(self) -> None:
-        self._best_values: list[float] = []
+        self._best_values: dict[int, float] = {}
         self._shots: list[tuple[float, float]] = []
+        if not self.enabled_stages():
+            names = ", ".join(f"{stage.setting}_run" for stage in self.stages)
+            raise ValueError(f"no stage is enabled; set at least one of {names}")
         self._points_schedule = self._schedule()
         super().prepare()
 
@@ -266,8 +365,8 @@ class StagedScan(Optimiser):
         stage_index, setting = self._points_schedule[self.point.index]
         stage = self.stage = self.stages[stage_index]
         settings = {
-            earlier.setting: value
-            for earlier, value in zip(self.stages, self._best_values, strict=False)
+            self.stages[index].setting: value
+            for index, value in self._best_values.items()
         }
         settings[stage.setting] = setting
         results = self.measure(**settings)
@@ -291,15 +390,15 @@ class StagedScan(Optimiser):
                 raise ValueError(
                     f"stage {stage_index} ({stage.setting}): {error}"
                 ) from error
-            self._best_values.append(value)
+            self._best_values[stage_index] = value
             self._shots = []
 
     def finish(self) -> None:
         try:
-            for stage, value in zip(self.stages, self._best_values, strict=False):
-                self.record(f"proposed.{stage.save_as}", value)
+            for index, value in self._best_values.items():
+                self.record(f"proposed.{self.stages[index].save_as}", value)
             self.record("stages_done", len(self._best_values))
-            self.record("stages_total", len(self.stages))
+            self.record("stages_total", len(self.enabled_stages()))
         finally:
             super().finish()
 
@@ -540,3 +639,80 @@ class Fit(Optimiser):
                 self.record(f"proposed.{key}", value)
         finally:
             super().finish()
+
+
+#: Task statuses in which a task holds the devices it reserves.
+_LIVE = (TaskStatus.RUNNING, TaskStatus.PAUSED)
+
+
+def proposals(constants: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    """The values a run proposes for ``keys``, as plain Python values; arrays as nested lists."""
+    proposed = {}
+    for key in keys:
+        value = constants.get(f"proposed.{key}")
+        if value is not None:
+            proposed[key] = value.tolist() if hasattr(value, "tolist") else value
+    return proposed
+
+
+def accept_proposals(
+    values: dict[str, Any],
+    rid: int,
+    optimiser: dict[str, Any],
+    *,
+    client: ExperimentManagerClient,
+) -> list[SavedParameterChange]:
+    """Save ``values``, proposed by run ``rid``, for the whole lab as accepted.
+
+    A fit's keys not saved yet are created in its group with its units; a
+    search only sets keys that exist. The store sets every value or, refusing
+    any, none. Every key named is logged with ``rid``, unchanged ones included,
+    which is how a run is known to be accepted
+    (``saved_parameter_history(rid=rid)``).
+
+    Args:
+        values: ``{saved key: value}`` accepted.
+        rid: The run that proposed them.
+        optimiser: The optimiser's :meth:`Optimiser.optimiser_schema`.
+        client: The Experiment Manager to save them through.
+
+    Returns:
+        The change logged for each key.
+
+    Raises:
+        ManagerError: If the manager refuses any value.
+        ManagerUnavailable: If the manager does not answer.
+    """
+    return client.set_saved_parameters(
+        values,
+        f"accepted from run {rid}",
+        submitter_name(),
+        create=optimiser["kind"] == "fit",
+        group=optimiser.get("group", ""),
+        units=optimiser.get("units", {}),
+        rid=rid,
+    )
+
+
+def changed_summary(changes: list[SavedParameterChange]) -> str:
+    """``2 values changed``, or ``nothing changed``."""
+    changed = sum(change.old != change.new for change in changes)
+    if not changed:
+        return "nothing changed"
+    return f"{changed} value{'' if changed == 1 else 's'} changed"
+
+
+def live_task_using(
+    tasks: Iterable[Task], devices: Iterable[str]
+) -> tuple[int, list[str]] | None:
+    """The lowest rid of a running or paused task reserving any of ``devices``, and which.
+
+    An optimiser's :meth:`~Optimiser.apply` is not called while there is one,
+    since that task may be moving the same hardware.
+    """
+    devices = set(devices)
+    for task in sorted(tasks, key=lambda t: t.rid):
+        shared = sorted(set(task.devices or ()) & devices)
+        if task.status in _LIVE and shared:
+            return task.rid, shared
+    return None

@@ -27,11 +27,22 @@ shot.zip_number                          # MOTMaster's run number, None if save=
 shots = rig.scan("BX_BMOT_OP_magtrap", "tHold", [0, 10, 20])
 sp = rig.laser_set_points()
 shots = rig.scan_laser("BX_BMOT_OP_magtrap", "BX", scan_vals, iterations=3, settle_s=10)
-results = rig.auto_mot("0. DDSFourSidebands5W_noDDS",
-                       {"v0": np.linspace(sp["v0"] - 10e-6, sp["v0"] + 10e-6, 30)},
-                       iterations=3, display=True)
+results = rig.auto_mot(["v0", "v1"], spans={"v0": 10e-6}, points={"v0": 30}, display=True)
 rig.close()                              # releases the link
 ```
+
+`auto_mot` does not scan lasers itself: it submits the queued
+`OptimiseMOTLasers` (see `add-optimiser`) for the lasers named, waits, and returns
+each one's scan and proposed set point for `plot_auto_mot_results`. It accepts
+the proposals only with `accept=True` (otherwise do that in the Optimisers tab),
+exactly as the tab's Accept does (`accept_proposals` in
+`pytweezer/experiment/optimisers.py`), then ramps the lasers to them; the ramp
+is skipped with a warning while another running task uses the optimiser's
+devices, and a failed ramp raises with the values left saved. It runs through
+the Experiment Manager, so it takes the same device reservations as any queued
+task.
+Run `create_saved_set_points()` from `pytweezer.optimisers.optimise_mot_lasers`
+once before the first run, or it fails for want of the saved `caf_laser_*` keys.
 
 Moving a pycaf helper over: replace the `for fileno in range(file_start, file_end + 1):
 images, parameters_dict = CaF.readFromZip(fileno)` loop with
@@ -70,8 +81,7 @@ analysis counts all of them as one run of their own.
 
 ## Zips
 
-MOTMaster's save stays on (`save=True` default; `auto_mot` defaults to
-`save=False`). After `Go` the rig finds the one new `CaF{ddMMMyy}{batch}_{nnn}.zip`
+MOTMaster's save stays on (`save=True` default). After `Go` the rig finds the one new `CaF{ddMMMyy}{batch}_{nnn}.zip`
 in today's or tomorrow's day folder under `data_root_path`
 (`configuration/caf_mm_config.json`) and:
 
