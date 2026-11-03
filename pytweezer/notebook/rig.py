@@ -266,7 +266,7 @@ class Rig:
         scanning exactly the lasers in ``stages`` and waits for it. The run never
         accepts its proposals: accept them in the Optimisers tab. It does not use
         this rig's devices, so it must not run alongside a shot from this rig.
-        Interrupting it (Ctrl-C) terminates the run, which then restores the lasers.
+        Interrupting it (Ctrl-C) terminates the run, which then returns the lasers.
         Run :func:`~pytweezer.optimisers.optimise_mot_lasers.create_saved_set_points`
         once before the first run.
 

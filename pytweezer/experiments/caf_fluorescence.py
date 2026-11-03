@@ -28,8 +28,9 @@ class CaFFluorescence(MotMasterExperiment):
     the MOT field at ``bg_field``. Each shot then runs the script's iterations
     at ``mot_field``; ``counts`` is the mean over its frames of each frame's
     background-subtracted sum, ``counts_error`` its standard error (NaN for a
-    single frame). ``finish`` ramps every laser back to its starting set point,
-    whatever happened.
+    single frame). ``finish`` ramps every laser :meth:`set_lasers` moved back
+    to its starting set point, whatever happened; a laser it never moved is
+    left alone.
     """
 
     #: Interval between frame-count polls while a shot's frames settle.
@@ -61,6 +62,7 @@ class CaFFluorescence(MotMasterExperiment):
 
     def prepare(self) -> None:
         super().prepare()
+        self._moved_lasers: set[str] = set()
         self.start_set_points = self.caf.laser_set_points_wml()
         self.record("start_set_points", self.start_set_points)
         background_frames = self.shot(**{"caf.MOTCoilsCurrentValue": self.bg_field})
@@ -107,19 +109,27 @@ class CaFFluorescence(MotMasterExperiment):
         for laser, set_point in set_points.items():
             if set_point is None:
                 continue
+            self._moved_lasers.add(laser)
             self.caf.ramp_laser_set_point_wml(laser, float(set_point))
             moved = True
         if moved:
             time.sleep(self.settle_s)
 
     def restore_lasers(self) -> None:
-        """Ramp every laser back to its set point from ``prepare``, trying them all.
+        """Ramp each laser :meth:`set_lasers` moved back to its set point from ``prepare``.
+
+        Every such laser is tried even if one fails.
 
         Raises:
             RuntimeError: Naming the lasers that could not be ramped back.
         """
-        # Unset if prepare() failed before reading them, when nothing has moved yet.
-        start_set_points = getattr(self, "start_set_points", {})
+        # Unset if prepare() failed before setting them, when nothing has moved yet.
+        moved = getattr(self, "_moved_lasers", set())
+        start_set_points = {
+            laser: set_point
+            for laser, set_point in getattr(self, "start_set_points", {}).items()
+            if laser in moved
+        }
         errors: dict[str, Exception] = {}
         for laser, set_point in start_set_points.items():
             try:

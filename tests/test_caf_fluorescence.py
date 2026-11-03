@@ -197,6 +197,23 @@ def test_lasers_return_to_where_they_started(caf, failure, status):
     assert caf.motmaster.set_points == START
 
 
+def test_finish_leaves_a_laser_it_never_moved_alone(caf):
+    class HandTuned(CaFFluorescence):
+        def run_point(self):
+            self.caf.ramp_laser_set_point_wml("v1", 476.96)
+            for name, value in self.measure(v0=494.44).items():
+                self.record(name, value)
+
+    measurement = run(HandTuned)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    assert caf.motmaster.set_points == {**START, "v1": 476.96}
+    assert [entry for entry in caf.motmaster.log if entry[0] == "ramp"] == [
+        ("ramp", "v1", 476.96),
+        ("ramp", "v0", 494.44),
+        ("ramp", "v0", START["v0"]),
+    ]
+
+
 def test_a_laser_that_cannot_return_does_not_strand_the_others(caf):
     caf.motmaster.refused_ramps = {("v0", START["v0"])}
     measurement = run(measuring(v0=494.44, BX=564.59))
