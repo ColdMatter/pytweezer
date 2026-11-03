@@ -347,7 +347,7 @@ def _driver(fail=False, motmaster=None):
     return driver
 
 
-def test_linked_script_is_not_run_once_the_secondary_takes_back_control():
+def test_linked_script_is_not_run_once_the_secondary_takes_back_control(dotnet_types):
     driver = _driver(motmaster=FakeLinkableDotNet())
     driver.set_motmaster_experiment("LinkedTweezerLoad")
     driver.set_linked(True)
@@ -371,7 +371,7 @@ def test_unlinking_a_motmaster_built_before_linked_mode_does_nothing():
     assert driver.linked is False
 
 
-def test_driver_raises_instead_of_printing():
+def test_driver_raises_instead_of_printing(dotnet_types):
     driver = _driver(fail=True)
     with pytest.raises(RuntimeError, match="no such script"):
         driver.set_motmaster_experiment("missing")
