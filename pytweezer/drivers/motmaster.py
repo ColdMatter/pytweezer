@@ -336,11 +336,11 @@ class MotMasterInterface:
                 "back control); the linked script was not run. Call "
                 "set_linked(True) to claim the secondary again."
             )
+        # Go returns once the run, zip included, has finished.
         if parameters is not None:
             self.motmaster.Go(self.python_to_cs_dict(parameters))
         else:
             self.motmaster.Go()
-        time.sleep(self.interval)
 
     def get_params(self):
         return dict(self.motmaster.GetParameters())
