@@ -112,7 +112,12 @@ values, and unselected ones keep the script's defaults (not recorded in the
 file). `prepare()` sets script, iterations, save toggle and trigger mode on
 every task; repeats come from `Scan(repetitions=...)`, one stored point per
 shot; `run_sequences(**{"rb.tPulse": 3e-5})` overrides parameters for that one
-run (`LoadTweezers.shot()` puts the saved sequence parameters under these). `prepare()` puts followers in trigger mode; `run_sequences()` starts each
+run. `MotMaster(..., saved=(...))` binds script parameters to saved parameters:
+a bare name for the key of the same name, `{parameter: key}` for another key.
+They are read once in `prepare()` (an unreachable manager raises `RuntimeError`,
+missing keys a `KeyError`) and sent with every run; precedence is a
+`run_sequences` override > form or scan > saved > script default, and the saved
+values sent are the constant `saved_sequence` (`{"rb.<parameter>": value}`). `prepare()` puts followers in trigger mode; `run_sequences()` starts each
 follower in a thread, then the master `follower_arm_delay` later
 (`MotMasterExperiment` class attribute, default 0.5 s). A follower still running
 `follower_timeout` (a `MotMaster(...)` keyword, default 60 s) after the master
@@ -318,8 +323,8 @@ The Rb tweezer experiments, in the order a session uses them:
 2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera
    and proposes the `trap_*` saved parameters.
 3. `LoadTweezers` (`load_tweezers.py`) runs every shot at the saved
-   sequence parameters (`SAVED_SEQUENCE_PARAMETERS`: script parameter → saved
-   key; a missing key, or an unreachable manager, fails `prepare()`), a script
+   sequence parameters (`LoadTweezers.rb.saved`, from `saved=` on its
+   `MotMaster`: script parameter → saved key; a missing key, or an unreachable manager, fails `prepare()`), a script
    parameter set in the form winning; the values used are the constant
    `saved_sequence`. It and everything built on it also read the trap sites in
    `prepare()` (`saved_trap_sites(saved)`), moved into this ROI by the origin

@@ -5,10 +5,9 @@ from pytweezer.analysis import analysis as an
 from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
-from pytweezer.experiment import Scan, optimisers, run_local
+from pytweezer.experiment import Scan, motmaster, optimisers, run_local
 from pytweezer.experiment.client import ManagerUnavailable
-from pytweezer.experiments import load_tweezers
-from pytweezer.experiments.load_tweezers import SAVED_SEQUENCE_PARAMETERS, LoadTweezers
+from pytweezer.experiments.load_tweezers import LoadTweezers
 from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
 from pytweezer.optimisers.optimise_molasses_shims import OptimiseMolassesShims
@@ -131,7 +130,7 @@ def midpoint_threshold():
 
 
 SAVED = {
-    key: 1.0 + index for index, key in enumerate(SAVED_SEQUENCE_PARAMETERS.values())
+    key: 1.0 + index for index, key in enumerate(LoadTweezers.rb.saved.values())
 } | {
     "trap_sites": np.array(SITES, dtype=float) + ROI_ORIGIN,
     "trap_threshold": midpoint_threshold(),
@@ -158,7 +157,7 @@ def rig(monkeypatch):
     )
     saved = dict(SAVED)
     sequencer.saved = saved
-    for module in (load_tweezers, optimisers):
+    for module in (motmaster, optimisers):
         monkeypatch.setattr(module, "get_saved_parameters", lambda: saved)
     return sequencer
 
@@ -265,7 +264,7 @@ def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(
 ):
     run_local(experiment, **args, **{"rb.tMolCoolVCO1": 7.5})
     expected = {
-        parameter: SAVED[key] for parameter, key in SAVED_SEQUENCE_PARAMETERS.items()
+        parameter: SAVED[key] for parameter, key in LoadTweezers.rb.saved.items()
     } | {"tMolCoolVCO1": 7.5}
     for go in rig.goes:
         assert {name: go[name] for name in expected} == expected
@@ -448,7 +447,7 @@ def test_load_tweezers_needs_the_saved_parameters(rig, monkeypatch):
     def unreachable():
         raise ManagerUnavailable("not responding")
 
-    monkeypatch.setattr(load_tweezers, "get_saved_parameters", unreachable)
+    monkeypatch.setattr(motmaster, "get_saved_parameters", unreachable)
     measurement = run_local(LoadTweezers)
 
     assert measurement.status == "failed"

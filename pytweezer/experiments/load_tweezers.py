@@ -11,11 +11,6 @@ from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.analysis.trap_sites import same_geometry, to_roi
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.experiment.arguments import Bool, Device, Integer
-from pytweezer.experiment.client import (
-    ManagerError,
-    ManagerUnavailable,
-    get_saved_parameters,
-)
 from pytweezer.experiment.motmaster import (
     MotMaster,
     MotMasterExperiment,
@@ -49,15 +44,6 @@ _SAVED_UNDER_OWN_NAME = (
     "tMolassesShimZccValue",
 )
 
-#: Script parameter of RbTweezerBasic2026_2 -> the saved parameter it is set from.
-SAVED_SEQUENCE_PARAMETERS = {
-    **{name: name for name in _SAVED_UNDER_OWN_NAME},
-    "tImgCoolVCO1": "tImgCoolVCO",
-    "tImgCoolVCO2": "tImgCoolVCO",
-    "tImgCoolVVA1": "tImgCoolVVA",
-    "tImgCoolVVA2": "tImgCoolVVA",
-}
-
 #: The saved parameters a trap-site fit is accepted into.
 TRAP_SITE_KEYS = (
     "trap_sites",
@@ -71,10 +57,9 @@ TRAP_SITE_KEYS = (
 class LoadTweezers(MotMasterExperiment):
     """Run the Rb tweezer-loading sequence and image the tweezers twice per point.
 
-    Every shot runs the sequence at the saved parameters
-    (:data:`SAVED_SEQUENCE_PARAMETERS`); a script parameter set in the form
-    wins over its saved value, and the values used are recorded as
-    ``saved_sequence``. :meth:`take_shots` runs a batch of shots, for
+    Every shot runs the sequence at the saved parameters ``rb`` binds
+    (``LoadTweezers.rb.saved``); a script parameter set in the form wins over
+    its saved value, and the values used are recorded as ``saved_sequence``. :meth:`take_shots` runs a batch of shots, for
     subclasses whose point is one.
 
     ``signal_counts`` is the summed first frame minus the summed second.
@@ -91,7 +76,19 @@ class LoadTweezers(MotMasterExperiment):
     ``save_raw_images``, which needs no sites.
     """
 
-    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic2026_2")
+    rb = MotMaster(
+        "Rb MotMaster",
+        script="RbTweezerBasic2026_2",
+        saved=(
+            *_SAVED_UNDER_OWN_NAME,
+            {
+                "tImgCoolVCO1": "tImgCoolVCO",
+                "tImgCoolVCO2": "tImgCoolVCO",
+                "tImgCoolVVA1": "tImgCoolVVA",
+                "tImgCoolVVA2": "tImgCoolVVA",
+            },
+        ),
+    )
     analyses = ("tweezer_histogram", "tweezer_photon_histogram")
 
     camera: ImagEMX2Camera = Device("Rb HamCam")
@@ -117,23 +114,6 @@ class LoadTweezers(MotMasterExperiment):
 
     def prepare(self) -> None:
         super().prepare()
-        try:
-            saved = get_saved_parameters()
-        except (ManagerUnavailable, ManagerError) as error:
-            raise RuntimeError(
-                f"the saved parameters could not be read: {error}"
-            ) from error
-        missing = sorted(set(SAVED_SEQUENCE_PARAMETERS.values()) - set(saved))
-        if missing:
-            raise KeyError(f"no saved parameter {', '.join(map(repr, missing))}")
-        set_in_form = self.motmaster_parameters()["rb"]
-        self.saved_sequence = {
-            parameter: saved[key]
-            for parameter, key in SAVED_SEQUENCE_PARAMETERS.items()
-            if parameter not in set_in_form
-        }
-        self.record("saved_sequence", self.saved_sequence)
-
         # The camera may round the ROI's corner; sites are placed by the one it used.
         self.roi_origin = tuple(
             self.camera.set_roi(
@@ -146,7 +126,9 @@ class LoadTweezers(MotMasterExperiment):
         self.camera.set_sensitivity(self.sensitivity)
         self.camera.setup_acquisition(2, mode="snap")
 
-        self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(saved)
+        self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(
+            self.saved_parameters
+        )
         if self.trap_sites is None:
             if not self.no_trap_sites_reason:
                 return
@@ -210,13 +192,12 @@ class LoadTweezers(MotMasterExperiment):
         return {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}, ""
 
     def shot(self, **overrides) -> tuple:
-        """Run the sequence once at the saved parameters plus ``overrides``; the two HamCam frames.
+        """Run the sequence once with ``overrides``; the two HamCam frames.
 
         ``overrides`` are keyed as for :meth:`run_sequences` (``rb.<parameter>``).
         """
-        saved = {f"rb.{name}": value for name, value in self.saved_sequence.items()}
         self.camera.start_acquisition()
-        self.run_sequences(**(saved | overrides))
+        self.run_sequences(**overrides)
         first_image, second_image = self.camera.acquire_n_frames(
             2, broadcast=True, header={"rid": self.rid}
         )
