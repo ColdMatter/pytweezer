@@ -5,7 +5,7 @@ import pytest
 
 from pytweezer.experiment import Scan, run_local
 from pytweezer.experiment.motmaster import MotMaster
-from pytweezer.experiments.caf_fluorescence import CaFFluorescence
+from pytweezer.experiments.caf_fluorescence import LASERS, CaFFluorescence
 
 START = {
     "v0": 494.431874,
@@ -225,3 +225,12 @@ def test_the_background_shot_has_the_field_off(caf):
     assert measurement.status == "completed", measurement.attrs["error"]
     fields = [go["MOTCoilsCurrentValue"] for go in caf.motmaster.goes()]
     assert fields == [0.0, 1.0, 1.0]
+
+
+def test_runs_against_the_simulated_motmaster_and_camera():
+    measurement = run_local(
+        CaFFluorescence, simulate=True, frame_settle_s=0.05, frame_timeout_s=0.2
+    )
+    assert measurement.status == "completed", measurement.attrs["error"]
+    assert np.isfinite(measurement.results["counts"][0])
+    assert set(measurement.constants["start_set_points"]) == set(LASERS)

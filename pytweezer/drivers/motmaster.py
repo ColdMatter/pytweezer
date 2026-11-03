@@ -746,6 +746,7 @@ class MotMasterInterface:
 SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
     "RbTweezerBasic": {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5, "nShots": 1},
     "CaFTweezerLoad": {"tLoad": 100, "bTop": 0.5, "tHold": 10e-3},
+    "0. DDSFourSidebands5W_noDDS": {"MOTCoilsCurrentValue": 1.0},
     "LinkedScopeTest": {
         "PatternLength": 20000,
         "PulseStart": 1000,
