@@ -20,13 +20,20 @@ FRAMES_SETTINGS = HistogramSettings(sites=len(SITE_CENTRES), detection_step=10)
 
 
 class ImagesArray(Experiment):
-    """Records two frames per point, as LoadTweezers does; the second is empty."""
+    """Records the two frames of each point as one stack, as LoadTweezers does; the second is empty."""
 
     detuning = Number(0.0, unit="MHz", scale=1e6)
 
     def run_point(self):
-        self.record("first_image", patterned_frame(self.point.index))
-        self.record("second_image", tweezer_frame([], seed=1000 + self.point.index))
+        self.record(
+            "hamcam_images",
+            np.stack(
+                [
+                    patterned_frame(self.point.index),
+                    tweezer_frame([], seed=1000 + self.point.index),
+                ]
+            ),
+        )
 
 
 def frames_file(scan=None):
@@ -172,7 +179,7 @@ def test_frames_without_the_sites_give_a_header_without_photons():
 
 
 def test_needed_results_names_only_what_the_source_uses(rig):  # noqa: F811
-    assert needed_results(frames_file(Scan())) == ["first_image", "second_image"]
+    assert needed_results(frames_file(Scan())) == ["hamcam_images"]
     assert needed_results(run_local(ArrayBatch, **FAST)) == [
         "first_counts",
         "second_counts",

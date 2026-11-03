@@ -156,7 +156,7 @@ an optimiser declares none. Each file records the names (root attr
 computation in `pytweezer/analysis/` plus an `AnalysisView` registered there).
 A view reads only what the file recorded, so record what it needs (the tweezer
 histograms take `first_counts`/`second_counts` with `trap_sites` and
-`threshold`, else per-site photons, else frames: `analysis/tweezer_histogram.py`).
+`threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`).
 A name this GUI doesn't know is listed disabled, and every analysis is disabled
 until the measurement finishes. An analysis only reads the file, through its
 own archive connection, off the GUI thread. The tab remembers the choice per
