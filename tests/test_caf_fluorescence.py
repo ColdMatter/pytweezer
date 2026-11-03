@@ -205,6 +205,15 @@ def test_a_laser_that_cannot_return_does_not_strand_the_others(caf):
     assert caf.motmaster.set_points == {**START, "v0": 494.44}
 
 
+def test_a_stranded_laser_is_reported_after_a_failed_run(caf):
+    caf.motmaster.fail_on_go, caf.motmaster.failure = 2, RuntimeError("Go failed")
+    caf.motmaster.refused_ramps = {("v0", START["v0"])}
+    measurement = run(measuring(v0=494.44))
+    assert measurement.status == "failed"
+    assert "Go failed" in measurement.attrs["error"]
+    assert f"{{'v0': {START['v0']}}}" in measurement.attrs["error"]
+
+
 def test_start_set_points_read_back_from_the_file(caf):
     measurement = run(CaFFluorescence)
     assert measurement.constants["start_set_points"] == START
