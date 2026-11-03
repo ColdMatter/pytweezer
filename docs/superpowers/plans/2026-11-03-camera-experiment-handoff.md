@@ -9,10 +9,8 @@ plan (`docs/superpowers/plans/2026-11-03-camera-experiment.md`).
 - Branch `camera-experiment`, pushed, based on main at c46518d.
 - Main now contains PR #50 (CaF laser-tuning optimiser) and the camera
   binning/gain/continuous commit (f06e317). Both were merged on 2026-11-03.
-- **The design and plan on this branch are out of date.** They were written before
-  #50 and before the decisions below. The user approved the decisions below; the
-  first job is to bring the design and the plan up to date with them (the user
-  wants this done in this new session), then execute the plan.
+- The design and plan were brought up to date with the decisions below on
+  2026-11-03, re-checked against main at c46518d. Next: execute the plan.
 - Nothing has been built. No product code has changed on this branch.
 
 ## Decisions the user approved (apply to the design and plan)

@@ -5,10 +5,11 @@
 Many experiments are "set up cameras A, B, C; run MOTMaster script X; get
 N_A, N_B, N_C frames from the cameras". Today each one copies the same
 camera setup, arm/acquire/stop code and recording from the last
-(`LoadTweezers` is the model), and `LoadTweezers.prepare` also carries a
-block that reads saved parameters and merges them into every sequence run.
-The aim is that such an experiment is written as declarations, with code only
-for what is specific to it (analysis, driver extras).
+(`LoadTweezers` takes a fixed number of frames per shot; `CaFFluorescence`
+takes whatever a free-running camera caught), and `LoadTweezers.prepare` also
+carries a block that reads saved parameters and merges them into every
+sequence run. The aim is that such an experiment is written as declarations,
+with code only for what is specific to it (analysis, driver extras).
 
 ## Goals
 
@@ -19,9 +20,9 @@ for what is specific to it (analysis, driver extras).
    ```python
    class PureRecipe(CameraExperiment):
        rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
-       ham = CameraShots("Rb HamCam", frames=2, exposure=20e-3, roi=(0, 512, 0, 512))
-       thor = CameraShots("Rb ThorCam", frames=1)
-       caf = CameraShots("CaF ThorCam", frames=3)
+       hamcam = CameraShots("Rb HamCam", frames=2, exposure=20e-3, roi=(0, 512, 0, 512))
+       thorcam = CameraShots("Rb ThorCam", frames=1, stream=True)
+       orca = CameraShots("CaF ORCA", frames=3, binning=2, gain=1)
    ```
 
    `CameraShots` is a `Device` subclass (so it is declared, reserved and in the
@@ -29,27 +30,55 @@ for what is specific to it (analysis, driver extras).
    Declarations stay class attributes because the manager imports the module,
    without running it, to list arguments and reserve devices.
 3. **Camera settings are arguments** in the Experiments form, editable and
-   scannable (`ListAxis(argument="ham.exposure", ...)`), with the declaration's
-   values as defaults. Named with dots, as MOTMaster script parameters are:
-   `<camera>.frames`, `<camera>.exposure`, `<camera>.roi_x0`, `.roi_width`,
-   `.roi_y0`, `.roi_height`. They are always shown in the form, not behind the
-   search box.
-4. **Generic loops over `self.cameras`** (a dict `{attribute name: device client}`):
-   - `prepare`: apply each camera's ROI, exposure, trigger source and
-     `setup_acquisition(frames, mode="snap")`, then call the hook
-     `configure_camera(name, camera)` for driver extras (EM gain, sensitivity,
-     `set_external_exposure_mode`).
-   - `take_shot(**overrides)`: start acquisition on every camera, run the
-     sequences, read each camera's `frames` frames, stop every camera. Returns
-     `{name: (frames, H, W) array}`. Cameras are armed before the master fires.
+   scannable (`ListAxis(argument="hamcam.exposure", ...)`), with the
+   declaration's values as defaults. Named with dots, as MOTMaster script
+   parameters are: `<camera>.frames`, `<camera>.exposure`, `<camera>.binning`,
+   `<camera>.gain`, `<camera>.roi_x0`, `.roi_width`, `.roi_y0`, `.roi_height`.
+   They are always shown in the form, not behind the search box.
+   - `binning` and `gain` are optional: `None` (the default) means the
+     experiment never sets them and the camera keeps what it has. They use
+     `Camera.set_binning` and `Camera.set_gain`. `gain` is in the camera's own
+     unit: dB on the ThorCams, the contrast-gain index on the ORCAs, and on the
+     HamCam its sensitivity, which takes effect only once EM gain is enabled.
+   - The ROI is in unbinned sensor pixels, as pylablib's DCAM and Thorlabs
+     backends take it; a camera binning `b` returns frames of
+     `(roi_height // b, roi_width // b)` and may round the ROI to a multiple of
+     `b`. The origin it used (`self.roi_origins[name]`) is in sensor pixels too.
+4. **Two acquisition modes per camera:**
+   - **Snap** (the default), as `LoadTweezers` does: `setup_acquisition(frames,
+     mode="snap")` at `prepare`, then per shot `start_acquisition`, run the
+     sequences, `acquire_n_frames(frames)`, `stop_acquisition`.
+   - **Stream** (`CameraShots(..., stream=True)`), as `CaFFluorescence` does:
+     `camera.arm()` at `prepare` (and again, a no-op while it runs, before every
+     shot, so a shared camera another task stopped comes back). Each shot notes
+     `frames_acquired()` as a mark, runs the sequences, waits with
+     `pytweezer.drivers.shot_frames.settle_frame_counts` until every streaming
+     camera's count has been still for `frame_settle_s` (at most
+     `frame_timeout_s`), then reads `read_frames_from(mark)`. The camera keeps
+     running after the shot and the task. Stream mode is needed for the
+     ThorCams: their driver ignores `mode`, so a snap loop would re-read stale
+     ring-buffer frames from the second shot on.
+5. **Generic loops over `self.cameras`** (a dict `{attribute name: device client}`):
+   - `prepare`, per camera, in this order: binning, ROI (`set_roi` keeps the
+     binning; `set_binning` can reset the ROI), exposure, trigger source, the
+     hook `configure_camera(name, camera)` for driver extras (on the HamCam:
+     `set_external_exposure_mode`, enabling EM gain), gain, then
+     `setup_acquisition(frames, mode="snap")` or, streaming, `arm()`. A
+     streaming camera is stopped first if any of these is to be set. Settings
+     left `None` are skipped.
+   - `take_shot(**overrides)`: start every snap camera and mark every streaming
+     one, run the sequences, read every camera's frames, and stop the snap
+     cameras even on failure. Returns `{name: (frames, H, W) array}`. Cameras
+     are armed before the master fires.
    - default `run_point`: `take_shot()`, then record each camera's frames as
      one stack, `<name>_images`. Users index into the stack; there are no
      per-frame labels.
    - `record_frames(frames)` does that recording for a `run_point` that wants it
      alongside its own analysis.
-   - Frames are broadcast with the `rid` header, as `LoadTweezers.shot` does today,
-     so applets keep working.
-5. **Saved-parameter binding on the `MotMaster` declaration**, generic for any
+   - Snap frames are broadcast with the `rid` header, as `LoadTweezers.shot`
+     does today, so applets keep working. Streaming cameras are not
+     re-broadcast: a live one (the CaF ThorCam) already broadcasts every frame.
+6. **Saved-parameter binding on the `MotMaster` declaration**, generic for any
    script:
 
    ```python
@@ -66,30 +95,39 @@ for what is specific to it (analysis, driver extras).
    - `MotMasterExperiment.prepare` resolves the bindings once from the manager,
      with `LoadTweezers.prepare`'s present errors (manager unreachable raises
      `RuntimeError`; a missing saved key raises `KeyError` naming all missing
-     keys), and records the values used as `saved_sequence` (`/constants`).
+     keys), and records the values used as `saved_sequence` (`/constants`),
+     keyed `"<attribute>.<parameter>"` (e.g. `"rb.tMOTLoadRepVCO"`).
    - `run_sequences` applies them automatically. Precedence, highest first: an
      override passed to `run_sequences`; a script parameter set in the form
      (declared or by dotted name, including a scanned one); the saved value; the
      script's own default. `saved_sequence` holds only the saved values that
      were not beaten by the form, as today.
    - No experiment copies the reading/merging block again.
-6. **`LoadTweezers` is rewritten** as a `CameraExperiment`:
-   `ham = CameraShots("Rb HamCam", frames=2, ...)`, `rb = MotMaster(..., saved=...)`.
-   It keeps the `Rearrangement` rig device, trap-site loading and checks,
-   `signal_counts`, `loading`, `first_/second_occupied`, `first_/second_counts`,
-   `take_shots` and the `analyses`, now reading the two frames from
-   the `take_shot()` stack (`frames["ham"][0]` and `[1]`). It records the camera
-   frames as `ham_images`, `(2, H, W)` per point (`(shots, 2, H, W)` per point in
+7. **`LoadTweezers` is rewritten** as a `CameraExperiment`:
+   `hamcam = CameraShots("Rb HamCam", frames=2, binning=1, gain=600, roi=(110, 256, 220, 256), locked=("frames", "binning"))`,
+   `rb = MotMaster(..., saved=...)`. It keeps the `Rearrangement` rig device,
+   trap-site loading and checks, `signal_counts`, `loading`,
+   `first_/second_occupied`, `first_/second_counts`, `take_shots` and the
+   `analyses`, now reading the two frames from the `take_shot()` stack
+   (`frames["hamcam"][0]` and `[1]`). It records the camera frames as
+   `hamcam_images`, `(2, H, W)` per point (`(shots, 2, H, W)` per point in
    `take_shots`), replacing `first_image`, `second_image`, `first_images` and
    `second_images`; still gated by `save_raw_images`. `save_raw_images` and
-   `save_tweezer_counts` stay `LoadTweezers` arguments. The default analysis
-   (`tweezer_histogram.FRAMES` and the code reading it), the optimisers, their
-   tooltips and the tests move to index `ham_images`. Measurement files written
-   before the change, which hold `first_image` and `second_image`, are not read
-   by the new analysis. `TweezerArrayMeasurement` and the
-   optimisers that subclass it keep working. The module-level
-   `SAVED_SEQUENCE_PARAMETERS` is replaced by the `saved=` declaration (the
-   rewrite chooses how to keep the single list of names importable).
+   `save_tweezer_counts` stay `LoadTweezers` arguments. `LoadTweezers.sensitivity`
+   is removed in favour of `hamcam.gain`. Binning is locked at 1 because the
+   trap sites are saved in sensor pixels and placed in the frame by the ROI
+   origin. The default analysis (`tweezer_histogram.FRAMES` and the code reading
+   it), the optimisers, their tooltips and the tests move to index
+   `hamcam_images`. Measurement files written before the change, which hold
+   `first_image` and `second_image`, are not read by the new analysis.
+   `TweezerArrayMeasurement` and the optimisers that subclass it keep working.
+   The module-level `SAVED_SEQUENCE_PARAMETERS` is replaced by the `saved=`
+   declaration (`LoadTweezers.rb.saved` is the importable mapping).
+8. **`CaFFluorescence` is ported** onto `CameraExperiment`: its `shot()` becomes
+   `take_shot()` on `thorcam = CameraShots("CaF ThorCam", frames=3, stream=True,
+   trigger=None, locked=("frames",))`, one frame per MOTMaster iteration. Its
+   background shot, laser setting and restore logic stay. `OptimiseMOTLasers`,
+   `Rig.auto_mot` and the Optimisers tab keep working unchanged.
 
 ## Non-goals and anti-goals
 
@@ -101,9 +139,13 @@ for what is specific to it (analysis, driver extras).
   `LoadTweezers` internals that break, for the user.
 - Not changing camera drivers or `camera_base.py`; the generic loops use the
   `Camera` interface every driver shares (`set_roi`, `set_exposure_time`,
-  `set_trigger_source`, `setup_acquisition`, `start_acquisition`,
-  `acquire_n_frames`, `stop_acquisition`). Driver extras go in
+  `set_trigger_source`, `set_binning`, `set_gain`, `setup_acquisition`,
+  `start_acquisition`, `acquire_n_frames`, `stop_acquisition`, `arm`,
+  `frames_acquired`, `read_frames_from`). Driver extras go in
   `configure_camera`.
+- Not `ContinuousAcquisition` (`experiments/camera_continuous.py`), which leaves
+  one chosen camera free-running and is unrelated. Its undotted `binning`,
+  `gain` and `roi_*` arguments do not collide with the dotted camera arguments.
 - Anti-goal: a design where an experiment author must still write per-camera
   loops or the saved-parameter block to get the standard behaviour.
 
@@ -114,9 +156,9 @@ for what is specific to it (analysis, driver extras).
 - Every camera used must be declared (reserved, `UndeclaredDeviceError`
   otherwise); `CameraShots` being a `Device` gives this.
 - Tests follow the design: update existing tests broken by the rewrite
-  (`tests/test_tweezer_array.py` uses `SAVED_SEQUENCE_PARAMETERS`; others may
-  touch `roi_x0` and friends) instead of keeping the old design. Do not add new
-  test files or cases unless the user asks.
+  (`tests/test_tweezer_array.py`, `tests/test_tweezer_histogram.py`,
+  `tests/test_caf_fluorescence.py`) instead of keeping the old design. Do not
+  add new test files or cases unless the user asks.
 - Docstrings Google style, UK English, no change history, comments only for
   the surprising (project CLAUDE.md). Use `get_logger`.
 - The `add-experiment` skill describes `MotMasterExperiment` and
@@ -127,45 +169,44 @@ for what is specific to it (analysis, driver extras).
 ## Decided by the user
 
 - Base class name `CameraExperiment`; concrete base class, not mixins.
-- Camera settings are form arguments (editable, scannable), not fixed in the class.
-- Frames recorded as one stack per camera, `<name>_images`, indexed by position, including by `LoadTweezers`, its analyses and the optimisers.
+- Camera attribute names `hamcam`, `thorcam`, `orca`; records `<name>_images`
+  (`hamcam_images`); `LoadTweezers.camera` becomes `hamcam`.
+- Camera settings are form arguments (editable, scannable), not fixed in the
+  class. `frames`, `roi_width`, `roi_height` and `binning` cannot be scanned
+  (they change the recorded shape); `exposure`, `gain`, `roi_x0` and `roi_y0`
+  can, and are re-applied before a shot when they change. `LoadTweezers`
+  refuses `hamcam.roi_x0`/`roi_y0` scans, because its trap sites are placed in
+  the ROI fixed at `prepare`.
+- Snap and stream modes, as in Goal 4; snap is the default.
+- `binning` and `gain` are optional `CameraShots` settings, applied in the
+  order in Goal 5. `LoadTweezers.sensitivity` is replaced by `hamcam.gain`.
+- Frames recorded as one stack per camera, `<name>_images`, indexed by
+  position, including by `LoadTweezers`, its analyses and the optimisers.
 - Cameras kept in a dict, with loops doing setup, arm, run and read.
-- Saved-parameter binding is generic, not copied into `prepare`.
-- `LoadTweezers` is rewritten on the new base.
-
-## My calls (not yet confirmed)
-
-- The declaration is called `CameraShots`; the hook `configure_camera`; the
-  module `pytweezer/experiment/camera_experiment.py`.
-- Saved binding is a `saved=` keyword on `MotMaster`, accepting bare names and
-  a dict of renames.
-- Precedence of saved values below form values, above script defaults (the
-  current behaviour of `LoadTweezers`).
+- Saved-parameter binding is generic, not copied into `prepare`; `saved=` on
+  `MotMaster`, bare names and a dict of renames; precedence as in Goal 6;
+  `saved_sequence` keys are dotted.
+- `LoadTweezers` is rewritten on the new base; `CaFFluorescence` is ported
+  after it.
 - Frames are broadcast with the `rid` header by default.
-- Every experiment's camera frames are recorded as `<camera>_images`;
-  `LoadTweezers` has no separate names. Old measurement files are not supported
-  by the updated analyses (a notebook is a record; no compatibility shim).
+- Old measurement files are not supported by the updated analyses (a notebook
+  is a record; no compatibility shim). Saved recipes naming the old arguments
+  (`roi_x0`, `sensitivity`, ...) stop validating (`unknown_arguments` in
+  `recipes.py` reports them); a migration only if it is trivial.
 - `roi=(x0, width, y0, height)`, the order `set_roi` takes.
 - A subclass can lock a camera setting: `CameraShots(..., frames=2,
   locked=("frames",))` leaves it out of the form and fixes it at the declared
-  value. `LoadTweezers` locks `ham.frames`, as it needs exactly two frames. Other
-  settings of a locked camera stay editable.
-- `LoadTweezers`' `roi_x0`, `roi_y0`, `roi_width` and `roi_height` become
-  `ham.roi_x0` and so on. `sensitivity` stays a `LoadTweezers` argument,
-  applied in `configure_camera`. Saved recipes that name the old arguments stop
-  validating (`unknown_arguments` in `recipes.py` reports them); write a
-  migration only if it is trivial.
+  value. Other settings of a locked camera stay editable.
+- No new tests; existing ones are updated to the design.
 
-## Left to the builder
+## Left to the builder (settled in the plan)
 
 - How dotted camera arguments are generated and exposed through `arguments()`,
-  `to_schema`, the form and `extra_argument` machinery (they must be always
-  shown, unlike undeclared MOTMaster parameters).
+  `to_schema`, the form and `extra_argument` machinery.
 - Which settings are optional: HamCam is exposed by the external trigger pulse
-  (`set_external_exposure_mode`), so `exposure=None` (do not call
-  `set_exposure_time`) and `roi=None` must be allowed. Check each driver's
-  `set_trigger_source` and choose the default trigger source accordingly.
-- Whether `frames` is scannable per point (changing it needs re-arming the
-  camera) or fixed at `prepare`.
-- Exact shape and storage of `saved_sequence`, error text, and how the
-  default `run_point` names records.
+  (`set_external_exposure_mode`), so `exposure=None` and `roi=None` must be
+  allowed, as must `trigger=None` (the CaF ThorCam's bulb trigger is set from
+  its CONFIG entry and must not be overwritten).
+- Where the stream settle timing lives, and whether a streaming camera that
+  catches a different number of frames than `frames` is an error.
+- Exact error text, and how the default `run_point` names records.
