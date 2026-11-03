@@ -94,6 +94,10 @@ name, so `get_device` on it raises `KeyError` naming its sub-devices.
   device name, so one coordinator class can serve rigs whose devices are named
   differently. A role defaults to the device name.
 - Sub-configs inherit the composite's `simulate` flag unless they set their own.
+- **A native crash while building a sub-device does take every sibling down**, as
+  it kills the process and no `except` can catch it. A driver whose library can do
+  that must probe it in a child process first and raise on failure, as
+  `open_dcam_camera` does (`_probe_dcam_library` in `drivers/hamamatsu.py`).
 - **A dead sub-device does not take the server down.** One that fails to build is
   logged, recorded in `DeviceServerSpec.failed`, and skipped; everything else
   still serves. The **coordinator is the exception** — it drives every backend,

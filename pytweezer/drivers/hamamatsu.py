@@ -1,7 +1,12 @@
 """Locating a specific Hamamatsu camera among several on one DCAM host."""
 
+import subprocess
+import sys
+
 from pylablib.devices.DCAM import dcamapi4_lib
 from pylablib.devices.DCAM.DCAM import DCAMCamera, lib, libctl
+
+PROBE_TIMEOUT_S = 60
 
 
 def _normalise_serial(serial: str) -> str:
@@ -53,13 +58,46 @@ def find_dcam_index(serial_number: str | None, model_prefix: str) -> int:
     return matches[0]["index"]
 
 
+def _probe_dcam_library() -> None:
+    """Enumerate the cameras in a throwaway process, raising if that fails.
+
+    A broken DCAM install can kill the calling process outright (a fast-fail in
+    ``combase.dll``, exit code ``0xC0000602``), which no ``except`` can catch. In
+    a composite device that would take every other sub-device down with it, so
+    the library is first exercised in a child that may die instead.
+    """
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pytweezer.drivers.hamamatsu import list_dcam_cameras;"
+                " list_dcam_cameras()"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=PROBE_TIMEOUT_S,
+        check=False,
+    )
+    if probe.returncode != 0:
+        last_line = (probe.stderr.strip().splitlines() or ["no error output"])[-1]
+        raise RuntimeError(
+            f"DCAM library probe failed (exit code {probe.returncode & 0xFFFFFFFF:#x}): "
+            f"{last_line}"
+        )
+
+
 def open_dcam_camera(serial_number: str | None, model_prefix: str) -> DCAMCamera:
     """Open the camera :func:`find_dcam_index` selects.
 
     A camera held by another process is not enumerated, so indices shift
     whenever the DCAM library is re-initialised; the lookup and the open
-    therefore share one library session.
+    therefore share one library session. The library is first probed in a
+    child process (:func:`_probe_dcam_library`) so that a crash in it surfaces as
+    a failed device instead of killing this one.
     """
+    _probe_dcam_library()
     with libctl.temp_open():
         camera = DCAMCamera(find_dcam_index(serial_number, model_prefix))
     opened_serial = _normalise_serial(camera.get_device_info().serial_number)

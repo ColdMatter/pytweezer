@@ -1,4 +1,5 @@
 import contextlib
+import subprocess
 from typing import ClassVar
 
 import pytest
@@ -59,6 +60,7 @@ class _FakeDCAMCamera:
 def fake_dcam(monkeypatch):
     monkeypatch.setattr(hamamatsu, "DCAMCamera", _FakeDCAMCamera)
     monkeypatch.setattr(hamamatsu.libctl, "temp_open", contextlib.nullcontext)
+    monkeypatch.setattr(hamamatsu, "_probe_dcam_library", lambda: None)
 
 
 def test_open_returns_the_requested_camera(fake_dcam):
@@ -70,4 +72,17 @@ def test_open_returns_the_requested_camera(fake_dcam):
 def test_open_rejects_a_camera_with_the_wrong_serial(fake_dcam, monkeypatch):
     monkeypatch.setattr(_FakeDCAMCamera, "serials", {1: "S/N: 280187"})
     with pytest.raises(RuntimeError, match="expected 000407"):
+        hamamatsu.open_dcam_camera("000407", "C9100")
+
+
+def test_open_reports_a_crashing_dcam_library_instead_of_dying(monkeypatch):
+    monkeypatch.setattr(
+        hamamatsu.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, -1073740286, stdout="", stderr=""
+        ),
+    )
+    monkeypatch.setattr(hamamatsu.libctl, "temp_open", pytest.fail)
+    with pytest.raises(RuntimeError, match="0xc0000602"):
         hamamatsu.open_dcam_camera("000407", "C9100")
