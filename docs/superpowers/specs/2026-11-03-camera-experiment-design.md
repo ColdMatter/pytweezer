@@ -78,13 +78,15 @@ for what is specific to it (analysis, driver extras).
    It keeps the `Rearrangement` rig device, trap-site loading and checks,
    `signal_counts`, `loading`, `first_/second_occupied`, `first_/second_counts`,
    `take_shots` and the `analyses`, now reading the two frames from
-   the `take_shot()` stack (`frames["ham"][0]` and `[1]`). Its saved files do
-   not change: it overrides `run_point` and records `first_image`,
-   `second_image` (and `first_images`, `second_images` per batch in
-   `take_shots`) exactly as now, still gated by `save_raw_images`, and does not
-   also write `ham_images`. `save_raw_images` and `save_tweezer_counts` stay
-   `LoadTweezers` arguments. `tweezer_histogram.FRAMES` and the existing
-   measurement files therefore keep working. `TweezerArrayMeasurement` and the
+   the `take_shot()` stack (`frames["ham"][0]` and `[1]`). It records the camera
+   frames as `ham_images`, `(2, H, W)` per point (`(shots, 2, H, W)` per point in
+   `take_shots`), replacing `first_image`, `second_image`, `first_images` and
+   `second_images`; still gated by `save_raw_images`. `save_raw_images` and
+   `save_tweezer_counts` stay `LoadTweezers` arguments. The default analysis
+   (`tweezer_histogram.FRAMES` and the code reading it), the optimisers, their
+   tooltips and the tests move to index `ham_images`. Measurement files written
+   before the change, which hold `first_image` and `second_image`, are not read
+   by the new analysis. `TweezerArrayMeasurement` and the
    optimisers that subclass it keep working. The module-level
    `SAVED_SEQUENCE_PARAMETERS` is replaced by the `saved=` declaration (the
    rewrite chooses how to keep the single list of names importable).
@@ -126,7 +128,7 @@ for what is specific to it (analysis, driver extras).
 
 - Base class name `CameraExperiment`; concrete base class, not mixins.
 - Camera settings are form arguments (editable, scannable), not fixed in the class.
-- Frames recorded as one stack per camera, `<name>_images`, indexed by position.
+- Frames recorded as one stack per camera, `<name>_images`, indexed by position, including by `LoadTweezers`, its analyses and the optimisers.
 - Cameras kept in a dict, with loops doing setup, arm, run and read.
 - Saved-parameter binding is generic, not copied into `prepare`.
 - `LoadTweezers` is rewritten on the new base.
@@ -140,9 +142,9 @@ for what is specific to it (analysis, driver extras).
 - Precedence of saved values below form values, above script defaults (the
   current behaviour of `LoadTweezers`).
 - Frames are broadcast with the `rid` header by default.
-- The generic `<name>_images` records belong to `CameraExperiment`'s default
-  `run_point` only. `LoadTweezers` keeps its on-disk names (see goal 6), so no
-  analysis, optimiser or saved measurement file changes.
+- Every experiment's camera frames are recorded as `<camera>_images`;
+  `LoadTweezers` has no separate names. Old measurement files are not supported
+  by the updated analyses (a notebook is a record; no compatibility shim).
 - `roi=(x0, width, y0, height)`, the order `set_roi` takes.
 - A subclass can lock a camera setting: `CameraShots(..., frames=2,
   locked=("frames",))` leaves it out of the form and fixes it at the declared
