@@ -41,7 +41,9 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   `low >= high`, neither bounds nor span, a non-positive span, or a span with
   bounds raise `TypeError` when the class is defined.
 - A `StagedScan` sweeps each stage `repeats` times, then passes the best values
-  of earlier stages to every later stage's `measure()`. A
+  of earlier stages to every later stage's `measure()`. Each stage also has a
+  `<setting>_run` argument (`Stage(..., run=False)` sets its default); a stage
+  switched off is skipped and not proposed, and a run with none on is refused. A
   `BayesianOptimisation` (skopt GP, expected improvement) makes `n_calls`
   evaluations, the first `n_initial` random, with `xi` falling geometrically
   from `xi_start` to `xi_end`; a non-finite objective is told as the worst so

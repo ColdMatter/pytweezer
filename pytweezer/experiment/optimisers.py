@@ -24,7 +24,7 @@ from typing import Any, ClassVar
 import numpy as np
 import skopt
 
-from pytweezer.experiment.arguments import Argument, Integer, Number, collect
+from pytweezer.experiment.arguments import Argument, Bool, Integer, Number, collect
 from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.experiment.scan import Point, Scan
 
@@ -36,7 +36,9 @@ SEARCH = "Search"
 class Stage:
     """One setting of a :class:`StagedScan`, swept from ``start`` to ``stop``.
 
-    Its best value is proposed for the saved parameter ``save_as``.
+    Its best value is proposed for the saved parameter ``save_as``. ``run`` is
+    the default of the stage's ``<setting>_run`` argument; a stage switched off
+    is neither scanned nor proposed.
     """
 
     setting: str
@@ -45,6 +47,7 @@ class Stage:
     stop: float
     points: int
     save_as: str
+    run: bool = True
 
 
 @dataclass(frozen=True)
@@ -179,16 +182,19 @@ class Optimiser:
 class StagedScan(Optimiser):
     """Scans one setting per stage, each at the best values of the stages before.
 
-    Each :class:`Stage` adds the arguments ``<setting>_start``,
-    ``<setting>_stop`` and ``<setting>_points``. Within a stage the sweep runs
-    ``repeats`` times. When a stage's points are done, :meth:`best` gives its
-    proposal, which every later stage passes to ``measure()``.
+    Each :class:`Stage` adds the arguments ``<setting>_run``,
+    ``<setting>_start``, ``<setting>_stop`` and ``<setting>_points``. Only
+    enabled stages (:meth:`enabled_stages`) are scanned, and at least one must
+    be. Within a stage the sweep runs ``repeats`` times. When a stage's points
+    are done, :meth:`best` gives its proposal, which every later enabled stage
+    passes to ``measure()``.
 
-    Each point records ``stage`` (its index), ``setting``, ``objective`` and
-    every result of ``measure()``, so ``measure()`` must not return a result
-    named ``stage``, ``setting`` or ``objective``. :meth:`finish` records
-    ``proposed.<key>`` for each finished stage, ``stages_done`` and
-    ``stages_total``.
+    Each point records ``stage`` (its index in ``stages``, whether or not the
+    others are enabled), ``setting``, ``objective`` and every result of
+    ``measure()``, so ``measure()`` must not return a result named ``stage``,
+    ``setting`` or ``objective``. :meth:`finish` records ``proposed.<key>`` for
+    each finished stage, and ``stages_done`` and ``stages_total`` counting
+    enabled stages.
 
     While a run is in progress, :attr:`stage` is the :class:`Stage` being
     scanned, so an overridden :meth:`best` can tell which stage it chooses for.
@@ -207,6 +213,7 @@ class StagedScan(Optimiser):
     def generated_arguments(cls) -> dict[str, Argument]:
         arguments: dict[str, Argument] = {}
         for stage in cls.declarations():
+            arguments[f"{stage.setting}_run"] = Bool(stage.run, group=SEARCH)
             arguments[f"{stage.setting}_start"] = Number(stage.start, group=SEARCH)
             arguments[f"{stage.setting}_stop"] = Number(stage.stop, group=SEARCH)
             arguments[f"{stage.setting}_points"] = Integer(
@@ -240,13 +247,21 @@ class StagedScan(Optimiser):
         choose = {"max": max, "min": min}[self.goal]
         return float(choose(means, key=means.__getitem__))
 
+    def enabled_stages(self) -> list[tuple[int, Stage]]:
+        """``(index in stages, stage)`` for each stage whose ``<setting>_run`` is set."""
+        return [
+            (index, stage)
+            for index, stage in enumerate(self.stages)
+            if getattr(self, f"{stage.setting}_run")
+        ]
+
     def number_of_points(self) -> int:
         return len(self._schedule())
 
     def _schedule(self) -> list[tuple[int, float]]:
         """``(stage index, setting value)`` for every point, in run order."""
         schedule = []
-        for index, stage in enumerate(self.stages):
+        for index, stage in self.enabled_stages():
             values = np.linspace(
                 getattr(self, f"{stage.setting}_start"),
                 getattr(self, f"{stage.setting}_stop"),
@@ -257,8 +272,11 @@ class StagedScan(Optimiser):
         return schedule
 
     def prepare(self) -> None:
-        self._best_values: list[float] = []
+        self._best_values: dict[int, float] = {}
         self._shots: list[tuple[float, float]] = []
+        if not self.enabled_stages():
+            names = ", ".join(f"{stage.setting}_run" for stage in self.stages)
+            raise ValueError(f"no stage is enabled; set at least one of {names}")
         self._points_schedule = self._schedule()
         super().prepare()
 
@@ -266,8 +284,8 @@ class StagedScan(Optimiser):
         stage_index, setting = self._points_schedule[self.point.index]
         stage = self.stage = self.stages[stage_index]
         settings = {
-            earlier.setting: value
-            for earlier, value in zip(self.stages, self._best_values, strict=False)
+            self.stages[index].setting: value
+            for index, value in self._best_values.items()
         }
         settings[stage.setting] = setting
         results = self.measure(**settings)
@@ -291,15 +309,15 @@ class StagedScan(Optimiser):
                 raise ValueError(
                     f"stage {stage_index} ({stage.setting}): {error}"
                 ) from error
-            self._best_values.append(value)
+            self._best_values[stage_index] = value
             self._shots = []
 
     def finish(self) -> None:
         try:
-            for stage, value in zip(self.stages, self._best_values, strict=False):
-                self.record(f"proposed.{stage.save_as}", value)
+            for index, value in self._best_values.items():
+                self.record(f"proposed.{self.stages[index].save_as}", value)
             self.record("stages_done", len(self._best_values))
-            self.record("stages_total", len(self.stages))
+            self.record("stages_total", len(self.enabled_stages()))
         finally:
             super().finish()
 

@@ -141,6 +141,47 @@ def test_a_run_terminated_in_stage_one_proposes_nothing():
     assert m.constants["stages_done"] == 0
 
 
+class SilentStage(StagedScan, DemoResonance):
+    objective = "counts"
+    stages: ClassVar[list[Stage]] = [
+        Stage(
+            "detuning",
+            start=-5.0,
+            stop=5.0,
+            points=3,
+            save_as="demo_resonance",
+            run=False,
+        ),
+    ]
+
+
+def test_a_stage_switched_off_is_not_scanned():
+    m = run_local(DemoStagedScan, power_run=False)
+    assert set(m.results["stage"]) == {0}
+    assert "proposed.demo_resonance" in m.constants
+    assert "proposed.demo_power" not in m.constants
+    assert m.constants["stages_total"] == 1
+
+
+def test_a_later_stage_runs_at_the_best_of_the_enabled_earlier_ones():
+    SpyStagedScan.calls.clear()
+    run_local(SpyStagedScan, detuning_run=False, power_points=4)
+    assert len(SpyStagedScan.calls) == 4
+    assert all(set(call) == {"power"} for call in SpyStagedScan.calls)
+
+
+def test_a_run_with_no_stage_enabled_is_refused():
+    m = run_local(DemoStagedScan, detuning_run=False, power_run=False)
+    assert m.status == "failed"
+    assert "detuning_run" in m.attrs["error"]
+    assert "AttributeError" not in m.attrs["error"]
+
+
+def test_stage_run_defaults_follow_the_declaration():
+    assert SilentStage.schema()["arguments"]["detuning_run"]["default"] is False
+    assert DemoStagedScan.schema()["arguments"]["detuning_run"]["default"] is True
+
+
 class NanOnThirdCall(DemoBayesian):
     def prepare(self):
         self.calls = 0
