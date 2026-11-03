@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pytweezer.experiment import Bool, Device, Experiment, Integer, Number
-from pytweezer.helper_scripts.array_hologram import ENVELOPE, GENERATOR_SETTINGS
+from pytweezer.experiment.client import get_saved_parameters
+from pytweezer.helper_scripts import array_hologram
 from pytweezer.servers import ImageClient
 
 if TYPE_CHECKING:
@@ -54,6 +55,11 @@ class SlmTweezerArray(Experiment):
     """Put an NxM tweezer array on the Rb SLM, one optimised phase mask per point.
 
     See :mod:`pytweezer.helper_scripts.array_hologram` for how the mask is made.
+    The optics come from saved parameters: the blaze, Fresnel lens and pupil
+    through saved-backed arguments, and the generator, Zernike correction and
+    depth envelope (:data:`~pytweezer.helper_scripts.array_hologram.SAVED_KEYS`)
+    directly; :meth:`prepare` records the last two sets as
+    ``generator_settings`` and ``envelope``.
     """
 
     rig: Rearrangement = Device("Rb Rearrangement Rig")
@@ -68,16 +74,24 @@ class SlmTweezerArray(Experiment):
         tooltip="weight traps to cancel the measured depth fall-off",
     )
 
-    blaze_x = Number(48e-6, unit="um", scale=1e-6, group="Optics")
-    blaze_y = Number(4e-6, unit="um", scale=1e-6, group="Optics")
-    fresnel_focal_length = Number(1.125, unit="mm", scale=1e-3, group="Optics")
+    blaze_x = Number(saved="slm_blaze_x", unit="um", scale=1e-6, group="Optics")
+    blaze_y = Number(saved="slm_blaze_y", unit="um", scale=1e-6, group="Optics")
+    fresnel_focal_length = Number(
+        saved="slm_fresnel_focal_length", unit="mm", scale=1e-3, group="Optics"
+    )
     zernike = Bool(
         False, group="Optics", tooltip="add the Zernike aberration correction"
     )
 
-    pupil_radius = Number(8.704e-3, unit="mm", scale=1e-3, min=0, group="Pupil")
-    pupil_dump_x = Number(100e-6, unit="um", scale=1e-6, group="Pupil")
-    pupil_dump_y = Number(0.0, unit="um", scale=1e-6, group="Pupil")
+    pupil_radius = Number(
+        saved="slm_pupil_radius", unit="mm", scale=1e-3, min=0, group="Pupil"
+    )
+    pupil_dump_x = Number(
+        saved="slm_pupil_dump_x", unit="um", scale=1e-6, group="Pupil"
+    )
+    pupil_dump_y = Number(
+        saved="slm_pupil_dump_y", unit="um", scale=1e-6, group="Pupil"
+    )
 
     iterations = Integer(2000, min=1, group="Optimisation")
     damping = Number(0.5, min=0, max=1, group="Optimisation")
@@ -90,9 +104,15 @@ class SlmTweezerArray(Experiment):
     )
 
     def prepare(self) -> None:
+        saved = get_saved_parameters()
+        missing = sorted(set(array_hologram.SAVED_KEYS) - set(saved))
+        if missing:
+            raise KeyError(f"no saved parameter {', '.join(map(repr, missing))}")
+        self.generator_settings = array_hologram.generator_settings(saved)
+        self.envelope = array_hologram.envelope(saved)
+        self.record("generator_settings", self.generator_settings)
+        self.record("envelope", self.envelope)
         self.stream = ImageClient("slm")
-        self.record("generator_settings", GENERATOR_SETTINGS)
-        self.record("envelope", ENVELOPE)
 
     def run_point(self) -> None:
         blaze_um = (self.blaze_x * 1e6, self.blaze_y * 1e6)
@@ -101,7 +121,8 @@ class SlmTweezerArray(Experiment):
             columns=self.columns,
             spacing_um=self.spacing * 1e6,
             angle_deg=math.degrees(self.angle),
-            compensate_envelope=self.compensate_envelope,
+            generator_settings=self.generator_settings,
+            envelope=self.envelope if self.compensate_envelope else None,
             blaze_um=blaze_um,
             fresnel_focal_length_mm=self.fresnel_focal_length * 1e3,
             zernike=self.zernike,
@@ -142,7 +163,7 @@ class SlmTweezerArray(Experiment):
             target,
             channel="_target",
         )
-        pitch_m = GENERATOR_SETTINGS["slm_pitch_um"] * 1e-6
+        pitch_m = self.generator_settings["slm_pitch_um"] * 1e-6
         ny, nx = mask.shape
         self.stream.send(
             {

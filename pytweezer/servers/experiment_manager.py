@@ -4,7 +4,10 @@ A single-threaded loop serves REQ/REP commands (from GUIs, notebooks and the
 workers) and starts each task the queue says may start in a fresh worker
 subprocess (:mod:`pytweezer.experiment.worker`), so tasks in different
 pipelines run side by side. Each task reserves the devices its experiment
-declares, as the catalogue describes them, and its worker may use only those.
+declares, as its catalogue describes them, and its worker may use only those.
+There are two catalogues: the experiments under :mod:`pytweezer.experiments`,
+for the Experiments tab, and the optimisers under :mod:`pytweezer.optimisers`,
+for the Optimisers tab.
 Its state is published as the sipyco notifier ``"experiment"`` on
 ``sync_port`` (see :data:`NOTIFIER_NAME` for the layout), so every GUI holds a
 live copy of the queue and of the points each task has measured so far. The
@@ -78,8 +81,8 @@ logger = get_logger("pytweezer.servers.experiment_manager")
 #: The published state (:data:`~pytweezer.experiment.client.NOTIFIER_NAME`)
 #: is laid out as::
 #:
-#:     {"started", "catalogue_version", "recipes_version",
-#:      "saved_parameters_version", "simulated",
+#:     {"started", "experiments_version", "optimisers_version",
+#:      "recipes_version", "saved_parameters_version", "simulated",
 #:      "alive",                         # epoch s, at least every PUBLISH_INTERVAL_S
 #:      "running", "queue", "history",   # as ExperimentQueue.snapshot()
 #:      "points": {str(rid): [{"index", "values", "scalars", "t_start", "t_end"}]}}
@@ -97,7 +100,8 @@ class ExperimentManager:
         server_name: str = "Experiment Manager",
         *,
         root: Path | str | None = None,
-        catalogue: Catalogue | None = None,
+        experiments: Catalogue | None = None,
+        optimisers: Catalogue | None = None,
         bind: bool = True,
         db: DBWriter | None = None,
     ) -> None:
@@ -124,7 +128,10 @@ class ExperimentManager:
         )
         state = self.queue.state
         state.next_rid = max(state.next_rid, highest_rid(self.root) + 1)
-        self.catalogue = catalogue or Catalogue()
+        self.catalogues = {
+            "experiments": experiments or Catalogue("pytweezer.experiments"),
+            "optimisers": optimisers or Catalogue("pytweezer.optimisers"),
+        }
         #: Receives a ``runs`` row per start/finish and a ``points`` row per point.
         self.db = db if db is not None else DBWriter()
         self.copier = None
@@ -139,8 +146,8 @@ class ExperimentManager:
         #: The rid whose points are published for each pipeline.
         self._points_shown: dict[str, int] = {}
         self._running = True
-        # Bumped whenever the catalogue changes, so GUIs know to fetch it again.
-        self._catalogue_version = 0
+        # Bumped whenever a catalogue changes, so GUIs know to fetch it again.
+        self._catalogue_versions = dict.fromkeys(self.catalogues, 0)
         self._recipes_version = 0
         self._saved_parameters_version = 0
         self._dirty = True
@@ -186,7 +193,8 @@ class ExperimentManager:
                 self.tick()
         finally:
             # Deliberately leave running workers alone: the next manager adopts them.
-            self.catalogue.close()
+            for catalogue in self.catalogues.values():
+                catalogue.close()
             self.db.close()
             if self.copier is not None:
                 self.copier.close()
@@ -201,8 +209,10 @@ class ExperimentManager:
         monotonic = time.monotonic()
         if monotonic - self._last_rescan > CATALOGUE_RESCAN_S:
             self._last_rescan = monotonic
-            self._catalogue_changed(self.catalogue.refresh())
-        self._catalogue_changed(self.catalogue.poll())
+            for kind, catalogue in self.catalogues.items():
+                self._catalogue_changed(kind, catalogue.refresh())
+        for kind, catalogue in self.catalogues.items():
+            self._catalogue_changed(kind, catalogue.poll())
         self._resolve_devices()
         self._start_due()
         if self._dirty or monotonic - self._last_publish > PUBLISH_INTERVAL_S:
@@ -229,17 +239,37 @@ class ExperimentManager:
     def _cmd_snapshot(self, request):
         return {"snapshot": self._snapshot()}
 
-    def _cmd_catalogue(self, request):
-        self._catalogue_changed(self.catalogue.refresh())
+    def _cmd_experiments(self, request):
+        return self._listing("experiments")
+
+    def _cmd_optimisers(self, request):
+        return self._listing("optimisers")
+
+    def _listing(self, kind: str) -> dict[str, Any]:
+        catalogue = self.catalogues[kind]
+        self._catalogue_changed(kind, catalogue.refresh())
         return {
-            "modules": self.catalogue.entries(),
-            "busy": self.catalogue.busy,
-            "version": self._catalogue_version,
+            "modules": catalogue.entries(),
+            "busy": catalogue.busy,
+            "version": self._catalogue_versions[kind],
         }
 
     def _cmd_describe_again(self, request):
-        self.catalogue.describe_again(request["module"])
-        self._catalogue_changed(self.catalogue.refresh())
+        kind = self._kind_of(request["module"])
+        self.catalogues[kind].describe_again(request["module"])
+        self._catalogue_changed(kind, self.catalogues[kind].refresh())
+
+    def _kind_of(self, module: str) -> str:
+        """Which catalogue lists ``module``: ``"experiments"`` or ``"optimisers"``.
+
+        Raises:
+            KeyError: ``module`` is in neither catalogue's package.
+        """
+        for kind, catalogue in self.catalogues.items():
+            if module.startswith(catalogue.package + "."):
+                return kind
+        packages = " or ".join(c.package for c in self.catalogues.values())
+        raise KeyError(f"{module} is not under {packages}")
 
     def _cmd_get(self, request):
         return {"task": self.queue.get(int(request["rid"])).model_dump(mode="json")}
@@ -386,20 +416,26 @@ class ExperimentManager:
         return {"rid": task.rid}
 
     def _schema(self, module: str, class_name: str) -> dict[str, Any]:
-        """The catalogue's description of ``module.class_name``.
+        """The description of ``module.class_name`` in the catalogue for its package.
 
         Raises:
-            RecipeError: If the module fails to import or the class is not in
-                the catalogue; :class:`_CatalogueBusy` if it may yet appear, or
-                the module is being re-read.
+            RecipeError: If the module is in neither catalogue's package, fails
+                to import, or the class is not in the catalogue;
+                :class:`_CatalogueBusy` if it may yet appear, or the module is
+                being re-read.
         """
+        try:
+            kind = self._kind_of(module)
+        except KeyError as error:
+            raise RecipeError(error.args[0]) from None
+        catalogue = self.catalogues[kind]
         # Starts reading any module not yet described, so ``busy`` is accurate.
-        self._catalogue_changed(self.catalogue.refresh())
-        if self.catalogue.pending(module):
+        self._catalogue_changed(kind, catalogue.refresh())
+        if catalogue.pending(module):
             raise _CatalogueBusy(
                 f"the manager is still reading {module}, so try again shortly"
             )
-        for entry in self.catalogue.entries():
+        for entry in catalogue.entries():
             if entry["module"] != module:
                 continue
             if entry.get("error"):
@@ -408,10 +444,10 @@ class ExperimentManager:
             for schema in entry["classes"]:
                 if schema["class_name"] == class_name:
                     return schema
-        if self.catalogue.busy:
+        if catalogue.busy:
             raise _CatalogueBusy(
                 f"{module}.{class_name} is not in the catalogue yet; the manager "
-                "is still reading the experiments, so try again shortly"
+                f"is still reading the {kind}, so try again shortly"
             )
         raise RecipeError(f"{module}.{class_name} is not in the catalogue")
 
@@ -727,9 +763,9 @@ class ExperimentManager:
 
     # -- state and publishing ------------------------------------------------
 
-    def _catalogue_changed(self, changed: bool) -> None:
+    def _catalogue_changed(self, kind: str, changed: bool) -> None:
         if changed:
-            self._catalogue_version += 1
+            self._catalogue_versions[kind] += 1
             self._dirty = True
 
     def _changed(self) -> None:
@@ -757,7 +793,8 @@ class ExperimentManager:
     def _snapshot(self) -> dict[str, Any]:
         return {
             "started": self.started,
-            "catalogue_version": self._catalogue_version,
+            "experiments_version": self._catalogue_versions["experiments"],
+            "optimisers_version": self._catalogue_versions["optimisers"],
             "recipes_version": self._recipes_version,
             "saved_parameters_version": self._saved_parameters_version,
             "simulated": self.simulate,

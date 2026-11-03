@@ -4,7 +4,7 @@ Subscribes to two image streams: the target trap intensities (``targetstreams``,
 drawn with ``target_cmap``) and the 8-bit phase mask on the SLM
 (``phasestreams``), drawn with the cyclic ``phase_cmap`` over a fixed range of
 one ``phase_period`` so that 0 and 2π share a colour and phase wraps are
-invisible. ``experiments/slm_array.py`` publishes both. Images are placed in
+invisible. ``experiments/slm_tweezer_array.py`` publishes both. Images are placed in
 metres when their header carries ``_offset``/``_imgresolution``, in pixels
 otherwise.
 

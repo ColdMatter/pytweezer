@@ -112,3 +112,65 @@ def test_device_is_resolved_lazily_once_and_closed(fake_devices):
     experiment.close_devices()
     assert all(client.closed for client in opened)
     assert "camera" not in experiment.__dict__
+
+
+class Calibrated(Experiment):
+    blaze = Number(saved="blaze", unit="um", scale=1e-6)
+    shots = Integer(10)
+
+    def run_point(self):
+        self.record("blaze_used", self.blaze)
+
+
+def test_a_saved_backed_argument_is_unset_until_the_task_starts():
+    schema = Calibrated.schema()["arguments"]["blaze"]
+    assert (schema["default"], schema["saved"]) == (None, "blaze")
+    assert coerce_arguments(Calibrated, {})["blaze"] is None
+    assert coerce_arguments(Calibrated, {"blaze": None})["blaze"] is None
+    assert coerce_arguments(Calibrated, {"blaze": 2e-6})["blaze"] == 2e-6
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"default": 1.0, "saved": "blaze"}])
+def test_an_argument_needs_a_default_or_a_saved_parameter(kwargs):
+    with pytest.raises(TypeError, match="exactly one"):
+        Number(**kwargs)
+
+
+@pytest.fixture
+def saved(monkeypatch):
+    values = {"blaze": 48e-6}
+    monkeypatch.setattr(
+        "pytweezer.experiment.client.get_saved_parameters", lambda: values
+    )
+    return values
+
+
+def test_an_unset_argument_takes_its_saved_value_and_the_file_says_so(saved):
+    from pytweezer.experiment import run_local
+
+    measurement = run_local(Calibrated)
+
+    assert measurement.arguments["blaze"] == 48e-6
+    assert list(measurement.results["blaze_used"]) == [48e-6]
+    assert json.loads(measurement.attrs["saved_arguments"]) == {"blaze": "blaze"}
+
+
+def test_a_value_given_or_scanned_wins_over_the_saved_one(saved):
+    from pytweezer.experiment import ListAxis, Scan, run_local
+
+    given = run_local(Calibrated, blaze=50e-6)
+    scanned = run_local(
+        Calibrated, Scan(axes=[ListAxis(argument="blaze", values=[1e-6, 2e-6])])
+    )
+
+    assert given.arguments["blaze"] == 50e-6
+    assert json.loads(given.attrs["saved_arguments"]) == {}
+    assert list(scanned.results["blaze_used"]) == [1e-6, 2e-6]
+
+
+def test_a_missing_saved_parameter_refuses_the_run(saved):
+    from pytweezer.experiment import run_local
+
+    del saved["blaze"]
+    with pytest.raises(KeyError, match="blaze"):
+        run_local(Calibrated)

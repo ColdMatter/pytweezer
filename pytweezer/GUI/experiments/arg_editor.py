@@ -41,7 +41,11 @@ _FLOAT_LIMIT = 1e15
 
 
 class ValueField(QWidget):
-    """One argument's value in display units; :meth:`value` returns it in SI."""
+    """One argument's value in display units; :meth:`value` returns it in SI.
+
+    A saved-backed argument is a text field that may be left blank (``None``,
+    use the saved value), with the saved value shown greyed in it.
+    """
 
     changed = QtCore.pyqtSignal()
 
@@ -53,7 +57,11 @@ class ValueField(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        if self.kind == "number":
+        self.saved = schema.get("saved", "")
+        if self.saved:
+            widget = QLineEdit()
+            widget.textChanged.connect(self.changed)
+        elif self.kind == "number":
             widget = CompactDoubleSpinBox()
             low, high = schema.get("min"), schema.get("max")
             widget.setRange(
@@ -90,6 +98,8 @@ class ValueField(QWidget):
         if self.kind != "bool":
             widget.setFixedWidth(width)
         self.widget = widget
+        if self.saved:
+            self.set_saved_value(None)
         layout.addWidget(widget)
         self.unit = QLabel(schema.get("unit") or "")
         self.unit.setProperty("role", "regionHint")
@@ -100,6 +110,8 @@ class ValueField(QWidget):
         self.set_value(schema["default"])
 
     def value(self):
+        if self.saved:
+            return self._typed_value()
         if self.kind == "number":
             return self.widget.value() * self.scale
         if self.kind == "integer":
@@ -111,7 +123,9 @@ class ValueField(QWidget):
         return self.widget.text()
 
     def set_value(self, value):
-        if self.kind == "number":
+        if self.saved:
+            self.widget.setText("" if value is None else self._display(value))
+        elif self.kind == "number":
             self.widget.setValue(value / self.scale)
         elif self.kind == "integer":
             self.widget.setValue(int(value))
@@ -124,9 +138,52 @@ class ValueField(QWidget):
 
     def is_default(self):
         default = self.schema["default"]
+        if self.saved:
+            return not self.widget.text().strip()
         if self.kind == "number":
             return math.isclose(self.value(), default, rel_tol=1e-9, abs_tol=1e-15)
         return self.value() == default
+
+    def set_saved_value(self, value):
+        """Show ``value`` (SI), the saved parameter's current value, greyed in the blank field."""
+        self.saved_value = value
+        unit = self.schema.get("unit") or ""
+        shown = (
+            f"no saved {self.saved}"
+            if value is None
+            else f"{self._display(value)} {unit} (saved)".replace("  ", " ")
+        )
+        self.widget.setPlaceholderText(shown)
+        self.widget.setToolTip(
+            f"blank uses the saved parameter {self.saved}"
+            + (f"\n{self.schema['tooltip']}" if self.schema.get("tooltip") else "")
+        )
+
+    def _display(self, value):
+        if self.kind == "number":
+            return f"{value / self.scale:.15g}"
+        return str(int(value))
+
+    def _typed_value(self):
+        text = self.widget.text().strip()
+        if not text:
+            return None
+        try:
+            if self.kind == "number":
+                return float(text) * self.scale
+            return int(text)
+        except ValueError:
+            raise ValueError(f"{text!r} is not a number") from None
+
+    def value_or_saved(self, fallback=0):
+        """The typed value, else the saved one, else ``fallback``: a starting point for a scan."""
+        try:
+            value = self.value()
+        except ValueError:
+            value = None
+        if value is None and self.saved:
+            value = self.saved_value
+        return fallback if value is None else value
 
 
 def parse_list(text, schema):
@@ -188,8 +245,8 @@ class ScanField(QWidget):
         linear_layout = QHBoxLayout(linear)
         linear_layout.setContentsMargins(0, 0, 0, 0)
         if numeric:
-            self.start = ValueField(schema, show_unit=False, width=110)
-            self.stop = ValueField(schema, show_unit=False, width=110)
+            self.start = ValueField(_without_saved(schema), show_unit=False, width=110)
+            self.stop = ValueField(_without_saved(schema), show_unit=False, width=110)
             self.steps = QSpinBox()
             self.steps.setRange(1, 1_000_000)
             self.steps.setValue(11)
@@ -254,6 +311,15 @@ class ScanField(QWidget):
             self.values.setText(format_list(values, self.schema))
 
 
+def _without_saved(schema):
+    """``schema`` as a plain argument, for fields that always hold a value."""
+    if not schema.get("saved"):
+        return schema
+    return {key: value for key, value in schema.items() if key != "saved"} | {
+        "default": 0
+    }
+
+
 class ArgumentRow(QtCore.QObject):
     """Label, value-or-scan editor, unit and scan toggle for one argument."""
 
@@ -289,10 +355,12 @@ class ArgumentRow(QtCore.QObject):
             and self.scan.mode.currentText() == "list"
             and not self.scan.values.text()
         ):
-            self.scan.values.setText(format_list([self.value.value()], self.schema))
+            self.scan.values.setText(
+                format_list([self.value.value_or_saved()], self.schema)
+            )
         if scanning and self.scan.mode.currentText() == "linear":
-            self.scan.start.set_value(self.value.value())
-            self.scan.stop.set_value(self.value.value())
+            self.scan.start.set_value(self.value.value_or_saved())
+            self.scan.stop.set_value(self.value.value_or_saved())
         self.stack.setCurrentIndex(1 if scanning else 0)
         self._update()
 
@@ -329,6 +397,7 @@ class ArgumentEditor(QWidget):
         self.schema = None
         self.recipe_name = ""
         self.rows = {}
+        self._saved_values = {}
         self.fetcher = ParameterFetcher(DeviceParameterSource())
         self.fetcher.fetched.connect(self._parameters_fetched)
         self.fetcher.failed.connect(self._parameters_failed)
@@ -509,12 +578,20 @@ class ArgumentEditor(QWidget):
                 argument_row.changed.connect(self._update_count)
                 self.rows[name] = argument_row
             self.arguments_layout.addWidget(box)
+        self.set_saved_parameters(self._saved_values)
         self._add_motmaster_boxes(schema)
         if not self.rows and not self.motmaster_boxes:
             self.arguments_layout.addWidget(QLabel("No arguments."))
         self.error.clear()
         self._set_enabled(True)
         self._update_count()
+
+    def set_saved_parameters(self, values):
+        """Show each saved-backed argument's current saved value, from ``{key: value}``."""
+        self._saved_values = values
+        for row in self.rows.values():
+            if row.value.saved:
+                row.value.set_saved_value(values.get(row.value.saved))
 
     def reset_to_defaults(self):
         self.set_recipe_name("")

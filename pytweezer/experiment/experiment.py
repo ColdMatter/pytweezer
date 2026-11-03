@@ -1,6 +1,7 @@
 """The :class:`Experiment` base class."""
 
 import inspect
+from collections.abc import Iterable
 from typing import Any, ClassVar
 
 from pytweezer.experiment.arguments import (
@@ -112,6 +113,32 @@ class Experiment:
         setattr(self, name, value)
         if name not in self.arguments() and name not in self._extra_names:
             self._extra_names.append(name)
+
+    def resolve_saved_arguments(self, scanned: Iterable[str] = ()) -> dict[str, str]:
+        """Give each unset saved-backed argument not in ``scanned`` its saved value.
+
+        Returns:
+            ``{argument: saved key}`` for every argument so resolved.
+
+        Raises:
+            KeyError: A saved parameter they need does not exist.
+        """
+        unset = {
+            name: argument
+            for name, argument in self.arguments().items()
+            if argument.saved and name not in scanned and getattr(self, name) is None
+        }
+        if not unset:
+            return {}
+        from pytweezer.experiment.client import get_saved_parameters
+
+        saved = get_saved_parameters()
+        missing = sorted({a.saved for a in unset.values()} - set(saved))
+        if missing:
+            raise KeyError(f"no saved parameter {', '.join(map(repr, missing))}")
+        for name, argument in unset.items():
+            self.set_argument(name, argument.coerce(saved[argument.saved]))
+        return {name: argument.saved for name, argument in unset.items()}
 
     def argument_values(self) -> dict[str, Any]:
         names = [*self.arguments(), *self._extra_names]

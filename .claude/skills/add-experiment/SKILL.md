@@ -5,7 +5,8 @@ description: Write, run, queue and read back pytweezer experiments — an Experi
 
 # Experiments
 
-An experiment is a class in a module under `pytweezer/experiments/`. The
+An experiment is a class in a module under `pytweezer/experiments/`
+(optimisers are under `pytweezer/optimisers/`: add-optimiser). The
 Experiment Manager (a `CONFIG["Servers"]` process on the server PC) queues
 tasks and runs each one in a **fresh worker subprocess** that imports the
 module, makes one instance, and writes **one h5 file per measurement**, flushed
@@ -71,7 +72,7 @@ Rules that matter:
 - A class only appears in the GUI if it is defined in that module and
   overrides `run_point`, so intermediate base classes stay hidden; a base that
   inherits a concrete `run_point` hides with `run_point = Experiment.run_point`
-  (`TweezerArrayShots`).
+  (`TweezerArrayMeasurement`).
 - `self.rid` is the task's run id (-1 under `run_local`), e.g. to tag broadcast
   frames (`acquire_n_frames(..., broadcast=True, header={"rid": self.rid})`).
 - An experiment that chooses its own points overrides
@@ -111,7 +112,7 @@ values, and unselected ones keep the script's defaults (not recorded in the
 file). `prepare()` sets script, iterations, save toggle and trigger mode on
 every task; repeats come from `Scan(repetitions=...)`, one stored point per
 shot; `run_sequences(**{"rb.tPulse": 3e-5})` overrides parameters for that one
-run (`TweezerArrayShots` runs batches this way). `prepare()` puts followers in trigger mode; `run_sequences()` starts each
+run (`LoadTweezers.shot()` puts the saved sequence parameters under these). `prepare()` puts followers in trigger mode; `run_sequences()` starts each
 follower in a thread, then the master `follower_arm_delay` later
 (`MotMasterExperiment` class attribute, default 0.5 s). A follower still running
 `follower_timeout` (a `MotMaster(...)` keyword, default 60 s) after the master
@@ -179,7 +180,9 @@ m.status, m.attrs["error"]  # a failure is recorded, not raised
 
 `submit` needs a class importable by the manager — **not one defined in a
 notebook**; use `run_local` for those (pass `path=` to keep a file). A plain
-`submit()` is refused at once if the class is not in the catalogue, its module
+`submit()` is refused at once if the class is not in the catalogue for its
+package (the manager keeps one for `pytweezer.experiments` and one for
+`pytweezer.optimisers`), its module
 fails to import, or its devices can't be reserved (`ReservationError`: unknown
 or inactive device, or `linked=True` on a MOTMaster with no `linked_partner`;
 `run_local` raises the same before running). While the catalogue
@@ -187,7 +190,7 @@ is still being read the task is queued and resolved later, failing if it then
 can't be.
 `Scan(repeat="scan")` repeats the whole grid rather than each point.
 `ExperimentManagerClient` has `get/pause/resume/terminate/abort/hold/release/
-delete/set_priority/snapshot/history/last_request/catalogue/describe_again/
+delete/set_priority/snapshot/history/last_request/experiments/optimisers/describe_again/
 recipes/save_recipe/delete_recipe/submit_recipe/saved_parameters/
 set_saved_parameters/saved_parameter_history`.
 
@@ -271,11 +274,19 @@ saved_parameter_history("level", limit=10)  # newest first; rid= for one run's
 - A set is all or none. Unknown keys are refused unless `create=True`; a key
   keeps its type (int accepted for a float), and an array keeps its number of
   dimensions and every axis length past the first.
-- Read them in `prepare()`/`run_point()` for the value at run time, or as an
-  argument default, `level = Number(get_saved_parameter("level"))` — read at
-  import, so the module contacts the manager when imported and the form's
-  **Defaults** button (which has the manager describe the experiment again)
-  re-reads it.
+- Read them in `prepare()`/`run_point()` for the value at run time, or, for a
+  calibration the form may override, declare a saved-backed argument. Never
+  read one into an argument default (`Number(get_saved_parameter(...))`): it is
+  read at import, and recipes and prefilled forms pin the value current then,
+  silently overriding later recalibrations.
+- A saved-backed argument, `blaze = Number(saved="slm_blaze_x", unit="um",
+  scale=1e-6)` (a `Number` or `Integer` with `saved=` instead of a default), is
+  `None` until the task starts, when `open_writer` gives it the saved value
+  (SI); a missing key fails it before a file exists. A value in the form, a
+  request, a recipe or a scan axis wins. The file's `saved_arguments` header
+  lists the arguments that took saved values, and Results' Resubmit leaves
+  those unset again. The form shows such a field blank, with the saved value
+  greyed in it.
 - The **Saved parameters** tab edits values by hand with a reason and shows the
   history; arrays are read-only there. Keys are created only by
   `create=True`, an accepted `Fit`, or `import_parameters_json(path)` in
@@ -296,15 +307,22 @@ add-optimiser skill; a measurement it runs only needs a
 
 The Rb tweezer experiments, in the order a session uses them:
 
-1. `SlmTweezerArray` (`slm_array.py`) puts an array on the SLM through
+1. `SlmTweezerArray` (`slm_tweezer_array.py`) puts an array on the SLM through
    `Rb Rearrangement Rig` (`rig.make_array(...)`, one mask per point, shown on
-   the `slm` image stream for the SLM Monitor applet). The rig remembers it:
+   the `slm` image stream for the SLM Monitor applet). Its optics are `slm_*`
+   saved parameters in SI: the blaze, Fresnel lens and pupil as saved-backed
+   arguments, the generator, Zernike rows `[index, coefficient]` and depth
+   envelope from `array_hologram.SAVED_KEYS`. The rig remembers it:
    `rig.get_array()` gives `sites` and trap `x_um`/`y_um` (`None` if the rig
    didn't write the mask).
 2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera
    and proposes the `trap_*` saved parameters.
-3. `LoadTweezers` (`load_tweezers.py`) and everything built on it read them in
-   `prepare()` (`saved_trap_sites()`), moved into this ROI by the origin
+3. `LoadTweezers` (`load_tweezers.py`) runs every shot at the saved
+   sequence parameters (`SAVED_SEQUENCE_PARAMETERS`: script parameter → saved
+   key; a missing key, or an unreachable manager, fails `prepare()`), a script
+   parameter set in the form winning; the values used are the constant
+   `saved_sequence`. It and everything built on it also read the trap sites in
+   `prepare()` (`saved_trap_sites(saved)`), moved into this ROI by the origin
    `camera.set_roi` returned. They are refused when none are saved, when
    `trap_geometry` is not the rig's array (`same_geometry`; an unreachable rig
    is not checked), or when a summing window leaves the ROI. With sites, each
@@ -313,13 +331,13 @@ The Rb tweezer experiments, in the order a session uses them:
    `save_tweezer_counts`; frames are recorded only with `save_raw_images`.
    `LoadTweezers` runs without sites only if it records frames;
    `TweezerArrayMeasurement` always needs them.
-4. `TweezerArrayShots` (`tweezer_array.py`) runs every shot at the saved
-   sequence parameters (`SAVED_SEQUENCE_PARAMETERS`: script parameter → saved
-   key; a missing key fails `prepare()`), a script parameter set in the form
-   winning; the values used are the constant `saved_sequence`. Each point is a
-   batch of shots, so its `first_occupied`/`second_occupied`/`*_counts` are
-   `(shots, sites)`, and `save_raw_images` (off by default here) records
-   `first_images`/`second_images`.
+4. `LoadTweezers.take_shots(n, **sequence)` runs a batch, for the classes
+   whose point is one: `TweezerArrayMeasurement` (`score_batch()`, used by the
+   Bayesian optimisers) and `FindTrapSites`. Their
+   `first_occupied`/`second_occupied`/`*_counts` are `(shots, sites)` per
+   point, and `save_raw_images` (off by default there) records
+   `first_images`/`second_images`. They declare no analyses; `LoadTweezers`
+   itself keeps one shot per point, which the default analyses expect.
 
 Shots broadcast their HamCam frames with `header={"rid": self.rid}`; the live
 tweezer loading analysis (`analysis/tweezer_loading.py`) starts afresh whenever
@@ -374,8 +392,8 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
 
 - **Published state:** the manager serves sipyco notifier `"experiment"` on
   `sync_port` (layout in the module): the queue snapshot (`running`, a list,
-  `queue`, `history`, `simulated`, `alive`, and `catalogue_`/`recipes_`/
-  `saved_parameters_version` counters; waiting tasks carry `waiting_for`) and
+  `queue`, `history`, `simulated`, `alive`, and `experiments_`/`optimisers_`/
+  `recipes_`/`saved_parameters_version` counters; waiting tasks carry `waiting_for`) and
   `points`, keyed by rid, every point each running task (and each pipeline's
   last finished one) has measured, with its scanned values and 0-d numeric
   results. Only changes are sent; a GUI connecting late gets it all.
@@ -437,5 +455,5 @@ Tests: `tests/test_experiment_*.py`, `tests/test_motmaster_experiment.py`,
 `tests/test_results_{browser,archive,analyses}.py`, `tests/test_file_copier.py`,
 `tests/test_saved_parameters.py`; `test_experiment_e2e.py` runs a real manager
 and worker subprocesses on localhost. Tweezer measurements:
-`tests/test_tweezer_array.py`, `tests/test_slm_array.py`,
+`tests/test_tweezer_array.py`, `tests/test_slm_tweezer_array.py`,
 `tests/test_tweezer_histogram.py`.

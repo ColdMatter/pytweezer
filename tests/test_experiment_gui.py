@@ -29,8 +29,7 @@ from pytweezer.experiment.queue import UNKNOWN_DEVICES, now
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.saved_parameters import SavedParameter, SavedParameterChange
 from pytweezer.experiment.task import Task, TaskRequest
-from pytweezer.experiments.demo import DemoBayesian, DemoStagedScan, RabiDemo
-from pytweezer.experiments.tweezer_array import FindTrapSites
+from pytweezer.experiments.rabi_demo import RabiDemo
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
@@ -43,6 +42,9 @@ from pytweezer.GUI.experiments.queue_view import (
 )
 from pytweezer.GUI.optimisers import OptimisersPanel
 from pytweezer.GUI.saved_parameters import SavedParametersPanel, display_value
+from pytweezer.optimisers.demo_bayesian import DemoBayesian
+from pytweezer.optimisers.demo_staged_scan import DemoStagedScan
+from pytweezer.optimisers.find_trap_sites import FindTrapSites
 from tests.helpers import FakeFeed, settle, until
 
 Left, Right = QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton
@@ -74,17 +76,17 @@ class FakeClient:
         self.recipes_version = 0
         self.errors = {}
         self.modules = MODULES
-        self.catalogue_version = 1
+        self.experiments_version = 1
 
     def call(self, command, **fields):
         self.calls.append((command, fields))
         if command in self.errors:
             raise ManagerError(self.errors[command])
-        if command == "catalogue":
+        if command == "experiments":
             return {
                 "ok": True,
                 "modules": self.modules,
-                "version": self.catalogue_version,
+                "version": self.experiments_version,
             }
         if command == "recipes":
             return {
@@ -115,7 +117,7 @@ def task(rid, status, **kwargs):
     return {
         "rid": rid,
         "status": status,
-        "experiment": "pytweezer.experiments.demo",
+        "experiment": "pytweezer.experiments.rabi_demo",
         "class_name": "Demo",
         "args": {},
         "scan": {"axes": []},
@@ -140,6 +142,74 @@ def editor(qapp):
     return editor
 
 
+class Calibrated(Experiment):
+    blaze = Number(saved="slm_blaze_x", unit="um", scale=1e-6)
+
+    def run_point(self):
+        pass
+
+
+CALIBRATED = Calibrated.schema()
+
+
+@pytest.fixture
+def calibrated(qapp):
+    editor = ArgumentEditor()
+    editor.set_saved_parameters({"slm_blaze_x": 48e-6})
+    editor.set_experiment(CALIBRATED)
+    return editor
+
+
+def test_a_saved_backed_field_is_blank_and_shows_the_saved_value(calibrated):
+    field = calibrated.rows["blaze"].value
+    assert field.widget.text() == ""
+    assert field.widget.placeholderText() == "48 um (saved)"
+    assert calibrated.request().args == {"blaze": None}
+
+    field.widget.setText("50")
+    assert calibrated.rows["blaze"].label.property("state") == "modified"
+    assert calibrated.request().args["blaze"] == pytest.approx(50e-6)
+
+    field.widget.setText("fifty")
+    with pytest.raises(ValueError, match="not a number"):
+        calibrated.request()
+
+
+def test_a_saved_value_changed_elsewhere_shows_in_the_blank_field(calibrated):
+    calibrated.set_saved_parameters({})
+    assert (
+        "no saved slm_blaze_x"
+        in calibrated.rows["blaze"].value.widget.placeholderText()
+    )
+    calibrated.set_saved_parameters({"slm_blaze_x": 51e-6})
+    assert calibrated.rows["blaze"].value.widget.placeholderText() == "51 um (saved)"
+
+
+def test_scanning_a_blank_saved_backed_argument_starts_at_its_saved_value(calibrated):
+    row = calibrated.rows["blaze"]
+    row.scan_button.setChecked(True)
+    assert row.scan.start.value() == pytest.approx(48e-6)
+
+
+def test_a_request_that_leaves_it_unset_loads_back_blank(calibrated):
+    calibrated.rows["blaze"].value.widget.setText("50")
+    calibrated.load_request(
+        TaskRequest(experiment=CALIBRATED["module"], class_name="Calibrated")
+    )
+    assert calibrated.rows["blaze"].value.widget.text() == ""
+
+
+def test_panel_refetches_saved_parameters_when_they_change(qapp):
+    client, feed = FakeClient(), FakeFeed()
+    panel = ExperimentsPanel(client=client, feed=feed)
+    panel.refresh_catalogue()
+    fetched = len(commands(client, "saved_parameters"))
+    feed.queue_changed.emit(
+        {"running": [], "queue": [], "history": [], "saved_parameters_version": 7}
+    )
+    assert len(commands(client, "saved_parameters")) == fetched + 1
+
+
 def test_form_shows_display_units_and_returns_si(editor):
     row = editor.rows["detuning"]
     assert row.value.widget.value() == pytest.approx(-5.0)
@@ -158,7 +228,7 @@ def test_optimisers_are_not_offered_in_the_experiments_tab(qapp):
     view.set_modules(
         [
             {
-                "module": "pytweezer.experiments.demo",
+                "module": "pytweezer.experiments.rabi_demo",
                 "classes": [SCHEMA, DemoStagedScan.schema()],
                 "warnings": [],
                 "error": None,
@@ -168,7 +238,17 @@ def test_optimisers_are_not_offered_in_the_experiments_tab(qapp):
     module = view.tree.topLevelItem(0)
     names = [module.child(i).text(0) for i in range(module.childCount())]
     assert names == ["Demo"]
-    assert view.schema_for("pytweezer.experiments.demo", "DemoStagedScan") is None
+    assert view.schema_for("pytweezer.experiments.rabi_demo", "DemoStagedScan") is None
+
+
+def test_a_module_of_base_classes_only_is_not_listed(qapp):
+    view = CatalogueView()
+    base_only = {"module": "pytweezer.experiments.base", "classes": [], "error": None}
+    view.set_modules([base_only, *MODULES])
+    names = [
+        view.tree.topLevelItem(i).text(0) for i in range(view.tree.topLevelItemCount())
+    ]
+    assert "base" not in names and "broken" in names
 
 
 class Tiny(Experiment):
@@ -302,7 +382,7 @@ def test_panel_offers_pipelines_seen_in_the_queue(qapp):
             "running": [task(1, "running", pipeline="CaF")],
             "queue": [task(2, "queued", pipeline="Rb")],
             "history": [task(3, "done", pipeline="old")],
-            "catalogue_version": 1,
+            "experiments_version": 1,
         }
     )
     combo = panel.editor.pipeline
@@ -509,17 +589,17 @@ def test_panel_submits_and_forwards_actions(qapp):
             "running": [task(12, "running")],
             "queue": [],
             "history": [],
-            "catalogue_version": 1,
+            "experiments_version": 1,
         }
     )
     panel.queue_view.table.selectRow(0)
     panel.queue_view.buttons["terminate"].click()
     assert ("terminate", {"rid": 12}) in client.calls
-    catalogue_fetches = len(commands(client, "catalogue"))
+    catalogue_fetches = len(commands(client, "experiments"))
     feed.queue_changed.emit(
-        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+        {"running": [], "queue": [], "history": [], "experiments_version": 2}
     )
-    assert len(commands(client, "catalogue")) == catalogue_fetches + 1
+    assert len(commands(client, "experiments")) == catalogue_fetches + 1
 
 
 def test_panel_prefills_last_request_and_keeps_drafts(qapp):
@@ -558,9 +638,9 @@ def test_defaults_asks_for_a_fresh_description_and_applies_it(qapp):
         },
     }
     client.modules = [{**MODULES[0], "classes": [changed]}, MODULES[1]]
-    client.catalogue_version = 2
+    client.experiments_version = 2
     feed.queue_changed.emit(
-        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+        {"running": [], "queue": [], "history": [], "experiments_version": 2}
     )
     assert panel.editor.rows["shots"].value.value() == 999
 
@@ -581,9 +661,9 @@ def test_defaults_for_a_module_that_no_longer_imports_shows_its_error(qapp):
         },
         MODULES[1],
     ]
-    client.catalogue_version = 2
+    client.experiments_version = 2
     feed.queue_changed.emit(
-        {"running": [], "queue": [], "history": [], "catalogue_version": 2}
+        {"running": [], "queue": [], "history": [], "experiments_version": 2}
     )
     assert "SyntaxError: oops" in panel.status.text()
     assert panel.status.property("state") == "crashed"
@@ -1281,9 +1361,9 @@ def test_a_refresh_that_regroups_keys_keeps_the_selection_and_an_unsent_edit(qap
     assert panel.why_edit.text() == "trap off"
 
 
-DEMO = "pytweezer.experiments.demo"
-STAGED = DemoStagedScan.schema()
-BAYESIAN = DemoBayesian.schema()
+DEMO = "pytweezer.optimisers.demo"
+STAGED = {**DemoStagedScan.schema(), "module": DEMO}
+BAYESIAN = {**DemoBayesian.schema(), "module": DEMO}
 
 
 def optimiser_schema(class_name, base=STAGED):
@@ -1382,15 +1462,10 @@ class FakeOptimiserClient:
             for key, value in [("demo_resonance", 1.0), ("demo_power", 0.5)]
         ]
 
-    def call(self, command, **fields):
-        assert command == "catalogue"
-        return {
-            "ok": True,
-            "version": 1,
-            "modules": [
-                {"module": DEMO, "classes": self.schemas, "warnings": [], "error": None}
-            ],
-        }
+    def optimisers(self):
+        return [
+            {"module": DEMO, "classes": self.schemas, "warnings": [], "error": None}
+        ]
 
     def history(self, before_rid=None, limit=50):
         return list(self.tasks)

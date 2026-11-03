@@ -14,6 +14,12 @@ touches hardware.
 
 Values are always held in SI units. ``unit`` and ``scale`` only control how a
 value is displayed: ``Number(5e6, unit="MHz", scale=1e6)`` shows as ``5 MHz``.
+
+A :class:`Number` or :class:`Integer` declared with ``saved="<key>"`` instead of
+a default is *saved-backed*: left unset (``None``), it takes the saved
+parameter ``<key>`` when the task starts
+(:meth:`~pytweezer.experiment.experiment.Experiment.resolve_saved_arguments`),
+so requests and recipes that leave it unset follow recalibrations.
 """
 
 import math
@@ -30,11 +36,14 @@ class Argument:
 
     kind = "argument"
 
+    #: The saved parameter an unset value is taken from; ``""`` for none.
+    saved = ""
+
     def __init__(self, default: Any, *, tooltip: str = "", group: str = "") -> None:
         self.name = ""
         self.tooltip = tooltip
         self.group = group
-        self.default = self.coerce(default)
+        self.default = self.accept(default)
 
     def __set_name__(self, owner: type, name: str) -> None:
         self.name = name
@@ -48,13 +57,22 @@ class Argument:
         """Return ``value`` converted to this argument's type, or raise ``ValueError``."""
         raise NotImplementedError
 
+    def accept(self, value: Any) -> Any:
+        """``value`` coerced; ``None`` stays unset for a saved-backed argument."""
+        if value is None and self.saved:
+            return None
+        return self.coerce(value)
+
     def to_schema(self) -> dict[str, Any]:
-        return {
+        schema = {
             "kind": self.kind,
             "default": self.default,
             "tooltip": self.tooltip,
             "group": self.group,
         }
+        if self.saved:
+            schema["saved"] = self.saved
+        return schema
 
     def _fail(self, value: Any, reason: str) -> ValueError:
         return ValueError(f"argument {self.name!r}: {value!r} {reason}")
@@ -65,8 +83,9 @@ class Number(Argument):
 
     def __init__(
         self,
-        default: float,
+        default: float | None = None,
         *,
+        saved: str = "",
         unit: str = "",
         scale: float = 1.0,
         min: float | None = None,
@@ -81,6 +100,7 @@ class Number(Argument):
         self.max = max
         self.step = step
         self.ndecimals = ndecimals
+        self.saved = _saved_or_default(default, saved)
         super().__init__(default, **kwargs)
 
     def coerce(self, value: Any) -> float:
@@ -111,8 +131,9 @@ class Integer(Argument):
 
     def __init__(
         self,
-        default: int,
+        default: int | None = None,
         *,
+        saved: str = "",
         unit: str = "",
         min: int | None = None,
         max: int | None = None,
@@ -121,6 +142,7 @@ class Integer(Argument):
         self.unit = unit
         self.min = min
         self.max = max
+        self.saved = _saved_or_default(default, saved)
         super().__init__(default, **kwargs)
 
     def coerce(self, value: Any) -> int:
@@ -141,6 +163,14 @@ class Integer(Argument):
             "min": self.min,
             "max": self.max,
         }
+
+
+def _saved_or_default(default: Any, saved: str) -> str:
+    if (default is None) == (not saved):
+        raise TypeError(
+            "an argument needs exactly one of a default and a saved parameter"
+        )
+    return saved
 
 
 class Bool(Argument):
@@ -249,7 +279,7 @@ def coerce_arguments(cls: type, values: dict[str, Any]) -> dict[str, Any]:
             f"known: {sorted(declared)}"
         )
     coerced = {
-        name: argument.coerce(values[name]) if name in values else argument.default
+        name: argument.accept(values[name]) if name in values else argument.default
         for name, argument in declared.items()
     }
     coerced.update(

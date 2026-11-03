@@ -1,10 +1,10 @@
 """The Optimisers tab: set up and run each optimiser, watch it, accept what it proposes.
 
-Optimisers are the catalogue entries whose schema has an ``"optimiser"``
-entry; they are set up and run only here, never from the Experiments tab. The
-tab follows the manager's published snapshot through an
+Optimisers are the classes under :mod:`pytweezer.optimisers`, listed by the
+manager's optimisers catalogue; they are set up and run only here, never from
+the Experiments tab. The tab follows the manager's published snapshot through an
 :class:`~pytweezer.GUI.experiments.feed.ExperimentFeed`, refetching the
-catalogue, recipes and saved parameters when their versions change. A running
+optimisers, recipes and saved parameters when their versions change. A running
 optimiser is plotted from the feed's points as they arrive; a finished one from
 its measurement file, read through a results archive as the Results tab does,
 off the GUI thread.
@@ -274,7 +274,7 @@ class OptimisersPanel(QWidget):
         self._recipes: dict[tuple[str, str], dict[str, Recipe]] = {}
         self._last_requests: dict[tuple[str, str], TaskRequest | None] = {}
         self._versions: dict[str, object] = {}
-        self._stale = {"catalogue", "recipes", "saved", "tasks"}
+        self._stale = {"optimisers", "recipes", "saved", "tasks"}
         self._plots = None
         self._sheet_rid = None
         self._sheet_shown = None
@@ -431,7 +431,7 @@ class OptimisersPanel(QWidget):
     def _queue_changed(self, snapshot):
         self._merge_tasks(snapshot)
         for name, stale in (
-            ("catalogue_version", "catalogue"),
+            ("optimisers_version", "optimisers"),
             ("recipes_version", "recipes"),
             ("saved_parameters_version", "saved"),
         ):
@@ -458,7 +458,7 @@ class OptimisersPanel(QWidget):
 
     def refresh(self) -> None:
         """Refetch everything the tab shows from the manager."""
-        self._stale |= {"catalogue", "recipes", "saved", "tasks"}
+        self._stale |= {"optimisers", "recipes", "saved", "tasks"}
         self._measurements = {
             path: m for path, m in self._measurements.items() if not _failed(m)
         }
@@ -476,9 +476,8 @@ class OptimisersPanel(QWidget):
 
     def _fetch_stale(self):
         try:
-            if "catalogue" in self._stale:
-                reply = self.client.call("catalogue")
-                self._set_catalogue(reply["modules"])
+            if "optimisers" in self._stale:
+                self._set_optimisers(self.client.optimisers())
             if "tasks" in self._stale:
                 for past in self.client.history(limit=TASK_HISTORY_LIMIT):
                     self._tasks.setdefault(past.rid, past)
@@ -512,7 +511,7 @@ class OptimisersPanel(QWidget):
 
     # -- the table -----------------------------------------------------------
 
-    def _set_catalogue(self, modules):
+    def _set_optimisers(self, modules):
         schemas = [
             schema
             for module in modules

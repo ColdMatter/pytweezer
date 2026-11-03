@@ -52,6 +52,8 @@ def open_writer(
 ) -> tuple[Experiment, list[Point], MeasurementWriter]:
     """Instantiate the experiment, expand the scan and create its measurement file.
 
+    Unset saved-backed arguments take their saved values first; the file's
+    header lists them as ``saved_arguments`` (JSON ``{argument: saved key}``).
     With ``simulate`` the experiment's devices are simulated in-process. With
     ``allowed_devices`` the experiment may only open those canonical device names.
     """
@@ -61,6 +63,7 @@ def open_writer(
         experiment.allowed_devices = frozenset(allowed_devices)
     if simulate:
         experiment.simulated_devices = SimulatedDevices()
+    from_saved = experiment.resolve_saved_arguments(axis.argument for axis in scan.axes)
     points = experiment.planned_points(scan)
     writer = MeasurementWriter(
         path,
@@ -70,9 +73,15 @@ def open_writer(
             **git_provenance(),
             "simulated": simulate,
             "analyses": json.dumps(list(experiment_cls.analyses)),
+            "saved_arguments": json.dumps(from_saved),
             **header,
         },
-        argument_values=experiment.argument_values(),
+        # A scanned saved-backed argument has no one value; /points holds its values.
+        argument_values={
+            name: value
+            for name, value in experiment.argument_values().items()
+            if value is not None
+        },
         argument_schema=_argument_schema(experiment_cls, experiment, scan),
         scan=scan,
         points=points,
@@ -177,6 +186,8 @@ def run_local(
     Raises:
         ReservationError: Before anything is created, if a declared device is
             unknown or inactive in ``CONFIG["Devices"]``.
+        KeyError: Before anything is created, if a saved parameter an unset
+            argument needs does not exist.
     """
     experiment, points, writer = open_writer(
         path,

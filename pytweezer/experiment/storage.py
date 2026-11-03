@@ -4,7 +4,9 @@ Layout of ``{data_root}/YYYY/MM/DD/{rid:06d}_{ClassName}.h5``::
 
     /                     attrs: schema_version, rid, experiment, class_name, label,
                                  submitter, host, status, error, t_submit, t_start,
-                                 t_end, n_points, n_done, git_commit, git_dirty
+                                 t_end, n_points, n_done, git_commit, git_dirty,
+                                 saved_arguments (JSON {argument: saved key} of
+                                 the arguments given their saved value)
     /arguments            attrs: effective value of every argument;
                                  ``__schema__`` = JSON of the argument declarations
     /scan                 attrs: ``spec`` = Scan JSON

@@ -26,12 +26,10 @@ from pytweezer.experiment.optimisers import (
 from pytweezer.experiment.runner import open_writer, run_points
 from pytweezer.experiment.scan import Point
 from pytweezer.experiment.task import Action
-from pytweezer.experiments.demo import (
-    DemoBayesian,
-    DemoResonance,
-    DemoStagedScan,
-    RabiDemo,
-)
+from pytweezer.experiments.demo_resonance import DemoResonance
+from pytweezer.experiments.rabi_demo import RabiDemo
+from pytweezer.optimisers.demo_bayesian import DemoBayesian
+from pytweezer.optimisers.demo_staged_scan import DemoStagedScan
 from tests.helpers import in_process_client
 
 

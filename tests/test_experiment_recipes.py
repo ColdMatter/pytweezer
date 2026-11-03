@@ -13,7 +13,7 @@ from pytweezer.experiment.recipes import (
 from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
 from pytweezer.experiment.task import TaskRequest
 
-DEMO = "pytweezer.experiments.demo"
+DEMO = "pytweezer.experiments.rabi_demo"
 
 
 def recipe(name="check", **kwargs):

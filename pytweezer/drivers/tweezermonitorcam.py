@@ -1,17 +1,10 @@
-import argparse
-import sys
-
 import pylablib as pll
 import pylablib.devices.Thorlabs as thorcam
-from sipyco.pc_rpc import Client as RPCClient
-from sipyco.pc_rpc import simple_server_loop
 
-from pytweezer.configuration.config import get_config
 from pytweezer.drivers.camera_base import (
     Camera,
     simulated_camera_for,
 )
-from pytweezer.logging_utils import get_logger
 
 THORLABS_DLL_PATH = "C:\\Program Files\\Thorlabs\\Scientific Imaging\\Scientific Camera Support\\Scientific Camera Interfaces\\SDK\\Python Toolkit\\dlls\\64_lib"
 pll.par["devices/dlls/thorlabs_tlcam"] = THORLABS_DLL_PATH
@@ -19,8 +12,6 @@ pll.par["devices/dlls/thorlabs_tlcam"] = THORLABS_DLL_PATH
 IMAGE_DIRECTORY = (
     "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/ThorCamImages"
 )
-
-LOGGER = get_logger("thorcam")
 
 
 class ThorCam(Camera):
@@ -90,134 +81,3 @@ class ThorCam(Camera):
 #: One-size-fits-all simulated camera, with the ThorLabs camera's controls
 #: auto-stubbed so the simulated surface matches the real driver.
 SimulatedThorLabsCamera = simulated_camera_for(ThorCam)
-
-
-class ThorCamClient(RPCClient):
-    """Experiment-side RPC client with direct access to camera methods."""
-
-    def __init__(
-        self,
-        server_name: str = "ThorLabs Camera",
-        host: str | None = None,
-        port: int | None = None,
-        timeout: float | None = 5.0,
-    ):
-
-        conf = get_config()
-        server_conf = conf.get("Devices", {}).get(server_name, {})
-
-        self.host = host or server_conf.get("host", "127.0.0.1")
-        self.port = int(port or server_conf.get("port", 3251))
-        super().__init__(host=self.host, port=self.port, timeout=timeout)
-
-    def ping(self):
-        return {"ok": True, "host": self.host, "port": self.port, "target": "camera"}
-
-
-def run_server(
-    host: str,
-    port: int,
-    stream_name: str = "thorcam",
-    image_dir: str | None = None,
-    timeout: float = 5.0,
-    simulate: bool = False,
-):
-    LOGGER.info(
-        "Starting ThorLabs Camera RPC server host=%s port=%s stream=%s simulate=%s",
-        host,
-        port,
-        stream_name,
-        simulate,
-    )
-    if simulate:
-        LOGGER.warning("Running ThorLabs Camera server in SIMULATION MODE")
-        camera = SimulatedThorLabsCamera(
-            stream_name=stream_name, image_dir=image_dir, timeout=timeout
-        )
-    else:
-        camera = ThorCam(
-            stream_name=stream_name,
-            image_dir=image_dir,
-            timeout=timeout,
-        )
-
-    simple_server_loop(
-        {"camera": camera},
-        host=host,
-        port=int(port),
-        description="ThorLabs Camera RPC server",
-    )
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="ThorLabs Camera sipyco RPC server launcher"
-    )
-    parser.add_argument(
-        "name", help="process-manager label or explicit server name", default=None
-    )
-    parser.add_argument(
-        "--stream-name",
-        default="thorcam",
-        help="image stream name used by experiment-side clients",
-    )
-    parser.add_argument(
-        "--image-dir", default=IMAGE_DIRECTORY, help="optional TIFF autosave directory"
-    )
-    parser.add_argument(
-        "--timeout", type=float, default=5, help="frame wait timeout in seconds"
-    )
-    parser.add_argument("--host", default=None, help="override RPC bind host")
-    parser.add_argument("--port", type=int, default=None, help="override RPC bind port")
-    parser.add_argument(
-        "--simulate", action="store_true", help="force synthetic camera backend"
-    )
-    args = parser.parse_args()
-
-    conf = get_config()
-
-    if args.name is not None:
-        server_name = args.name
-        server_conf = conf["Devices"][server_name]
-        host = server_conf["host"]
-        port = server_conf["port"]
-        simulate = server_conf["simulate"]
-        timeout = server_conf["timeout"]
-        image_dir = server_conf["image_dir"]
-        stream_name = server_conf["stream_name"]
-    else:
-        host = args.host
-        port = args.port
-        simulate = args.simulate
-        timeout = args.timeout
-        image_dir = args.image_dir
-        stream_name = args.stream_name
-
-    if host is None or port is None:
-        print(
-            "Error: RPC host and port must be specified either via command-line or configuration."
-        )
-        sys.exit(1)
-
-    print(
-        f"Starting ThorLabs Camera server with configuration:\n"
-        f"  Host: {host}\n"
-        f"  Port: {port}\n"
-        f"  Stream Name: {stream_name}\n"
-        f"  Image Directory: {image_dir}\n"
-        f"  Timeout: {timeout} seconds\n"
-        f"  Simulate: {simulate}"
-    )
-
-    run_server(
-        host=host,
-        port=port,
-        stream_name=stream_name,
-        image_dir=image_dir,
-        timeout=timeout,
-        simulate=simulate,
-    )
-
-
-if __name__ == "__main__":
-    main()

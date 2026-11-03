@@ -17,7 +17,7 @@ from pytweezer.experiment.task import Action, TaskRequest, TaskStatus
 
 def request(**kwargs):
     return TaskRequest(
-        experiment="pytweezer.experiments.demo", class_name="RabiDemo", **kwargs
+        experiment="pytweezer.experiments.rabi_demo", class_name="RabiDemo", **kwargs
     )
 
 
@@ -269,7 +269,7 @@ def test_old_state_file_migrates_worker_and_pipeline(tmp_path, had_worker):
     record = {"rid": 1, "token": "t", "pid": 123, "create_time": 1.0}
     task = {
         "schema_version": 1,
-        "experiment": "pytweezer.experiments.demo",
+        "experiment": "pytweezer.experiments.rabi_demo",
         "class_name": "RabiDemo",
         "rid": 1,
         "status": "running",
