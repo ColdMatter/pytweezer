@@ -25,6 +25,15 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# FIXME: saved parameters overlap MOTMaster's globalParameters.json. A
+# pytweezer run pushes saved values over the script's (and the globals'), but
+# only for the keys each experiment maps (e.g. load_tweezers'
+# SAVED_SEQUENCE_PARAMETERS), while a hand run from MOTMaster reads the globals,
+# so the same parameter silently differs between the two routes. Decide whether
+# they may differ (then show which source each value came from) or must match
+# (pytweezer mirrors into the globals, MOTMaster fetches from the manager, or
+# the globals become the master copy).
+
 Value = float | int | bool | str | list[Any]
 
 
