@@ -7,6 +7,7 @@ import pytest
 
 from pytweezer.drivers.shot_frames import settle_frame_counts
 from pytweezer.experiment import run_local
+from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiment.queue import now
 from pytweezer.experiment.task import Task, TaskStatus
 from pytweezer.experiments.caf_fluorescence import LASERS
@@ -539,6 +540,20 @@ def test_a_failing_auto_mot_apply_leaves_the_values_saved_and_says_so(
         accepting.rig.auto_mot(["v0", "v1"], accept=True)
     assert saved_values(accepting.client)["caf_laser_v1"] == 2.0
     assert len(accepting.client.saved_parameter_history(rid=42)) == 2
+
+
+def test_accepting_auto_mot_saves_nothing_when_the_running_tasks_cannot_be_read(
+    accepting, monkeypatch
+):
+    def not_responding():
+        raise ManagerUnavailable("no reply")
+
+    monkeypatch.setattr(accepting.client, "snapshot", not_responding)
+    with pytest.raises(ManagerUnavailable):
+        accepting.rig.auto_mot(["v0", "v1"], accept=True)
+    assert accepting.client.saved_parameter_history(rid=42) == []
+    assert saved_values(accepting.client)["caf_laser_v0"] == START["v0"]
+    assert accepting.motmaster.calls == []
 
 
 @pytest.mark.parametrize("stages", ["v0", "0. DDSFourSidebands5W_noDDS"])

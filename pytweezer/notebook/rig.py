@@ -483,17 +483,21 @@ class Rig:
 def _accept_and_apply(rid: int, constants: dict[str, Any]) -> None:
     """Accept every proposal of :class:`OptimiseMOTLasers` run ``rid``, then apply them."""
     values = proposals(constants, OptimiseMOTLasers.proposes())
+    reserved = OptimiseMOTLasers.reserved_devices()
     client = ExperimentManagerClient()
     try:
+        # Read before saving, so a failure here leaves nothing saved.
+        snapshot = client.snapshot()
+        running = [
+            Task.model_validate(entry) for entry in snapshot.get("running") or []
+        ]
+        busy = live_task_using(running, reserved)
         changes = accept_proposals(
             values, rid, OptimiseMOTLasers.optimiser_schema(), client=client
         )
-        snapshot = client.snapshot()
     finally:
         client.close()
     accepted = f"Accepted run {rid}: {changed_summary(changes)}"
-    running = [Task.model_validate(entry) for entry in snapshot.get("running") or []]
-    busy = live_task_using(running, OptimiseMOTLasers.reserved_devices())
     if busy:
         busy_rid, shared = busy
         warnings.warn(
