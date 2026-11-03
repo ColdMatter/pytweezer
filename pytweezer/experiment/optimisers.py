@@ -36,6 +36,8 @@ SEARCH = "Search"
 class Stage:
     """One setting of a :class:`StagedScan`, swept from ``start`` to ``stop``.
 
+    Given ``span`` instead, it is swept within ``span`` of its centre, which
+    is the value ``save_as`` holds when the run starts unless the run sets it.
     Its best value is proposed for the saved parameter ``save_as``. ``run`` is
     the default of the stage's ``<setting>_run`` argument; a stage switched off
     is neither scanned nor proposed.
@@ -43,10 +45,11 @@ class Stage:
 
     setting: str
     _: KW_ONLY
-    start: float
-    stop: float
     points: int
     save_as: str
+    span: float | None = None
+    start: float | None = None
+    stop: float | None = None
     run: bool = True
 
 
@@ -182,8 +185,13 @@ class Optimiser:
 class StagedScan(Optimiser):
     """Scans one setting per stage, each at the best values of the stages before.
 
-    Each :class:`Stage` adds the arguments ``<setting>_run``,
-    ``<setting>_start``, ``<setting>_stop`` and ``<setting>_points``. Only
+    Each :class:`Stage` adds the arguments ``<setting>_run`` and
+    ``<setting>_points``, then ``<setting>_start`` and ``<setting>_stop``, or
+    ``<setting>_span`` and ``<setting>_centre`` if it declares a span. The
+    centre takes the saved parameter ``save_as`` when it is not set, so the
+    saved parameter must exist; it is read for every span stage, enabled or
+    not. The sweep of a span stage runs from ``centre - span`` to
+    ``centre + span``. Only
     enabled stages (:meth:`enabled_stages`) are scanned, and at least one must
     be. Within a stage the sweep runs ``repeats`` times. When a stage's points
     are done, :meth:`best` gives its proposal, which every later enabled stage
@@ -210,12 +218,53 @@ class StagedScan(Optimiser):
         return list(getattr(cls, "stages", []))
 
     @classmethod
+    def check_declarations(cls) -> None:
+        """Refuse declarations that cannot run.
+
+        Raises:
+            TypeError: As :meth:`Optimiser.check_declarations`, or if a stage
+                does not give exactly one of a positive ``span`` or both
+                ``start`` and ``stop``.
+        """
+        super().check_declarations()
+        for stage in cls.declarations():
+            if stage.span is not None:
+                if stage.start is not None or stage.stop is not None:
+                    raise TypeError(
+                        f"{cls.__name__}: stage {stage.setting!r} gives "
+                        "both a span and start/stop; give one or the other"
+                    )
+                if not stage.span > 0:
+                    raise TypeError(
+                        f"{cls.__name__}: stage {stage.setting!r} has "
+                        f"span {stage.span}; it must be positive"
+                    )
+            elif stage.start is None or stage.stop is None:
+                raise TypeError(
+                    f"{cls.__name__}: stage {stage.setting!r} needs "
+                    "start and stop, or a span"
+                )
+
+    @classmethod
     def generated_arguments(cls) -> dict[str, Argument]:
         arguments: dict[str, Argument] = {}
         for stage in cls.declarations():
             arguments[f"{stage.setting}_run"] = Bool(stage.run, group=SEARCH)
-            arguments[f"{stage.setting}_start"] = Number(stage.start, group=SEARCH)
-            arguments[f"{stage.setting}_stop"] = Number(stage.stop, group=SEARCH)
+            if stage.span is not None:
+                arguments[f"{stage.setting}_span"] = Number(
+                    stage.span,
+                    min=0,
+                    group=SEARCH,
+                    tooltip="scanned within this of the centre",
+                )
+                arguments[f"{stage.setting}_centre"] = Number(
+                    saved=stage.save_as,
+                    group=SEARCH,
+                    tooltip=f"the saved {stage.save_as} unless set",
+                )
+            else:
+                arguments[f"{stage.setting}_start"] = Number(stage.start, group=SEARCH)
+                arguments[f"{stage.setting}_stop"] = Number(stage.stop, group=SEARCH)
             arguments[f"{stage.setting}_points"] = Integer(
                 stage.points, min=1, group=SEARCH
             )
@@ -262,10 +311,19 @@ class StagedScan(Optimiser):
         """``(stage index, setting value)`` for every point, in run order."""
         schedule = []
         for index, stage in self.enabled_stages():
+            if stage.span is None:
+                start = getattr(self, f"{stage.setting}_start")
+                stop = getattr(self, f"{stage.setting}_stop")
+            else:
+                span = getattr(self, f"{stage.setting}_span")
+                if not span > 0:
+                    raise ValueError(
+                        f"{stage.setting}_span is {span}; it must be positive"
+                    )
+                centre = getattr(self, f"{stage.setting}_centre")
+                start, stop = centre - span, centre + span
             values = np.linspace(
-                getattr(self, f"{stage.setting}_start"),
-                getattr(self, f"{stage.setting}_stop"),
-                getattr(self, f"{stage.setting}_points"),
+                start, stop, getattr(self, f"{stage.setting}_points")
             ).tolist()
             for _ in range(self.repeats):
                 schedule.extend((index, value) for value in values)

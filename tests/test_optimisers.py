@@ -182,6 +182,80 @@ def test_stage_run_defaults_follow_the_declaration():
     assert DemoStagedScan.schema()["arguments"]["detuning_run"]["default"] is True
 
 
+class AroundSavedDetuning(StagedScan, DemoResonance):
+    objective = "counts"
+    stages: ClassVar[list[Stage]] = [
+        Stage("detuning", span=2.0, points=5, save_as="demo_resonance"),
+    ]
+
+
+@pytest.fixture
+def saved_resonance(monkeypatch):
+    monkeypatch.setattr(
+        "pytweezer.experiment.client.get_saved_parameters",
+        lambda: {"demo_resonance": 1.0},
+    )
+
+
+def test_a_span_stage_scans_around_its_saved_value(saved_resonance):
+    m = run_local(AroundSavedDetuning)
+    assert m.status == "completed", m.attrs["error"]
+    assert list(m.results["setting"]) == [-1, 0, 1, 2, 3]
+
+
+def test_a_span_stage_scans_around_a_chosen_centre(monkeypatch):
+    def unread():
+        raise AssertionError("the saved parameter was read")
+
+    monkeypatch.setattr("pytweezer.experiment.client.get_saved_parameters", unread)
+    m = run_local(AroundSavedDetuning, detuning_centre=10.0)
+    assert m.status == "completed", m.attrs["error"]
+    assert list(m.results["setting"]) == [8, 9, 10, 11, 12]
+
+
+def test_the_centre_used_is_in_the_file(saved_resonance):
+    m = run_local(AroundSavedDetuning)
+    assert m.arguments["detuning_centre"] == 1.0
+
+
+def test_a_span_stage_without_its_saved_parameter_names_the_key(monkeypatch):
+    monkeypatch.setattr("pytweezer.experiment.client.get_saved_parameters", dict)
+    with pytest.raises(KeyError, match="demo_resonance"):
+        open_writer(None, AroundSavedDetuning, {}, Scan(), {"rid": -1, "label": ""})
+
+
+def test_a_span_stage_has_a_span_and_a_centre_but_no_start_or_stop():
+    arguments = AroundSavedDetuning.schema()["arguments"]
+    assert arguments["detuning_span"]["default"] == 2.0
+    assert arguments["detuning_centre"]["saved"] == "demo_resonance"
+    assert "detuning_start" not in arguments
+    assert "detuning_stop" not in arguments
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        {"span": 1.0, "start": 0.0, "stop": 1.0},
+        {},
+        {"span": 0.0},
+        {"span": -1.0},
+        {"start": 0.0},
+        {"stop": 1.0},
+    ],
+    ids=[
+        "span and range",
+        "neither",
+        "zero span",
+        "negative span",
+        "only start",
+        "only stop",
+    ],
+)
+def test_bad_span_declarations_are_refused(stage):
+    with pytest.raises(TypeError, match="detuning"):
+        _staged([Stage("detuning", points=3, save_as="a", **stage)])
+
+
 class NanOnThirdCall(DemoBayesian):
     def prepare(self):
         self.calls = 0
