@@ -49,8 +49,8 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   every span stage's `save_as` must exist even when the stage is switched off,
   since the runner resolves it for all stages. A non-positive `_span` raises
   `ValueError` when the run starts.
-- `Stage(..., run=False)` is the default of `<setting>_run`; a stage with it
-  unset is not scanned, passes nothing to later stages and proposes nothing
+- `Stage(..., run=False)` makes `<setting>_run` default to false; a stage whose
+  `_run` is false is not scanned, passes nothing to later stages and proposes nothing
   (`enabled_stages()` lists `(index in stages, stage)` for those that run).
   `stage` records still use the index in `stages`, and `stages_total` counts
   enabled stages. A run with no stage enabled is refused (`ValueError` in
