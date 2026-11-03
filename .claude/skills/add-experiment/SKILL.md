@@ -322,18 +322,23 @@ The Rb tweezer experiments, in the order a session uses them:
    didn't write the mask).
 2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera
    and proposes the `trap_*` saved parameters.
-3. `LoadTweezers` (`load_tweezers.py`) runs every shot at the saved
+3. `LoadTweezers` (`load_tweezers.py`, a `CameraExperiment` with
+   `hamcam = CameraShots("Rb HamCam", frames=2, ...)`) runs every shot at the saved
    sequence parameters (`LoadTweezers.rb.saved`, from `saved=` on its
    `MotMaster`: script parameter → saved key; a missing key, or an unreachable manager, fails `prepare()`), a script
    parameter set in the form winning; the values used are the constant
    `saved_sequence`. It and everything built on it also read the trap sites in
-   `prepare()` (`saved_trap_sites(saved)`), moved into this ROI by the origin
-   `camera.set_roi` returned. They are refused when none are saved, when
+   `prepare()` (`saved_trap_sites(saved)`), moved into the ROI
+   (`hamcam.roi_x0`/`roi_y0`/`roi_width`/`roi_height`, unbinned; binning is
+   locked at 1) by the origin `set_roi` returned (`roi_origins["hamcam"]`).
+   The EM-gain sensitivity is `hamcam.gain`; scans of the ROI origin are
+   refused. They are refused when none are saved, when
    `trap_geometry` is not the rig's array (`same_geometry`; an unreachable rig
    is not checked), or when a summing window leaves the ROI. With sites, each
    point records `first_occupied`/`second_occupied` (bool per site) and
    `loading`, plus raw `first_counts`/`second_counts` with
-   `save_tweezer_counts`; frames are recorded only with `save_raw_images`.
+   `save_tweezer_counts`; frames are recorded as `hamcam_images`
+   (`(2, H, W)` per point) only with `save_raw_images`.
    `LoadTweezers` runs without sites only if it records frames;
    `TweezerArrayMeasurement` always needs them.
 4. `LoadTweezers.take_shots(n, **sequence)` runs a batch, for the classes
@@ -341,7 +346,7 @@ The Rb tweezer experiments, in the order a session uses them:
    Bayesian optimisers) and `FindTrapSites`. Their
    `first_occupied`/`second_occupied`/`*_counts` are `(shots, sites)` per
    point, and `save_raw_images` (off by default there) records
-   `first_images`/`second_images`. They declare no analyses; `LoadTweezers`
+   `hamcam_images`, `(shots, 2, H, W)` per point. They declare no analyses; `LoadTweezers`
    itself keeps one shot per point, which the default analyses expect.
 
 Shots broadcast their HamCam frames with `header={"rid": self.rid}`; the live
