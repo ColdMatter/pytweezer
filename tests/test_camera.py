@@ -83,6 +83,7 @@ class FakeVendorCamera:
 
     def __init__(self):
         self.calls = {}
+        self.binning = (1, 1)
 
     def wait_for_frame(self, nframes, timeout):
         pass
@@ -100,10 +101,15 @@ class FakeVendorCamera:
     def acquisition_in_progress(self):
         return "started" in self.calls
 
-    def set_roi(self, hstart, hend, vstart, vend):
+    def get_roi(self):
+        return (0, 1024, 0, 1024, *self.binning)
+
+    def set_roi(self, hstart, hend, vstart, vend, hbin=1, vbin=1):
+        # pylablib writes the binning on every call, 1 unless it is passed.
         self.calls["roi"] = (hstart, hend, vstart, vend)
+        self.binning = (hbin, vbin)
         # Like DCAM, which moves the ROI to its subarray step; returns get_roi().
-        return (hstart // 4 * 4, hend, vstart, vend, 1, 1)
+        return (hstart // 4 * 4, hend, vstart, vend, hbin, vbin)
 
 
 DRIVERS = [ImagEMX2Camera, ORCACamera, thorcam.ThorCam, tweezermonitorcam.ThorCam]
@@ -130,6 +136,14 @@ def test_drivers_ask_pylablib_for_the_requested_roi(cls):
     driver = _driver(cls)
     driver.set_roi(110, 256, 220, 64)
     assert driver._backend.calls["roi"] == (110, 366, 220, 284)
+
+
+@pytest.mark.parametrize("cls", DRIVERS, ids=DRIVER_IDS)
+def test_setting_the_roi_keeps_the_binning(cls):
+    driver = _driver(cls)
+    driver._backend.binning = (4, 4)
+    driver.set_roi(110, 256, 220, 64)
+    assert driver._backend.binning == (4, 4)
 
 
 @pytest.mark.parametrize("cls", DRIVERS, ids=DRIVER_IDS)

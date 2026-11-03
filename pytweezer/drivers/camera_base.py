@@ -91,7 +91,7 @@ class Camera(ABC):
     def set_roi(self, x0: int, width: int, y0: int, height: int) -> tuple[int, int]:
         """Restrict readout to the given region of interest (pixels).
 
-        Returns the ``(x0, y0)`` the camera used, which it may have rounded,
+        Keeps the camera's binning. Returns the ``(x0, y0)`` the camera used, which it may have rounded,
         and keeps it as :attr:`roi_origin`.
         """
 
@@ -102,6 +102,17 @@ class Camera(ABC):
     @abstractmethod
     def set_exposure_time(self, exposure: float) -> None:
         """Set the per-frame exposure time in seconds."""
+
+    def set_binning(self, binning: int) -> None:
+        """Bin ``binning`` x ``binning`` pixels together.
+
+        Changing it can reset the ROI, so call :meth:`set_roi` afterwards.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no binning control")
+
+    def set_gain(self, gain: float) -> None:
+        """Set the camera's gain, in the unit its driver documents."""
+        raise NotImplementedError(f"{type(self).__name__} has no gain control")
 
     @abstractmethod
     def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
@@ -343,6 +354,12 @@ class SimulatedCamera(Camera):
 
     def set_exposure_time(self, exposure: float) -> None:
         self._exposure = float(exposure)
+
+    def set_binning(self, binning: int) -> None:
+        self._binning = int(binning)
+
+    def set_gain(self, gain: float) -> None:
+        self._gain = float(gain)
 
     def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
         self._nframes = max(1, int(nframes))

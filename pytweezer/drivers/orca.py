@@ -45,7 +45,10 @@ class ORCACamera(Camera):
             self._backend.close()
 
     def set_roi(self, x0: int, width: int, y0: int, height: int):
-        hstart, _, vstart, *_ = self._backend.set_roi(x0, x0 + width, y0, y0 + height)
+        *_, hbin, vbin = self._backend.get_roi()
+        hstart, _, vstart, *_ = self._backend.set_roi(
+            x0, x0 + width, y0, y0 + height, hbin, vbin
+        )
         self.roi_origin = (int(hstart), int(vstart))
         return self.roi_origin
 
@@ -81,7 +84,8 @@ class ORCACamera(Camera):
     def set_readout_speed(self, speed: int):
         self._backend.set_attribute_value("readout_speed", int(speed))
 
-    def set_gain(self, gain: int):
+    def set_gain(self, gain: float):
+        """Set the contrast gain (an integer index)."""
         self._backend.set_attribute_value("contrast_gain", int(gain))
 
     def set_external_exposure_mode(self):

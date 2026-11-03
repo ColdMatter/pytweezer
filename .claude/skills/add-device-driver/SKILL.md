@@ -71,7 +71,8 @@ should always stream takes a `live` flag and calls `arm()` and `start_live()`
 at the end of `__init__` (`thorcam.py`).
 
 `set_roi(x0, width, y0, height)` passes pylablib exclusive ends
-(`x0 + width`, not `x0 + width - 1`), stores the corner the camera actually
+(`x0 + width`, not `x0 + width - 1`) and the current binning from
+`get_roi()` (pylablib's `set_roi` resets binning to 1 otherwise), stores the corner the camera actually
 applied in `self.roi_origin` and returns it: `broadcast_image` puts it in every
 frame's header as `roi_x0`/`roi_y0`, which is how analyses place trap sites on
 a cropped frame.
