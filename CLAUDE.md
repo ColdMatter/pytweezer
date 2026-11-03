@@ -134,12 +134,6 @@ run `uv run ruff check .` and `uv run ruff format --check .` before pushing.
   failure fails CI, so keep the docs building.
 
 
-### Lab book
-
-"The labbook" is the shared Obsidian vault github.com/ColdMatter/CaFMOT-LabBook,
-cloned at `~/CaFMOT-LabBook`; read its own `CLAUDE.md` before writing to it.
-
-
 ### Comments and self-documenting code
 
 - **Write self-documenting code; do not over-comment.** The people reading this
@@ -215,3 +209,31 @@ Load a skill when you need more than that:
 | MOTMaster channels (which board/port/line a signal is on), scripts, the C# side | Read `../EDMSuite/.claude/skills/motmaster-controller/SKILL.md` — EDMSuite skills don't load from here. Channel maps: `../EDMSuite/DAQ/MoleculeMOTHardware.cs` (CaF), `../EDMSuite/DAQ/RbTweezerHardware.cs` (Rb) |
 
 Each skill is self-contained; there is no separate long-form documentation.
+
+<!-- lab-repos:start -->
+## The experiment's repositories
+
+The CaF and Rb tweezer experiments run on five repositories. This block is
+kept identical in the CLAUDE.md of pytweezer, CaFMOT-LabBook and both
+notebook folders (EDMSuite doesn't carry it): change it in all of them at
+once, and keep it to what each one is for, not how it works inside.
+
+- **pytweezer** (github.com/ColdMatter/pytweezer): Python control software
+  for the experiment: GUIs, device drivers, the experiment queue, database
+  loggers and live analysis. The notebooks import it.
+- **EDMSuite** (github.com/ColdMatter/EDMSuite): the group's C# lab software,
+  shared with other ColdMatter experiments. Its MOTMaster builds and fires the
+  NI pattern-generator sequences; pytweezer drives MOTMaster remotely.
+- **CaFMOT-LabBook** (github.com/ColdMatter/CaFMOT-LabBook): the shared
+  Obsidian lab book ("the labbook") for both experiments: daily notes, lab
+  infrastructure pages and the experiment map. Read its CLAUDE.md before
+  writing to it.
+- **CaF notebooks** (Box: `Working folder/cafmot/datasync/ipython_notebooks`):
+  dated Jupyter notebooks from running the CaF experiment, using pytweezer
+  and pycaf.
+- **Tweezer notebooks** (Box: `Working folder/caftweezers/ipython_notebooks`):
+  dated Jupyter notebooks from the Rb and CaF tweezer work.
+
+Local paths differ between people and PCs. Look for sibling clones and the
+Box folder before assuming one is missing.
+<!-- lab-repos:end -->
