@@ -44,7 +44,13 @@ from pytweezer.experiment.client import (
     ManagerUnavailable,
     submitter_name,
 )
-from pytweezer.experiment.optimisers import SEARCH
+from pytweezer.experiment.optimisers import (
+    SEARCH,
+    accept_proposals,
+    changed_summary,
+    live_task_using,
+    proposals,
+)
 from pytweezer.experiment.queue import now
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.task import Task, TaskRequest, TaskStatus
@@ -98,16 +104,6 @@ def partial_label(constants: dict) -> str:
             f"{constants['evaluations_total']} evaluations"
         )
     return "partial"
-
-
-def proposals(constants: dict, keys: list[str]) -> dict:
-    """The values a run proposes for ``keys``, as plain Python values; arrays as nested lists."""
-    proposed = {}
-    for key in keys:
-        value = constants.get(f"proposed.{key}")
-        if value is not None:
-            proposed[key] = value.tolist() if hasattr(value, "tolist") else value
-    return proposed
 
 
 def live_results(points: list[dict], names: list[str]) -> dict[str, np.ndarray]:
@@ -1120,28 +1116,15 @@ class OptimisersPanel(QWidget):
             return
         optimiser = row.schema["optimiser"]
         try:
-            changes = self.client.set_saved_parameters(
-                values,
-                f"accepted from run {rid}",
-                submitter_name(),
-                create=optimiser["kind"] == "fit",
-                group=optimiser.get("group", ""),
-                units=optimiser.get("units", {}),
-                rid=rid,
-            )
+            changes = accept_proposals(values, rid, optimiser, client=self.client)
         except ManagerUnavailable:
             self._show_status(f"Accepting: {NOT_RESPONDING}", "error")
             return
         except ManagerError as error:
             self._show_status(f"Accepting: {error}", "error")
             return
-        changed = sum(change.old != change.new for change in changes)
-        accepted = (
-            f"Accepted: {changed} value{'' if changed == 1 else 's'} changed"
-            if changed
-            else "Accepted: nothing changed"
-        )
-        busy = self._running_task_using(row.schema.get("reserves") or ())
+        accepted = f"Accepted: {changed_summary(changes)}"
+        busy = live_task_using(self._tasks.values(), row.schema.get("reserves") or ())
         if optimiser.get("applies") and busy:
             busy_rid, shared = busy
             self._show_status(
@@ -1164,14 +1147,6 @@ class OptimisersPanel(QWidget):
         self._stale.add("saved")
         self._fetch_stale()
         self._update()
-
-    def _running_task_using(self, devices) -> tuple[int, list[str]] | None:
-        """The rid of a running task reserving any of ``devices``, and which."""
-        for task in sorted(self._tasks.values(), key=lambda t: t.rid):
-            shared = sorted(set(task.devices or ()) & set(devices))
-            if task.status in _LIVE and shared:
-                return task.rid, shared
-        return None
 
     def _applied(self, accepted, outcome, rid, class_name):
         self._applying = False

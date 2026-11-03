@@ -13,11 +13,13 @@ The mixin comes first, so it sets the points and runs each one; the
 measurement's own ``prepare`` and ``finish`` still run. A :class:`Fit` instead
 runs one point and proposes what its ``fit()`` returns. The values it proposes
 are recorded as constants ``proposed.<saved key>``; nothing is saved until a
-person accepts them.
+person accepts them, in the Optimisers tab or with ``Rig.auto_mot(accept=True)``,
+both through :func:`accept_proposals`.
 """
 
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import KW_ONLY, dataclass
 from typing import Any, ClassVar
 
@@ -25,8 +27,14 @@ import numpy as np
 import skopt
 
 from pytweezer.experiment.arguments import Argument, Bool, Integer, Number, collect
-from pytweezer.experiment.client import get_saved_parameters
+from pytweezer.experiment.client import (
+    ExperimentManagerClient,
+    get_saved_parameters,
+    submitter_name,
+)
+from pytweezer.experiment.saved_parameters import SavedParameterChange
 from pytweezer.experiment.scan import Point, Scan
+from pytweezer.experiment.task import Task, TaskStatus
 
 #: Argument group of an optimiser's own arguments, shown first in the Optimisers tab.
 SEARCH = "Search"
@@ -164,9 +172,10 @@ class Optimiser:
     def apply(cls, proposals: dict[str, Any]) -> None:
         """Put accepted proposals to use, after they are saved; does nothing by default.
 
-        The Optimisers tab calls this once it has saved the ticked values, on a
-        worker thread, and reports an exception beside the accepted run without
-        undoing the save.
+        Called once the accepted values are saved, by the Optimisers tab (on a
+        worker thread) and by ``Rig.auto_mot(accept=True)``, neither of which
+        undoes the save if it raises; neither calls it while a running task
+        reserves one of the optimiser's devices (:func:`live_task_using`).
 
         Args:
             proposals: ``{saved key: value}`` of the values accepted.
@@ -630,3 +639,80 @@ class Fit(Optimiser):
                 self.record(f"proposed.{key}", value)
         finally:
             super().finish()
+
+
+#: Task statuses in which a task holds the devices it reserves.
+_LIVE = (TaskStatus.RUNNING, TaskStatus.PAUSED)
+
+
+def proposals(constants: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    """The values a run proposes for ``keys``, as plain Python values; arrays as nested lists."""
+    proposed = {}
+    for key in keys:
+        value = constants.get(f"proposed.{key}")
+        if value is not None:
+            proposed[key] = value.tolist() if hasattr(value, "tolist") else value
+    return proposed
+
+
+def accept_proposals(
+    values: dict[str, Any],
+    rid: int,
+    optimiser: dict[str, Any],
+    *,
+    client: ExperimentManagerClient,
+) -> list[SavedParameterChange]:
+    """Save ``values``, proposed by run ``rid``, for the whole lab as accepted.
+
+    A fit's keys not saved yet are created in its group with its units; a
+    search only sets keys that exist. The store sets every value or, refusing
+    any, none. Every key named is logged with ``rid``, unchanged ones included,
+    which is how a run is known to be accepted
+    (``saved_parameter_history(rid=rid)``).
+
+    Args:
+        values: ``{saved key: value}`` accepted.
+        rid: The run that proposed them.
+        optimiser: The optimiser's :meth:`Optimiser.optimiser_schema`.
+        client: The Experiment Manager to save them through.
+
+    Returns:
+        The change logged for each key.
+
+    Raises:
+        ManagerError: If the manager refuses any value.
+        ManagerUnavailable: If the manager does not answer.
+    """
+    return client.set_saved_parameters(
+        values,
+        f"accepted from run {rid}",
+        submitter_name(),
+        create=optimiser["kind"] == "fit",
+        group=optimiser.get("group", ""),
+        units=optimiser.get("units", {}),
+        rid=rid,
+    )
+
+
+def changed_summary(changes: list[SavedParameterChange]) -> str:
+    """``2 values changed``, or ``nothing changed``."""
+    changed = sum(change.old != change.new for change in changes)
+    if not changed:
+        return "nothing changed"
+    return f"{changed} value{'' if changed == 1 else 's'} changed"
+
+
+def live_task_using(
+    tasks: Iterable[Task], devices: Iterable[str]
+) -> tuple[int, list[str]] | None:
+    """The lowest rid of a running or paused task reserving any of ``devices``, and which.
+
+    An optimiser's :meth:`~Optimiser.apply` is not called while there is one,
+    since that task may be moving the same hardware.
+    """
+    devices = set(devices)
+    for task in sorted(tasks, key=lambda t: t.rid):
+        shared = sorted(set(task.devices or ()) & devices)
+        if task.status in _LIVE and shared:
+            return task.rid, shared
+    return None
