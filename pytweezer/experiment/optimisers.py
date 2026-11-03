@@ -147,6 +147,7 @@ class Optimiser:
         ``settings[i]`` is the setting whose best value is proposed for
         ``proposes[i]``; ``objective`` is ``None`` for a class that names none.
         ``units`` and ``group`` are what an accepted proposal is created with.
+        ``applies`` is true when the class overrides :meth:`apply`.
         """
         return {
             "kind": cls.kind,
@@ -156,7 +157,20 @@ class Optimiser:
             "settings": [declared.setting for declared in cls.declarations()],
             "units": {key: cls.proposal_units.get(key, "") for key in cls.proposes()},
             "group": cls.proposal_group,
+            "applies": cls.apply.__func__ is not Optimiser.apply.__func__,
         }
+
+    @classmethod
+    def apply(cls, proposals: dict[str, Any]) -> None:
+        """Put accepted proposals to use, after they are saved; does nothing by default.
+
+        The Optimisers tab calls this once it has saved the ticked values, on a
+        worker thread, and reports an exception beside the accepted run without
+        undoing the save.
+
+        Args:
+            proposals: ``{saved key: value}`` of the values accepted.
+        """
 
     def planned_points(self, scan: Scan) -> list[Point]:
         if scan.axes or scan.repetitions != 1:

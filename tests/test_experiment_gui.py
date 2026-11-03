@@ -1,5 +1,6 @@
 """Experiments tab widgets, offscreen, with a fake manager client and feed."""
 
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -1731,6 +1732,74 @@ def test_accept_writes_only_ticked_rows_with_the_run(qapp):
         "accepted from run 41",
         41,
     )
+
+
+applied = []
+
+
+class ApplyingStagedScan(DemoStagedScan):
+    failure = None
+
+    @classmethod
+    def apply(cls, proposals):
+        applied.append(proposals)
+        if cls.failure:
+            raise cls.failure
+
+
+@pytest.fixture
+def applying_panel(qapp, monkeypatch):
+    applied.clear()
+    monkeypatch.setitem(sys.modules, DEMO, sys.modules[__name__])
+    panel = make_optimisers_panel(
+        [
+            optimiser_schema(
+                "ApplyingStagedScan", {**ApplyingStagedScan.schema(), "module": DEMO}
+            )
+        ],
+        [finished_run(41, "completed", "ApplyingStagedScan")],
+        {run_file(41, "ApplyingStagedScan"): staged_measurement()},
+    )
+    panel.select(DEMO, "ApplyingStagedScan")
+    return panel
+
+
+def accept_and_wait(panel):
+    panel.accept()
+    settle(QtCore.QCoreApplication.instance(), "Optimisers apply")
+
+
+def test_accepting_calls_apply_with_exactly_the_ticked_values(applying_panel):
+    applying_panel.accept_rows["demo_power"].setChecked(False)
+    accept_and_wait(applying_panel)
+    assert applied == [{"demo_resonance": 1.2}]
+    assert applying_panel.status.text().endswith("and applied")
+    assert applying_panel.status.property("state") != "error"
+
+
+def test_a_failing_apply_leaves_the_values_saved_and_says_so(
+    applying_panel, monkeypatch
+):
+    monkeypatch.setattr(
+        ApplyingStagedScan, "failure", RuntimeError("wavemeter lock lost")
+    )
+    accept_and_wait(applying_panel)
+    saved = {p.key: p.value for p in applying_panel.client.parameters}
+    assert saved["demo_resonance"] == 1.2
+    assert saved["demo_power"] == 0.9
+    assert applying_panel.rows[(DEMO, "ApplyingStagedScan")].state == "accepted"
+    assert applying_panel.status.property("state") == "error"
+    assert applying_panel.status.text() == (
+        "Accepted, but applying failed: wavemeter lock lost"
+    )
+
+
+def test_an_optimiser_without_apply_is_accepted_without_importing_it(qapp):
+    panel = make_optimisers_panel()
+    panel.select(DEMO, "DemoStagedScan")
+    panel.accept()
+    assert panel.status.text() == "Accepted: 2 values changed"
+    assert panel.status.property("state") != "error"
 
 
 def test_a_failed_run_offers_no_accept(qapp):

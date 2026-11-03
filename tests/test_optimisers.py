@@ -378,7 +378,20 @@ def test_the_schema_lists_generated_arguments_and_proposals(
         "settings": ["detuning", "power"],
         "units": {"demo_resonance": "", "demo_power": ""},
         "group": "",
+        "applies": False,
     }
+
+
+class AppliedStagedScan(DemoStagedScan):
+    @classmethod
+    def apply(cls, proposals):
+        pass
+
+
+def test_apply_does_nothing_by_default_and_the_schema_says_so():
+    assert DemoStagedScan.apply({"demo_resonance": 1.0}) is None
+    assert DemoStagedScan.optimiser_schema()["applies"] is False
+    assert AppliedStagedScan.optimiser_schema()["applies"] is True
 
 
 class SharedBase(StagedScan, DemoResonance):
@@ -489,4 +502,5 @@ def test_the_schema_gives_a_fits_proposals_with_their_units_and_group():
         "settings": [],
         "units": {"demo_offset": "V", "demo_grid": "px"},
         "group": "Demo",
+        "applies": False,
     }
