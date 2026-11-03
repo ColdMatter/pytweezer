@@ -76,6 +76,10 @@ at the end of `__init__` (`thorcam.py`).
 applied in `self.roi_origin` and returns it: `broadcast_image` puts it in every
 frame's header as `roi_x0`/`roi_y0`, which is how analyses place trap sites on
 a cropped frame.
+`set_binning` and `set_gain` are optional (the base raises
+`NotImplementedError`); `CameraExperiment` calls them only when a
+`CameraShots` declaration sets `binning` or `gain`, so a driver without them
+still works there.
 
 **Match the base class signatures exactly.** `setup_acquisition(self, nframes,
 mode="sequence")` takes both, and the base `arm()` calls it; a camera with no
