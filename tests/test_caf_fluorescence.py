@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from pytweezer.experiment import Scan, run_local
+from pytweezer.experiment.camera_experiment import CameraShots
 from pytweezer.experiment.motmaster import MotMaster
 from pytweezer.experiments.caf_fluorescence import LASERS, CaFFluorescence
 
@@ -139,6 +140,9 @@ def measuring(**set_points):
 
 class OneIteration(CaFFluorescence):
     caf = MotMaster("CaF MotMaster", script="0. DDSFourSidebands5W_noDDS")
+    thorcam = CameraShots(
+        "CaF ThorCam", frames=1, stream=True, trigger=None, locked=("frames",)
+    )
 
 
 def test_counts_are_background_subtracted_frame_sums(caf):

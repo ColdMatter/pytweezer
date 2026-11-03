@@ -147,7 +147,8 @@ point for the most `counts`. Its six span stages are `v0`, `BX`, `v1`, `v2`,
 (THz, group `CaF lasers`); `v0`, `v1` and `TCool` are on by default. Its `apply`
 ramps each accepted laser on `CaF MotMaster`, trying every laser and raising
 `RuntimeError` naming any it missed. The measurement `experiments/caf_fluorescence.py`
-restores the lasers it moved in `finish`.
+(a `CameraExperiment` streaming from `thorcam`, the CaF ThorCam) restores the
+lasers it moved in `finish`.
 
 Run `create_saved_set_points()` (from `pytweezer.optimisers.optimise_mot_lasers`)
 once before the first run: it creates the missing `caf_laser_*` keys from the
