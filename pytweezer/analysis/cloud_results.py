@@ -44,12 +44,11 @@ def scanned_arguments(measurement: Measurement) -> list[str]:
 
 
 def needed_results(measurement: Measurement) -> list[str]:
-    """Every recorded cloud-fit result of every camera, mean images included."""
+    """Every camera's recorded fit fields and their errors; no mean images."""
     names = []
     for camera in cloud_cameras(measurement):
         names += [f"{camera}_{field}" for field in FIELDS]
         names += [f"{camera}_{field}_error" for field in ERROR_FIELDS]
-        names.append(f"{camera}_mean_image")
     return [name for name in names if name in measurement.result_shapes]
 
 
@@ -84,7 +83,7 @@ def cloud_sizes(
 
 
 def point_image(
-    measurement: Measurement, camera: str, index: int
+    measurement: Measurement, camera: str, index: int, mean_image: np.ndarray | None
 ) -> tuple[np.ndarray | None, CloudFit]:
     """Point ``index``'s mean image and its cloud fit.
 
@@ -95,13 +94,13 @@ def point_image(
     file's units.
 
     Args:
-        measurement: Loaded with the camera's fields and, if recorded, its
-            mean images.
+        measurement: Loaded with the camera's fields.
         camera: As :func:`cloud_cameras` gives.
         index: Row of the point in ``measurement.points``.
+        mean_image: The point's recorded ``<camera>_mean_image``, read on its
+            own as it is large; ``None`` if the file has none.
     """
-    images = measurement.results.get(f"{camera}_mean_image")
-    image = None if images is None else np.asarray(images[index])
+    image = None if mean_image is None else np.asarray(mean_image)
     if image is not None and np.isfinite(image).any():
         return image, fit_cloud(image)
     values = {

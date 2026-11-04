@@ -189,7 +189,13 @@ class CloudFitView(ComputedAnalysisView):
             field: (x / scale, mean, error)
             for field, (x, mean, error) in cloud_sizes(loaded, camera, axis).items()
         }
-        image, fit = point_image(loaded, camera, row)
+        image_name = f"{camera}_mean_image"
+        mean_image = (
+            self.point_result(image_name, row)
+            if image_name in loaded.result_shapes
+            else None
+        )
+        image, fit = point_image(loaded, camera, row, mean_image)
         return CloudFitDrawing(
             sizes=sizes,
             size_unit=loaded.units.get(f"{camera}_sigma_x", ""),

@@ -171,7 +171,8 @@ an optimiser declares none. Each file records the names (root attr
 `pytweezer/GUI/experiments/analyses.py` (`ANALYSES`; a new one is a Qt-free
 computation in `pytweezer/analysis/` plus an `AnalysisView` registered there,
 usually a `ComputedAnalysisView`, which loads and computes off the GUI thread
-through its hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`).
+through its hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`;
+`compute` reads one point's large result, such as an image, with `point_result`).
 A view reads only what the file recorded, so record what it needs (the tweezer
 histograms take `first_counts`/`second_counts` with `trap_sites` and
 `threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`;
@@ -406,7 +407,8 @@ Other PCs never read the manager's disk: it serves the files as sipyco RPC
 target `"results"` on `results_port` (`pytweezer/experiment/archive.py`).
 `ResultsArchive(root)` reads files directly and `RemoteArchive` is the same
 interface over RPC (`days`, `runs(day)`, `find(rid)`, `load(path, results)`,
-`planned_points(path)`, paths relative to `data_root`). `default_archive()` is
+`planned_points(path)`, `point_result(path, name, index)` for one point's value,
+paths relative to `data_root`). `default_archive()` is
 local on the manager's PC or with `PYTWEEZER_DATA_DIR` set, remote elsewhere;
 the Results tab, `Dataset(rid)`, `fetch_measurement` and
 `points_with_readings(rid, ...)` all go through it. Its reads run in threads, so

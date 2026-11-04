@@ -28,6 +28,7 @@ from pytweezer.experiment.storage import (
     load_measurement,
     read_header,
     read_planned_points,
+    read_point_result,
 )
 from pytweezer.servers.sipyco_patches import apply_patches
 
@@ -95,6 +96,10 @@ class ResultsArchive:
         """Every planned point's ``/points`` columns; readable while it runs."""
         return read_planned_points(self._file(path))
 
+    def point_result(self, path: str, name: str, index: int) -> Any:
+        """Point ``index``'s value of result ``name``, without loading the rest."""
+        return read_point_result(self._file(path), name, int(index))
+
     def _file(self, path: str) -> Path:
         file = self._inside(path)
         if file.suffix != ".h5":
@@ -145,6 +150,10 @@ class ArchiveTarget:
         columns = await asyncio.to_thread(self._archive.planned_points, path)
         return _to_wire(columns)
 
+    async def point_result(self, path: str, name: str, index: int) -> Any:
+        value = await asyncio.to_thread(self._archive.point_result, path, name, index)
+        return _to_wire(value)
+
 
 class RemoteArchive:
     """A :class:`ResultsArchive` on the Experiment Manager's PC, over sipyco RPC.
@@ -189,6 +198,9 @@ class RemoteArchive:
 
     def planned_points(self, path: str) -> dict[str, np.ndarray]:
         return _from_wire(self._call("planned_points", path))
+
+    def point_result(self, path: str, name: str, index: int) -> Any:
+        return _from_wire(self._call("point_result", path, name, int(index)))
 
     def close(self) -> None:
         with self._lock:

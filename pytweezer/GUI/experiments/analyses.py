@@ -43,6 +43,8 @@ from pytweezer.logging_utils import get_logger
 logger = get_logger("pytweezer.GUI.experiments.analyses")
 
 _RECOMPUTE_DELAY_MS = 300
+#: Per-point results a view keeps, most recently read; each may be a whole image.
+_POINT_RESULTS_KEPT = 8
 
 
 def declared_analyses(measurement: Measurement) -> list[str]:
@@ -74,7 +76,8 @@ class ComputedAnalysisView(AnalysisView):
     * :meth:`needed_results`: which results to load from the file;
     * :meth:`settings`: its controls' state, read on the GUI thread;
     * :meth:`compute`: the result from the loaded file and those settings, in
-      the worker thread;
+      the worker thread. It may read one point's value of a result it did not
+      load, such as an image, with :meth:`point_result`;
     * :meth:`show_result`: draw the result, or clear the drawing for ``None``;
     * :meth:`unavailable_reason`: why a file cannot be analysed, or ``None``.
 
@@ -91,6 +94,10 @@ class ComputedAnalysisView(AnalysisView):
         self._path = self._measurement = None
         #: The last file loaded with its results, so changing a control doesn't reload.
         self._loaded = (None, None)
+        #: Values read by point_result(), keyed (path, name, index), oldest first.
+        self._point_results = {}
+        #: The file the running compute() analyses.
+        self._computing_path = None
         self._generation = 0
         # One analysis at a time, each holding a whole file's results; a request
         # made meanwhile waits here, replaced by any newer one.
@@ -123,6 +130,21 @@ class ComputedAnalysisView(AnalysisView):
     def unavailable_reason(self, measurement: Measurement) -> str | None:
         """Why ``measurement`` cannot be analysed, or ``None`` if it can."""
         return None
+
+    def point_result(self, name: str, index: int) -> Any:
+        """Point ``index``'s value of result ``name`` in the file being analysed.
+
+        Reads that one value over the view's archive connection, keeping the
+        few read last. Call it only from :meth:`compute`.
+        """
+        key = (self._computing_path, name, index)
+        value = self._point_results.pop(key, None)
+        if value is None:
+            value = self._clone.point_result(self._computing_path, name, index)
+        self._point_results[key] = value
+        while len(self._point_results) > _POINT_RESULTS_KEPT:
+            del self._point_results[next(iter(self._point_results))]
+        return value
 
     def set_measurement(self, archive, path, measurement):
         if archive is not self._archive:
@@ -168,6 +190,7 @@ class ComputedAnalysisView(AnalysisView):
                     path, results=self.needed_results(measurement)
                 )
                 self._loaded = (path, loaded)
+            self._computing_path = path
             result = self.compute(loaded, settings)
         except ArchiveUnavailable as error:
             result = error
