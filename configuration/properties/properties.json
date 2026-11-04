@@ -324,7 +324,7 @@
             },
             "Image Plot Monitor": {
                 "script": "pytweezer/GUI/viewers/image_plot_monitor.py",
-                "description": "Image Monitor with the x and y sums, and their Gaussian fits, above and left of the image"
+                "description": "Image with x/y projection plots linked to the image axes"
             },
             "Image Monitor 2": {
                 "script": "pytweezer/GUI/viewers/image_monitor.py"
