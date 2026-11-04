@@ -169,10 +169,14 @@ analyses the experiment declares as a class attribute (inherited), e.g.
 an optimiser declares none. Each file records the names (root attr
 `analyses`), so the tab never imports the experiment. Names map to views in
 `pytweezer/GUI/experiments/analyses.py` (`ANALYSES`; a new one is a Qt-free
-computation in `pytweezer/analysis/` plus an `AnalysisView` registered there).
+computation in `pytweezer/analysis/` plus an `AnalysisView` registered there,
+usually a `ComputedAnalysisView`, which loads and computes off the GUI thread
+through its hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`).
 A view reads only what the file recorded, so record what it needs (the tweezer
 histograms take `first_counts`/`second_counts` with `trap_sites` and
-`threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`).
+`threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`;
+the MOT Gaussian fit, `cloud_fit`, takes what `record_cloud_fit` records,
+`<camera>_<field>`, `_error` and `<camera>_mean_image`: `analysis/cloud_results.py`).
 A name this GUI doesn't know is listed disabled, and every analysis is disabled
 until the measurement finishes. An analysis only reads the file, through its
 own archive connection, off the GUI thread. The tab remembers the choice per

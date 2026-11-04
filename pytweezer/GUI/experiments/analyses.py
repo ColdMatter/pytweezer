@@ -7,13 +7,15 @@ loads what it needs over its own archive connection and computes off the GUI
 thread, so a large file never stalls the tab.
 
 To add one, put its computation in :mod:`pytweezer.analysis` (no Qt), write an
-:class:`AnalysisView` that draws it, and register both here.
+:class:`AnalysisView` that draws it (usually a :class:`ComputedAnalysisView`,
+which loads and computes off the GUI thread), and register both here.
 """
 
 import json
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
@@ -56,28 +58,148 @@ class AnalysisView(QWidget):
         raise NotImplementedError
 
 
-class TweezerHistogramView(AnalysisView):
-    """The tweezer loading histogram of a file, as the live viewer draws it, in ``unit``."""
+class ComputedAnalysisView(AnalysisView):
+    """An analysis computed off the GUI thread from the file's results.
+
+    Loads the results it needs over its own clone of the archive, once per
+    file, and computes in a worker thread. One computation runs at a time; a
+    request made meanwhile waits, replaced by any newer one, and a result
+    overtaken by a newer request is discarded. Failures are shown in
+    :attr:`message`, never raised.
+
+    A subclass lays out its controls, its drawing and :attr:`message`, calls
+    :meth:`recompute` (or :meth:`recompute_soon`, for a spin box) when a
+    control changes, and implements:
+
+    * :meth:`needed_results`: which results to load from the file;
+    * :meth:`settings`: its controls' state, read on the GUI thread;
+    * :meth:`compute`: the result from the loaded file and those settings, in
+      the worker thread;
+    * :meth:`show_result`: draw the result, or clear the drawing for ``None``;
+    * :meth:`unavailable_reason`: why a file cannot be analysed, or ``None``.
+
+    To refill controls that depend on the file, override
+    :meth:`set_measurement` and call it from the override with the controls'
+    signals blocked.
+    """
 
     _result_ready = QtCore.pyqtSignal(int, object)
 
-    def __init__(self, unit="counts", parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.unit = unit
         self._archive = self._clone = None
         self._path = self._measurement = None
         #: The last file loaded with its results, so changing a control doesn't reload.
         self._loaded = (None, None)
         self._generation = 0
-        # One analysis at a time, each holding a whole file's frames; a request
+        # One analysis at a time, each holding a whole file's results; a request
         # made meanwhile waits here, replaced by any newer one.
         self._running = False
         self._pending = None
         self._result_ready.connect(self._show_result)
-        self._recompute_soon = QtCore.QTimer(self)
-        self._recompute_soon.setSingleShot(True)
-        self._recompute_soon.setInterval(_RECOMPUTE_DELAY_MS)
-        self._recompute_soon.timeout.connect(self._recompute)
+        self._recompute_timer = QtCore.QTimer(self)
+        self._recompute_timer.setSingleShot(True)
+        self._recompute_timer.setInterval(_RECOMPUTE_DELAY_MS)
+        self._recompute_timer.timeout.connect(self.recompute)
+        self.message = QLabel()
+        self.message.setProperty("role", "regionHint")
+
+    def needed_results(self, measurement: Measurement) -> list[str]:
+        """The results :meth:`compute` reads from ``measurement``'s file."""
+        raise NotImplementedError
+
+    def settings(self) -> Any:
+        """The controls' state, passed to :meth:`compute`."""
+        raise NotImplementedError
+
+    def compute(self, loaded: Measurement, settings: Any) -> Any:
+        """The result to show, from the loaded file; runs in a worker thread."""
+        raise NotImplementedError
+
+    def show_result(self, result: Any) -> None:
+        """Draw a result of :meth:`compute`; ``None`` clears the drawing."""
+        raise NotImplementedError
+
+    def unavailable_reason(self, measurement: Measurement) -> str | None:
+        """Why ``measurement`` cannot be analysed, or ``None`` if it can."""
+        return None
+
+    def set_measurement(self, archive, path, measurement):
+        if archive is not self._archive:
+            self._archive, self._clone = archive, archive.clone()
+        if path != self._path:
+            self.show_result(None)
+        self._path, self._measurement = path, measurement
+        reason = self.unavailable_reason(measurement)
+        if reason is not None:
+            self._generation += 1
+            self.show_result(None)
+            self.message.setText(reason)
+            return
+        self.recompute()
+
+    def recompute_soon(self) -> None:
+        """:meth:`recompute` once the controls have been still for a moment."""
+        self._recompute_timer.start()
+
+    def recompute(self) -> None:
+        """Analyse the current file again with the current settings."""
+        measurement = self._measurement
+        if measurement is None or self.unavailable_reason(measurement) is not None:
+            return
+        self._recompute_timer.stop()
+        self._generation += 1
+        self.message.setText("Analysing…")
+        request = (self._generation, self._path, measurement, self.settings())
+        if self._running:
+            self._pending = request
+        else:
+            self._start(request)
+
+    def _start(self, request):
+        self._running = True
+        threading.Thread(target=self._compute, args=request, daemon=True).start()
+
+    def _compute(self, generation, path, measurement, settings):
+        try:
+            loaded_path, loaded = self._loaded
+            if loaded_path != path:
+                loaded = self._clone.load(
+                    path, results=self.needed_results(measurement)
+                )
+                self._loaded = (path, loaded)
+            result = self.compute(loaded, settings)
+        except ArchiveUnavailable as error:
+            result = error
+        except Exception as error:
+            logger.exception("Could not analyse %s", path)
+            result = error
+        self._result_ready.emit(generation, result)
+
+    def _show_result(self, generation, result):
+        self._running = False
+        if self._pending is not None:
+            request, self._pending = self._pending, None
+            self._start(request)
+        if generation != self._generation:
+            return
+        if isinstance(result, ArchiveUnavailable):
+            self.show_result(None)
+            self.message.setText("Experiment Manager not reachable.")
+        elif isinstance(result, Exception):
+            self.show_result(None)
+            self.message.setText(f"Could not analyse: {result}")
+        else:
+            self.message.setText("")
+            self.show_result(result)
+
+
+class TweezerHistogramView(ComputedAnalysisView):
+    """The tweezer loading histogram of a file, as the live viewer draws it, in ``unit``."""
+
+    def __init__(self, unit="counts", parent=None):
+        super().__init__(parent)
+        self.unit = unit
 
         defaults = HistogramSettings()
         self.image = QComboBox()
@@ -128,15 +250,13 @@ class TweezerHistogramView(AnalysisView):
             if frames_only:
                 self._frames_only += [label, widget]
         controls.addStretch(1)
-        self.image.currentIndexChanged.connect(self._recompute)
-        self.shots_from.currentIndexChanged.connect(self._recompute)
+        self.image.currentIndexChanged.connect(self.recompute)
+        self.shots_from.currentIndexChanged.connect(self.recompute)
         for spin in (self.sites, self.feature_size, self.window_size):
-            spin.valueChanged.connect(self._recompute_soon.start)
-        self.detection_step.valueChanged.connect(self._recompute_soon.start)
+            spin.valueChanged.connect(self.recompute_soon)
+        self.detection_step.valueChanged.connect(self.recompute_soon)
 
         self.plots = TweezerLoadingPlots()
-        self.message = QLabel()
-        self.message.setProperty("role", "regionHint")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(controls)
@@ -144,11 +264,6 @@ class TweezerHistogramView(AnalysisView):
         layout.addWidget(self.message)
 
     def set_measurement(self, archive, path, measurement):
-        if archive is not self._archive:
-            self._archive, self._clone = archive, archive.clone()
-        if path != self._path:
-            self.plots.show_message("")
-        self._path, self._measurement = path, measurement
         kind = source(measurement)
         for widget in self._frames_only:
             widget.setVisible(kind == "frames")
@@ -157,16 +272,17 @@ class TweezerHistogramView(AnalysisView):
         self.shots_from.addItem("all points")
         self.shots_from.addItems([label for label, _ in point_groups(measurement)])
         self.shots_from.blockSignals(False)
-        if kind is None:
-            self._generation += 1
-            self.plots.show_message("")
-            self.message.setText(
-                "This file recorded no tweezer images, counts or photons."
-            )
-            return
-        self._recompute()
+        super().set_measurement(archive, path, measurement)
 
-    def _settings(self):
+    def unavailable_reason(self, measurement):
+        if source(measurement) is None:
+            return "This file recorded no tweezer images, counts or photons."
+        return None
+
+    def needed_results(self, measurement):
+        return needed_results(measurement)
+
+    def settings(self):
         group = self.shots_from.currentIndex() - 1
         return HistogramSettings(
             image=self.image.currentIndex(),
@@ -178,52 +294,20 @@ class TweezerHistogramView(AnalysisView):
             detection_step=self.detection_step.value(),
         )
 
-    def _recompute(self):
-        if self._measurement is None or source(self._measurement) is None:
-            return
-        self._recompute_soon.stop()
-        self._generation += 1
-        self.message.setText("Analysing…")
-        request = (self._generation, self._path, self._measurement, self._settings())
-        if self._running:
-            self._pending = request
-        else:
-            self._start(request)
+    def compute(self, loaded, settings):
+        return tweezer_histogram(loaded, settings)
 
-    def _start(self, request):
-        self._running = True
-        threading.Thread(target=self._compute, args=request, daemon=True).start()
-
-    def _compute(self, generation, path, measurement, settings):
-        try:
-            loaded_path, loaded = self._loaded
-            if loaded_path != path:
-                loaded = self._clone.load(path, results=needed_results(measurement))
-                self._loaded = (path, loaded)
-            result = tweezer_histogram(loaded, settings)
-        except ArchiveUnavailable as error:
-            result = error
-        except Exception as error:
-            logger.exception("Could not analyse %s", path)
-            result = error
-        self._result_ready.emit(generation, result)
-
-    def _show_result(self, generation, result):
-        self._running = False
-        if self._pending is not None:
-            request, self._pending = self._pending, None
-            self._start(request)
-        if generation != self._generation:
-            return
-        if isinstance(result, ArchiveUnavailable):
+    def show_result(self, result):
+        if result is None:
             self.plots.show_message("")
-            self.message.setText("Experiment Manager not reachable.")
-        elif isinstance(result, Exception):
-            self.plots.show_message("")
-            self.message.setText(f"Could not analyse: {result}")
         else:
-            self.message.setText("")
             self.plots.show_result(*result)
+
+
+def _cloud_fit_view() -> AnalysisView:
+    from pytweezer.GUI.experiments.cloud_views import CloudFitView
+
+    return CloudFitView()
 
 
 @dataclass(frozen=True)
@@ -243,4 +327,5 @@ ANALYSES: dict[str, AnalysisEntry] = {
         "Tweezer loading histogram (photons)",
         lambda: TweezerHistogramView(unit="photons"),
     ),
+    "cloud_fit": AnalysisEntry("MOT Gaussian fit", _cloud_fit_view),
 }

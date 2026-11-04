@@ -1,15 +1,19 @@
 import threading
 
+import numpy as np
 import pytest
 
-from pytweezer.experiment import Scan, run_local
+from pytweezer.analysis.cloud_fit import fit_frames
+from pytweezer.analysis.cloud_results import cloud_sizes
+from pytweezer.experiment import ListAxis, Scan, run_local
 from pytweezer.experiment.archive import ArchiveUnavailable, ResultsArchive
 from pytweezer.GUI.experiments import analyses
 from pytweezer.GUI.experiments.analyses import (
     TweezerHistogramView,
     declared_analyses,
 )
-from tests.helpers import until
+from pytweezer.GUI.experiments.cloud_views import CloudFitView
+from tests.helpers import until, write_run
 from tests.test_analysis import SITE_CENTRES
 from tests.test_tweezer_histogram import ImagesArray
 
@@ -154,3 +158,99 @@ def test_the_previous_files_histogram_is_cleared_while_the_next_loads(
 
     assert view.plots.readout.text() == ""
     release.set()
+
+
+def sizes_file(path, values, repetitions, sigma_x, sigma_y, error):
+    """``thorcam`` sizes per point, in point order, each with the recorded ``error``."""
+
+    def record(point):
+        return {
+            "thorcam_sigma_x": sigma_x[point.index],
+            "thorcam_sigma_y": sigma_y[point.index],
+            "thorcam_sigma_x_error": error[point.index],
+            "thorcam_sigma_y_error": error[point.index],
+        }
+
+    scan = Scan(axes=[ListAxis(argument="x", values=values)], repetitions=repetitions)
+    return ResultsArchive(path.parent).load(
+        write_run(path, scan=scan, record=record).name
+    )
+
+
+def test_cloud_sizes_pool_repeated_scan_values(tmp_path):
+    measurement = sizes_file(
+        tmp_path / "m.h5",
+        values=[1.0, 2.0],
+        repetitions=3,
+        sigma_x=[1.0, 2.0, 3.0, 4.0, 6.0, 8.0],
+        sigma_y=[5.0, 5.0, 5.0, 1.0, 1.0, 4.0],
+        error=[0.5] * 6,
+    )
+
+    sizes = cloud_sizes(measurement, "thorcam", "x")
+
+    x, mean, error = sizes["sigma_x"]
+    np.testing.assert_allclose(x, [1.0, 2.0])
+    np.testing.assert_allclose(mean, [2.0, 6.0])
+    np.testing.assert_allclose(error, [1 / np.sqrt(3), 2 / np.sqrt(3)])
+    _, mean, error = sizes["sigma_y"]
+    np.testing.assert_allclose(mean, [5.0, 2.0])
+    np.testing.assert_allclose(error, [0.0, 1.0])
+
+
+def test_single_point_value_keeps_recorded_error(tmp_path):
+    measurement = sizes_file(
+        tmp_path / "m.h5",
+        values=[1.0, 2.0],
+        repetitions=1,
+        sigma_x=[3.0, 4.0],
+        sigma_y=[5.0, 6.0],
+        error=[0.25, np.nan],
+    )
+
+    x, mean, error = cloud_sizes(measurement, "thorcam", "x")["sigma_x"]
+
+    np.testing.assert_allclose(mean, [3.0, 4.0])
+    np.testing.assert_allclose(error, [0.25, np.nan])
+
+
+def cloud_frames(centre_rc, shape=(40, 50), sigma=3.0, frames=2, seed=0):
+    rows, cols = np.mgrid[: shape[0], : shape[1]]
+    cloud = 200 * np.exp(
+        -((rows - centre_rc[0]) ** 2 + (cols - centre_rc[1]) ** 2) / (2 * sigma**2)
+    )
+    noise = np.random.default_rng(seed).normal(0, 2, (frames, *shape))
+    return cloud + noise
+
+
+def test_cloud_fit_view_draws_a_fit_file(qapp, tmp_path):
+    # Recorded in metres from a cropped frame, as from a camera with
+    # object_pixel_m and an ROI; the mean image itself carries no geometry.
+    centre_rc = (14, 30)
+
+    def record(point):
+        values, mean_image = fit_frames(
+            cloud_frames(centre_rc, sigma=2.0 + point.values["x"], seed=point.index),
+            None,
+            (4e-6, 4e-6),
+            (100.0, 60.0),
+        )
+        recorded = {f"thorcam_{name}": value for name, value in values.items()}
+        return recorded | {"thorcam_mean_image": mean_image}
+
+    relative = "2026/11/04/000001_Sweep.h5"
+    scan = Scan(axes=[ListAxis(argument="x", values=[1.0, 2.0])], repetitions=2)
+    write_run(tmp_path / relative, scan=scan, record=record)
+    archive = ResultsArchive(tmp_path)
+    view = CloudFitView()
+    view.set_measurement(archive, relative, archive.load(relative, results=[]))
+
+    assert until(lambda: len(view.outline_curves) == 8, qapp=qapp)
+    assert view.image_item.image.shape == (40, 50)
+    outline_x, outline_y = view.outline_curves[0].getData()
+    assert np.mean(outline_x) == pytest.approx(centre_rc[1] + 0.5, abs=0.2)
+    assert np.mean(outline_y) == pytest.approx(centre_rc[0] + 0.5, abs=0.2)
+    for field in ("sigma_x", "sigma_y"):
+        x, sigma = view.size_curves[field].getData()
+        np.testing.assert_allclose(x, [1.0, 2.0])
+        np.testing.assert_allclose(sigma, [12e-6, 16e-6], rtol=0.1)
