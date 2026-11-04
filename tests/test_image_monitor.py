@@ -6,7 +6,7 @@ from PyQt6 import QtCore
 from pytweezer.analysis.cloud_fit import fit_cloud
 from pytweezer.analysis.roi_slice import RoiSlice
 from pytweezer.GUI import applet
-from pytweezer.GUI.viewers import data_sidebar, image_monitor
+from pytweezer.GUI.viewers import data_sidebar, image_monitor, image_plot_monitor
 from pytweezer.GUI.viewers.archive import zmq_ROI
 from pytweezer.GUI.viewers.image_monitor import camera_roi, overlay_paths
 
@@ -237,3 +237,82 @@ def test_a_roi_over_pixels_is_cropped_from_the_same_pixels_by_roi_slice(monitor)
         shape,
     )
     assert bounds == (10, 30, 5, 21)
+
+
+def projection_message(stream, coords, sums, fit):
+    head = {"center": 0.0, "sigma": 1.0, "amplitude": 1.0, "offset": 0.0}
+    head["success"] = bool(np.isfinite(fit).all())
+    return (stream, head, np.vstack([coords, sums, fit]))
+
+
+@pytest.fixture
+def projection_monitor(qapp, monkeypatch):
+    """A projections monitor on ``cloud``'s ``_x`` and ``_y`` profiles, with no hubs behind it."""
+    fake_hubs(monkeypatch)
+    monkeypatch.setattr(image_plot_monitor, "DataClient", FakeStream)
+
+    class SeededProps(FakeProps):
+        def __init__(self, name=""):
+            super().__init__(name)
+            self.values["projectionstreams"] = ["cloud"]
+
+    monkeypatch.setattr(applet, "Properties", SeededProps)
+    return image_plot_monitor.ImageProjectionDisplay("Test Projections")
+
+
+def test_projection_monitor_builds_and_draws_both_profiles(projection_monitor):
+    monitor = projection_monitor
+    x = np.arange(48) * 1e-6
+    y = np.arange(64) * 3e-6
+    bump_x = np.exp(-0.5 * ((x - 20e-6) / 5e-6) ** 2)
+    bump_y = np.exp(-0.5 * ((y - 90e-6) / 12e-6) ** 2)
+    monitor.projectionclient.queue += [
+        projection_message("cloud_x", x, 100 * bump_x, 100 * bump_x),
+        projection_message("cloud_y", y, 200 * bump_y, 200 * bump_y),
+    ]
+
+    monitor.poll()
+
+    top_data, top_fit = monitor.projection_curves["cloud_x"]
+    left_data, left_fit = monitor.projection_curves["cloud_y"]
+    assert top_data in monitor.top_plot.listDataItems()
+    assert top_fit in monitor.top_plot.listDataItems()
+    assert left_data in monitor.left_plot.listDataItems()
+    assert left_fit in monitor.left_plot.listDataItems()
+    for curve, expected in [
+        (top_data, (x, 100 * bump_x)),
+        (top_fit, (x, 100 * bump_x)),
+        # the left plot runs its values along x and the coordinate up the shared y-axis
+        (left_data, (200 * bump_y, y)),
+        (left_fit, (200 * bump_y, y)),
+    ]:
+        np.testing.assert_allclose(curve.getData(), expected)
+
+
+def test_projection_plots_share_the_images_axes(projection_monitor):
+    monitor = projection_monitor
+    assert monitor.top_plot.getViewBox().linkedView(pg.ViewBox.XAxis) is (
+        monitor.plot.getViewBox()
+    )
+    assert monitor.left_plot.getViewBox().linkedView(pg.ViewBox.YAxis) is (
+        monitor.plot.getViewBox()
+    )
+    assert monitor.left_plot.getViewBox().yInverted()
+
+
+def test_an_untrusted_fit_draws_no_fit_curve(projection_monitor):
+    monitor = projection_monitor
+    x = np.arange(48.0)
+    trusted = np.exp(-0.5 * ((x - 20) / 5) ** 2)
+    monitor.projectionclient.queue.append(
+        projection_message("cloud_x", x, trusted, trusted)
+    )
+    monitor.poll()
+    monitor.projectionclient.queue.append(
+        projection_message("cloud_x", x, trusted, np.full(x.shape, np.nan))
+    )
+    monitor.poll()
+
+    data, fit = monitor.projection_curves["cloud_x"]
+    assert data.getData()[1] == pytest.approx(trusted)
+    assert fit.getData()[0] is None or len(fit.getData()[0]) == 0

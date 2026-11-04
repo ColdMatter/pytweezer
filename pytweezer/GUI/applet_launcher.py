@@ -31,7 +31,7 @@ DEFAULT_APPLETS = [
     {
         "name": "Image Plot Monitor",
         "script": "pytweezer/GUI/viewers/image_plot_monitor.py",
-        "description": "Image with x/y projection plots linked to the image axes",
+        "description": "Image Monitor with the x and y sums, and their Gaussian fits, above and left of the image",
     },
     {
         "name": "Scalar History",

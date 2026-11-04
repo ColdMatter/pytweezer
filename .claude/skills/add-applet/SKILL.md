@@ -340,8 +340,9 @@ what was built or why.
   subscribed data stream, one block per stream; on by default); shows a second
   stream category (masks) on its own `streamkey`, and cloud-fit contour ellipses
   from `overlaystreams` (`overlay_paths`).
-- `viewers/image_plot_monitor.py` — image with axis-linked projection plots;
-  the example to copy for multiple linked plots in one window.
+- `viewers/image_plot_monitor.py` — the Image Monitor plus the x and y sums
+  (`projectionstreams`) in plots above and left of the image, linked to its
+  axes; the example to copy for multiple linked plots in one window.
 
 `viewers/archive/` holds retired viewers — do not use them as models, though
 `zmq_ROI` is still imported from there by the image viewers.

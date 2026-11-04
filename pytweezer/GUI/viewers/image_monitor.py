@@ -160,6 +160,11 @@ class ImageDisplay(Applet):
     _n_contours = PropertyAttribute("n_contours", 8)
     _show_sidebar = PropertyAttribute("show_sidebar", True)
 
+    #: Grid cell of the image plot in :attr:`graphics_layout`; its colour bar sits
+    #: one column to the right. Subclasses move it to leave room for more plots.
+    image_row = 0
+    image_col = 0
+
     def init_gui(self):
         self.imDataDict = {}
         self.image_index = -1
@@ -186,7 +191,10 @@ class ImageDisplay(Applet):
 
         cmap = pg.ColorMap(pos=np.linspace(0.0, 1.0, len(colors)), color=colors)
         graphics_layout_widget = pg.GraphicsLayoutWidget()
-        plot: pg.PlotItem = graphics_layout_widget.addPlot()
+        self.graphics_layout = graphics_layout_widget
+        plot: pg.PlotItem = graphics_layout_widget.addPlot(
+            row=self.image_row, col=self.image_col
+        )
         plot.setLabel("left", text="y", units="m")
         plot.setLabel("bottom", text="x", units="m")
         image_item = pg.ImageItem(imgdata, axisOrder="row-major")
@@ -194,7 +202,7 @@ class ImageDisplay(Applet):
         # add a LUT to the image display
         lut = pg.HistogramLUTItem()
         lut.setImageItem(image_item)
-        graphics_layout_widget.addItem(lut)
+        graphics_layout_widget.addItem(lut, row=self.image_row, col=self.image_col + 1)
         image_item.setRect(frame_rect({}, imgdata.shape))
         # The colormap goes on the histogram's gradient, not on the image: a
         # HistogramLUTItem drives its image's lookup table, so a setLookupTable
