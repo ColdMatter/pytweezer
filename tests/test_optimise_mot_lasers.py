@@ -94,6 +94,7 @@ def test_each_enabled_laser_is_scanned_around_its_saved_set_point_and_best_value
         f"proposed.{LASER_KEYS[laser]}" in measurement.constants
         for laser in ("BX", "v2", "v3")
     )
+    assert "thorcam_sigma_x" in measurement.results
     first_v1_call = next(call for call in Spying.calls if "v1" in call)
     assert first_v1_call["v0"] == pytest.approx(PEAKS["v0"], abs=SPANS["v0"] / 20)
     first_tcool_call = next(call for call in Spying.calls if "TCool" in call)

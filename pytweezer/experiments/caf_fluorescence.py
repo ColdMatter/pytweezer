@@ -24,12 +24,12 @@ class CaFFluorescence(CameraExperiment):
     at ``mot_field`` and reads one ``thorcam`` frame per iteration, with the
     trigger, binning and gain its CONFIG entry sets; ``counts`` is the mean over its frames of each frame's
     background-subtracted sum, ``counts_error`` its standard error (NaN for a
-    single frame). Each point also records the Gaussian fit of the cloud in
-    the mean background-subtracted frame as ``thorcam_*``
+    single frame). Each :meth:`measure` also records the Gaussian fit of the
+    cloud in the mean background-subtracted frame as ``thorcam_*``
     (:meth:`~pytweezer.experiment.camera_experiment.CameraExperiment.record_cloud_fit`),
-    from the same shot as ``counts``. ``finish`` ramps every laser :meth:`set_lasers` moved back
-    to its starting set point, whatever happened; a laser it never moved is
-    left alone.
+    from the same shot as ``counts``, so optimisers built on it record it too.
+    ``finish`` ramps every laser :meth:`set_lasers` moved back to its starting
+    set point, whatever happened; a laser it never moved is left alone.
     """
 
     cloud_species = "CaF"
@@ -66,10 +66,8 @@ class CaFFluorescence(CameraExperiment):
         self.background = background_frames.astype(float).mean(axis=0)
 
     def run_point(self) -> None:
-        frames = self.shoot()
-        for name, value in self.count(frames).items():
+        for name, value in self.measure().items():
             self.record(name, value)
-        self.record_cloud_fit("thorcam", frames, self.background)
 
     def finish(self) -> None:
         try:
@@ -87,18 +85,15 @@ class CaFFluorescence(CameraExperiment):
         v3: float | None = None,
         TCool: float | None = None,
     ) -> dict[str, float]:
-        """Fluorescence counts with the given set points (THz); ``None`` leaves a laser alone."""
-        return self.count(self.shoot(v0=v0, BX=BX, v1=v1, v2=v2, v3=v3, TCool=TCool))
+        """Fluorescence counts with the given set points (THz); ``None`` leaves a laser alone.
 
-    def shoot(self, **set_points: float | None) -> np.ndarray:
-        """The ``thorcam`` frames of one shot with the given set points (THz); ``None`` leaves a laser alone."""
-        self.set_lasers(**set_points)
-        return self.take_shot()["thorcam"]
-
-    def count(self, frames: np.ndarray) -> dict[str, float]:
-        """``counts`` and ``counts_error`` of a shot's ``thorcam`` ``frames``."""
+        Also records the shot's ``thorcam_*`` cloud fit, so it must run inside a point.
+        """
+        self.set_lasers(v0=v0, BX=BX, v1=v1, v2=v2, v3=v3, TCool=TCool)
+        frames = self.take_shot()["thorcam"]
         frame_counts = (frames.astype(float) - self.background).sum(axis=(1, 2))
         n_frames = len(frame_counts)
+        self.record_cloud_fit("thorcam", frames, self.background)
         return {
             "counts": float(np.mean(frame_counts)),
             "counts_error": float(np.std(frame_counts, ddof=1) / np.sqrt(n_frames))
