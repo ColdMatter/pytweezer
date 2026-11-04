@@ -5,7 +5,7 @@
     class PureRecipe(CameraExperiment):
         rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
         hamcam = CameraShots("Rb HamCam", frames=2, exposure=20e-3, roi=(0, 512, 0, 512))
-        thorcam = CameraShots("Rb ThorCam", frames=1, stream=True)
+        thorcam = CameraShots("Rb ThorCam", frames=1)
         orca = CameraShots("CaF ORCA", frames=3, binning=2, gain=1)
 
 Each :class:`CameraShots` is a device whose settings become form arguments
@@ -19,12 +19,9 @@ pixels, so a camera binning ``b`` returns frames of
 dB on the ThorCams, the contrast-gain index on the ORCAs, and the sensitivity
 on the HamCam, which takes effect only once EM gain is enabled.
 
-A camera runs in snap mode by default: it is set up for ``frames`` frames,
-started before the sequences and read and stopped after them. With
-``stream=True`` it runs free instead: each shot reads the frames it caught
-since a mark taken before the sequences, once every streaming camera's frame
-count has been still for ``frame_settle_s``. Use it for the ThorCams, whose
-driver ignores snap mode and would re-read stale frames.
+Every camera runs in snap mode: it is set up for ``frames`` frames, started
+before the sequences and read and stopped after them. A camera that was live
+is taken out of live mode for the task and put back in :meth:`finish`.
 
 ``exposure``, ``gain``, ``roi_x0`` and ``roi_y0`` can be scanned and are
 re-applied before the shot of a point that changes them; ``frames``,
@@ -36,11 +33,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any
 
 import numpy as np
 
-from pytweezer.drivers.shot_frames import settle_frame_counts
 from pytweezer.experiment.arguments import Argument, Device, Integer, Number, collect
 from pytweezer.experiment.motmaster import MotMasterExperiment
 from pytweezer.experiment.scan import Point, Scan
@@ -77,7 +73,7 @@ class CameraShots(Device):
 
     Args:
         device_name: The camera's ``CONFIG["Devices"]`` name.
-        frames: Frames per shot; for a streaming camera, the number expected.
+        frames: Frames per shot.
         exposure: Exposure time in seconds; ``None`` leaves it to the camera,
             as for a camera exposed by its trigger pulse.
         binning: Pixels per side binned together; ``None`` leaves it.
@@ -86,7 +82,6 @@ class CameraShots(Device):
             leaves it.
         trigger: Trigger source for ``set_trigger_source``; ``None`` keeps the
             one the camera was configured with.
-        stream: Run the camera free and read each shot's frames from a mark.
         locked: Settings kept at their declared value and left out of the form.
         timeout: RPC timeout for the camera's client.
 
@@ -105,7 +100,6 @@ class CameraShots(Device):
         gain: float | None = None,
         roi: tuple[int, int, int, int] | None = None,
         trigger: str | None = "ext",
-        stream: bool = False,
         locked: Iterable[str] = (),
         timeout: float | None = None,
     ) -> None:
@@ -139,7 +133,6 @@ class CameraShots(Device):
         self.gain = gain
         self.roi = None if roi is None else tuple(int(value) for value in roi)
         self.trigger = trigger
-        self.stream = stream
         self.locked = locked
 
     def declared(self) -> ShotSettings:
@@ -198,7 +191,6 @@ class CameraShots(Device):
                 "gain": self.gain,
                 "roi": list(self.roi) if self.roi is not None else None,
                 "trigger": self.trigger,
-                "stream": self.stream,
                 "locked": list(self.locked),
             }
         }
@@ -214,14 +206,11 @@ class CameraExperiment(MotMasterExperiment):
     :meth:`prepare` applies each camera's settings, in this order: binning,
     ROI (``set_roi`` keeps the binning, while ``set_binning`` can reset the
     ROI), exposure, trigger source, :meth:`configure_camera`, gain, then
-    ``setup_acquisition(frames, mode="snap")`` or, streaming, ``arm()``. The
-    origin each camera's ROI took is in :attr:`roi_origins`. The default
+    ``setup_acquisition(frames, mode="snap")``. The origin each camera's ROI
+    took is in :attr:`roi_origins`. The default
     :meth:`run_point` takes one shot and records each camera's frames as
     ``<camera>_images``, ``(frames, H, W)`` per point.
     """
-
-    #: Interval between frame-count polls while a shot's streamed frames settle.
-    frame_poll_s: ClassVar[float] = 0.05
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         inherited = collect(cls, Argument)
@@ -236,27 +225,6 @@ class CameraExperiment(MotMasterExperiment):
                 if dotted not in generated and dotted in inherited:
                     # collect() drops a name a subclass sets to anything else.
                     setattr(cls, dotted, None)
-        if any(camera.stream for camera in collect(cls, CameraShots).values()) and (
-            "frame_settle_s" not in collect(cls, Argument)
-        ):
-            for name, argument in {
-                "frame_settle_s": Number(
-                    0.3,
-                    min=0,
-                    unit="s",
-                    group="Camera",
-                    tooltip="How long the frame count must stay unchanged after a shot",
-                ),
-                "frame_timeout_s": Number(
-                    5.0,
-                    min=0,
-                    unit="s",
-                    group="Camera",
-                    tooltip="Longest wait for the frames",
-                ),
-            }.items():
-                argument.name = name
-                setattr(cls, name, argument)
         super().__init_subclass__(**kwargs)
 
     @classmethod
@@ -294,16 +262,10 @@ class CameraExperiment(MotMasterExperiment):
         """Set driver-specific options of camera ``name``; called before its gain is set."""
 
     def apply_camera_settings(self, name: str) -> None:
-        """Send camera ``name`` its settings for the current point, then set it up or arm it."""
+        """Send stopped camera ``name`` its settings for the current point and set it up."""
         declared = self.camera_shots()[name]
         camera = self.cameras[name]
         settings = self.shot_settings(name)
-        anything_set = declared.trigger is not None or any(
-            getattr(settings, setting) is not None
-            for setting in ("exposure", "binning", "gain", "roi")
-        )
-        if declared.stream and anything_set:
-            camera.stop_acquisition()
         if settings.binning is not None:
             camera.set_binning(settings.binning)
         if settings.roi is not None:
@@ -315,10 +277,7 @@ class CameraExperiment(MotMasterExperiment):
         self.configure_camera(name, camera)
         if settings.gain is not None:
             camera.set_gain(settings.gain)
-        if declared.stream:
-            camera.arm()
-        else:
-            camera.setup_acquisition(settings.frames, mode="snap")
+        camera.setup_acquisition(settings.frames, mode="snap")
         self._applied[name] = settings
 
     def planned_points(self, scan: Scan) -> list[Point]:
@@ -337,8 +296,30 @@ class CameraExperiment(MotMasterExperiment):
             self.camera_shots()
         )
         self._applied: dict[str, ShotSettings] = {}
-        for name in self.camera_shots():
+        self._was_live: list[str] = []
+        for name, camera in self.cameras.items():
+            if camera.is_live():
+                self._was_live.append(name)
+            camera.stop_live()
             self.apply_camera_settings(name)
+
+    def finish(self) -> None:
+        try:
+            self._restore_live()
+        finally:
+            super().finish()
+
+    def _restore_live(self) -> None:
+        errors = []
+        # Unset if prepare() failed first.
+        for name in getattr(self, "_was_live", []):
+            try:
+                self.cameras[name].start_live()
+            except Exception as error:
+                logger.exception("Could not put camera %s back in live mode", name)
+                errors.append(error)
+        if errors:
+            raise errors[0]
 
     def take_shot(self, **overrides: Any) -> dict[str, np.ndarray]:
         """Run the sequences once and return every camera's frames, ``{name: (frames, H, W)}``.
@@ -346,32 +327,18 @@ class CameraExperiment(MotMasterExperiment):
         Args:
             **overrides: Script parameters for this run, as for
                 :meth:`run_sequences`.
-
-        Raises:
-            RuntimeError: If a streaming camera caught no frames.
         """
-        declared = self.camera_shots()
-        for name in declared:
+        names = list(self.camera_shots())
+        for name in names:
             if self.shot_settings(name) != self._applied[name]:
-                self.cameras[name].stop_acquisition()
                 self.apply_camera_settings(name)
-        snap = [name for name, camera in declared.items() if not camera.stream]
-        streaming = {
-            name: self.cameras[name]
-            for name, camera in declared.items()
-            if camera.stream
-        }
         frames: dict[str, np.ndarray] = {}
         failed = True
         try:
-            for name in snap:
+            for name in names:
                 self.cameras[name].start_acquisition()
-            marks = {}
-            for name, camera in streaming.items():
-                camera.arm()
-                marks[name] = camera.frames_acquired()
             self.run_sequences(**overrides)
-            for name in snap:
+            for name in names:
                 frames[name] = np.asarray(
                     self.cameras[name].acquire_n_frames(
                         self._applied[name].frames,
@@ -379,37 +346,9 @@ class CameraExperiment(MotMasterExperiment):
                         header={"rid": self.rid},
                     )
                 )
-            if streaming:
-                settle_frame_counts(
-                    streaming,
-                    self.frame_settle_s,
-                    self.frame_timeout_s,
-                    self.frame_poll_s,
-                )
-            for name, camera in streaming.items():
-                frames[name] = self._streamed_frames(
-                    name, np.asarray(camera.read_frames_from(marks[name]))
-                )
             failed = False
         finally:
-            self._stop_cameras(snap, raise_errors=not failed)
-        return frames
-
-    def _streamed_frames(self, name: str, frames: np.ndarray) -> np.ndarray:
-        expected = self._applied[name].frames
-        if len(frames) == 0:
-            script = self.motmasters()[self.master_name()].script
-            raise RuntimeError(
-                f"{self.camera_shots()[name].device_name!r} caught no frames from "
-                f"{script!r}; is it armed on the MOTMaster's trigger?"
-            )
-        if len(frames) != expected:
-            logger.warning(
-                "%s caught %d frames where %d were expected",
-                name,
-                len(frames),
-                expected,
-            )
+            self._stop_cameras(names, raise_errors=not failed)
         return frames
 
     def _stop_cameras(self, names: list[str], *, raise_errors: bool) -> None:

@@ -21,8 +21,8 @@ class CaFFluorescence(CameraExperiment):
     ``prepare`` notes every laser's set point, recorded as the constant
     ``start_set_points`` (``{laser: THz}``), and takes a background shot with
     the MOT field at ``bg_field``. Each shot then runs the script's iterations
-    at ``mot_field`` and reads the frames ``thorcam`` caught, streaming with
-    the trigger, binning and gain its CONFIG entry sets; ``counts`` is the mean over its frames of each frame's
+    at ``mot_field`` and reads one ``thorcam`` frame per iteration, with the
+    trigger, binning and gain its CONFIG entry sets; ``counts`` is the mean over its frames of each frame's
     background-subtracted sum, ``counts_error`` its standard error (NaN for a
     single frame). ``finish`` ramps every laser :meth:`set_lasers` moved back
     to its starting set point, whatever happened; a laser it never moved is
@@ -30,9 +30,7 @@ class CaFFluorescence(CameraExperiment):
     """
 
     caf = MotMaster("CaF MotMaster", script="0. DDSFourSidebands5W_noDDS", iterations=3)
-    thorcam = CameraShots(
-        "CaF ThorCam", frames=3, stream=True, trigger=None, locked=("frames",)
-    )
+    thorcam = CameraShots("CaF ThorCam", frames=3, trigger=None, locked=("frames",))
     mot_field = MotMasterNumber(1.0, parameter="MOTCoilsCurrentValue")
     bg_field = Number(
         0.0, group="MOTMaster", tooltip="MOTCoilsCurrentValue for the background shot"

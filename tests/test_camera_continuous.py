@@ -76,14 +76,12 @@ def test_camera_is_reconfigured_while_stopped_then_left_acquiring(
     assert measurement.status == "completed", measurement.attrs["error"]
     expected = [
         ("stop_live",),
-        ("stop_acquisition",),
         ("set_trigger_source", "int"),
         ("set_exposure_time", 2e-3),
         *([("set_gain", 6.0)] if "gain" in chosen else []),
         # binning can reset the ROI, so it goes first
         *([("set_binning", 4)] if "binning" in chosen else []),
         *([("set_roi", 8, 64, 4, 32)] if "roi" in chosen else []),
-        ("arm", 50),
-        *([("start_live",)] if broadcast else []),
+        ("start_live", 50) if broadcast else ("arm", 50),
     ]
     assert camera.calls == expected

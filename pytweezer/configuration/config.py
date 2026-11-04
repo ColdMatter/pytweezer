@@ -260,9 +260,9 @@ CONFIG = {
             "trigger_polarity": "rise",
             "binning": 16,
             "gain_db": 12.0,
-            "live": True,
             "stream_name": "caf_thorcam",
             "timeout": 5.0,
+            "image_dir": "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/ThorCamImages",
         },
         # The NI Cards tab: channels by MOTMaster alias, from each PC's hardware file.
         "CaF NI Cards": {

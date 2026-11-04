@@ -90,18 +90,14 @@ def test_broadcast_frames_say_which_roi_they_were_read_from(camera, clock, roi):
     assert all(h["rid"] == 3 for h in recorder.headers)
 
 
-def test_caf_thorcam_builds_simulated_and_streams_live():
-    from pytweezer.configuration.config import get_config
-    from pytweezer.servers.device_server import build_spec
-
-    conf = get_config()["Devices"]["CaF ThorCam"] | {"simulate": True}
-    camera = build_spec("CaF ThorCam", conf).target
-    try:
-        assert camera._acquisition_in_progress()
-        assert camera._live_thread.is_alive()
-    finally:
-        camera.close()
-    assert camera._live_thread is None
+def test_live_mode_can_be_left_and_entered_again(camera):
+    camera.start_live()
+    camera.stop_live()
+    assert not camera.is_live()
+    assert not camera._acquisition_in_progress()
+    camera.start_live()
+    assert camera.is_live()
+    assert camera._acquisition_in_progress()
 
 
 def test_the_caf_thorcam_and_ni_cards_entries_come_last_so_no_existing_port_moves():

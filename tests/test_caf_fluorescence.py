@@ -30,10 +30,22 @@ class FakeCamera:
             (2, 3), 10 + 5 * field
         )
 
-    def arm(self, buffer_frames=1000):
+    def close_rpc(self):
         pass
 
-    def close_rpc(self):
+    def is_live(self):
+        return False
+
+    def stop_live(self):
+        pass
+
+    def setup_acquisition(self, nframes, mode="sequence"):
+        pass
+
+    def start_acquisition(self):
+        self.frames = []
+
+    def stop_acquisition(self):
         pass
 
     def catch(self, iterations, field, set_points):
@@ -42,13 +54,10 @@ class FakeCamera:
             if image is not None:
                 self.frames.append(np.asarray(image, dtype=np.uint16))
 
-    def frames_acquired(self):
-        return len(self.frames)
-
-    def read_frames_from(self, start):
-        if start >= len(self.frames):
-            return np.empty((0, 0, 0), dtype=np.uint16)
-        return np.stack(self.frames[start:])
+    def acquire_n_frames(self, nframes, broadcast=False, header=None):
+        if len(self.frames) < nframes:
+            raise TimeoutError(f"{len(self.frames)} of {nframes} frames arrived")
+        return np.stack(self.frames[:nframes])
 
 
 class FakeCaFMotMaster:
@@ -124,7 +133,7 @@ def caf(monkeypatch):
 
 
 def run(experiment_cls, scan=None, **args):
-    return run_local(experiment_cls, scan, frame_settle_s=0.0, **args)
+    return run_local(experiment_cls, scan, **args)
 
 
 def measuring(**set_points):
@@ -140,9 +149,7 @@ def measuring(**set_points):
 
 class OneIteration(CaFFluorescence):
     caf = MotMaster("CaF MotMaster", script="0. DDSFourSidebands5W_noDDS")
-    thorcam = CameraShots(
-        "CaF ThorCam", frames=1, stream=True, trigger=None, locked=("frames",)
-    )
+    thorcam = CameraShots("CaF ThorCam", frames=1, trigger=None, locked=("frames",))
 
 
 def test_counts_are_background_subtracted_frame_sums(caf):
@@ -240,14 +247,13 @@ def test_start_set_points_read_back_from_the_file(caf):
     assert measurement.constants["start_set_points"] == START
 
 
-def test_a_shot_with_no_frames_is_an_error(caf):
+def test_a_shot_missing_frames_fails(caf):
     caf.camera.frame = lambda field, set_points, iteration: (
         np.zeros((2, 3)) if field == 0.0 else None
     )
     measurement = run(CaFFluorescence)
     assert measurement.status == "failed"
-    assert "RuntimeError" in measurement.attrs["error"]
-    assert "CaF ThorCam" in measurement.attrs["error"]
+    assert "TimeoutError" in measurement.attrs["error"]
 
 
 def test_the_background_shot_has_the_field_off(caf):
@@ -258,9 +264,7 @@ def test_the_background_shot_has_the_field_off(caf):
 
 
 def test_runs_against_the_simulated_motmaster_and_camera():
-    measurement = run_local(
-        CaFFluorescence, simulate=True, frame_settle_s=0.05, frame_timeout_s=0.2
-    )
+    measurement = run_local(CaFFluorescence, simulate=True)
     assert measurement.status == "completed", measurement.attrs["error"]
     assert np.isfinite(measurement.results["counts"][0])
     assert set(measurement.constants["start_set_points"]) == set(LASERS)

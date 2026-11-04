@@ -9,10 +9,6 @@ from pytweezer.drivers.camera_base import (
 THORLABS_DLL_PATH = "C:\\Program Files\\Thorlabs\\Scientific Imaging\\Scientific Camera Support\\Scientific Camera Interfaces\\SDK\\Python Toolkit\\dlls\\64_lib"
 pll.par["devices/dlls/thorlabs_tlcam"] = THORLABS_DLL_PATH
 
-IMAGE_DIRECTORY = (
-    "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/ThorCamImages"
-)
-
 
 class ThorCam(Camera):
     """ThorLabs shim: translates the generic :class:`Camera` interface to the
@@ -30,8 +26,6 @@ class ThorCam(Camera):
         trigger_polarity: str = "rise",
         binning: int | None = None,
         gain_db: float | None = None,
-        buffer_frames: int = 1000,
-        live: bool = False,
     ):
         """Open the camera and apply whichever settings are given.
 
@@ -43,12 +37,10 @@ class ThorCam(Camera):
                 with a ``trigger_mode``.
             binning: Square binning over the full sensor.
             gain_db: Analogue gain in dB.
-            buffer_frames: Ring-buffer size for :meth:`arm`.
-            live: Arm now and broadcast every frame on the image stream.
         """
         self.serial_number = serial_number
         super().__init__(
-            image_dir=image_dir or IMAGE_DIRECTORY,
+            image_dir=image_dir,
             timeout=timeout,
             stream_name=stream_name,
         )
@@ -59,9 +51,6 @@ class ThorCam(Camera):
             self._backend.set_roi(hbin=int(binning), vbin=int(binning))
         if gain_db is not None:
             self._backend.set_gain(float(gain_db))
-        if live:
-            self.arm(buffer_frames)
-            self.start_live()
 
     # ------------------------------------------------------------------ #
     # Camera hooks

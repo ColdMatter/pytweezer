@@ -84,7 +84,7 @@ def test_each_enabled_laser_is_scanned_around_its_saved_set_point_and_best_value
     caf, saved_set_points
 ):
     Spying.calls.clear()
-    measurement = run_local(Spying, frame_settle_s=0.0)
+    measurement = run_local(Spying)
     assert measurement.status == "completed", measurement.attrs["error"]
     for laser in ("v0", "v1", "TCool"):
         assert measurement.constants[f"proposed.{LASER_KEYS[laser]}"] == pytest.approx(
@@ -106,7 +106,7 @@ def test_a_laser_with_no_saved_set_point_names_the_key(caf, monkeypatch):
         lambda: {LASER_KEYS[laser]: START[laser] for laser in LASERS[1:]},
     )
     with pytest.raises(KeyError, match="caf_laser_v0"):
-        run_local(OptimiseMOTLasers, frame_settle_s=0.0)
+        run_local(OptimiseMOTLasers)
     assert caf.motmaster.log == []
 
 

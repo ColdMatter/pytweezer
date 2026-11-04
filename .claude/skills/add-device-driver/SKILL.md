@@ -63,12 +63,15 @@ The base also gives every camera a frame-index protocol, which notebooks' `Rig`
 relies on (see `notebook-rig`): `arm(buffer_frames)` starts a continuous
 ring-buffer acquisition, `frames_acquired()` counts frames since it started,
 `read_frames_from(start)` returns every frame since `start`, `settings()` is
-saved beside frames in zips, and `start_live()` broadcasts every new frame. The
-defaults assume a pylablib backend; otherwise implement
-`_acquisition_in_progress`, `_count_frames` and `_read_range`. Take
-`self._lock` around backend calls the live thread could race. A camera that
-should always stream takes a `live` flag and calls `arm()` and `start_live()`
-at the end of `__init__` (`thorcam.py`).
+saved beside frames in zips. Live mode is something a camera is put in and
+taken out of at run time, never a constructor option: `start_live(buffer_frames)`
+arms it and broadcasts every new frame, `stop_live()` stops the broadcast and
+the acquisition, `is_live()` says which. `CameraExperiment` takes a live camera
+out of live mode for its task and puts it back in `finish`. The defaults assume
+a pylablib backend; otherwise implement `_acquisition_in_progress`,
+`_count_frames` and `_read_range`. Take `self._lock` around backend calls the
+live thread could race. Paths such as `image_dir` come from the CONFIG entry;
+a driver holds no default for them.
 
 `set_roi(x0, width, y0, height)` passes pylablib exclusive ends
 (`x0 + width`, not `x0 + width - 1`) and the current binning from

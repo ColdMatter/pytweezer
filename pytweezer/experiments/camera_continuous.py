@@ -82,7 +82,6 @@ class ContinuousAcquisition(Experiment):
     def run_point(self):
         camera = self.device(self.camera_name)
         camera.stop_live()
-        camera.stop_acquisition()
         camera.set_trigger_source("int")
         camera.set_exposure_time(self.exposure)
         if self.set_gain:
@@ -94,7 +93,8 @@ class ContinuousAcquisition(Experiment):
                 self.roi_x0, self.roi_width, self.roi_y0, self.roi_height
             )
             self.record("roi_origin", [x0, y0], unit="px")
-        camera.arm(self.buffer_frames)
         if self.broadcast:
-            camera.start_live()
+            camera.start_live(self.buffer_frames)
+        else:
+            camera.arm(self.buffer_frames)
         self.record("camera_settings", camera.settings())

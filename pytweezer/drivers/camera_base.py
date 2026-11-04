@@ -156,7 +156,7 @@ class Camera(ABC):
         return self._backend is not None
 
     def close(self) -> None:
-        self.stop_live()
+        self._stop_live_thread()
         try:
             self._disconnect()
         except Exception:
@@ -248,9 +248,13 @@ class Camera(ABC):
         """Camera settings worth keeping with saved frames (JSON-safe)."""
         return {}
 
-    def start_live(self, poll_s: float = 0.05) -> None:
-        """Broadcast every new frame on the image stream from a background thread."""
-        if self._live_thread is not None and self._live_thread.is_alive():
+    def start_live(self, buffer_frames: int = 1000, poll_s: float = 0.05) -> None:
+        """Run free (see :meth:`arm`) and broadcast every new frame on the image stream.
+
+        A camera already live stays as it is.
+        """
+        self.arm(buffer_frames)
+        if self.is_live():
             return
         self._live_stop.clear()
         self._live_thread = threading.Thread(
@@ -262,6 +266,14 @@ class Camera(ABC):
         self._live_thread.start()
 
     def stop_live(self) -> None:
+        """Stop broadcasting and stop the acquisition."""
+        self._stop_live_thread()
+        self.stop_acquisition()
+
+    def is_live(self) -> bool:
+        return self._live_thread is not None and self._live_thread.is_alive()
+
+    def _stop_live_thread(self) -> None:
         self._live_stop.set()
         if self._live_thread is not None:
             self._live_thread.join(timeout=2.0)
@@ -325,7 +337,6 @@ class SimulatedCamera(Camera):
         image_dir: str | None = None,
         timeout: float = 5.0,
         stream_name: str | None = None,
-        live: bool = False,
     ):
         self._shape = (256, 256)
         self._nframes = 1
@@ -333,9 +344,6 @@ class SimulatedCamera(Camera):
         self._started = 0.0
         self._rng = np.random.default_rng()
         super().__init__(image_dir=image_dir, timeout=timeout, stream_name=stream_name)
-        if live:
-            self.arm()
-            self.start_live()
 
     def _connect(self) -> None:
         # No hardware; a non-None sentinel marks the camera as "connected".
