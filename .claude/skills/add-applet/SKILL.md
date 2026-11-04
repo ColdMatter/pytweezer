@@ -155,9 +155,9 @@ Not everything worth viewing is a stream:
 - **Trap sites** (`trap_sites`) are saved as full-sensor `(y, x)` pixels. Place
   them in a frame with `analysis/trap_sites.to_roi(sites, head.get("roi_y0", 0),
   head.get("roi_x0", 0))`, or they sit off the atoms whenever the camera reads an
-  ROI. The Image Monitor draws frames transposed; to match the Optimisers tab and
-  the notebooks (row 0 at the top), use `show_rows_down` from
-  `viewers/tweezer_monitor.py`, which shows the whole pattern.
+  ROI. The Image Monitor draws frames row-major, row 0 at the top and x along the
+  columns, as the Optimisers tab and the notebooks do, so a subclass gets that
+  for free.
 
 A plot that another panel also shows belongs in a widget module under
 `pytweezer/GUI/` that the applet only wraps: `tweezer_loading_plots.py` is drawn
@@ -336,8 +336,10 @@ what was built or why.
   header says so.
 - `viewers/image_monitor.py` — image stream, colormap + histogram LUT, ROIs
   (`CameraROI`: right-click copies one as a sensor-pixel camera ROI), and
-  a hideable sidebar; shows a second stream category (masks) on its own
-  `streamkey`.
+  a data panel below the image (`DataSidebar`: the latest message of each
+  subscribed data stream, one block per stream; on by default); shows a second
+  stream category (masks) on its own `streamkey`, and cloud-fit contour ellipses
+  from `overlaystreams` (`overlay_paths`).
 - `viewers/image_plot_monitor.py` — image with axis-linked projection plots;
   the example to copy for multiple linked plots in one window.
 
