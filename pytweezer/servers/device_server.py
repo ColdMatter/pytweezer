@@ -59,6 +59,9 @@ from pytweezer.logging_utils import get_logger
 
 logger = get_logger("device server")
 
+#: RPC target a composite serves its :class:`_RigControl` under.
+RIG_CONTROL_TARGET = "rigcontrol"
+
 
 @dataclass
 class DeviceServerSpec:
@@ -70,7 +73,9 @@ class DeviceServerSpec:
     :func:`serve`. ``teardown`` (if given) is called in a ``finally``
     after the loop ends, for backends that need an explicit disconnect.
     ``failed`` names the composite sub-devices that could not be built and are
-    therefore absent from :attr:`targets`.
+    therefore absent from :attr:`targets`. ``control`` (composites only) manages
+    those sub-devices one by one and is served as :data:`RIG_CONTROL_TARGET`;
+    :attr:`targets` is changed in place as it does.
     """
 
     target_name: str | None = None
@@ -79,6 +84,7 @@ class DeviceServerSpec:
     teardown: Callable[[], None] | None = None
     targets: dict[str, object] | None = None
     failed: tuple = ()
+    control: object | None = None
 
     def __post_init__(self):
         if self.targets is None:
@@ -243,6 +249,10 @@ def _make_composite(name, conf):
     its camera usable. The coordinator is the exception: it is only constructed when
     *every* sub-device built, since it drives all of them, so an incomplete rig
     leaves the composite's own name unserved rather than half-working.
+
+    The running server also serves a :class:`_RigControl` target
+    (:data:`RIG_CONTROL_TARGET`), which stops, starts or restarts one sub-device
+    without touching the others, rebuilding the coordinator around the change.
     """
     sub_confs = conf.get("devices")
     if not sub_confs:
@@ -261,6 +271,12 @@ def _make_composite(name, conf):
                 f"and {device_name!r} both map to RPC target {target_name!r}"
             )
         target_names[target_name] = device_name
+
+    if RIG_CONTROL_TARGET in target_names:
+        raise ValueError(
+            f"Composite device {name!r}: sub-device {target_names[RIG_CONTROL_TARGET]!r} "
+            f"maps to {RIG_CONTROL_TARGET!r}, the target that controls the rig"
+        )
 
     if conf.get("coordinator") is not None and coordinator_name in target_names:
         raise ValueError(
@@ -283,111 +299,209 @@ def _make_composite(name, conf):
             )
         role_owners[role] = device_name
 
-    targets = {}
-    roles = {}
-    teardowns = []
-    failed = []
-
-    def teardown_all():
-        # Reversed: the coordinator is appended last and must release the backends
-        # before they are closed underneath it.
-        for teardown in reversed(teardowns):
-            _safe(teardown)
-
+    rig = _CompositeRig(name, conf, sub_confs, coordinator_name)
     try:
-        for device_name, sub_conf in sub_confs.items():
-            sub_conf = dict(sub_conf)
-            sub_conf.setdefault("simulate", conf.get("simulate", False))
-
-            try:
-                sub_spec = build_spec(device_name, conf=sub_conf)
-                if len(sub_spec.targets) != 1:
-                    raise ValueError(
-                        f"Composite device {name!r}: sub-device {device_name!r} exposes "
-                        f"{len(sub_spec.targets)} targets; exactly one is required"
-                    )
-                target = next(iter(sub_spec.targets.values()))
-                _check_target_callable(name, device_name, target)
-            except Exception:
-                # One unavailable device must not cost the whole rig its server.
-                logger.exception(
-                    "Composite device %r: sub-device %r failed to start; serving the "
-                    "rest of the rig without it",
-                    name,
-                    device_name,
-                )
-                failed.append(device_name)
-                continue
-
-            targets[composite_target_name(device_name)] = target
-            roles[sub_conf.get("role", device_name)] = target
-            if sub_spec.teardown is not None:
-                teardowns.append(sub_spec.teardown)
-
-        coordinator_path = conf.get("coordinator")
-        if coordinator_path is not None:
-            _add_coordinator(
-                name,
-                conf,
-                coordinator_path,
-                coordinator_name,
-                roles,
-                failed,
-                targets,
-                teardowns,
-            )
+        rig.build()
     except Exception:
         # Release whatever already opened, or a half-built rig leaks hardware handles.
-        teardown_all()
+        rig.teardown()
         raise
 
-    if not targets:
+    if not rig.targets:
         logger.error(
             "Composite device %r: nothing could be started (%s); the server stays up "
             "with no targets so its state is visible, but every client call will fail",
             name,
-            ", ".join(sorted(failed)) or "no sub-devices configured",
+            ", ".join(sorted(rig.unavailable)) or "no sub-devices configured",
         )
 
     return DeviceServerSpec(
-        targets=targets,
+        targets=rig.targets,
         description=conf.get("description", f"composite device server {name!r}"),
-        teardown=teardown_all,
-        failed=tuple(failed),
+        teardown=rig.teardown,
+        failed=tuple(rig.unavailable),
+        control=_RigControl(rig),
     )
 
 
-def _add_coordinator(name, conf, path, target_name, roles, failed, targets, teardowns):
-    """Construct the composite's coordinator into ``targets``, if it can run.
+class _CompositeRig:
+    """The live state of one composite: its sub-devices, coordinator and targets.
 
-    A coordinator drives every backend in the rig, so a partial rig gets none: when
-    any sub-device failed it is skipped, leaving the composite's own name unserved
-    (``get_device(<composite>)`` then raises) rather than serving a coordinator whose
-    ``require_role`` would fail mid-experiment. A coordinator that raises while
-    constructing is skipped the same way — the sub-devices that did build stay
-    individually addressable.
+    :attr:`targets` is the dict the RPC server serves from, and it is changed in
+    place as sub-devices stop and start, so a sub-device can be rebuilt while its
+    siblings keep serving. The coordinator holds references to every backend, so
+    any change to the set of running sub-devices stops it first and rebuilds it
+    afterwards, which succeeds only when every sub-device is running. A client
+    connected to the old coordinator must reconnect.
+
+    Methods run on the server's event loop, like any RPC call, so nothing else is
+    served while one rebuilds a device.
     """
-    if failed:
-        logger.error(
-            "Composite device %r: coordinator not started because sub-device(s) %s are "
-            "unavailable; the rest of the rig is still addressable by device name",
-            name,
-            ", ".join(sorted(failed)),
+
+    def __init__(self, name, conf, sub_confs, coordinator_name):
+        self.name = name
+        self.conf = conf
+        self.sub_confs = sub_confs
+        self.coordinator_name = coordinator_name
+        self.targets = {}
+        self.unavailable = {}  # sub-device name -> "failed" | "stopped"
+        self._roles = {}
+        self._teardowns = {}
+        self._coordinator_teardown = None
+
+    def build(self):
+        for device_name in self.sub_confs:
+            self._build_device(device_name)
+        self._build_coordinator()
+
+    def device_state(self, device_name):
+        return self.unavailable.get(device_name, "up")
+
+    def resolve(self, device_name):
+        """Return the config key of the sub-device ``device_name`` names."""
+        wanted = _normalize(device_name)
+        for key in self.sub_confs:
+            if _normalize(key) == wanted:
+                return key
+        raise KeyError(
+            f"{device_name!r} is not a sub-device of composite {self.name!r}; "
+            f"it has: {', '.join(sorted(self.sub_confs))}"
         )
-        return
-    try:
-        coordinator = _load(path)(roles, conf)
-        _check_target_callable(name, target_name, coordinator)
-    except Exception:
-        logger.exception(
-            "Composite device %r: coordinator %s failed to start; serving its "
-            "sub-devices without it",
-            name,
-            path,
-        )
-        return
-    targets[target_name] = coordinator
-    teardowns.append(coordinator.shutdown)
+
+    def start(self, device_name):
+        device_name = self.resolve(device_name)
+        if device_name in self.unavailable:
+            self.restart(device_name)
+        return self.device_state(device_name)
+
+    def restart(self, device_name):
+        device_name = self.resolve(device_name)
+        self._drop_coordinator()
+        if device_name not in self.unavailable:
+            self._drop_device(device_name)
+        self._build_device(device_name)
+        self._build_coordinator()
+        return self.device_state(device_name)
+
+    def stop(self, device_name):
+        device_name = self.resolve(device_name)
+        self._drop_coordinator()
+        if device_name not in self.unavailable:
+            self._drop_device(device_name)
+        self.unavailable[device_name] = "stopped"
+        return self.device_state(device_name)
+
+    def teardown(self):
+        # The coordinator first: it must release the backends before they close.
+        self._drop_coordinator()
+        for device_name in reversed(list(self._teardowns)):
+            _safe(self._teardowns.pop(device_name))
+
+    def _build_device(self, device_name):
+        sub_conf = dict(self.sub_confs[device_name])
+        sub_conf.setdefault("simulate", self.conf.get("simulate", False))
+        try:
+            sub_spec = build_spec(device_name, conf=sub_conf)
+            if len(sub_spec.targets) != 1:
+                raise ValueError(
+                    f"Composite device {self.name!r}: sub-device {device_name!r} exposes "
+                    f"{len(sub_spec.targets)} targets; exactly one is required"
+                )
+            target = next(iter(sub_spec.targets.values()))
+            _check_target_callable(self.name, device_name, target)
+        except Exception:
+            # One unavailable device must not cost the whole rig its server.
+            logger.exception(
+                "Composite device %r: sub-device %r failed to start; serving the "
+                "rest of the rig without it",
+                self.name,
+                device_name,
+            )
+            self.unavailable[device_name] = "failed"
+            return
+        self.unavailable.pop(device_name, None)
+        self.targets[composite_target_name(device_name)] = target
+        self._roles[sub_conf.get("role", device_name)] = target
+        if sub_spec.teardown is not None:
+            self._teardowns[device_name] = sub_spec.teardown
+
+    def _drop_device(self, device_name):
+        self.targets.pop(composite_target_name(device_name), None)
+        self._roles.pop(self.sub_confs[device_name].get("role", device_name), None)
+        teardown = self._teardowns.pop(device_name, None)
+        if teardown is not None:
+            _safe(teardown)
+
+    def _build_coordinator(self):
+        """Construct the coordinator into :attr:`targets`, if it can run.
+
+        A coordinator drives every backend in the rig, so a partial rig gets none:
+        while any sub-device is unavailable it is skipped, leaving the composite's
+        own name unserved (``get_device(<composite>)`` then raises) rather than
+        serving a coordinator whose ``require_role`` would fail mid-experiment. A
+        coordinator that raises while constructing is skipped the same way — the
+        sub-devices that did build stay individually addressable.
+        """
+        path = self.conf.get("coordinator")
+        if path is None:
+            return
+        if self.unavailable:
+            logger.error(
+                "Composite device %r: coordinator not started because sub-device(s) %s "
+                "are unavailable; the rest of the rig is still addressable by device "
+                "name",
+                self.name,
+                ", ".join(sorted(self.unavailable)),
+            )
+            return
+        try:
+            coordinator = _load(path)(dict(self._roles), self.conf)
+            _check_target_callable(self.name, self.coordinator_name, coordinator)
+        except Exception:
+            logger.exception(
+                "Composite device %r: coordinator %s failed to start; serving its "
+                "sub-devices without it",
+                self.name,
+                path,
+            )
+            return
+        self.targets[self.coordinator_name] = coordinator
+        self._coordinator_teardown = coordinator.shutdown
+
+    def _drop_coordinator(self):
+        self.targets.pop(self.coordinator_name, None)
+        teardown, self._coordinator_teardown = self._coordinator_teardown, None
+        if teardown is not None:
+            _safe(teardown)
+
+
+class _RigControl:
+    """RPC target, served beside a composite's devices, that manages them one by one.
+
+    Stopping, starting or restarting a sub-device leaves the process and the other
+    sub-devices running. Device names match case- and whitespace-insensitively. Each
+    method returns the sub-device's state afterwards: ``"up"``, ``"failed"`` (it
+    could not be built, so see the device log) or ``"stopped"``.
+    """
+
+    def __init__(self, rig):
+        self._rig = rig
+
+    def status(self):
+        """Return ``{sub-device name: state}`` for every sub-device."""
+        return {name: self._rig.device_state(name) for name in self._rig.sub_confs}
+
+    def start(self, device):
+        """Build ``device`` if it is not running."""
+        return self._rig.start(device)
+
+    def stop(self, device):
+        """Release ``device``'s hardware and stop serving it."""
+        return self._rig.stop(device)
+
+    def restart(self, device):
+        """Release ``device`` if it is running, then build it again."""
+        return self._rig.restart(device)
 
 
 def _check_target_name(composite_name, device_name):
@@ -650,6 +764,8 @@ def run_device_server(name, host=None, port=None, allow_parallel=None):
             name,
             ", ".join(sorted(spec.failed)),
         )
+    if spec.control is not None:
+        spec.targets[RIG_CONTROL_TARGET] = spec.control
     try:
         serve(
             name,

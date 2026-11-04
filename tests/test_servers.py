@@ -130,6 +130,103 @@ def test_composite_serves_what_started(sub_confs, coordinator, targets, failed):
     assert survivor is None or not survivor.is_connected()
 
 
+class Flaky:
+    """A device that builds only while ``healthy``, like hardware that gets replugged."""
+
+    healthy = False
+    closed = 0
+
+    def __init__(self):
+        if not Flaky.healthy:
+            raise RuntimeError("not plugged in")
+
+    def close(self):
+        Flaky.closed += 1
+
+
+@pytest.fixture
+def flaky_rig():
+    Flaky.healthy, Flaky.closed = False, 0
+    conf = {
+        "host": "h",
+        "port": 1,
+        "devices": {
+            "Good SLM": _WORKING_SLM,
+            "Flaky Cam": {"class": f"{__name__}:Flaky", "teardown": "close"},
+        },
+        "coordinator": _COORDINATOR,
+    }
+    spec = device_server.build_spec("Rig", conf=conf)
+    yield spec
+    spec.teardown()
+
+
+def test_a_failed_sub_device_restarts_alone_and_brings_the_coordinator_back(flaky_rig):
+    spec = flaky_rig
+    slm = spec.targets["goodslm"]
+    assert set(spec.targets) == {"goodslm"}
+
+    Flaky.healthy = True
+    assert spec.control.restart("flaky cam") == "up"
+
+    assert set(spec.targets) == {"goodslm", "flakycam", "coordinator"}
+    assert spec.targets["goodslm"] is slm and slm.is_connected()
+    assert spec.control.status() == {"Good SLM": "up", "Flaky Cam": "up"}
+
+
+def test_a_restart_that_fails_again_leaves_the_rest_serving(flaky_rig):
+    spec = flaky_rig
+    assert spec.control.restart("Flaky Cam") == "failed"
+    assert set(spec.targets) == {"goodslm"}
+    assert spec.targets["goodslm"].is_connected()
+
+
+def test_restarting_a_running_sub_device_releases_the_old_one_first(flaky_rig):
+    spec = flaky_rig
+    Flaky.healthy = True
+    spec.control.restart("Flaky Cam")
+    old_cam, old_coordinator = spec.targets["flakycam"], spec.targets["coordinator"]
+
+    assert spec.control.restart("Flaky Cam") == "up"
+    assert Flaky.closed == 1
+    assert spec.targets["flakycam"] is not old_cam
+    assert spec.targets["coordinator"] is not old_coordinator
+    assert spec.targets["goodslm"].is_connected()
+
+
+def test_a_stopped_sub_device_stays_down_until_started(flaky_rig):
+    spec = flaky_rig
+    Flaky.healthy = True
+    spec.control.restart("Flaky Cam")
+
+    assert spec.control.stop("Flaky Cam") == "stopped"
+    assert set(spec.targets) == {"goodslm"}
+    assert Flaky.closed == 1
+
+    assert spec.control.start("Flaky Cam") == "up"
+    assert spec.control.start("Flaky Cam") == "up"  # already up: not rebuilt
+    assert set(spec.targets) == {"goodslm", "flakycam", "coordinator"}
+
+
+def test_rig_control_names_the_sub_devices_when_given_a_wrong_one(flaky_rig):
+    with pytest.raises(KeyError, match="Flaky Cam"):
+        flaky_rig.control.restart("Nope")
+
+
+def test_rig_control_endpoint(captured_rpc):
+    device_client.get_rig_control("Rb Feedback Cam")
+    assert captured_rpc["target_name"] == device_server.RIG_CONTROL_TARGET
+    assert (captured_rpc["host"], captured_rpc["port"]) == ("1.2.3.9", 6000)
+    with pytest.raises(KeyError, match="not part of a composite"):
+        device_client.get_rig_control("Rb HamCam")
+
+
+def test_composite_rejects_a_sub_device_named_like_the_rig_control():
+    conf = {"host": "h", "port": 1, "devices": {"RigControl": _WORKING_SLM}}
+    with pytest.raises(ValueError, match="controls the rig"):
+        device_server.build_spec("Rig", conf=conf)
+
+
 def test_composite_rejects_a_nested_composite():
     with pytest.raises(ValueError):
         device_server.build_spec(

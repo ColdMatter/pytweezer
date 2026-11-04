@@ -123,8 +123,6 @@ def test_devices_panel_breaks_composites_into_sub_device_rows(devices_panel):
     panel, _control = devices_panel(_PANEL_CONFIG)
 
     assert set(panel._rows) == {"Rig", "Rig Cam", "Rig SLM"}
-    # Sub-devices share the rig's process, so only the rig is startable.
-    assert panel._rows["Rig Cam"].toggleButton is None
     assert panel._rows["Rig Cam"].property("tier") == "child"
     assert panel._rows["Rig"].property("tier") is None
 
@@ -142,6 +140,32 @@ def test_devices_panel_breaks_composites_into_sub_device_rows(devices_panel):
         "up",
         "failed",
     ]
+
+
+def test_sub_device_toggle_asks_the_running_rig_not_the_gui_channel(
+    devices_panel, monkeypatch
+):
+    import threading
+
+    from bin import managed_panel
+
+    done = threading.Event()
+    calls = []
+    monkeypatch.setattr(
+        managed_panel,
+        "_run_rig_action",
+        lambda device, action: (calls.append((action, device)), done.set()),
+    )
+    panel, control = devices_panel(_PANEL_CONFIG)
+    cam = panel._rows["Rig Cam"]
+    cam.apply_status("failed")
+
+    cam.toggleButton.click()
+
+    assert done.wait(5)
+    assert calls == [("start", "Rig Cam")]
+    assert control.sent == []
+    assert cam.property("state") == "starting"
 
 
 def test_remote_device_toggle_sends_requests_and_waits_for_the_feed(devices_panel):

@@ -50,7 +50,7 @@ from sipyco.pc_rpc import AsyncioClient, AutoTarget
 from sipyco.pc_rpc import Client as RPCClient
 
 from pytweezer.logging_utils import get_logger
-from pytweezer.servers.device_server import resolve_address
+from pytweezer.servers.device_server import RIG_CONTROL_TARGET, resolve_address
 
 logger = get_logger("device client")
 
@@ -176,6 +176,24 @@ def get_device(name, host=None, port=None, target_name=AutoTarget, timeout=None)
         return RPCClient(host, port, target_name=target_name, timeout=timeout)
     except ValueError as exc:
         _reraise_multi_target(name, exc)
+
+
+def get_rig_control(name, timeout=None):
+    """Build the client that stops, starts and restarts a composite's sub-devices.
+
+    ``name`` is the composite or any of its sub-devices. The client's ``restart``,
+    ``start`` and ``stop`` take a sub-device name and leave the process and the
+    other sub-devices running; ``status`` returns every sub-device's state::
+
+        get_rig_control("Rb Feedback Rig").restart("Rb Feedback Cam")
+    """
+    owner = resolve_address(name).owner_conf
+    if "devices" not in owner:
+        raise KeyError(f"Device {name!r} is not part of a composite device")
+    host, port = owner.get("host", "127.0.0.1"), owner.get("port")
+    if port is None:
+        raise ValueError(f"Device {name!r} has no 'port' configured")
+    return RPCClient(host, int(port), target_name=RIG_CONTROL_TARGET, timeout=timeout)
 
 
 async def get_device_async(name, host=None, port=None, target_name=AutoTarget):

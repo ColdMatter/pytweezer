@@ -41,6 +41,7 @@ from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import tweezerpath
+from pytweezer.servers.device_client import get_rig_control
 from pytweezer.servers.device_control import DeviceControlChannel
 from pytweezer.servers.device_status import DeviceStatusClient
 from pytweezer.servers.process_cleanup import kill_device_process
@@ -507,6 +508,34 @@ def _stop_orphan(name):
 _SUB_DEVICE_INDENT = 18
 
 
+def _run_rig_action(device, action):
+    client = None
+    try:
+        client = get_rig_control(device)
+        state = getattr(client, action)(device)
+        logger.info("%s of %s: now %s", action, device, state)
+    except Exception:
+        logger.exception("Could not %s sub-device %s", action, device)
+    finally:
+        if client is not None:
+            try:
+                client.close_rpc()
+            except Exception:
+                pass
+
+
+def _rig_request(device):
+    """A ``remote_request`` that starts or stops one sub-device of a running rig."""
+
+    def request(action):
+        # Off the GUI thread: building a device can take seconds.
+        threading.Thread(
+            target=_run_rig_action, args=(device, action), daemon=True
+        ).start()
+
+    return request
+
+
 class DevicesPanel(BWidget):
     """Devices tab: Start/Stop toggle + cross-PC status for every device.
 
@@ -517,11 +546,11 @@ class DevicesPanel(BWidget):
     host, and this panel in turn carries out the requests addressed to its own
     devices.
 
-    A composite device gets a row for the rig itself plus an indented, view-only
-    row per sub-device, because a rig comes up serving only the devices that
-    opened successfully and each one's state has to be readable on its own. Only
-    the rig row is controllable: sub-devices share its process and start and stop
-    with it.
+    A composite device gets a row for the rig itself plus an indented row per
+    sub-device, because a rig comes up serving only the devices that opened
+    successfully and each one's state has to be readable on its own. The rig row
+    starts and stops the whole process; a sub-device row asks the running rig to
+    stop or start that one device, from any PC, leaving the rest serving.
     """
 
     def __init__(self, name, parent=None):
@@ -589,11 +618,16 @@ class DevicesPanel(BWidget):
             for sub_name in sorted(params.get("devices") or {}):
                 sub_row = ManagedRow(
                     sub_name,
-                    tooltip=f"Served by {pname}; starts and stops with it",
+                    tooltip=f"Served by {pname}",
                     controllable=False,
                     show_last_seen=True,
                     indent=_SUB_DEVICE_INDENT,
                     reserve_control=True,
+                    remote_request=_rig_request(sub_name),
+                )
+                sub_row.toggleButton.setToolTip(
+                    f"Stop or start this device alone; {pname} and its other "
+                    "devices keep running"
                 )
                 self._rows[sub_name] = sub_row
                 outer.addWidget(sub_row)

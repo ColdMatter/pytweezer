@@ -103,6 +103,13 @@ name, so `get_device` on it raises `KeyError` naming its sub-devices.
   still serves. The **coordinator is the exception** — it drives every backend,
   so it is built only when all sub-devices built, and stands down otherwise
   rather than failing halfway through an experiment.
+- **A sub-device restarts on its own.** Each composite also serves a `rigcontrol`
+  target (`_RigControl`, over `_CompositeRig`, both in `device_server.py`) with
+  `status`/`start`/`stop`/`restart(device_name)`; `get_rig_control(name)` returns its
+  client, and the Devices tab's sub-device rows use it. The process and the other
+  sub-devices keep serving. The coordinator holds references to every backend, so
+  it is dropped and rebuilt around any change (only when every sub-device is up),
+  and a client connected to the old one must reconnect.
 - If every sub-device fails, the server still binds its port with no targets.
   That is deliberate: the rig reads as "running, all parts failed" in the Devices
   tab, which is diagnosable, where an exited process looks like one never
