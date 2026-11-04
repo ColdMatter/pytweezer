@@ -90,6 +90,18 @@ def test_broadcast_frames_say_which_roi_they_were_read_from(camera, clock, roi):
     assert all(h["rid"] == 3 for h in recorder.headers)
 
 
+def test_broadcast_frames_say_their_binning(camera, clock):
+    recorder = Recorder()
+    camera.image_client = recorder
+    camera.set_binning(2)
+    camera.arm()
+    clock.now += 0.6
+
+    camera.acquire_n_frames(2, broadcast=True)
+
+    assert [h["binning"] for h in recorder.headers] == [2, 2]
+
+
 def test_live_mode_can_be_left_and_entered_again(camera):
     camera.start_live()
     camera.stop_live()

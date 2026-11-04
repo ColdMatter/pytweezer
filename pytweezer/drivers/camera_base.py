@@ -57,6 +57,8 @@ class Camera(ABC):
     image_prefix: str = "image"
     #: Sensor pixel ``(x0, y0)`` of the ROI's corner, as the last :meth:`set_roi` left it.
     roi_origin: tuple[int, int] = (0, 0)
+    #: Pixels per side the frames are binned by, as the last :meth:`set_binning` or :meth:`set_roi` left it.
+    binning: int = 1
 
     def __init__(
         self,
@@ -298,12 +300,14 @@ class Camera(ABC):
                 sent += 1
 
     def broadcast_image(self, image: np.ndarray, info) -> None:
-        """Send ``image`` on the image hub, its header saying which ROI it was read from."""
+        """Send ``image`` on the image hub, its header saying which ROI and binning it was read with."""
         if self.image_client is None:
             LOGGER.error("tried to broadcast image but no client exists")
             return
         roi_x0, roi_y0 = self.roi_origin
-        self.image_client.send({"roi_x0": roi_x0, "roi_y0": roi_y0, **info}, image)
+        self.image_client.send(
+            {"roi_x0": roi_x0, "roi_y0": roi_y0, "binning": self.binning, **info}, image
+        )
 
     @classmethod
     def save_tiff(
@@ -364,7 +368,7 @@ class SimulatedCamera(Camera):
         self._exposure = float(exposure)
 
     def set_binning(self, binning: int) -> None:
-        self._binning = int(binning)
+        self.binning = int(binning)
 
     def set_gain(self, gain: float) -> None:
         self._gain = float(gain)

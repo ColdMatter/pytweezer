@@ -153,6 +153,14 @@ def test_drivers_keep_the_roi_origin_the_camera_used(cls):
     assert driver.roi_origin == (108, 220)
 
 
+@pytest.mark.parametrize("cls", DRIVERS, ids=DRIVER_IDS)
+def test_drivers_keep_the_binning_the_camera_reads_with(cls):
+    driver = _driver(cls)
+    driver._backend.binning = (4, 4)
+    driver.set_roi(110, 256, 220, 64)
+    assert driver.binning == 4
+
+
 # pylablib's DCAM cameras take (mode, nframes); its Thorlabs cameras have no
 # modes and take only the ring-buffer size.
 SETUPS = {

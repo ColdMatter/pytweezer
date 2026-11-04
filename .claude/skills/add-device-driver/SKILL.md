@@ -78,7 +78,9 @@ a driver holds no default for them.
 `get_roi()` (pylablib's `set_roi` resets binning to 1 otherwise), stores the corner the camera actually
 applied in `self.roi_origin` and returns it: `broadcast_image` puts it in every
 frame's header as `roi_x0`/`roi_y0`, which is how analyses place trap sites on
-a cropped frame.
+a cropped frame. `set_roi` and `set_binning` also keep the binning in
+`self.binning`, broadcast as `binning`, so a viewer can turn frame pixels back
+into sensor pixels.
 `set_binning` and `set_gain` are optional (the base raises
 `NotImplementedError`); `CameraExperiment` calls them only when a
 `CameraShots` declaration sets `binning` or `gain`, so a driver without them

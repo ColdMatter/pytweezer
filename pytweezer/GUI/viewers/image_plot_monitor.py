@@ -24,7 +24,7 @@ from PyQt6 import QtCore
 from PyQt6.QtWidgets import QVBoxLayout
 
 from pytweezer.GUI.applet import Applet, run_applet
-from pytweezer.GUI.viewers.archive.zmq_ROI import zmq_ROI
+from pytweezer.GUI.viewers.image_monitor import CameraROI
 from pytweezer.servers import DataClient, ImageClient, PropertyAttribute
 
 
@@ -65,6 +65,7 @@ class ImagePlotDisplay(Applet):
 
         imgdata = np.ones((100, 100))
         self.image_item = pg.ImageItem(imgdata)
+        self.image_head = None
         self.image_item.setRect(PyQt6.QtCore.QRect(0, 0, 100, 100))
         lut.setImageItem(self.image_item)
         # The colormap goes on the histogram's gradient, not on the image: a
@@ -90,7 +91,7 @@ class ImagePlotDisplay(Applet):
         view_box.setAspectLocked(True)
 
         for region in self._roilist:
-            roi = zmq_ROI(self.name + "/ROI/" + region, invertible=True)
+            roi = CameraROI(self.name + "/ROI/" + region, self, invertible=True)
             roi.addScaleHandle((1, 1), center=(0, 0))
             self.plot.addItem(roi)
 
@@ -146,6 +147,7 @@ class ImagePlotDisplay(Applet):
             msg, head, imgdata = self.imgstream.recv()
             self.image_item.setImage(imgdata, autoLevels=True)
             self.image_item.resetTransform()
+            self.image_head = head
             try:
                 self.imgresolution = head["_imgresolution"]
                 offset = np.array(head["_offset"]) * np.array(self.imgresolution)

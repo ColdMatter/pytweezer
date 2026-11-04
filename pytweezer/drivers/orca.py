@@ -51,10 +51,11 @@ class ORCACamera(Camera):
 
     def set_roi(self, x0: int, width: int, y0: int, height: int):
         *_, hbin, vbin = self._backend.get_roi()
-        hstart, _, vstart, *_ = self._backend.set_roi(
+        hstart, _, vstart, _, hbin, _ = self._backend.set_roi(
             x0, x0 + width, y0, y0 + height, hbin, vbin
         )
         self.roi_origin = (int(hstart), int(vstart))
+        self.binning = int(hbin)
         return self.roi_origin
 
     def set_trigger_source(self, source: str):
@@ -85,6 +86,7 @@ class ORCACamera(Camera):
 
     def set_binning(self, binning: int):
         self._backend.set_attribute_value("binning", int(binning))
+        self.binning = int(binning)
 
     def set_readout_speed(self, speed: int):
         self._backend.set_attribute_value("readout_speed", int(speed))

@@ -1,6 +1,13 @@
 """Image-viewer applet: subscribes to image streams and displays them live.
 
 Built on :class:`pytweezer.GUI.applet.Applet`.
+
+Right-click an ROI and choose **Copy as camera ROI** to put
+``(x0, width, y0, height)`` on the clipboard: the region of the last frame
+under that ROI in unbinned sensor pixels, the argument order of the
+cameras' ``set_roi`` and of ``CameraShots(roi=...)``. It is worked out from
+the frame header's ``roi_x0``/``roi_y0`` and ``binning``, so it is only
+meaningful on a camera's own stream.
 """
 
 import matplotlib.pyplot as plt
@@ -8,17 +15,86 @@ import numpy as np
 import PyQt6
 import pyqtgraph as pg
 from PyQt6 import QtCore
+from PyQt6.QtGui import QAction, QCursor, QGuiApplication
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
+    QMenu,
     QSpinBox,
+    QToolTip,
     QVBoxLayout,
 )
 
 from pytweezer.GUI.applet import Applet, run_applet
 from pytweezer.GUI.viewers.archive.zmq_ROI import zmq_ROI
 from pytweezer.GUI.viewers.data_sidebar import DataSidebar
+from pytweezer.logging_utils import get_logger
 from pytweezer.servers import ImageClient, PropertyAttribute, tweezerpath
+
+logger = get_logger(__name__)
+
+
+def camera_roi(
+    roi: pg.ROI, image_item: pg.ImageItem, head: dict
+) -> tuple[int, int, int, int] | None:
+    """The camera ROI ``(x0, width, y0, height)`` that reads the part of ``image_item``'s frame under ``roi``.
+
+    In unbinned sensor pixels, from the ROI origin and binning in the frame's
+    ``head``; ``None`` when ``roi`` misses the frame.
+    """
+    rect = roi.mapRectToItem(image_item, roi.boundingRect())
+    horizontal = sorted((rect.left(), rect.right()))
+    vertical = sorted((rect.top(), rect.bottom()))
+    if image_item.axisOrder == "col-major":
+        row_span, col_span = horizontal, vertical
+    else:
+        row_span, col_span = vertical, horizontal
+    rows, cols = image_item.image.shape[:2]
+    row0, row1 = max(0, round(row_span[0])), min(rows, round(row_span[1]))
+    col0, col1 = max(0, round(col_span[0])), min(cols, round(col_span[1]))
+    if row1 <= row0 or col1 <= col0:
+        return None
+    binning = int(head.get("binning", 1))
+    return (
+        int(head.get("roi_x0", 0)) + col0 * binning,
+        (col1 - col0) * binning,
+        int(head.get("roi_y0", 0)) + row0 * binning,
+        (row1 - row0) * binning,
+    )
+
+
+class CameraROI(zmq_ROI):
+    """A :class:`zmq_ROI` whose context menu copies it as a camera ROI.
+
+    ``viewer`` draws the frames in ``viewer.image_item`` and keeps the last
+    one's header as ``viewer.image_head`` (``None`` until a frame arrives).
+    """
+
+    def __init__(self, name, viewer, **kwargs):
+        super().__init__(name, **kwargs)
+        self.viewer = viewer
+        self.menu = QMenu("ROI")
+        copy = QAction("Copy as camera ROI", self.menu)
+        copy.triggered.connect(self.copy_as_camera_roi)
+        self.menu.addAction(copy)
+
+    def contextMenuEnabled(self):
+        return True
+
+    def copy_as_camera_roi(self) -> None:
+        head = self.viewer.image_head
+        if head is None:
+            message = "No frame yet: the camera ROI comes from the last frame"
+        elif (sensor_roi := camera_roi(self, self.viewer.image_item, head)) is None:
+            message = "The ROI is outside the frame"
+        else:
+            text = "({}, {}, {}, {})".format(*sensor_roi)
+            QGuiApplication.clipboard().setText(text)
+            message = f"Copied camera ROI (x0, width, y0, height) = {text}"
+            if "binning" not in head:
+                message += "\nThe frame does not say its binning; taken as 1"
+            logger.info("%s from %s", message, self.name)
+        QToolTip.showText(QCursor.pos(), message)
 
 
 class ImageDisplay(Applet):
@@ -45,6 +121,7 @@ class ImageDisplay(Applet):
         self.imDataDict = {}
         self.imgresolution = [1, 1]
         self.image_index = -1
+        self.image_head = None
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -95,7 +172,7 @@ class ImageDisplay(Applet):
         plot.addItem(mask)
         self.mask = mask
         for region in self._roilist:
-            roi = zmq_ROI(self.name + "/ROI/" + region, invertible=True)
+            roi = CameraROI(self.name + "/ROI/" + region, self, invertible=True)
             roi.addScaleHandle((1, 1), center=(0, 0))
             plot.addItem(roi)
         content.addWidget(graphics_layout_widget, 1)

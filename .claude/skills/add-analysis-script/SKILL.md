@@ -110,7 +110,8 @@ Useful header keys, all optional — read them with `head.get(...)`. A camera
 frame (`Camera.broadcast_image` in `drivers/camera_base.py`) carries `timestamp`,
 `index` (the frame's number as read: its place in the shot when an experiment
 reads a shot, counting up from the acquisition start when broadcast live),
-`roi_x0`/`roi_y0` (the sensor pixel of the frame's corner) and `rid` when the
+`roi_x0`/`roi_y0` (the sensor pixel of the frame's corner), `binning` (sensor
+pixels per frame pixel, per side) and `rid` when the
 experiment that read it passes one. A change of `rid` is the natural reset for
 anything that accumulates over a task, as `tweezer_loading.py` does. Some
 publishers add `_offset` (pixel origin of a crop within its parent frame) and

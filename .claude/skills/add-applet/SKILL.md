@@ -119,7 +119,8 @@ Header keys are all optional — use `head.get(...)`. A camera frame
 (`Camera.broadcast_image` in `drivers/camera_base.py`) carries `timestamp`,
 `index` (the frame's number as read: its place in the shot when an experiment
 reads a shot, counting up from the acquisition start when broadcast live),
-`roi_x0`/`roi_y0` (the sensor pixel of the frame's corner), and `rid` when the
+`roi_x0`/`roi_y0` (the sensor pixel of the frame's corner), `binning` (sensor
+pixels per frame pixel, per side), and `rid` when the
 experiment that read it passes one (`LoadTweezers` does). The pair `_offset`/`_imgresolution` (pixel origin and metres
 per pixel) is set by some publishers (`roi_slice.py`, `experiments/slm_tweezer_array.py`)
 and not others.
@@ -333,7 +334,8 @@ what was built or why.
   trap sites over each frame by its ROI origin.
 - `viewers/slm_monitor.py` — two image streams side by side, in metres when the
   header says so.
-- `viewers/image_monitor.py` — image stream, colormap + histogram LUT, ROIs, and
+- `viewers/image_monitor.py` — image stream, colormap + histogram LUT, ROIs
+  (`CameraROI`: right-click copies one as a sensor-pixel camera ROI), and
   a hideable sidebar; shows a second stream category (masks) on its own
   `streamkey`.
 - `viewers/image_plot_monitor.py` — image with axis-linked projection plots;
