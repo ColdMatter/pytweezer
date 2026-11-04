@@ -54,6 +54,7 @@ FIELDS = (
     "offset",
     "integral",
 )
+SPECIES_MASS_AMU = {"CaF": 59.0, "Rb": 86.909}
 ERROR_FIELDS = ("x0", "y0", "sigma_x", "sigma_y", "sigma_major", "sigma_minor")
 
 _SEED_BINS = 256
@@ -220,7 +221,10 @@ def _moments_seed(image: np.ndarray) -> tuple[np.ndarray, bool]:
     factor = max(1, min(math.ceil(max(rows, cols) / _SEED_BINS), rows, cols))
     coarse = _block_mean(image, factor)
     baseline, _ = _baseline_and_noise(coarse)
-    z_max, row, col, bins, smoothed, level_baseline, noise, sigma_bins = _detect(coarse)
+    detected = _detect(coarse)
+    if detected is None:
+        return np.array([0.0, cols / 2, rows / 2, 0.0, 0.0, 0.0, baseline]), False
+    z_max, row, col, bins, smoothed, level_baseline, noise, sigma_bins = detected
     step = bins * factor  # pixels per bin of the detecting level
     centre_x, centre_y = (col + 0.5) * step, (row + 0.5) * step
     if z_max < _SEED_MIN_SIGNIFICANCE:
@@ -335,7 +339,13 @@ def _fit_window(image, p, window):
 def _fit_pixels(
     image: np.ndarray, seed: tuple[np.ndarray, bool] | None = None
 ) -> tuple[np.ndarray, bool]:
-    """Fit the cloud in pixel space, from ``seed`` or the moments seed."""
+    """Fit the cloud in pixel space, from ``seed`` or the moments seed.
+
+    An image that is not 2-D, is empty or too small to search, or holds a NaN or
+    infinity fails (``ok`` False) rather than raising.
+    """
+    if image.ndim != 2 or image.size == 0 or not np.isfinite(image).all():
+        return np.zeros(7), False
     p, ok = _moments_seed(image) if seed is None else seed
     if not ok:
         return p, False

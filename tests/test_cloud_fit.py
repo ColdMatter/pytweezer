@@ -79,12 +79,24 @@ def test_fit_reports_in_frame_coordinates():
     assert -np.pi / 2 < fit.angle <= np.pi / 2
 
 
-def test_blank_frame_fails_quietly():
-    frame = np.random.default_rng(1).poisson(100.0, (400, 400)).astype(np.float64)
+@pytest.mark.parametrize(
+    "frames",
+    [
+        np.random.default_rng(1).poisson(100.0, (1, 400, 400)).astype(np.float64),
+        np.full((2, 64, 64), np.nan),
+        np.full((1, 64, 64), np.inf),
+        np.zeros((1, 0, 0)),
+        np.ones((1, 1, 50)),
+        np.ones((1, 3, 3)),
+    ],
+    ids=["blank", "nan", "inf", "empty", "one-row", "tiny"],
+)
+def test_frame_with_no_cloud_gives_nan_fields_not_an_error(frames):
     started = time.perf_counter()
-    fit = fit_cloud(frame)
+    values, _ = fit_frames(frames, None, None, (0, 0))
 
-    assert fit.success is False
+    assert np.isnan(values["sigma_x"])
+    assert np.isnan(values["sigma_x_error"])
     assert time.perf_counter() - started < 1.0
 
 
