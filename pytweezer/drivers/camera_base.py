@@ -264,6 +264,10 @@ class Camera(ABC):
         """Camera settings worth keeping with saved frames (JSON-safe)."""
         return {}
 
+    def frame_geometry(self) -> tuple[int, tuple[int, int]]:
+        """``(binning, (x0, y0))`` the camera reads frames with now: :attr:`binning` and :attr:`roi_origin`."""
+        return self.binning, self.roi_origin
+
     def start_live(self, buffer_frames: int = 1000, poll_s: float = 0.05) -> None:
         """Run free (see :meth:`arm`) and broadcast every new frame on the image stream.
 

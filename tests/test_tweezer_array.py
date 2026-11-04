@@ -129,6 +129,9 @@ class FakeORCA:
     def stop_acquisition(self): ...
     def stop_live(self): ...
 
+    def frame_geometry(self):
+        return 1, (0, 0)
+
     def is_live(self):
         return False
 

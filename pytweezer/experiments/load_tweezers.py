@@ -287,6 +287,7 @@ class LoadTweezersMOTImage(LoadTweezers):
     )
 
     def configure_camera(self, name: str, camera) -> None:
+        # The HamCam's EM-gain calls don't exist on the ORCA.
         if name == "hamcam":
             super().configure_camera(name, camera)
 

@@ -51,6 +51,8 @@ class FakeCamera:
         self.frame = gaussian_frame()
         self.background_frame = gaussian_frame(cloud=False, seed=1)
         self.headers = []
+        self.binning = BINNING
+        self.roi_origin = ROI_ORIGIN
 
     def close_rpc(self):
         pass
@@ -67,6 +69,9 @@ class FakeCamera:
 
     def set_roi(self, x0, width, y0, height):
         return ROI_ORIGIN
+
+    def frame_geometry(self):
+        return self.binning, self.roi_origin
 
     def acquire_n_frames(self, nframes, broadcast=False, header=None):
         self.headers.append(header)
@@ -162,6 +167,25 @@ def test_point_without_a_cloud_records_nan(camera, frame):
 
     assert np.isnan(measurement.results["thorcam_sigma_x"][0])
     assert np.isnan(measurement.results["thorcam_x0_error"][0])
+
+
+def test_cloud_geometry_comes_from_the_camera_not_the_declared_shots(camera):
+    class Undeclared(Shots):
+        thorcam = CameraShots("Rb ThorCam", frames=2)
+
+    camera.binning, camera.roi_origin = 4, (60, 100)
+    measurement = run(Undeclared)
+    resolution = PIXEL_M * 4
+
+    assert measurement.results["thorcam_sigma_x"][0] == pytest.approx(
+        6 * resolution, rel=0.03
+    )
+    assert measurement.results["thorcam_x0"][0] == pytest.approx(
+        (60 / 4 + CLOUD["x0"] + 0.5) * resolution, rel=1e-3
+    )
+    assert measurement.results["thorcam_y0"][0] == pytest.approx(
+        (100 / 4 + CLOUD["y0"] + 0.5) * resolution, rel=1e-3
+    )
 
 
 @pytest.mark.parametrize("species, mass", [("CaF", 59.0), ("Rb", 86.909), (None, None)])

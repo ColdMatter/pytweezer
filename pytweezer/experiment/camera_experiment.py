@@ -419,12 +419,15 @@ class CameraExperiment(MotMasterExperiment):
     def _cloud_geometry(
         self, name: str
     ) -> tuple[tuple[float, float] | None, tuple[float, float]]:
-        """``(resolution, origin)`` of camera ``name``'s frames for :func:`fit_frames`."""
+        """``(resolution, origin)`` of camera ``name``'s frames for :func:`fit_frames`.
+
+        Binning and ROI origin are read from the camera, which may have been set
+        outside this experiment.
+        """
         conf = get_device_config(self.camera_shots()[name].device_name)
-        binning = self._applied[name].binning or conf.get("binning") or 1
+        binning, (x0, y0) = self.cameras[name].frame_geometry()
         pixel_m = conf.get("object_pixel_m")
         resolution = None if pixel_m is None else (pixel_m * binning,) * 2
-        x0, y0 = self.roi_origins.get(name) or (0, 0)
         return resolution, (x0 / binning, y0 / binning)
 
     def run_point(self) -> None:
