@@ -1,4 +1,5 @@
 import warnings
+import zipfile
 from datetime import date
 from types import SimpleNamespace
 
@@ -15,7 +16,7 @@ from pytweezer.notebook import Rig, plot_auto_mot_results, zips
 from pytweezer.optimisers.optimise_mot_lasers import LASER_KEYS, OptimiseMOTLasers
 from tests.helpers import in_process_client
 from tests.test_caf_fluorescence import START
-from tests.test_notebook_zips import fake_motmaster_zip, read_zip_like_analysis3
+from tests.test_notebook_zips import fake_motmaster_zip
 from tests.test_optimise_mot_lasers import caf as caf_experiment  # noqa: F401
 from tests.test_optimise_mot_lasers import saved_set_points  # noqa: F401
 
@@ -197,29 +198,28 @@ def test_cameras_go_live_once_the_rig_is_made(rig_parts):
     assert all(camera.live_buffer == 1000 for camera in cameras.values())
 
 
-def test_saved_run_puts_caf_frames_in_motmasters_zip_and_rb_in_a_sibling(rig_parts):
+def test_saved_run_puts_every_cameras_frames_in_motmasters_zip(rig_parts, tmp_path):
     rig, _, _ = rig_parts()
     shot = rig.run("S")
-    caf, caf_params = read_zip_like_analysis3(shot.zips["CaF"])
-    rb, rb_params = read_zip_like_analysis3(shot.zips["Rb"])
-    assert caf.shape[0] == 3 and rb.shape[0] == 2
-    assert caf_params == rb_params == {"dummy": 0.0}
-    assert shot.zips["Rb"].name == "Rb" + shot.zips["CaF"].name[3:]
+    assert list(tmp_path.rglob("*.zip")) == [shot.zip_path]
+    tifs = [n for n in zipfile.ZipFile(shot.zip_path).namelist() if n.endswith(".tif")]
+    assert sum(n.startswith("CaF_") for n in tifs) == 3
+    assert sum(n.startswith("Rb_") for n in tifs) == 2
     assert shot.zip_number == 0
 
 
 def test_iterations_land_in_one_zip(rig_parts):
     rig, _, _ = rig_parts()
     shot = rig.run("S", iterations=3)
-    images, _ = read_zip_like_analysis3(shot.zips["CaF"])
-    assert images.shape[0] == 9
+    names = zipfile.ZipFile(shot.zip_path).namelist()
+    assert sum(n.startswith("CaF_") and n.endswith(".tif") for n in names) == 9
     assert shot.images["CaF"].shape[0] == 9
 
 
 def test_unsaved_run_writes_no_zip(rig_parts, tmp_path):
     rig, motmaster, _ = rig_parts()
     shot = rig.run("S", save=False)
-    assert shot.zips == {}
+    assert shot.zip_path is None
     assert shot.zip_number is None
     assert ("save", False) in motmaster.calls
     assert not list(tmp_path.rglob("*.zip"))
@@ -661,5 +661,5 @@ def test_a_simulated_motmaster_runs_without_saving(monkeypatch, tmp_path):
     rig = Rig("MM", {}, frame_settle_s=0.0)
     with pytest.warns(UserWarning, match="simulated"):
         shot = rig.run("S")
-    assert shot.zips == {}
+    assert shot.zip_path is None
     assert ("save", False) in rig.motmaster.calls
