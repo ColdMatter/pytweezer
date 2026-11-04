@@ -176,8 +176,8 @@ fields `rid`, `index`, `_imgresolution`, `_offset` are carried through.
 sharing its x-axis and a plot left of it sharing its y-axis. One property,
 `projectionstreams`, names projection analyses; `<name>_x` draws in the top
 plot and `<name>_y` in the left, each as the sum plus its fit curve.
-`image_plot_monitor.py` is deleted; the builder moves any Properties/CONFIG
-references to it.
+`image_plot_monitor.py` is rewritten in place as this subclass; its path is
+kept because `applet_launcher.py` and `properties.json` launch it.
 
 ## Experiments
 
