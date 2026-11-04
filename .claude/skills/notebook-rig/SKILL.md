@@ -23,6 +23,7 @@ rig.linked = True                        # for a linked Rb+CaF script
 shot = rig.run("LinkedRbCaFMOT", iterations=3, dummy=0.0)
 images, params = shot.images["CaF"], shot.params   # what CaF.readFromZip(n) gave
 shot.zip_number                          # MOTMaster's run number, None if save=False
+shot.zip_path                            # the run zip holding every camera's frames
 
 shots = rig.scan("BX_BMOT_OP_magtrap", "tHold", [0, 10, 20])
 sp = rig.laser_set_points()
@@ -84,18 +85,14 @@ analysis counts all of them as one run of their own.
 
 MOTMaster's save stays on (`save=True` default). After `Go` the rig finds the one new `CaF{ddMMMyy}{batch}_{nnn}.zip`
 in today's or tomorrow's day folder under `data_root_path`
-(`configuration/caf_mm_config.json`) and:
+(`configuration/caf_mm_config.json`), kept as `shot.zip_path`, and appends every
+camera's frames to it, prefixed with the camera's key (`CaF_0000.tif`...,
+`Rb_0000.tif`...), each with `<key>_camera_settings.json` (gain, binning, ...).
 
-- the camera whose key equals MOTMaster's element (`"CaF"`) is appended to that
-  zip as `CaF_0000.tif`...;
-- every other key gets a sibling zip, e.g. `Rb27Oct2600_012.zip`, with copies of
-  MOTMaster's `parameters.txt`/`hardwareReport.txt`, so set
-  `Rb.fileNameString = "Rb..."` to read it with `Rb.readFromZip(n)`;
-- each zip also gets `<key>_camera_settings.json` (gain, binning, ...).
-
-`analysis3.readFromZip` loads every `.tif` in a zip, which is why species never
-share one; `analysis3.py` is deliberately untouched. Runs started outside the
-notebook (MOTMaster's own window) save zips with no frames.
+`analysis3.readFromZip` loads every `.tif` in a zip, so with more than one camera
+it returns all of them together (sorted by name, so CaF before Rb); filter the
+zip's entries by prefix to read one camera. `analysis3.py` is deliberately untouched.
+Runs started outside the notebook (MOTMaster's own window) save zips with no frames.
 
 ## Cameras
 

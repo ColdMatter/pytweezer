@@ -68,21 +68,22 @@ def test_frame_order_survives_more_than_ten_frames(tmp_path):
     assert [image[0, 0] for image in images] == list(range(12))
 
 
-def test_sibling_zip_holds_its_frames_and_motmaster_parameters(tmp_path):
+def test_each_camera_is_prefixed_in_one_zip(tmp_path):
     main = fake_motmaster_zip(tmp_path)
-    sibling = zips.write_sibling(main, "CaF", "Rb", frames(2), {})
-    assert sibling == tmp_path / "Rb27Oct2600_012.zip"
-    images, params = read_zip_like_analysis3(sibling)
-    assert images.shape[0] == 2
-    assert params == {"dummy": 0.0}
-    assert not any(name.startswith("Rb") for name in zipfile.ZipFile(main).namelist())
-
-
-def test_sibling_zip_is_never_overwritten(tmp_path):
-    main = fake_motmaster_zip(tmp_path)
-    zips.write_sibling(main, "CaF", "Rb", frames(2), {})
-    with pytest.raises(FileExistsError):
-        zips.write_sibling(main, "CaF", "Rb", frames(2), {})
+    zips.inject_frames(main, "CaF", frames(3), {})
+    zips.inject_frames(main, "Rb", frames(2), {})
+    names = zipfile.ZipFile(main).namelist()
+    assert [n for n in names if n.startswith("CaF_")] == [
+        "CaF_0000.tif",
+        "CaF_0001.tif",
+        "CaF_0002.tif",
+        "CaF_camera_settings.json",
+    ]
+    assert [n for n in names if n.startswith("Rb_")] == [
+        "Rb_0000.tif",
+        "Rb_0001.tif",
+        "Rb_camera_settings.json",
+    ]
 
 
 def test_new_zip_is_found(tmp_path):
@@ -107,14 +108,6 @@ def test_two_new_zips_is_an_error(tmp_path):
     fake_motmaster_zip(folder, "CaF27Oct2600_012")
     with pytest.raises(RuntimeError, match="27"):
         zips.find_new_zip(before, [folder], "CaF")
-
-
-def test_a_sibling_zip_is_not_taken_for_motmasters(tmp_path):
-    folder = tmp_path / "27"
-    before = zips.snapshot([folder], "CaF")
-    main = fake_motmaster_zip(folder, "CaF27Oct2600_012")
-    zips.write_sibling(main, "CaF", "Rb", frames(1), {})
-    assert zips.find_new_zip(before, [folder], "CaF") == main
 
 
 def test_a_zip_written_after_midnight_is_found(tmp_path):

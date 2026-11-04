@@ -11,8 +11,8 @@
 Each camera is put in live mode and runs free; a shot's frames are whatever each camera
 caught between the mark taken just before ``Go`` and the moment its frame count
 stops changing afterwards, so no frame count is configured anywhere. When saving,
-the frames are added to the zip MOTMaster wrote for the run (see
-:mod:`pytweezer.notebook.zips`), so ``analysis3.readFromZip`` keeps working.
+every camera's frames are added to the zip MOTMaster wrote for the run, prefixed
+with the camera's key (see :mod:`pytweezer.notebook.zips`).
 """
 
 import functools
@@ -22,7 +22,7 @@ import sys
 import time
 import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -59,16 +59,16 @@ class Shot:
     script: str
     params: dict[str, Any]
     images: dict[str, np.ndarray]
-    zips: dict[str, Path] = field(default_factory=dict)
+    zip_path: Path | None = None
     t_start: float = 0.0
     t_end: float = 0.0
 
     @property
     def zip_number(self) -> int | None:
         """The run number MOTMaster gave the saved zip, or ``None`` if unsaved."""
-        if not self.zips:
+        if self.zip_path is None:
             return None
-        return int(re.search(r"_(\d+)\.zip$", next(iter(self.zips.values())).name)[1])
+        return int(re.search(r"_(\d+)\.zip$", self.zip_path.name)[1])
 
 
 def _caller_stacklevel() -> int:
@@ -109,8 +109,8 @@ class Rig:
 
     Args:
         motmaster: Device name, or an object with the MOTMaster driver's methods.
-        cameras: ``{key: device name or camera object}``. The camera whose key is
-            ``element`` saves into MOTMaster's zip; every other key gets a sibling.
+        cameras: ``{key: device name or camera object}``. Each camera's frames are
+            saved in MOTMaster's zip as ``{key}_0000.tif``...
         linked: Run scripts in MOTMaster's linked mode (see :attr:`linked`).
         element: MOTMaster's data prefix (``"CaF"``); read from the device's
             config file when ``motmaster`` is a name.
@@ -432,9 +432,11 @@ class Rig:
             t_end=t_end,
         )
         if save:
-            shot.zips = self._save(
-                zips.find_new_zip(before, folders, self.element), images
-            )
+            shot.zip_path = zips.find_new_zip(before, folders, self.element)
+            for key, stack in images.items():
+                zips.inject_frames(
+                    shot.zip_path, key, stack, self.cameras[key].settings()
+                )
         self.last_shots.append(shot)
         return shot
 
@@ -456,19 +458,6 @@ class Rig:
                 logger.warning(message)
                 warnings.warn(message, stacklevel=_caller_stacklevel())
             self._last_counts[(script, key)] = count
-
-    def _save(self, main_zip: Path, images: dict[str, np.ndarray]) -> dict[str, Path]:
-        saved = {}
-        for key, stack in images.items():
-            settings = self.cameras[key].settings()
-            if key == self.element:
-                zips.inject_frames(main_zip, key, stack, settings)
-                saved[key] = main_zip
-            else:
-                saved[key] = zips.write_sibling(
-                    main_zip, self.element, key, stack, settings
-                )
-        return saved
 
     def close(self) -> None:
         """Release a link this rig made, and close the device clients it opened."""

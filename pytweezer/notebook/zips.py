@@ -1,10 +1,9 @@
 """MOTMaster run zips: finding the one a run just wrote, and adding camera frames.
 
 MOTMaster saves each run as ``{element}{ddMMMyy}{batch}_{nnn}.zip`` in a folder per
-day. Frames from the camera whose key is MOTMaster's element go into that zip;
-any other camera's go into a sibling zip named with its key in place of the
-element, so ``analysis3.readFromZip`` (which loads every ``.tif`` in a zip) only
-ever sees one camera's frames.
+day. Every camera's frames go into that zip, named with the camera's key as a
+prefix (``CaF_0000.tif``, ``Rb_0000.tif``...). ``analysis3.readFromZip`` loads every
+``.tif`` in a zip, so it only gives one camera's frames when one camera saved.
 """
 
 import io
@@ -32,8 +31,6 @@ _MONTHS = [
     "Nov",
     "Dec",
 ]
-#: Entries ``analysis3.readFromZip`` recognises by suffix; a sibling needs copies.
-_MOTMASTER_TEXT_SUFFIXES = ("parameters.txt", "hardwareReport.txt")
 
 
 def day_folder(data_root: Path, day: date) -> Path:
@@ -90,35 +87,11 @@ def _tiff_bytes(frame: np.ndarray) -> bytes:
     return buffer.getvalue()
 
 
-def _write_frames(
-    archive: zipfile.ZipFile, key: str, frames: np.ndarray, settings: dict
-) -> None:
-    for index, frame in enumerate(frames):
-        archive.writestr(f"{key}_{index:04d}.tif", _tiff_bytes(frame))
-    archive.writestr(
-        f"{key}_camera_settings.json", json.dumps(settings, indent=1, default=str)
-    )
-
-
 def inject_frames(zip_path: Path, key: str, frames: np.ndarray, settings: dict) -> None:
     """Append ``frames`` as ``{key}_0000.tif``... plus the camera's settings."""
     with zipfile.ZipFile(zip_path, "a") as archive:
-        _write_frames(archive, key, frames, settings)
-
-
-def write_sibling(
-    main_zip: Path, element: str, key: str, frames: np.ndarray, settings: dict
-) -> Path:
-    """Write ``key``'s frames to a new zip beside ``main_zip``, with its parameters.
-
-    Raises:
-        FileExistsError: if the sibling already exists.
-    """
-    main_zip = Path(main_zip)
-    sibling = main_zip.with_name(key + main_zip.name[len(element) :])
-    with zipfile.ZipFile(main_zip) as source, zipfile.ZipFile(sibling, "x") as archive:
-        for name in source.namelist():
-            if name.endswith(_MOTMASTER_TEXT_SUFFIXES):
-                archive.writestr(name, source.read(name))
-        _write_frames(archive, key, frames, settings)
-    return sibling
+        for index, frame in enumerate(frames):
+            archive.writestr(f"{key}_{index:04d}.tif", _tiff_bytes(frame))
+        archive.writestr(
+            f"{key}_camera_settings.json", json.dumps(settings, indent=1, default=str)
+        )
