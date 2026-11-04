@@ -69,7 +69,7 @@ class ImageStats(ImageAnalysis):
 
 then `self.dataq.send(head, data, channel=...)` inside `process` and `return
 None`, since the base's republish path would put them on the wrong hub.
-`projections.py` (image in, two data profiles out) and `image_stats.py` are the
+`projections.py` (image in, two data profiles with Gaussian fits out) and `image_stats.py` are the
 two examples to copy from.
 
 ## Writing `process`

@@ -316,13 +316,14 @@ def cloud_temperature(
         measurement: Loaded with :func:`needed_results` and the constant.
         camera: As :func:`cloud_cameras` gives.
         axis: A scanned argument holding the free-fall time.
-        seconds_per_unit: Seconds in one unit of ``axis``' recorded values.
+        seconds_per_unit: Seconds in one unit of the recorded values of ``axis``.
 
     Returns:
-        ``"unit"``, the length unit recorded; ``"fits"``, ``{"sigma_x": TofFit,
-        "sigma_y": TofFit}``; ``"sigma2"``, ``{field: (t**2, sigma**2, error)}``
-        in SI; ``"centres"``, ``{"x0": (t**2, mean, error), "y0": ...}``;
-        ``"gravity"``, the :class:`GravityFit` of ``y0``.
+        A dict. ``"unit"`` is the length unit recorded. ``"fits"`` maps
+        ``"sigma_x"`` and ``"sigma_y"`` to a :class:`TofFit`. ``"sigma2"`` maps
+        each size field to ``(t**2, sigma**2, error)`` in SI. ``"centres"`` maps
+        ``"x0"`` and ``"y0"`` to ``(t**2, mean, error)``. ``"gravity"`` is the
+        :class:`GravityFit` of ``y0``.
     """
     unit = measurement.units.get(f"{camera}_sigma_x", "")
     mass_amu = float(measurement.constants["cloud_mass_amu"])
