@@ -239,6 +239,9 @@ def test_projection_of_a_flat_noisy_frame_publishes_no_fit_curve():
     for head, data, _channel in proj.dataq.sent:
         assert head["success"] is False
         assert np.isnan(data[2]).all()
+        assert all(
+            np.isnan(head[key]) for key in ("center", "sigma", "amplitude", "offset")
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -616,6 +619,18 @@ def test_cloud_fit_analysis_publishes_fit_fields_with_geometry():
     assert (out["rid"], out["index"]) == (4, 2)
     assert out["_imgresolution"] == [resolution] * 2
     assert out["_offset"] == list(origin)
+
+
+def test_cloud_fit_analysis_publishes_nan_for_a_frame_with_no_cloud():
+    from pytweezer.analysis.cloud_fit import FIELDS, CloudFitAnalysis
+
+    frame = np.random.default_rng(3).poisson(100.0, (80, 100)).astype(np.uint16)
+    analysis = build(CloudFitAnalysis)
+    analysis.process({"rid": 4, "_imgresolution": [3e-6, 3e-6]}, frame)
+
+    ((out, _, _),) = analysis.dataq.sent
+    assert out["success"] is False and out["rid"] == 4 and out["units"] == "m"
+    assert all(np.isnan(out[field]) for field in FIELDS)
 
 
 def test_offset_without_a_scale_places_pixels_from_the_crop_origin():

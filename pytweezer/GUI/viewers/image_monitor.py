@@ -13,7 +13,8 @@ Frames are drawn row 0 at the top with x along the columns, as in the notebooks
 and the Optimisers tab. Pixel column ``c``, row ``r`` of a frame sits at
 ``x = (origin_x + c + 0.5) * res_x``, ``y = (origin_y + r + 0.5) * res_y``, with
 ``res`` the header's ``_imgresolution`` (metres per pixel) and ``origin`` its
-``_offset`` (binned pixels); without them ``res = (1, 1)`` and ``origin = (0, 0)``.
+``_offset`` (binned pixels); without ``_imgresolution``, ``res = (1, 1)`` and the
+units are pixels; without ``_offset``, ``origin = (0, 0)``.
 Rows therefore run down the screen with +y.
 
 Properties:

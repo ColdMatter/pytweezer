@@ -13,7 +13,8 @@ Output:
     Each is sent as a 3xN ``[coords, sums, fit_curve]`` array, so ``live_plot.py``
     and ``gaussian_fit.py`` can read ``A[0]`` as the axis and ``A[1]`` as the
     data. The header is the input header plus ``center``, ``sigma``,
-    ``amplitude``, ``offset`` and ``success`` of the 1-D Gaussian fit.
+    ``amplitude``, ``offset`` and ``success`` of the 1-D Gaussian fit; the four
+    numbers are NaN when the fit is not trusted.
 
 Properties:
     * imagestreams: ([str]) input image streams.
@@ -23,11 +24,11 @@ Coordinates follow :mod:`pytweezer.analysis.cloud_fit`: pixel ``i`` sits at
 ``_imgresolution``, in pixels (resolution 1) without ``_imgresolution``.
 
 The fit is only trusted when it is a clear peak: ``success`` and the fit curve
-are withheld (``success`` False, ``fit_curve`` all NaN) when the least-squares
-fit failed, its centre is outside the profile, its width is under a pixel or
-over the profile's length, or its amplitude is below ``MIN_FIT_SNR`` times the
-rms residual. That keeps an empty
-frame from publishing a fit of its noise.
+are withheld (``success`` False, ``fit_curve`` and the header's numbers all NaN)
+when the least-squares fit failed, its centre is outside the profile, its width
+is under a pixel or over the profile's length, or its amplitude is below
+``MIN_FIT_SNR`` times the rms residual. That keeps an empty frame from
+publishing a fit of its noise.
 
 This consumes images but emits 1-D data, so (like ``find_tweezer_atoms.py``) it
 subscribes with the inherited :class:`ImageAnalysis` client and publishes on a
@@ -67,7 +68,7 @@ def _trusted_curve(coords, values):
         and coords[0] <= fit.center <= coords[-1]
     )
     if not clear_peak:
-        return fit, np.full(coords.shape, np.nan)
+        return None, np.full(coords.shape, np.nan)
     return fit, curve
 
 

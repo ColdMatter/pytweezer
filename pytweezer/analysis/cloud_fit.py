@@ -3,9 +3,10 @@
 Coordinates: pixel column ``c`` and row ``r`` sit at
 ``x = (origin_x + c + 0.5) * res_x``, ``y = (origin_y + r + 0.5) * res_y``, where
 ``res`` is the stream header's ``_imgresolution`` and ``origin`` its ``_offset``
-(binned pixels). Without them ``res = (1, 1)``, ``origin = (0, 0)`` and the
-units are ``"px"``; with them ``"m"``. ``angle`` is that of the major axis,
-measured from +x towards +y in these coordinates, in (-pi/2, pi/2].
+(binned pixels). Without ``_imgresolution``, ``res = (1, 1)`` and the units
+are ``"px"`` (else ``"m"``); without ``_offset``, ``origin = (0, 0)``. ``angle``
+is that of the major axis, measured from +x towards +y in these coordinates, in
+(-pi/2, pi/2].
 
 The fit is cheap enough for full 2048 x 2048 frames: a multi-scale blob detection
 and moments seed on a coarsely binned copy of the frame locates the cloud, the
@@ -20,8 +21,8 @@ Input:
 Output:
     A data message (no array) on ``<name>``: the fields of :class:`CloudFit`
     plus ``rid``, ``index``, ``_imgresolution`` and ``_offset`` from the input
-    header. A frame that cannot be fitted publishes ``success`` False and
-    those pass-through fields only.
+    header. A frame that cannot be fitted publishes ``success`` False and NaN
+    for every numeric fit field, so a plot of history shows a gap.
 
 Properties:
     *   imagestreams: ([str]) input image streams.
@@ -555,10 +556,13 @@ class CloudFitAnalysis(ImageAnalysis):
         out = {key: head[key] for key in _PASS_THROUGH if key in head}
         resolution, origin = frame_geometry(head)
         try:
-            out.update(fit_cloud(data, resolution, origin).as_dict())
+            fit = fit_cloud(data, resolution, origin).as_dict()
         except Exception:
             LOGGER.warning("cloud fit failed on a frame", exc_info=True)
-            out["success"] = False
+            fit = {"units": "px" if resolution is None else "m", "success": False}
+        if not fit["success"]:
+            fit.update(dict.fromkeys(FIELDS, math.nan))
+        out.update(fit)
         self.dataq.send(out, None)
         return
 
