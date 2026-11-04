@@ -156,8 +156,9 @@ run `uv run ruff check .` and `uv run ruff format --check .` before pushing.
 
 A notebook is a record of what was done at a particular time: never edit one
 retroactively, even when an API change breaks it. The exception is a notebook
-that demonstrates a feature; keep that one working. When a change breaks other
-notebooks, list them for the user instead.
+that demonstrates a feature; keep that one working. When a change would break
+notebook code (a renamed or removed function, argument or device), tell the
+user which changes are breaking; don't go looking for notebooks they affect.
 
 ### TODO/FIXME Convention
 
