@@ -15,6 +15,8 @@ class ImagEMX2Camera(Camera):
     Args:
         serial_number: DCAM serial number of the camera to open (e.g. ``"000407"``).
             If None, the only connected ImagEM X2 is opened.
+        external_exposure: Start in :meth:`set_external_exposure_mode`; otherwise
+            the camera keeps DCAM's own trigger mode (internal after power-up).
     """
 
     image_prefix = "HamTweezer"
@@ -26,6 +28,7 @@ class ImagEMX2Camera(Camera):
         timeout: float = 20.0,
         stream_name: str | None = None,
         serial_number: str | None = None,
+        external_exposure: bool = False,
     ):
         self.serial_number = serial_number
         super().__init__(
@@ -33,6 +36,8 @@ class ImagEMX2Camera(Camera):
             timeout=timeout,
             stream_name=stream_name,
         )
+        if external_exposure:
+            self.set_external_exposure_mode()
 
     # ------------------------------------------------------------------ #
     # Camera hooks

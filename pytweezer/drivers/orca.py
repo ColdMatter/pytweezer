@@ -13,6 +13,8 @@ class ORCACamera(Camera):
     Args:
         serial_number: DCAM serial number of the camera to open (e.g. ``"280187"``).
             If None, the only connected ORCA-R2 is opened.
+        external_exposure: Start in :meth:`set_external_exposure_mode`; otherwise
+            the camera keeps DCAM's own trigger mode (internal after power-up).
     """
 
     image_prefix = "ORCA"
@@ -24,9 +26,12 @@ class ORCACamera(Camera):
         timeout: float = 5 * 60.0,
         stream_name: str | None = None,
         serial_number: str | None = None,
+        external_exposure: bool = False,
     ):
         self.serial_number = serial_number
         super().__init__(image_dir=image_dir, timeout=timeout, stream_name=stream_name)
+        if external_exposure:
+            self.set_external_exposure_mode()
 
     # ------------------------------------------------------------------ #
     # Camera hooks
