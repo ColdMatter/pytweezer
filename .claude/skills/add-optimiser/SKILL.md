@@ -102,7 +102,8 @@ fit view draws the results `calibration_image` and `roi_sites`
   without a scan works as for any experiment. The tab's form groups the
   mixin's own arguments (group `SEARCH`) first, starts from the last run's
   arguments, and saves presets as recipes. A running optimiser is plotted from
-  the feed's published points; a finished one from its file. `analyses` is
+  the feed's published points; a finished one from its file. **Terminate**
+  under the plots stops the running or paused run after its current point. `analyses` is
   `()`: optimiser runs are not analysed in the Results tab.
 - Only a `completed` or `terminated` run can be accepted (a terminated staged
   scan proposes the stages it finished). **Accept** saves the ticked values

@@ -1492,6 +1492,9 @@ class FakeOptimiserClient:
         self.calls.append(("submit", request.class_name, request.args))
         return 60
 
+    def terminate(self, rid):
+        self.calls.append(("terminate", rid))
+
     def saved_parameters(self):
         return list(self.parameters)
 
@@ -2013,6 +2016,24 @@ def test_a_running_optimiser_is_plotted_point_by_point(qapp):
     assert list(shots.yData) == [300.0, 900.0, 600.0]
     assert list(best.yData) == [300.0, 900.0, 900.0]
     assert panel.accept_rows == {}
+
+
+def test_a_running_optimiser_can_be_terminated_once(qapp):
+    panel = make_optimisers_panel()
+    panel.select(DEMO, "DemoBayesian")
+    assert not panel.terminate_button.isEnabled()
+
+    running = task(70, "running", experiment=DEMO, class_name="DemoBayesian")
+    panel.feed.queue_changed.emit({"running": [running], "queue": [], "history": []})
+    assert panel.terminate_button.isEnabled()
+    panel.terminate_button.click()
+    assert panel.client.calls == [("terminate", 70)]
+    assert not panel.terminate_button.isEnabled()
+
+    stopping = {**running, "requested": "terminate"}
+    panel.feed.queue_changed.emit({"running": [stopping], "queue": [], "history": []})
+    assert not panel.terminate_button.isEnabled()
+    assert "stopping after this point" in panel.run_region.hint.text()
 
 
 def test_discarded_proposals_cannot_be_accepted(qapp, tmp_path):

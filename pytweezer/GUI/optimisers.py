@@ -53,7 +53,7 @@ from pytweezer.experiment.optimisers import (
 )
 from pytweezer.experiment.queue import now
 from pytweezer.experiment.recipes import Recipe
-from pytweezer.experiment.task import Task, TaskRequest, TaskStatus
+from pytweezer.experiment.task import Action, Task, TaskRequest, TaskStatus
 from pytweezer.GUI.background import BackgroundReader
 from pytweezer.GUI.components import Region, set_state, status_icon
 from pytweezer.GUI.experiments.arg_editor import ValueField
@@ -277,6 +277,7 @@ class OptimisersPanel(QWidget):
         self._sheet_rid = None
         self._sheet_shown = None
         self._proposed = {}
+        self._run_status_rid = None
         self._settings = QtCore.QSettings("pytweezer", "Optimisers")
 
         self.table = QTreeWidget()
@@ -305,6 +306,20 @@ class OptimisersPanel(QWidget):
         self.run_region = Region("well", "Pick an optimiser", "")
         self.run_region.body.addWidget(self.plots, 1)
         self.run_region.body.addWidget(self.plot_message)
+        self.terminate_button = QPushButton("Terminate")
+        self.terminate_button.setToolTip(
+            "Stop after the current point. What it measured is kept, and a"
+            " staged scan proposes the stages it finished."
+        )
+        self.terminate_button.clicked.connect(self.terminate_shown)
+        self.run_status = QLabel()
+        self.run_status.setObjectName("StatusLabel")
+        self.run_status.setWordWrap(True)
+        run_actions = QHBoxLayout()
+        run_actions.setSpacing(10)
+        run_actions.addWidget(self.terminate_button)
+        run_actions.addWidget(self.run_status, 1)
+        self.run_region.body.addLayout(run_actions)
 
         self.sheet = Region("well", "Accept", "nothing is saved until you accept")
         self.proposal_grid_holder = QVBoxLayout()
@@ -680,6 +695,7 @@ class OptimisersPanel(QWidget):
     def _show_selected(self):
         row = self._selected_row()
         self._show_settings(row)
+        self._show_terminate(None if row is None else self._shown_run(row))
         if row is None:
             self.run_region.title.setText("Pick an optimiser")
             self.run_region.set_hint("")
@@ -702,7 +718,10 @@ class OptimisersPanel(QWidget):
         self.run_region.title.setText(f"{name}, run {run.rid}")
         if run.status in _LIVE:
             total = run.points_total if run.points_total is not None else "?"
-            self.run_region.set_hint(f"{run.status}, {run.points_done} of {total}")
+            hint = f"{run.status}, {run.points_done} of {total}"
+            if run.requested == Action.TERMINATE:
+                hint += ", stopping after this point"
+            self.run_region.set_hint(hint)
             points = self.feed.points(run.rid)
             self._show_plots(row, run, live_results(points, _plotted_names(row.schema)))
             self._show_proposals(
@@ -752,6 +771,17 @@ class OptimisersPanel(QWidget):
                     self._show_status(
                         f"Accepted {when_text(change.time, now())} by {change.who}"
                     )
+
+    def _show_terminate(self, run):
+        live = run is not None and run.status in _LIVE
+        self.terminate_button.setEnabled(live and run.requested != Action.TERMINATE)
+        if not live or run.rid != self._run_status_rid:
+            self._show_run_status(None, "")
+
+    def _show_run_status(self, rid, text, state=""):
+        self._run_status_rid = rid
+        self.run_status.setText(text)
+        set_state(self.run_status, state)
 
     def _show_proposals(self, rid, message, proposed=None):
         """Fill the Accept area with run ``rid``'s proposals, or show ``message``.
@@ -1001,6 +1031,23 @@ class OptimisersPanel(QWidget):
         self._last_requests[row.key] = request
         self._show_settings_status(f"Queued as run {rid}")
         self.run_button.setEnabled(False)
+
+    def terminate_shown(self) -> None:
+        """Ask the run in progress to stop after its current point."""
+        row = self._selected_row()
+        run = None if row is None else self._shown_run(row)
+        if run is None or run.status not in _LIVE:
+            return
+        try:
+            self.client.terminate(run.rid)
+        except ManagerUnavailable:
+            self._show_run_status(run.rid, f"Terminating: {NOT_RESPONDING}", "error")
+            return
+        except ManagerError as error:
+            self._show_run_status(run.rid, f"Terminating: {error}", "error")
+            return
+        self._show_run_status(run.rid, f"Run {run.rid} stops after its current point")
+        self.terminate_button.setEnabled(False)
 
     def load_request(self, request) -> bool:
         """Select ``request``'s optimiser with its settings in the form; False if it is not one."""
