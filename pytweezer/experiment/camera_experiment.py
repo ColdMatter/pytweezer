@@ -6,7 +6,7 @@
         rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
         hamcam = CameraShots("Rb HamCam", frames=2, exposure=20e-3, roi=(0, 512, 0, 512))
         thorcam = CameraShots("Rb ThorCam", frames=1)
-        orca = CameraShots("CaF ORCA", frames=3, binning=2, gain=1)
+        orca = CameraShots("ORCA", frames=3, binning=2, gain=1)
 
 Each :class:`CameraShots` is a device whose settings become form arguments
 named ``<camera>.frames``, ``.exposure``, ``.binning``, ``.gain``,

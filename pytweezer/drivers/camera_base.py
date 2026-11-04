@@ -59,14 +59,28 @@ class Camera(ABC):
     roi_origin: tuple[int, int] = (0, 0)
     #: Pixels per side the frames are binned by, as the last :meth:`set_binning` or :meth:`set_roi` left it.
     binning: int = 1
+    #: Metres per unbinned sensor pixel at the atoms (sensor pitch over magnification); ``None`` if unknown.
+    object_pixel_m: float | None = None
 
     def __init__(
         self,
         image_dir: str | None = None,
         timeout: float = 5.0,
         stream_name: str | None = None,
+        object_pixel_m: float | None = None,
     ):
+        """Set up broadcasting and autosave, then connect.
+
+        Args:
+            image_dir: Directory :meth:`save_tiff` writes to.
+            timeout: Seconds to wait for frames.
+            stream_name: Image stream to broadcast on; ``None`` disables broadcasting.
+            object_pixel_m: Metres per unbinned sensor pixel at the atoms. When set,
+                broadcast headers carry ``_imgresolution`` and ``_offset`` so
+                consumers work in metres.
+        """
         self.image_dir = image_dir
+        self.object_pixel_m = object_pixel_m
         self.timeout = timeout
         self.stream_name = stream_name
         self.image_client = ImageClient(stream_name) if stream_name else None
@@ -300,14 +314,21 @@ class Camera(ABC):
                 sent += 1
 
     def broadcast_image(self, image: np.ndarray, info) -> None:
-        """Send ``image`` on the image hub, its header saying which ROI and binning it was read with."""
+        """Send ``image`` on the image hub, its header saying which ROI and binning it was read with.
+
+        With :attr:`object_pixel_m` set, the header also gives ``_imgresolution``
+        (metres per binned pixel) and ``_offset`` (the ROI corner in binned pixels).
+        """
         if self.image_client is None:
             LOGGER.error("tried to broadcast image but no client exists")
             return
         roi_x0, roi_y0 = self.roi_origin
-        self.image_client.send(
-            {"roi_x0": roi_x0, "roi_y0": roi_y0, "binning": self.binning, **info}, image
-        )
+        header = {"roi_x0": roi_x0, "roi_y0": roi_y0, "binning": self.binning}
+        if self.object_pixel_m is not None:
+            pixel_m = self.object_pixel_m * self.binning
+            header["_imgresolution"] = [pixel_m, pixel_m]
+            header["_offset"] = [roi_x0 / self.binning, roi_y0 / self.binning]
+        self.image_client.send({**header, **info}, image)
 
     @classmethod
     def save_tiff(
@@ -341,13 +362,19 @@ class SimulatedCamera(Camera):
         image_dir: str | None = None,
         timeout: float = 5.0,
         stream_name: str | None = None,
+        object_pixel_m: float | None = None,
     ):
         self._shape = (256, 256)
         self._nframes = 1
         self._running = False
         self._started = 0.0
         self._rng = np.random.default_rng()
-        super().__init__(image_dir=image_dir, timeout=timeout, stream_name=stream_name)
+        super().__init__(
+            image_dir=image_dir,
+            timeout=timeout,
+            stream_name=stream_name,
+            object_pixel_m=object_pixel_m,
+        )
 
     def _connect(self) -> None:
         # No hardware; a non-None sentinel marks the camera as "connected".

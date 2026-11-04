@@ -135,7 +135,7 @@ of sync as the real class grows. Stubs must return PYON-safe values, never a
 Add to `CONFIG["Devices"]` in `pytweezer/configuration/config.py`:
 
 ```python
-"Rb ORCA": {
+"ORCA": {
     "active": True,
     "class": "pytweezer.drivers.orca:ORCACamera",
     "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
@@ -144,7 +144,7 @@ Add to `CONFIG["Devices"]` in `pytweezer/configuration/config.py`:
     "port": get_next_port(),
     "simulate": SIMULATING,
     "serial_number": "280187",
-    "stream_name": "rb_orca",
+    "stream_name": "orca",
     "timeout": 5.0,
 },
 ```
@@ -175,7 +175,7 @@ reach the constructor, builds the backend in simulation, and reports the RPC
 surface:
 
 ```bash
-uv run python .claude/skills/add-device-driver/scripts/check_device.py "Rb ORCA"
+uv run python .claude/skills/add-device-driver/scripts/check_device.py "ORCA"
 ```
 
 `--all` checks every entry. If you hand-wrote a `Simulated*` class, add the

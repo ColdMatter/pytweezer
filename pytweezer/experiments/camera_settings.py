@@ -19,9 +19,9 @@ class RbHamCamSettings(ImagEMSettings):
 
 
 class CaFOrcaSettings(ORCASettings):
-    """Exposure mode, readout speed, contrast gain, exposure time and ROI of the CaF ORCA."""
+    """Exposure mode, readout speed, contrast gain, exposure time and ROI of the ORCA."""
 
-    camera = Device("CaF ORCA")
+    camera = Device("ORCA")
 
 
 class RbThorCamSettings(ThorCamSettings):
