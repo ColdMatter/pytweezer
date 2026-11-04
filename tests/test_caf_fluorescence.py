@@ -40,6 +40,9 @@ class FakeCamera:
     def stop_live(self):
         pass
 
+    def frame_geometry(self):
+        return 1, (0, 0)
+
     def setup_acquisition(self, nframes, mode="sequence"):
         pass
 
