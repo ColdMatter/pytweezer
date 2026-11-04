@@ -19,8 +19,8 @@ gives its sizes without a notebook.
    beast), fits each frame of any image stream and publishes the results on a
    data stream; the fit contour is an overlay on image monitors; the results go
    on the existing live/scalar-history plots and the image monitor's data panel.
-3. **Experiments.** `CaFFluorescence` and `LoadTweezers` (via an ORCA image
-   per shot) fit their MOT frames and record the results per point; the
+3. **Experiments.** `CaFFluorescence` and a new `LoadTweezersMOTImage` (an
+   ORCA image per shot) fit their MOT frames and record the results per point; the
    Results tab offers a view of each point's image with its contours, and
    "Plot against" plots the sizes against any scanned parameter.
 4. **Projections.** A live analysis of horizontal and vertical sums, each with
@@ -197,14 +197,15 @@ choice) fits one camera's background-subtracted frames for a point:
 **`CaFFluorescence`** (and so `OptimiseMOTLasers`): marks its background shot,
 and records the ThorCam fit per point beside `counts`.
 
-**`LoadTweezers`**: `RbTweezerBasic2026_2` fires `tMOTCamTrig` (Rb pattern
-board) with the first HamCam image. Add an `ORCA` `CameraShots`, one frame per
-shot, and record its fit per point. The ORCA is plugged into the CaF MOTMaster
-PC (ph-bonesaw) but images both species; here it images the Rb MOT, so
-`cloud_species` is Rb. It is used only while the `ORCA` CONFIG entry is active;
-how an optional camera is declared and reserved is the builder's to design
-within the reservation rules. No background shot: the offset term takes the
-background.
+**`LoadTweezersMOTImage(LoadTweezers)`** (new, in
+`experiments/load_tweezers.py`): `RbTweezerBasic2026_2` fires `tMOTCamTrig`
+(Rb pattern board) with the first HamCam image. This subclass adds an `ORCA`
+`CameraShots`, one frame per shot, and records its fit per point. The ORCA is
+plugged into the CaF MOTMaster PC (ph-bonesaw) but images both species; here
+it images the Rb MOT, so `cloud_species` is Rb. No background shot: the offset
+term takes the background. `LoadTweezers` itself is unchanged and does not use
+the ORCA. Imaging and not imaging are two experiments, not an option, and the
+ORCA's `active` flag in CONFIG plays no part. *(user's decision)*
 
 **The ORCA's CONFIG entry** is renamed from `"CaF ORCA"` to `"ORCA"` (stream
 `orca`), and the stale "keep exactly one of these two entries active" comment
@@ -214,7 +215,7 @@ example and `check_device.py` usage, which still name the deleted `"Rb ORCA"`.
 Dated specs and plans under `docs/superpowers/` stay as written. *(user's
 decision)*
 
-Both declare the new Results analysis in `analyses`.
+Both declare the new Results analyses in `analyses`.
 
 ## Results tab
 
@@ -240,8 +241,7 @@ builder finds the tick length the MOTMaster wrapper already knows). Per axis it
 fits σ² = σ₀² + (k_B T/m) t² weighted by the recorded errors, and shows σx²,
 σy² against t² with the fits, T_x, T_y ± error in µK and σ₀. The mass comes
 from a constant the experiment records, `cloud_mass_amu` (a class attribute
-`cloud_species`: CaF for `CaFFluorescence`; for `LoadTweezers`' ORCA image,
-Rb). The centre against
+`cloud_species`: CaF for `CaFFluorescence`, Rb for `LoadTweezersMOTImage`). The centre against
 t² is also plotted, with a fitted g, as the notebook did, as a check of the
 time axis. With fewer than three distinct times it says so instead of fitting.
 
@@ -260,5 +260,5 @@ new sections are proposed to the user first.
 ## Left to the builder
 
 Window size and binning rule; contour levels' exact spacing; the data panel's
-layout; how the optional ORCA is declared; whether `gaussian_fit.py` becomes a
+layout; whether `gaussian_fit.py` becomes a
 wrapper; plot styling within `pytweezer-gui-design`; tests per `write-tests`.

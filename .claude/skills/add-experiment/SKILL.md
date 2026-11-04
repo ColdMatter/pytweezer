@@ -61,6 +61,15 @@ Rules that matter:
   queued task's worker also refuses a bare `get_device()` of anything outside
   it (`device_client.restrict_devices`). The declarations are what the
   manager reserves (see "Pipelines and device reservations").
+- **A variant that uses other devices is another experiment.** Loading the
+  tweezers with a MOT image on the ORCA and without it are two classes (the
+  imaging one usually a subclass), not one class with an option or a device
+  used only when it happens to be available. Each declares exactly the devices
+  it uses.
+- **Never design around a device's `active` flag.** Which CONFIG entries are
+  active is lab state that anyone switches at any time; the value checked in
+  says nothing about how the device will be used. An experiment declares what
+  it needs and fails plainly if that device isn't running.
 - `record(name, value, unit="")`: in `run_point` it stores into
   `/results/<name>` row `point.index`; in `prepare`/`finish` into
   `/constants/<name>`. Each name's shape and dtype are fixed by its first

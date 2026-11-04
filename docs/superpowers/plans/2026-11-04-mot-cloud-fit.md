@@ -165,7 +165,7 @@
 - [ ] **Step 4: Run the test to verify it passes.** Then take an offscreen screenshot following `.claude/skills/run-pytweezer/SKILL.md` and look at it. Simulated frames with a Gaussian are fine: publish one from a test script on a scratch stream.
 - [ ] **Step 5: Commit** with the message "Projections monitor is an Image Monitor with linked sum plots".
 
-### Task 6: CameraExperiment: background shots, optional cameras, cloud fits
+### Task 6: CameraExperiment: background shots, cloud fits
 
 **Files:**
 - Modify: `pytweezer/experiment/camera_experiment.py`
@@ -175,23 +175,20 @@
 - Consumes: `fit_frames` (Task 1); CONFIG `object_pixel_m` (Task 2).
 - Produces:
   - `take_shot(self, *, background: bool = False, **overrides) -> dict[str, np.ndarray]`. With `background`, every broadcast header also carries `"background": True`.
-  - `CameraShots(..., optional: bool = False)`. An optional camera whose CONFIG entry has `active` False is left out of `prepare`, `take_shot` and `finish`, and out of `reserved_devices()` (reservation does not check `active`, so this is the only gate). `to_schema` includes `optional`.
-  - `CameraExperiment.shooting_cameras(self) -> dict[str, Any]`: the `cameras` that are in use.
   - `CameraExperiment.record_cloud_fit(self, name: str, frames: np.ndarray, background: np.ndarray | None = None) -> None`. It records `<name>_<field>` for `FIELDS`, the `_error`s and, when `save_mean_image` is set, `<name>_mean_image`. Resolution comes from the camera's CONFIG `object_pixel_m` × the applied binning (or the CONFIG entry's `binning`, else 1); origin from `roi_origins[name]` ÷ binning.
   - Class attribute `cloud_species: ClassVar[str | None] = None`. When set, `prepare` records the constant `cloud_mass_amu`, using `{"CaF": 59.0, "Rb": 86.909}`. Put those masses in `cloud_fit.py` as `SPECIES_MASS_AMU`.
   - Argument `save_mean_image = Bool(True, group="Camera")`, declared on the experiments that record fits (Task 7), not on the base.
 
 - [ ] **Step 1: Write the failing tests:**
   - `test_background_shot_marks_broadcast_headers`
-  - `test_inactive_optional_camera_is_not_used_or_reserved`
   - `test_point_records_cloud_fit_fields`: a Gaussian frame through `run_local`, with `sigma_x` recovered.
   - `test_point_without_a_cloud_records_nan`
 - [ ] **Step 2: Run them to verify they fail.**
 - [ ] **Step 3: Implement the changes.**
 - [ ] **Step 4: Run the experiment tests.** `uv run pytest tests/ -q -k "camera or experiment"` passes.
-- [ ] **Step 5: Commit** with the message "CameraExperiment: marked background shots, optional cameras, recorded cloud fits".
+- [ ] **Step 5: Commit** with the message "CameraExperiment: marked background shots, recorded cloud fits".
 
-### Task 7: CaFFluorescence and LoadTweezers record the fit
+### Task 7: CaFFluorescence records the fit; LoadTweezersMOTImage
 
 **Files:**
 - Modify: `pytweezer/experiments/caf_fluorescence.py`, `pytweezer/experiments/load_tweezers.py`
@@ -201,14 +198,13 @@
 - Consumes: Task 6.
 - Produces:
   - `CaFFluorescence` takes its background shot with `take_shot(background=True, ...)` and records `thorcam_*` fit fields beside `counts`. It declares `cloud_species = "CaF"`, `save_mean_image` and `analyses = ("cloud_fit", "cloud_temperature")`.
-  - `LoadTweezers` gains `orca = CameraShots("ORCA", frames=1, optional=True, locked=("frames",))`. It records `orca_*` fit fields with no background and declares `cloud_species = "Rb"`. Its `analyses` gain `"cloud_fit"` and `"cloud_temperature"` after the two tweezer histograms.
+  - `class LoadTweezersMOTImage(LoadTweezers)`, new, in `load_tweezers.py`. It declares `orca = CameraShots("ORCA", frames=1, locked=("frames",))`, `cloud_species = "Rb"`, `save_mean_image`, and `analyses = (*LoadTweezers.analyses, "cloud_fit", "cloud_temperature")`. `run_point` runs `LoadTweezers.run_point`'s shot once and records `orca_*` fit fields from the same shot's ORCA frame, with no background. Refactor `LoadTweezers.run_point` so the subclass reuses the shot's frames rather than taking a second shot. `LoadTweezers` itself does not change behaviour and never touches the ORCA.
   - Subclasses that set `analyses = ()` (the optimisers) keep their own.
 
 - [ ] **Step 1: Write the failing tests:**
   - `test_fluorescence_point_records_thorcam_cloud_fit`, using the existing `FakeCamera` with a Gaussian `frame`.
   - `test_fluorescence_background_shot_is_marked`
-  - `test_load_tweezers_records_orca_fit_when_active`
-  - `test_load_tweezers_runs_without_inactive_orca`
+  - `test_mot_image_variant_records_orca_fit_from_the_same_shot`: one MOTMaster run per point, with HamCam results and `orca_sigma_x` both recorded.
 - [ ] **Step 2: Run them to verify they fail.**
 - [ ] **Step 3: Implement the changes.** `measure()` keeps returning only `counts` and `counts_error`, because `OptimiseMOTLasers`' objective reads it. The fit is recorded in `run_point`.
 - [ ] **Step 4: Run the tests.** `uv run pytest tests/test_caf_fluorescence.py tests/test_optimise_mot_lasers.py <load-tweezers test file> -q` passes.
@@ -277,7 +273,7 @@
 **Files:**
 - Modify: `.claude/skills/add-analysis-script/SKILL.md`, `.claude/skills/add-applet/SKILL.md`, `.claude/skills/add-experiment/SKILL.md`, `docs/notes/applets.md`
 
-- [ ] **Step 1: Make the minor skill edits** (renamed or new files, table rows, the ORCA name, `take_shot(background=...)`, `optional=` and the new analysis names) and commit them.
+- [ ] **Step 1: Make the minor skill edits** (renamed or new files, table rows, the ORCA name, `take_shot(background=...)`, `LoadTweezersMOTImage` and the new analysis names) and commit them.
 - [ ] **Step 2: Propose the significant skill changes to the user and wait for approval.** Those are a new section in `add-applet` on overlays and the projections monitor, and one in `add-experiment` on recording cloud fits. Apply them once approved.
 - [ ] **Step 3: Run the full suite and lint.** `uv run pytest tests/ -q` passes. `uv run ruff check . && uv run ruff format --check .` are clean. `cd docs && uv run make html` builds.
 - [ ] **Step 4: List for the user** the dated notebooks that use the removed `subtract_bg.py` or the `"CaF ORCA"` name (grep the Box notebook folders), without editing them. Also list the open `object_pixel_m` values still to fill in.
