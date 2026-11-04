@@ -3,8 +3,8 @@
 An *analysis process* is a small, long-lived program that subscribes to one or
 more pub/sub streams, receives ``(message, head[, data])`` messages in a loop,
 transforms each one, and republishes the result on its own name. The existing
-scripts in this package (``data_average.py``, ``subtract_bg.py``,
-``rotate_image.py``) hand-roll the same skeleton:
+scripts in this package (``data_average.py``, ``rotate_image.py``) hand-roll
+the same skeleton:
 
     * hold a :class:`Properties` connection named after the process,
     * declare the input streams as a :class:`PropertyAttribute`,

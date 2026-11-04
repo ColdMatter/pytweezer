@@ -95,7 +95,8 @@ A few conventions that come from the transport rather than the maths:
   client converts numpy integers, floats and arrays, but not a numpy bool (any
   comparison of array values), which raises — wrap it in `bool()`.
 - **Emit 1-D traces as a 2xN `[coords, values]` array**, so `live_plot.py` and
-  `gaussian_fit.py` can read `A[0]` as the axis and `A[1]` as the values.
+  `gaussian_fit.py` can read `A[0]` as the axis and `A[1]` as the values. Extra
+  rows are fine (`projections.py` adds a fit curve as row 2); readers use rows 0-1.
 - **Accumulate in `float64`** (`data.sum(axis=0, dtype=np.float64)`) — raw camera
   frames are integer and overflow quietly.
 - **Return `None` rather than raising** on a message you can't handle. An
@@ -115,7 +116,9 @@ pixels per frame pixel, per side) and `rid` when the
 experiment that read it passes one. A change of `rid` is the natural reset for
 anything that accumulates over a task, as `tweezer_loading.py` does. Some
 publishers add `_offset` (pixel origin of a crop within its parent frame) and
-`_imgresolution` (metres per pixel).
+`_imgresolution` (metres per pixel). Frame coordinates are
+`(origin + pixel + 0.5) * resolution`, in pixels when either key is missing:
+`cloud_fit.frame_geometry(head)` reads them.
 
 Saved trap sites (`trap_sites`, fitted by `trap_sites.fit_trap_sites`) are
 full-sensor `(y, x)` pixels; place them in a frame with

@@ -11,6 +11,20 @@ The fit is cheap enough for full 2048 x 2048 frames: a multi-scale blob detectio
 and moments seed on a coarsely binned copy of the frame locates the cloud, the
 least-squares fit then runs on a binned window of +-4 sigma about it with an
 analytic Jacobian.
+
+Run as an analysis (:class:`CloudFitAnalysis`):
+
+Input:
+    One image stream, raw or background-subtracted.
+
+Output:
+    A data message (no array) on ``<name>``: the fields of :class:`CloudFit`
+    plus ``rid``, ``index``, ``_imgresolution`` and ``_offset`` from the input
+    header. A frame that cannot be fitted publishes ``success`` False and
+    those pass-through fields only.
+
+Properties:
+    *   imagestreams: ([str]) input image streams.
 """
 
 from __future__ import annotations
@@ -21,6 +35,12 @@ from dataclasses import asdict, dataclass
 import numpy as np
 from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit, least_squares
+
+from pytweezer.analysis.analysis_base import ImageAnalysis, run_analysis
+from pytweezer.logging_utils import get_logger
+from pytweezer.servers import DataClient
+
+LOGGER = get_logger(__name__)
 
 FIELDS = (
     "x0",
@@ -509,3 +529,31 @@ def fit_frames(
                 samples.std(ddof=1) / math.sqrt(len(samples))
             )
     return values, mean_image
+
+
+_PASS_THROUGH = ("rid", "index", "_imgresolution", "_offset")
+
+
+class CloudFitAnalysis(ImageAnalysis):
+    """Publish :class:`CloudFit` of every frame on the Data hub."""
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.dataq = DataClient(name.split("/")[-1])
+
+    def process(self, head, data):
+        if data is None or data.ndim != 2:
+            return
+        out = {key: head[key] for key in _PASS_THROUGH if key in head}
+        resolution, origin = frame_geometry(head)
+        try:
+            out.update(fit_cloud(data, resolution, origin).as_dict())
+        except Exception:
+            LOGGER.warning("cloud fit failed on a frame", exc_info=True)
+            out["success"] = False
+        self.dataq.send(out, None)
+        return
+
+
+if __name__ == "__main__":
+    run_analysis(CloudFitAnalysis)
