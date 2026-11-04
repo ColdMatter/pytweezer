@@ -8,6 +8,20 @@ from pylablib.devices.DCAM.DCAM import DCAMCamera, lib, libctl
 
 PROBE_TIMEOUT_S = 60
 
+# Bare ctypes so the child skips pylablib's import, which pulls in pandas and
+# scipy and would add ~6 s to every start. The struct is DCAMAPI_INIT.
+_PROBE_SCRIPT = """
+import ctypes
+class Init(ctypes.Structure):
+    _fields_ = [("size", ctypes.c_int32), ("count", ctypes.c_int32),
+                ("reserved", ctypes.c_int32), ("optionbytes", ctypes.c_int32),
+                ("option", ctypes.c_void_p), ("guid", ctypes.c_void_p)]
+lib = ctypes.CDLL("dcamapi.dll")
+init = Init(size=ctypes.sizeof(Init))
+if lib.dcamapi_init(ctypes.byref(init)) >= 0:
+    lib.dcamapi_uninit()
+"""
+
 
 def _normalise_serial(serial: str) -> str:
     return serial.removeprefix("S/N:").strip()
@@ -59,22 +73,16 @@ def find_dcam_index(serial_number: str | None, model_prefix: str) -> int:
 
 
 def _probe_dcam_library() -> None:
-    """Enumerate the cameras in a throwaway process, raising if that fails.
+    """Initialise the DCAM library in a throwaway process, raising if that dies.
 
     A broken DCAM install can kill the calling process outright (a fast-fail in
     ``combase.dll``, exit code ``0xC0000602``), which no ``except`` can catch. In
     a composite device that would take every other sub-device down with it, so
-    the library is first exercised in a child that may die instead.
+    the library is first exercised in a child that may die instead. A DCAM error
+    code is not a failure here: the real open reports it by name.
     """
     probe = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "from pytweezer.drivers.hamamatsu import list_dcam_cameras;"
-                " list_dcam_cameras()"
-            ),
-        ],
+        [sys.executable, "-I", "-c", _PROBE_SCRIPT],
         capture_output=True,
         text=True,
         timeout=PROBE_TIMEOUT_S,
