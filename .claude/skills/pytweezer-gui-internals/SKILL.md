@@ -12,7 +12,8 @@ those processes run on the server PC). Tabs are registered, in order, in the
 list `build_gui` passes to `TabbedGUI`: Servers, Devices, Loggers, Streams,
 Applets, Analysis, Experiments, Results, Saved parameters, Optimisers, NI Cards,
 Properties. NI Cards (`pytweezer/GUI/ni_cards/`) drives single NI channels by
-MOTMaster alias through each PC's `NICards` device (`pytweezer/drivers/ni_cards.py`).
+MOTMaster alias through each PC's `NICards` device (`pytweezer/drivers/ni_cards.py`),
+and is left out while no `NICards` entry in `CONFIG["Devices"]` is active.
 Experiments and Results (`pytweezer/GUI/experiments/`), Saved parameters
 (`pytweezer/GUI/saved_parameters.py`) and Optimisers (`pytweezer/GUI/optimisers.py`)
 are covered by the `add-experiment` skill.

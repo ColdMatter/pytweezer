@@ -48,7 +48,7 @@ Output (13 PNGs) lands in `.claude/skills/run-pytweezer/shots/`:
 - `client_full.png` — whole window, active tab raised
 - `client_tab_<Label>.png` — one per tab: Servers, Devices, Loggers, Streams,
   Applets, Analysis, Experiments, Results, Saved_parameters, Optimisers,
-  NI_Cards, Properties
+  NI_Cards (only while an `NICards` device is active), Properties
 
 Pass a second arg to redirect the output dir:
 

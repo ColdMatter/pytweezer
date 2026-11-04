@@ -7,7 +7,8 @@ which panels they expose:
 * ``pytweezer-server`` (:func:`server_main`) runs on the server PC and gives full
   start/stop control of the server processes: Servers | Devices | Loggers |
   Streams | Applets | Analysis | Experiments | Results | Saved parameters |
-  Optimisers | NI Cards | Properties.
+  Optimisers | NI Cards | Properties. NI Cards appears only while an
+  ``NICards`` device in ``CONFIG["Devices"]`` is active.
 * ``pytweezer-client`` (:func:`client_main`) runs on client PCs with the same
   tabs, except that the Servers and Loggers tabs are view-only because those
   processes run on the server PC.
@@ -174,7 +175,7 @@ def build_gui(server: bool) -> TabbedGUI:
     from pytweezer.GUI.experiments.feed import ExperimentFeed
     from pytweezer.GUI.experiments.panel import ExperimentsPanel
     from pytweezer.GUI.experiments.results import ResultsPanel
-    from pytweezer.GUI.ni_cards.panel import NICardsPanel
+    from pytweezer.GUI.ni_cards.panel import NICardsPanel, ni_card_devices
     from pytweezer.GUI.optimisers import OptimisersPanel
     from pytweezer.GUI.property_editor import PropEdit
     from pytweezer.GUI.saved_parameters import SavedParametersPanel
@@ -237,7 +238,11 @@ def build_gui(server: bool) -> TabbedGUI:
                 ),
             ),
             ("Optimisers", optimisers),
-            ("NI Cards", _safe_panel("NI Cards", NICardsPanel)),
+            *(
+                [("NI Cards", _safe_panel("NI Cards", NICardsPanel))]
+                if ni_card_devices(config.get_config()["Devices"])
+                else []
+            ),
             ("Properties", _safe_panel("Properties", lambda: PropEdit("/"))),
         ],
     )

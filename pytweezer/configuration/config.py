@@ -266,7 +266,7 @@ CONFIG = {
         },
         # The NI Cards tab: channels by MOTMaster alias, from each PC's hardware file.
         "CaF NI Cards": {
-            "active": True,
+            "active": False,
             "class": "pytweezer.drivers.ni_cards:NICards",
             "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
             "host": HOSTS["ph-bonesaw"],
@@ -292,7 +292,7 @@ CONFIG = {
             "teardown": "close",
         },
         "Rb NI Cards": {
-            "active": True,
+            "active": False,
             "class": "pytweezer.drivers.ni_cards:NICards",
             "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
             "host": HOSTS["IC-CZC221CCHS"],

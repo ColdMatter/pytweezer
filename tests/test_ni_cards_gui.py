@@ -109,11 +109,15 @@ def view(qapp, client):
     panel.close()
 
 
-def test_ni_card_devices_picks_entries_by_class():
+def test_ni_card_devices_picks_active_entries_by_class():
     devices = {
         "CaF NI Cards": {"class": "pytweezer.drivers.ni_cards:NICards"},
         "CaF ThorCam": {"class": "pytweezer.drivers.thorcam:ThorCam"},
         "Rb NI Cards": {"class": "pytweezer.drivers.ni_cards:NICards"},
+        "Spare NI Cards": {
+            "class": "pytweezer.drivers.ni_cards:NICards",
+            "active": False,
+        },
     }
     assert ni_card_devices(devices) == ["CaF NI Cards", "Rb NI Cards"]
 
