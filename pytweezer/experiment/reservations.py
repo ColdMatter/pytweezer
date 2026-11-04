@@ -4,7 +4,7 @@ from pytweezer.servers import device_server
 
 
 class ReservationError(ValueError):
-    """A declared device cannot be reserved: unknown, inactive or mis-configured."""
+    """A declared device cannot be reserved: unknown or mis-configured."""
 
 
 def _address(name: str) -> device_server.DeviceAddress:
@@ -25,10 +25,6 @@ def device_reservation(name: str) -> set[str]:
     A composite reserves itself and every sub-device; a sub-device only itself.
     """
     address = _address(name)
-    if address.owner_conf.get("active", True) is False:
-        raise ReservationError(
-            f"Device {address.name!r} is inactive in CONFIG['Devices']"
-        )
     reserved = {address.name}
     if not address.is_sub_device:
         reserved.update(address.conf.get("devices") or {})

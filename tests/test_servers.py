@@ -211,7 +211,7 @@ def status_server(monkeypatch):
 @pytest.mark.parametrize(
     "params, reachable, state",
     [
-        ({"active": False, "host": "h", "port": 1}, True, "disabled"),
+        ({"active": False, "host": "h", "port": 1}, True, "up"),
         ({"active": True, "host": None, "port": 1}, True, "down"),
         ({"active": True, "host": "h", "port": 1}, True, "up"),
         ({"active": True, "host": "h", "port": 1}, False, "down"),

@@ -129,9 +129,7 @@ class DeviceStatusServer:
         for name, params in self.devices.items():
             host = params.get("host")
             port = params.get("port")
-            if not params.get("active", True):
-                state, last_seen = "disabled", None
-            elif host is None or port is None:
+            if host is None or port is None:
                 state, last_seen = "down", None
             elif is_reachable(host, port, self.probe_timeout):
                 state, last_seen = "up", now

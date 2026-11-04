@@ -11,11 +11,11 @@ logger = get_logger(__name__)
 
 
 def camera_names() -> list[str]:
-    """Every active CONFIG device whose driver is a :class:`Camera`."""
+    """Every CONFIG device whose driver is a :class:`Camera`."""
     names = []
     for address in device_server.device_index().values():
         path = address.conf.get("class")
-        if not path or address.owner_conf.get("active", True) is False:
+        if not path:
             continue
         try:
             driver = device_server._load(path)

@@ -26,7 +26,7 @@ class RecordingCamera:
         return call
 
 
-def test_dropdown_lists_only_active_cameras(monkeypatch):
+def test_dropdown_lists_every_camera_started_at_launch_or_not(monkeypatch):
     devices = {
         "Cam A": {"class": "pytweezer.drivers.thorcam:ThorCam"},
         "Cam Off": {
@@ -39,7 +39,7 @@ def test_dropdown_lists_only_active_cameras(monkeypatch):
         },
     }
     monkeypatch.setattr(device_server, "get_config", lambda: {"Devices": devices})
-    assert cc.camera_names() == ["Cam A", "Rig Cam"]
+    assert cc.camera_names() == ["Cam A", "Cam Off", "Rig Cam"]
 
 
 def test_task_reserves_every_camera_in_the_dropdown():

@@ -65,11 +65,10 @@ def test_composite_reserves_its_members_but_a_member_only_itself(fake_config):
     assert device_reservation("Rig Cam") == {"Rig Cam"}
 
 
-def test_unknown_and_inactive_devices_are_refused(fake_config):
+def test_unknown_devices_are_refused_but_inactive_ones_reserved(fake_config):
     with pytest.raises(ReservationError, match="not found"):
         device_reservation("Nope")
-    with pytest.raises(ReservationError, match="inactive"):
-        device_reservation("Old Cam")
+    assert device_reservation("Old Cam") == {"Old Cam"}
 
 
 def test_experiment_reserves_the_union_of_its_devices(fake_config):
@@ -122,7 +121,7 @@ def test_describe_reports_reservations_and_errors(fake_config, monkeypatch):
             pass
 
     class Bad(Experiment):
-        cam = Device("Old Cam")
+        cam = Device("Nope")
 
         def run_point(self):
             pass
@@ -138,7 +137,7 @@ def test_describe_reports_reservations_and_errors(fake_config, monkeypatch):
     assert schemas["Good"]["reserves"] == ["Cam"]
     assert schemas["Good"]["reserve_error"] is None
     assert schemas["Bad"]["reserves"] is None
-    assert "inactive" in schemas["Bad"]["reserve_error"]
+    assert "not found" in schemas["Bad"]["reserve_error"]
 
 
 class Sneaky(Experiment):

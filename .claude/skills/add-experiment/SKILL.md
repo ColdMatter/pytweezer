@@ -191,7 +191,7 @@ notebook**; use `run_local` for those (pass `path=` to keep a file). A plain
 package (the manager keeps one for `pytweezer.experiments` and one for
 `pytweezer.optimisers`), its module
 fails to import, or its devices can't be reserved (`ReservationError`: unknown
-or inactive device, or `linked=True` on a MOTMaster with no `linked_partner`;
+device, or `linked=True` on a MOTMaster with no `linked_partner`;
 `run_local` raises the same before running). While the catalogue
 is still being read the task is queued and resolved later, failing if it then
 can't be.
