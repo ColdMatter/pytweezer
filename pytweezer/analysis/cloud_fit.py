@@ -7,9 +7,10 @@ Coordinates: pixel column ``c`` and row ``r`` sit at
 units are ``"px"``; with them ``"m"``. ``angle`` is that of the major axis,
 measured from +x towards +y in these coordinates, in (-pi/2, pi/2].
 
-The fit is cheap enough for full 2048 x 2048 frames: a moments seed on a coarsely
-binned copy of the frame locates the cloud, the least-squares fit then runs on a
-binned window of +-4 sigma about it with an analytic Jacobian.
+The fit is cheap enough for full 2048 x 2048 frames: a multi-scale blob detection
+and moments seed on a coarsely binned copy of the frame locates the cloud, the
+least-squares fit then runs on a binned window of +-4 sigma about it with an
+analytic Jacobian.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import math
 from dataclasses import asdict, dataclass
 
 import numpy as np
+from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit, least_squares
 
 FIELDS = (
@@ -35,13 +37,16 @@ FIELDS = (
 ERROR_FIELDS = ("x0", "y0", "sigma_x", "sigma_y", "sigma_major", "sigma_minor")
 
 _SEED_BINS = 256
-_SEED_THRESHOLD_NOISES = 6.0
+_QUANTILE_SAMPLES = 16384
+_MIN_LEVEL_BINS = 32  # fewer and the noise floor is too poorly estimated
+_SEED_MIN_SIGNIFICANCE = 7.0
 _WINDOW_SIGMAS = 4.0
 _MIN_HALF_WINDOW_PX = 8
 _BINS_PER_SIGMA_MINOR = 3
 _MAX_WINDOW_PASSES = 3
+_SEED_MOMENT_PASSES = 4
 _MAX_NFEV = 200
-_MIN_SIGMA_PX = 0.3
+_MIN_SIGMA_PX = 1.0
 _MIN_MATCHED_FILTER_SNR = 6.0
 
 
@@ -139,53 +144,108 @@ def _block_mean(block: np.ndarray, factor: int) -> np.ndarray:
     ) / (factor * factor)
 
 
-def _moments_seed(image: np.ndarray) -> tuple[np.ndarray, bool]:
-    """Seed from the second moments of a coarsely binned copy of the frame.
+def _baseline_and_noise(image: np.ndarray) -> tuple[float, float]:
+    """Mean and width of the noise floor from the lower tail, which a cloud does not reach."""
+    flat = image.ravel()
+    p10, p25 = np.percentile(flat[:: max(1, flat.size // _QUANTILE_SAMPLES)], (10, 25))
+    noise = float(p25 - p10) / 0.607  # lower-quartile spread of Gaussian noise
+    noise = max(noise, 1e-9 * max(float(np.abs(image).max()), 1.0))
+    return float(p10) + 1.2816 * noise, noise  # p10 sits 1.28 sigma below the mean
 
-    Only bins above the baseline by several noise widths carry weight, so a
-    large noisy frame does not drown the cloud. Fails when no bin does.
+
+def _detect(coarse: np.ndarray):
+    """Find the most significant blob over a ladder of scales.
+
+    Each level of a block-averaged pyramid is tested raw and smoothed by one
+    bin, so every scale is within about 1.4x of a matched filter. Returns
+    ``(z, row, col, bins, smoothed, baseline, noise, sigma_bins)`` for the
+    strongest response, where ``bins`` is the level's bin size in coarse bins and
+    ``sigma_bins`` the filter's width in coarse bins.
+    """
+    best = None
+    level, bins = coarse, 1
+    while min(level.shape) >= _MIN_LEVEL_BINS:
+        for smoothing in (0.0, 1.0):
+            smoothed = (
+                gaussian_filter(level, smoothing, mode="nearest")
+                if smoothing
+                else level
+            )
+            baseline, noise = _baseline_and_noise(smoothed)
+            z = (smoothed - baseline) / noise
+            row, col = np.unravel_index(np.argmax(z), z.shape)
+            if best is None or z[row, col] > best[0]:
+                sigma_bins = bins * math.sqrt(smoothing**2 + 1 / 12)
+                best = (
+                    float(z[row, col]),
+                    row,
+                    col,
+                    bins,
+                    smoothed,
+                    baseline,
+                    noise,
+                    sigma_bins,
+                )
+        level, bins = _block_mean(level, 2), bins * 2
+    return best
+
+
+def _moments_seed(image: np.ndarray) -> tuple[np.ndarray, bool]:
+    """Seed from the strongest blob of a coarsely binned copy of the frame.
+
+    Detection is by matched-filter-like significance over several scales, so a
+    faint, broad cloud is found as readily as a bright, small one; the second
+    moments of the blob then give the widths and the angle. Fails when nothing
+    stands ``_SEED_MIN_SIGNIFICANCE`` noise widths above the floor.
     """
     rows, cols = image.shape
     factor = max(1, min(math.ceil(max(rows, cols) / _SEED_BINS), rows, cols))
     coarse = _block_mean(image, factor)
-    p10, p25 = np.percentile(coarse, (10, 25))
-    noise = float(p25 - p10) / 0.607  # lower-quartile spread of Gaussian noise
-    baseline = (
-        float(p10) + 1.2816 * noise
-    )  # the 10th percentile sits 1.28 sigma below the mean
-    signal = coarse - baseline
-    mask = signal > _SEED_THRESHOLD_NOISES * noise
-    if not mask.any():
-        peak_row, peak_col = np.unravel_index(np.argmax(coarse), coarse.shape)
-        failed = np.array(
-            [
-                0.0,
-                (peak_col + 0.5) * factor,
-                (peak_row + 0.5) * factor,
-                0.0,
-                0.0,
-                0.0,
-                baseline,
-            ]
-        )
-        return failed, False
+    baseline, _ = _baseline_and_noise(coarse)
+    z_max, row, col, bins, smoothed, level_baseline, noise, sigma_bins = _detect(coarse)
+    step = bins * factor  # pixels per bin of the detecting level
+    centre_x, centre_y = (col + 0.5) * step, (row + 0.5) * step
+    if z_max < _SEED_MIN_SIGNIFICANCE:
+        return np.array([0.0, centre_x, centre_y, 0.0, 0.0, 0.0, baseline]), False
 
-    weights = np.where(mask, signal, 0.0)
-    xs = (np.arange(coarse.shape[1]) + 0.5) * factor
-    ys = (np.arange(coarse.shape[0]) + 0.5) * factor
-    total = weights.sum()
-    x0 = float(weights.sum(axis=0) @ xs / total)
-    y0 = float(weights.sum(axis=1) @ ys / total)
-    xc, yc = xs - x0, ys - y0
-    pixel_variance = factor**2 / 12  # bin averaging adds this to each axis
-    vxx = float(weights.sum(axis=0) @ xc**2 / total) - pixel_variance
-    vyy = float(weights.sum(axis=1) @ yc**2 / total) - pixel_variance
-    vxy = float(yc @ weights @ xc / total)
+    filter_variance = (sigma_bins * factor) ** 2  # the detecting filter widens the blob
+    sigma_px = max(sigma_bins * factor, 1.0)
+    x0, y0 = centre_x, centre_y
+    for _ in range(_SEED_MOMENT_PASSES):
+        # The detecting scale can be far narrower than the cloud: widen the
+        # moment window with the width found until it stops growing.
+        reach = math.ceil(3 * sigma_px / step) + 1
+        r0, r1 = (
+            max(0, int(y0 // step) - reach),
+            min(smoothed.shape[0], int(y0 // step) + reach + 1),
+        )
+        c0, c1 = (
+            max(0, int(x0 // step) - reach),
+            min(smoothed.shape[1], int(x0 // step) + reach + 1),
+        )
+        signal = smoothed[r0:r1, c0:c1] - level_baseline
+        weights = np.where(signal > 2 * noise, signal, 0.0)
+        total = weights.sum()
+        if total <= 0:
+            break
+        xs = (np.arange(c0, c1) + 0.5) * step
+        ys = (np.arange(r0, r1) + 0.5) * step
+        wx, wy = weights.sum(axis=0), weights.sum(axis=1)
+        x0, y0 = float(wx @ xs / total), float(wy @ ys / total)
+        xc, yc = xs - x0, ys - y0
+        vxx = float(wx @ xc**2 / total) - filter_variance
+        vyy = float(wy @ yc**2 / total) - filter_variance
+        vxy = float(yc @ weights @ xc / total)
+        mean, radius = 0.5 * (vxx + vyy), math.hypot(0.5 * (vxx - vyy), vxy)
+        widest = math.sqrt(max(mean + radius, 1.0))
+        grown = widest > 1.2 * sigma_px
+        sigma_px = max(sigma_px, widest)
+        if not grown:
+            break
     theta = 0.5 * math.atan2(2 * vxy, vxx - vyy)
-    mean, radius = 0.5 * (vxx + vyy), math.hypot(0.5 * (vxx - vyy), vxy)
     sigma_a = math.sqrt(max(mean + radius, 1.0))
     sigma_b = math.sqrt(max(mean - radius, 1.0))
-    amplitude = float(signal.max())
+    amplitude = float((smoothed[r0:r1, c0:c1] - level_baseline).max())
     return np.array([amplitude, x0, y0, sigma_a, sigma_b, theta, baseline]), True
 
 

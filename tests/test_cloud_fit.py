@@ -63,22 +63,13 @@ def test_rotated_cloud_parameters_recovered():
 
 
 def test_fit_reports_in_frame_coordinates():
-    cloud = rotated_cloud(angle=0.0)
-    resolution = (4e-6, 4e-6)
-    fit = fit_cloud(gaussian_image(**cloud), resolution=resolution, origin=(10, 20))
-
-    assert fit.units == "m"
-    assert fit.x0 == pytest.approx((10 + cloud["x0"] + 0.5) * 4e-6, abs=0.1 * 4e-6)
-    assert fit.y0 == pytest.approx((20 + cloud["y0"] + 0.5) * 4e-6, abs=0.1 * 4e-6)
-    assert fit.sigma_x == pytest.approx(12.0 * 4e-6, rel=0.02)
-    assert fit.sigma_y == pytest.approx(6.0 * 4e-6, rel=0.02)
-
-
-def test_anisotropic_resolution_gives_angle_in_metres():
     # 14 px major axis at 45 deg and 5 px minor, pixels 1 um wide and 3 um tall
     cloud = rotated_cloud(angle=np.pi / 4, s_major=14.0, s_minor=5.0)
-    fit = fit_cloud(gaussian_image(**cloud), resolution=(1e-6, 3e-6))
+    fit = fit_cloud(gaussian_image(**cloud), resolution=(1e-6, 3e-6), origin=(10, 20))
 
+    assert fit.units == "m"
+    assert fit.x0 == pytest.approx((10 + cloud["x0"] + 0.5) * 1e-6, abs=0.1e-6)
+    assert fit.y0 == pytest.approx((20 + cloud["y0"] + 0.5) * 3e-6, abs=0.1 * 3e-6)
     sxx, syy = 110.5e-12, 110.5e-12 * 9
     sxy = 85.5 * 3e-12
     assert fit.sigma_x == pytest.approx(np.sqrt(sxx), rel=0.02)
@@ -95,6 +86,35 @@ def test_blank_frame_fails_quietly():
 
     assert fit.success is False
     assert time.perf_counter() - started < 1.0
+
+
+def test_faint_broad_cloud_is_detected():
+    # Peak at or below the per-pixel noise, but over thousands of pixels
+    for shape, sigma, peak in [((200, 200), 15.0, 10.0), ((1024, 1280), 30.0, 8.0)]:
+        rng = np.random.default_rng(3)
+        cloud = gaussian_image(
+            shape,
+            0.45 * shape[1],
+            0.55 * shape[0],
+            sigma,
+            0.7 * sigma,
+            0.4,
+            peak,
+            0,
+            noisy=False,
+        )
+        fit = fit_cloud(cloud + rng.normal(100.0, 10.0, shape))
+
+        assert fit.success is True
+        assert fit.sigma_major == pytest.approx(sigma, rel=0.15)
+
+
+def test_hot_pixel_is_not_a_cloud():
+    rng = np.random.default_rng(63)
+    frame = rng.normal(100.0, 10.0, (2048, 2048))
+    frame[700, 1300] += 1000.0
+
+    assert fit_cloud(frame).success is False
 
 
 def test_cloud_at_the_edge_is_fitted():
