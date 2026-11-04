@@ -1,18 +1,24 @@
 import threading
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from pytweezer.analysis.cloud_fit import fit_frames
 from pytweezer.analysis.cloud_results import cloud_sizes
-from pytweezer.experiment import ListAxis, Scan, run_local
+from pytweezer.experiment import ListAxis, Number, Scan, run_local
 from pytweezer.experiment.archive import ArchiveUnavailable, ResultsArchive
+from pytweezer.experiment.motmaster import MotMasterNumber
 from pytweezer.GUI.experiments import analyses
 from pytweezer.GUI.experiments.analyses import (
     TweezerHistogramView,
     declared_analyses,
 )
-from pytweezer.GUI.experiments.cloud_views import CloudFitView, CloudTemperatureView
+from pytweezer.GUI.experiments.cloud_views import (
+    CloudFitView,
+    CloudTemperatureView,
+    holds_seconds,
+)
 from tests.helpers import until, write_run
 from tests.test_analysis import SITE_CENTRES
 from tests.test_cloud_results import tof_file
@@ -334,3 +340,21 @@ def test_cloud_temperature_view_says_when_no_species_was_recorded(qapp, tmp_path
 
     assert "recorded no species" in view.message.text()
     assert view.readout.text() == ""
+
+
+@pytest.mark.parametrize(
+    ("argument", "seconds"),
+    [
+        (Number(1e-3, unit="s"), True),
+        (Number(1e-3, unit="ms", scale=1e-3), True),
+        (Number(1e-5, unit="us", scale=1e-6), True),
+        (Number(1e-5, unit="µs", scale=1e-6), True),
+        (MotMasterNumber(100.0, unit="ms", parameter="FreeExpTime"), False),
+        (MotMasterNumber(100.0, unit="ms/100", parameter="FreeExpTime"), False),
+        (Number(100.0), False),
+    ],
+)
+def test_only_native_time_arguments_hold_seconds(argument, seconds):
+    measurement = SimpleNamespace(argument_schema={"t": argument.to_schema()})
+
+    assert holds_seconds(measurement, "t") is seconds

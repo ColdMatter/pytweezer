@@ -31,6 +31,7 @@ SIZE_LABELS = {"sigma_x": "σx", "sigma_y": "σy"}
 CENTRE_LABELS = {"x0": "x0", "y0": "y0"}
 MOTMASTER_TICK_US = 10.0
 SECOND_US = 1e6
+TIME_UNITS = ("s", "ms", "us", "µs", "ns")
 
 
 def themed_plot() -> pg.PlotWidget:
@@ -51,6 +52,16 @@ def refill(combo, items, keep=True):
     index = combo.findData(current) if keep else -1
     combo.setCurrentIndex(max(index, 0))
     combo.blockSignals(False)
+
+
+def holds_seconds(measurement, argument: str) -> bool:
+    """Whether scanned ``argument`` holds SI seconds, not MOTMaster clock ticks.
+
+    Native arguments are held in SI whatever unit they display in; MOTMaster
+    parameters are sent raw, so theirs stay in ticks.
+    """
+    schema = measurement.argument_schema.get(argument, {})
+    return schema.get("unit") in TIME_UNITS and "motmaster_parameter" not in schema
 
 
 def axis_scale(measurement, axis: str) -> tuple[float, str]:
@@ -405,7 +416,7 @@ class CloudTemperatureView(ComputedAnalysisView):
     def _sync_time_unit(self, measurement):
         """Default the time unit when the argument's kind changes: seconds, or MOTMaster ticks."""
         argument = self.time_argument.currentData()
-        seconds = argument is not None and axis_scale(measurement, argument)[1] == "s"
+        seconds = argument is not None and holds_seconds(measurement, argument)
         if seconds != self._unit_in_seconds:
             self._unit_in_seconds = seconds
             self.time_unit.blockSignals(True)
