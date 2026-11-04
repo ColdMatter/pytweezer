@@ -7,7 +7,7 @@ from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
 from pytweezer.experiment import Scan, motmaster, optimisers, run_local
 from pytweezer.experiment.client import ManagerUnavailable
-from pytweezer.experiments.load_tweezers import LoadTweezers
+from pytweezer.experiments.load_tweezers import LoadTweezers, LoadTweezersMOTImage
 from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
 from pytweezer.optimisers.optimise_molasses_shims import OptimiseMolassesShims
@@ -108,6 +108,35 @@ class FakeHamCam:
         return self._frame(loaded), self._frame(kept)
 
 
+class FakeORCA:
+    """Images a Gaussian MOT of widths (6, 4) px on every shot; has no EM gain."""
+
+    def __init__(self):
+        self.headers = []
+        y, x = np.mgrid[:60, :80]
+        self.frame = (
+            20
+            + 200 * np.exp(-((x - 40) ** 2 / (2 * 6**2) + (y - 30) ** 2 / (2 * 4**2)))
+        ).astype(np.uint16)
+
+    def close_rpc(self):
+        pass
+
+    def set_external_exposure_mode(self): ...
+    def set_trigger_source(self, source): ...
+    def setup_acquisition(self, nframes, mode="sequence"): ...
+    def start_acquisition(self): ...
+    def stop_acquisition(self): ...
+    def stop_live(self): ...
+
+    def is_live(self):
+        return False
+
+    def acquire_n_frames(self, n, broadcast=False, header=None):
+        self.headers.append(header)
+        return np.stack([self.frame] * n)
+
+
 class FakeRig:
     """Knows no array unless a test gives it one."""
 
@@ -155,6 +184,7 @@ def rig(monkeypatch):
     devices = {
         "Rb MotMaster": sequencer,
         "Rb HamCam": sequencer.camera,
+        "ORCA": FakeORCA(),
         "Rb Rearrangement Rig": rearrangement_rig,
     }
     monkeypatch.setattr(
@@ -532,3 +562,34 @@ def test_load_tweezers_reports_the_loading_fraction_of_each_shot(rig):
         results["loading"], results["first_occupied"].mean(axis=1)
     )
     assert results["loading"].mean() == pytest.approx(LOADING, abs=0.1)
+
+
+def test_mot_image_variant_records_orca_fit_from_the_same_shot(rig):
+    measurement = run_local(LoadTweezersMOTImage, Scan(repetitions=2))
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    results = measurement.results
+    assert len(rig.goes) == 2
+    assert results["orca_sigma_x"] == pytest.approx([6, 6], rel=0.03)
+    assert results["orca_sigma_y"] == pytest.approx([4, 4], rel=0.03)
+    assert results["hamcam_images"].shape[:2] == (2, 2)
+    assert "orca_images" not in results
+    assert measurement.constants["cloud_mass_amu"] == 86.909
+    assert "first_occupied" in results
+
+
+def test_load_tweezers_never_touches_the_orca(rig):
+    measurement = run_local(LoadTweezers)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert not any(name.startswith("orca") for name in measurement.results)
+    assert "cloud_mass_amu" not in measurement.constants
+
+
+def test_mot_image_variant_offers_the_cloud_analyses_after_the_tweezer_ones(rig):
+    assert LoadTweezersMOTImage.schema()["analyses"] == [
+        "tweezer_histogram",
+        "tweezer_photon_histogram",
+        "cloud_fit",
+        "cloud_temperature",
+    ]

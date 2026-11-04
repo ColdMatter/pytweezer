@@ -359,6 +359,9 @@ The Rb tweezer experiments, in the order a session uses them:
    (`(2, H, W)` per point) only with `save_raw_images`.
    `LoadTweezers` runs without sites only if it records frames;
    `TweezerArrayMeasurement` always needs them.
+   `LoadTweezersMOTImage` is `LoadTweezers` plus the ORCA's one frame of the Rb
+   MOT from the same shot, recorded as an `orca_*` cloud fit (`record_cloud_fit`);
+   `LoadTweezers` itself never touches the ORCA.
 4. `LoadTweezers.take_shots(n, **sequence)` runs a batch, for the classes
    whose point is one: `TweezerArrayMeasurement` (`score_batch()`, used by the
    Bayesian optimisers) and `FindTrapSites`. Their
