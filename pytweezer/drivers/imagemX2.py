@@ -4,7 +4,7 @@ from pytweezer.drivers.camera_base import (
     Camera,
     simulated_camera_for,
 )
-from pytweezer.drivers.hamamatsu import open_dcam_camera
+from pytweezer.drivers.hamamatsu import open_dcam_camera, set_dcam_exposure_mode
 
 
 class ImagEMX2Camera(Camera):
@@ -113,10 +113,13 @@ class ImagEMX2Camera(Camera):
     def set_sensitivity(self, sensitivity: int):
         self._backend.set_attribute_value("sensitivity", int(sensitivity))
 
+    def set_exposure_mode(self, mode: str):
+        """``"internal"``, ``"edge"`` (a trigger starts an exposure of the set
+        time) or ``"level"`` (the trigger pulse's width sets it)."""
+        set_dcam_exposure_mode(self._backend, mode)
+
     def set_external_exposure_mode(self):
-        self.set_trigger_source("ext")
-        self._backend.set_attribute_value("trigger_active", 2)
-        self._backend.setup_ext_trigger(invert=True)
+        self.set_exposure_mode("level")
 
     def get_conversion_factor(self) -> tuple[float, float]:
         """The camera's photoelectron conversion ``(coefficient, offset)`` at its current settings."""

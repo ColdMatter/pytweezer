@@ -77,6 +77,11 @@ Rules that matter:
   frames (`acquire_n_frames(..., broadcast=True, header={"rid": self.rid})`).
 - An experiment that chooses its own points overrides
   `planned_points(scan)`, raising `ValueError` for a scan it can't honour.
+- Each camera has a settings experiment (`experiments/camera_settings.py`,
+  bases `CameraSettings`/`ImagEMSettings`/`ORCASettings`/`ThorCamSettings`
+  in `experiment/camera_settings.py`) that sends only the settings ticked in
+  the form and leaves them; a new camera in CONFIG needs one
+  (`tests/test_camera_settings.py` checks).
 
 ## MOTMaster sequences
 
@@ -274,7 +279,9 @@ from pytweezer.experiment.client import (
 get_saved_parameter("tImgCoolVCO")  # KeyError names close matches
 get_saved_parameters()  # {key: value}; arrays as numpy arrays
 set_saved_parameters({"level": 0.3}, "realigned the probe")  # reason and user logged
-set_saved_parameters({"new_key": 1.0}, "first calibration", create=True, group="MOT", unit="V")
+set_saved_parameters(
+    {"new_key": 1.0}, "first calibration", create=True, group="MOT", unit="V"
+)
 saved_parameter_history("level", limit=10)  # newest first; rid= for one run's
 ```
 

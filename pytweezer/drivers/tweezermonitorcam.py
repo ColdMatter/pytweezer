@@ -58,6 +58,10 @@ class ThorCam(Camera):
     def set_trigger_source(self, source: str):
         self._backend.set_trigger_mode(source)
 
+    def set_trigger_polarity(self, polarity: str):
+        """``"rise"`` (active high) or ``"fall"`` (active low)."""
+        self._backend.setup_ext_trigger(polarity)
+
     def set_exposure_time(self, exposure: float):
         self._backend.set_exposure(exposure)
 

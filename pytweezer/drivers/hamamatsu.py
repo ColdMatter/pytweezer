@@ -23,6 +23,32 @@ if lib.dcamapi_init(ctypes.byref(init)) >= 0:
 """
 
 
+#: DCAM ``trigger_active`` for each external exposure mode.
+_TRIGGER_ACTIVE = {"edge": 1, "level": 2}
+
+
+def set_dcam_exposure_mode(camera: DCAMCamera, mode: str) -> None:
+    """Put ``camera`` in exposure mode ``"internal"``, ``"edge"`` or ``"level"``.
+
+    In ``"edge"`` each trigger starts an exposure of the set time; in
+    ``"level"`` the trigger pulse's width sets it. Both take the trigger
+    inverted (active low).
+
+    Raises:
+        ValueError: For any other ``mode``.
+    """
+    if mode == "internal":
+        camera.set_trigger_mode("int")
+        return
+    if mode not in _TRIGGER_ACTIVE:
+        raise ValueError(
+            f"exposure mode is 'internal', 'edge' or 'level', not {mode!r}"
+        )
+    camera.set_trigger_mode("ext")
+    camera.set_attribute_value("trigger_active", _TRIGGER_ACTIVE[mode])
+    camera.setup_ext_trigger(invert=True)
+
+
 def _normalise_serial(serial: str) -> str:
     return serial.removeprefix("S/N:").strip()
 

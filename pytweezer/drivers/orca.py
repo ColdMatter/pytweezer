@@ -2,7 +2,7 @@ from pytweezer.drivers.camera_base import (
     Camera,
     simulated_camera_for,
 )
-from pytweezer.drivers.hamamatsu import open_dcam_camera
+from pytweezer.drivers.hamamatsu import open_dcam_camera, set_dcam_exposure_mode
 
 
 class ORCACamera(Camera):
@@ -95,10 +95,13 @@ class ORCACamera(Camera):
         """Set the contrast gain (an integer index)."""
         self._backend.set_attribute_value("contrast_gain", int(gain))
 
+    def set_exposure_mode(self, mode: str):
+        """``"internal"``, ``"edge"`` (a trigger starts an exposure of the set
+        time) or ``"level"`` (the trigger pulse's width sets it)."""
+        set_dcam_exposure_mode(self._backend, mode)
+
     def set_external_exposure_mode(self):
-        self.set_trigger_source("ext")
-        self._backend.set_attribute_value("trigger_active", 2)
-        self._backend.setup_ext_trigger(invert=True)
+        self.set_exposure_mode("level")
 
     def trigger(self):
         """Send a software trigger to the camera."""

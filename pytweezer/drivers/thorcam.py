@@ -46,7 +46,7 @@ class ThorCam(Camera):
         )
         if trigger_mode is not None:
             self._backend.set_trigger_mode(trigger_mode)
-            self._backend.setup_ext_trigger(trigger_polarity)
+            self.set_trigger_polarity(trigger_polarity)
         if binning is not None:
             self.set_binning(binning)
         if gain_db is not None:
@@ -83,6 +83,10 @@ class ThorCam(Camera):
 
     def set_trigger_source(self, source: str):
         self._backend.set_trigger_mode(source)
+
+    def set_trigger_polarity(self, polarity: str):
+        """``"rise"`` (active high) or ``"fall"`` (active low)."""
+        self._backend.setup_ext_trigger(polarity)
 
     def set_exposure_time(self, exposure: float):
         self._backend.set_exposure(exposure)

@@ -18,17 +18,19 @@ import numpy as np
 from pytweezer.notebook import Rig
 
 rig = Rig("CaF MotMaster", {"CaF": "CaF ThorCam", "Rb": "Rb HamCam"})
-rig.linked = True                        # for a linked Rb+CaF script
+rig.linked = True  # for a linked Rb+CaF script
 
 shot = rig.run("LinkedRbCaFMOT", iterations=3, dummy=0.0)
-images, params = shot.images["CaF"], shot.params   # what CaF.readFromZip(n) gave
-shot.zip_number                          # MOTMaster's run number, None if save=False
+images, params = shot.images["CaF"], shot.params  # what CaF.readFromZip(n) gave
+shot.zip_number  # MOTMaster's run number, None if save=False
 
 shots = rig.scan("BX_BMOT_OP_magtrap", "tHold", [0, 10, 20])
 sp = rig.laser_set_points()
 shots = rig.scan_laser("BX_BMOT_OP_magtrap", "BX", scan_vals, iterations=3, settle_s=10)
-results = rig.auto_mot(["v0", "v1"], spans={"v0": 10e-6}, points={"v0": 30}, display=True)
-rig.close()                              # releases the link
+results = rig.auto_mot(
+    ["v0", "v1"], spans={"v0": 10e-6}, points={"v0": 30}, display=True
+)
+rig.close()  # releases the link
 ```
 
 `auto_mot` does not scan lasers itself: it submits the queued
@@ -106,9 +108,9 @@ notebook (MOTMaster's own window) save zips with no frames.
 - **Rb HamCam** (PH-BEAST, inside `Rb Rearrangement Rig`): starts in external
   exposure mode (`external_exposure` in CONFIG, as do the ORCAs), but keeps
   whatever the Rb side or a `ContinuousAcquisition` task (internal trigger) last
-  set. Set ROI, EM gain and trigger with raw calls; DCAM refuses trigger changes
-  while acquiring, so `stop_live()` first
-  (`get_device("Rb HamCam").set_external_exposure_mode()`). Addressed directly,
+  set. Set ROI, EM gain and exposure mode with an `RbHamCamSettings` task or raw
+  calls; DCAM refuses trigger changes while acquiring, so `stop_live()` first
+  (`get_device("Rb HamCam").set_exposure_mode("level")`, or `"edge"`/`"internal"`). Addressed directly,
   like any composite sub-device; a rearrangement-coordinator shot stalls its
   calls until it ends and leaves the camera out of live mode, which the next
   `run` restores.
