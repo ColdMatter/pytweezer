@@ -333,6 +333,12 @@ def _cloud_fit_view() -> AnalysisView:
     return CloudFitView()
 
 
+def _cloud_temperature_view() -> AnalysisView:
+    from pytweezer.GUI.experiments.cloud_views import CloudTemperatureView
+
+    return CloudTemperatureView()
+
+
 @dataclass(frozen=True)
 class AnalysisEntry:
     """How the Results tab lists an analysis and builds its view."""
@@ -351,4 +357,7 @@ ANALYSES: dict[str, AnalysisEntry] = {
         lambda: TweezerHistogramView(unit="photons"),
     ),
     "cloud_fit": AnalysisEntry("MOT Gaussian fit", _cloud_fit_view),
+    "cloud_temperature": AnalysisEntry(
+        "MOT temperature (time of flight)", _cloud_temperature_view
+    ),
 }

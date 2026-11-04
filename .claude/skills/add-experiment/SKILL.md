@@ -177,7 +177,10 @@ A view reads only what the file recorded, so record what it needs (the tweezer
 histograms take `first_counts`/`second_counts` with `trap_sites` and
 `threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`;
 the MOT Gaussian fit, `cloud_fit`, takes what `record_cloud_fit` records,
-`<camera>_<field>`, `_error` and `<camera>_mean_image`: `analysis/cloud_results.py`).
+`<camera>_<field>`, `_error` and `<camera>_mean_image`: `analysis/cloud_results.py`;
+`cloud_temperature` fits the time-of-flight expansion of those sizes against a scanned
+time argument, and needs the constant `cloud_mass_amu`, recorded by the experiment's
+`cloud_species`).
 A name this GUI doesn't know is listed disabled, and every analysis is disabled
 until the measurement finishes. An analysis only reads the file, through its
 own archive connection, off the GUI thread. The tab remembers the choice per

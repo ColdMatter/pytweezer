@@ -111,21 +111,31 @@ def _counts_and_image(point):
 
 
 def write_run(
-    path, rid=7, points_run=None, point_s=0.0, scan=None, record=_counts_and_image
+    path,
+    rid=7,
+    points_run=None,
+    point_s=0.0,
+    scan=None,
+    record=_counts_and_image,
+    constants=None,
+    units=None,
 ):
     """A run of ``Sweep`` over ``scan`` of which the first ``points_run`` ran.
 
     The scan is ``x`` = 1, 2, 3 V unless given. Each point records
     ``record(point)``, ``{result: value}``; by default a 2 x 2 ``image``, and
     ``counts`` except at point 1. Each point lasts at least ``point_s``, so a
-    reading can be placed inside it.
+    reading can be placed inside it. ``constants`` are recorded before the first
+    point as ``{name: (value, unit)}``; ``units`` is ``{result: unit}``.
     """
     scan = scan or Scan(axes=[ListAxis(argument="x", values=[1.0, 2.0, 3.0])])
     _, points, writer = open_writer(path, Sweep, {}, scan, {"rid": rid, "label": "t"})
+    for name, (value, unit) in (constants or {}).items():
+        writer.record(name, value, unit=unit)
     for point in points[:points_run]:
         writer.begin_point(point)
         for name, value in record(point).items():
-            writer.record(name, value)
+            writer.record(name, value, unit=(units or {}).get(name, ""))
         time.sleep(point_s)
         writer.end_point()
     writer.finalise("completed" if points_run in (None, len(points)) else "terminated")

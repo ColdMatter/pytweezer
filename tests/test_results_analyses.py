@@ -12,9 +12,10 @@ from pytweezer.GUI.experiments.analyses import (
     TweezerHistogramView,
     declared_analyses,
 )
-from pytweezer.GUI.experiments.cloud_views import CloudFitView
+from pytweezer.GUI.experiments.cloud_views import CloudFitView, CloudTemperatureView
 from tests.helpers import until, write_run
 from tests.test_analysis import SITE_CENTRES
+from tests.test_cloud_results import tof_file
 from tests.test_tweezer_histogram import ImagesArray
 
 
@@ -309,3 +310,27 @@ def test_choosing_a_point_reads_only_its_mean_image(qapp, tmp_path):
 
     assert until(lambda: ("point", "thorcam_mean_image", 3) in archive.reads, qapp=qapp)
     assert archive.reads == [("point", "thorcam_mean_image", 3)]
+
+
+def open_temperature_view(qapp, measurement, tmp_path):
+    view = CloudTemperatureView()
+    view.set_measurement(ResultsArchive(tmp_path), "tof.h5", measurement)
+    until(lambda: view.readout.text() or view.message.text() != "Analysing…", qapp=qapp)
+    return view
+
+
+def test_cloud_temperature_view_shows_the_temperature_and_g(qapp, tmp_path):
+    view = open_temperature_view(qapp, tof_file(tmp_path), tmp_path)
+
+    assert "Tx = " in view.readout.text()
+    assert "Ty = " in view.readout.text()
+    assert "g = 9.8" in view.readout.text()
+    assert len(view.sigma_curves["sigma_x"].getData()[0]) == 5
+    assert len(view.gravity_line.getData()[0]) == 2
+
+
+def test_cloud_temperature_view_says_when_no_species_was_recorded(qapp, tmp_path):
+    view = open_temperature_view(qapp, tof_file(tmp_path, species=False), tmp_path)
+
+    assert "recorded no species" in view.message.text()
+    assert view.readout.text() == ""

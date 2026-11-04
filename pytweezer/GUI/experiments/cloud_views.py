@@ -1,9 +1,12 @@
 """Results-tab views of the MOT cloud fits a measurement recorded."""
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
 import pyqtgraph as pg
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout
 
 from pytweezer.analysis.cloud_fit import contour_ellipses
@@ -11,17 +14,23 @@ from pytweezer.analysis.cloud_results import (
     SIZES,
     cloud_cameras,
     cloud_sizes,
+    cloud_temperature,
+    guess_time_axis,
     needed_results,
     point_image,
     scanned_arguments,
 )
 from pytweezer.experiment.summary import display_value
+from pytweezer.GUI.components import CompactDoubleSpinBox
 from pytweezer.GUI.experiments.analyses import ComputedAnalysisView
 from pytweezer.GUI.theme import CURVE_COLORS, PLOT_BACKGROUND, PLOT_FOREGROUND
 
 POINT_INDEX = "index"
 OUTLINE_PEN = pg.mkPen("w", width=1)
 SIZE_LABELS = {"sigma_x": "σx", "sigma_y": "σy"}
+CENTRE_LABELS = {"x0": "x0", "y0": "y0"}
+MOTMASTER_TICK_US = 10.0
+SECOND_US = 1e6
 
 
 def themed_plot() -> pg.PlotWidget:
@@ -30,6 +39,18 @@ def themed_plot() -> pg.PlotWidget:
         plot.getAxis(axis).setPen(PLOT_FOREGROUND)
         plot.getAxis(axis).setTextPen(PLOT_FOREGROUND)
     return plot
+
+
+def refill(combo, items, keep=True):
+    """Replace ``combo``'s ``(text, data)`` items silently, keeping the choice if ``keep``."""
+    current = combo.currentData()
+    combo.blockSignals(True)
+    combo.clear()
+    for text, data in items:
+        combo.addItem(text, data)
+    index = combo.findData(current) if keep else -1
+    combo.setCurrentIndex(max(index, 0))
+    combo.blockSignals(False)
 
 
 def axis_scale(measurement, axis: str) -> tuple[float, str]:
@@ -128,27 +149,14 @@ class CloudFitView(ComputedAnalysisView):
         layout.addWidget(self.message)
 
     def set_measurement(self, archive, path, measurement):
-        self._refill(
-            self.camera, [(camera, camera) for camera in cloud_cameras(measurement)]
-        )
-        self._refill(
+        refill(self.camera, [(camera, camera) for camera in cloud_cameras(measurement)])
+        refill(
             self.against,
             [(axis, axis) for axis in scanned_arguments(measurement)]
             + [("point index", POINT_INDEX)],
         )
-        self._refill(self.point, self._point_labels(measurement), keep=False)
+        refill(self.point, self._point_labels(measurement), keep=False)
         super().set_measurement(archive, path, measurement)
-
-    @staticmethod
-    def _refill(combo, items, keep=True):
-        current = combo.currentData()
-        combo.blockSignals(True)
-        combo.clear()
-        for text, data in items:
-            combo.addItem(text, data)
-        index = combo.findData(current) if keep else -1
-        combo.setCurrentIndex(max(index, 0))
-        combo.blockSignals(False)
 
     @staticmethod
     def _point_labels(measurement):
@@ -253,3 +261,273 @@ class CloudFitView(ComputedAnalysisView):
             curve = pg.PlotCurveItem(x, y, pen=OUTLINE_PEN)
             self.image_plot.addItem(curve)
             self.outline_curves.append(curve)
+
+
+def format_value(value: float, error: float, scale: float = 1.0) -> str:
+    """``value ± error`` times ``scale``, the error to two figures and the value to its decimal place."""
+    value, error = value * scale, error * scale
+    if not (math.isfinite(error) and error > 0):
+        return f"{value:.3g}"
+    decimals = max(0, 1 - math.floor(math.log10(error)))
+    return f"{value:.{decimals}f} ± {error:.{decimals}f}"
+
+
+@dataclass(frozen=True)
+class TemperatureDrawing:
+    """What :class:`CloudTemperatureView` shows for one camera and time argument."""
+
+    result: dict
+    argument: str
+    seconds_per_unit: float
+
+
+class CloudTemperatureView(ComputedAnalysisView):
+    """The temperature of a cloud from its expansion over a scanned free-fall time.
+
+    σ² against t² for x and y with their fits, and the centre against t² with
+    ``g`` fitted to y0 as a check of the time axis. Lengths are shown in mm and
+    times in ms.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.camera = QComboBox()
+        self.camera.setToolTip("Camera whose cloud fits to analyse")
+        self.time_argument = QComboBox()
+        self.time_argument.setToolTip("Scanned argument that is the free-fall time")
+        self.time_unit = CompactDoubleSpinBox()
+        self.time_unit.setRange(1e-3, 1e9)
+        self.time_unit.setValue(MOTMASTER_TICK_US)
+        self.time_unit.setSuffix(" µs")
+        self.time_unit.setToolTip(
+            "Length of one unit of the time argument's value. MOTMaster times "
+            "are in clock ticks of 10 µs; an argument in seconds is 1000000 µs"
+        )
+        self._unit_in_seconds = False
+
+        controls = QHBoxLayout()
+        controls.setSpacing(8)
+        for text, widget, width in (
+            ("Camera", self.camera, 160),
+            ("Time argument", self.time_argument, 200),
+            ("Time unit", self.time_unit, 110),
+        ):
+            widget.setFixedWidth(width)
+            if controls.count():
+                controls.addSpacing(12)
+            controls.addWidget(QLabel(text))
+            controls.addWidget(widget)
+        controls.addStretch(1)
+        self.camera.currentIndexChanged.connect(self.recompute)
+        self.time_argument.currentIndexChanged.connect(self._time_argument_changed)
+        self.time_unit.valueChanged.connect(self.recompute_soon)
+
+        self.sigma_plot = themed_plot()
+        self.sigma_plot.addLegend()
+        self.sigma_plot.setLabel("bottom", "t²", units="ms²")
+        self.sigma_curves, self.sigma_errors, self.sigma_lines = {}, {}, {}
+        self.centre_plot = themed_plot()
+        self.centre_plot.addLegend()
+        self.centre_plot.setLabel("bottom", "t²", units="ms²")
+        self.centre_curves, self.centre_errors = {}, {}
+        for plot in (self.sigma_plot, self.centre_plot):
+            for axis in ("left", "bottom"):
+                plot.getAxis(axis).enableAutoSIPrefix(False)
+        for i, field in enumerate(SIZES):
+            self.sigma_curves[field], self.sigma_errors[field] = self._series(
+                self.sigma_plot, CURVE_COLORS[i], SIZE_LABELS[field]
+            )
+            self.sigma_lines[field] = self.sigma_plot.plot(
+                [], [], pen=pg.mkPen(CURVE_COLORS[i], width=1.5)
+            )
+        for i, field in enumerate(CENTRE_LABELS):
+            self.centre_curves[field], self.centre_errors[field] = self._series(
+                self.centre_plot, CURVE_COLORS[i], CENTRE_LABELS[field]
+            )
+        self.gravity_line = self.centre_plot.plot(
+            [], [], pen=pg.mkPen(CURVE_COLORS[1], width=1.5)
+        )
+
+        # Monospaced so the digits hold their columns as the values change.
+        self.readout = QLabel()
+        font = QFont("Consolas")
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        self.readout.setFont(font)
+        self.readout.setContentsMargins(10, 6, 10, 6)
+        self.readout.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+
+        plots = QHBoxLayout()
+        plots.setSpacing(8)
+        plots.addWidget(self.sigma_plot, 1)
+        plots.addWidget(self.centre_plot, 1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(controls)
+        layout.addWidget(self.readout)
+        layout.addLayout(plots, 1)
+        layout.addWidget(self.message)
+
+    @staticmethod
+    def _series(plot, colour, name):
+        curve = plot.plot([], [], pen=None, symbol="o", symbolBrush=colour, name=name)
+        errors = pg.ErrorBarItem(
+            x=np.empty(0), y=np.empty(0), height=np.empty(0), pen=colour
+        )
+        plot.addItem(errors)
+        return curve, errors
+
+    def set_measurement(self, archive, path, measurement):
+        refill(self.camera, [(camera, camera) for camera in cloud_cameras(measurement)])
+        arguments = scanned_arguments(measurement)
+        refill(self.time_argument, [(name, name) for name in arguments], keep=False)
+        guess = guess_time_axis(arguments)
+        if guess is not None:
+            self.time_argument.blockSignals(True)
+            self.time_argument.setCurrentIndex(self.time_argument.findData(guess))
+            self.time_argument.blockSignals(False)
+        self._sync_time_unit(measurement)
+        super().set_measurement(archive, path, measurement)
+
+    def unavailable_reason(self, measurement):
+        if not cloud_cameras(measurement):
+            return "This file recorded no cloud fits."
+        if "cloud_mass_amu" not in measurement.constants:
+            return (
+                "The experiment recorded no species, so there is no mass to "
+                "turn the expansion into a temperature."
+            )
+        if not scanned_arguments(measurement):
+            return "This file scanned no argument to use as the free-fall time."
+        return None
+
+    def _sync_time_unit(self, measurement):
+        """Default the time unit when the argument's kind changes: seconds, or MOTMaster ticks."""
+        argument = self.time_argument.currentData()
+        seconds = argument is not None and axis_scale(measurement, argument)[1] == "s"
+        if seconds != self._unit_in_seconds:
+            self._unit_in_seconds = seconds
+            self.time_unit.blockSignals(True)
+            self.time_unit.setValue(SECOND_US if seconds else MOTMASTER_TICK_US)
+            self.time_unit.blockSignals(False)
+
+    def _time_argument_changed(self):
+        if self._measurement is not None:
+            self._sync_time_unit(self._measurement)
+        self.recompute()
+
+    def needed_results(self, measurement):
+        return needed_results(measurement)
+
+    def settings(self):
+        return (
+            self.camera.currentData(),
+            self.time_argument.currentData(),
+            self.time_unit.value() * 1e-6,
+        )
+
+    def compute(self, loaded, settings):
+        camera, argument, seconds_per_unit = settings
+        return TemperatureDrawing(
+            cloud_temperature(loaded, camera, argument, seconds_per_unit),
+            argument,
+            seconds_per_unit,
+        )
+
+    def show_result(self, result):
+        if result is None:
+            self.readout.setText("")
+            for curve in (*self.sigma_curves.values(), *self.centre_curves.values()):
+                curve.setData([], [])
+            for errors in (*self.sigma_errors.values(), *self.centre_errors.values()):
+                errors.setData(x=np.empty(0), y=np.empty(0), height=np.empty(0))
+            for line in (*self.sigma_lines.values(), self.gravity_line):
+                line.setData([], [])
+            return
+        drawing = result.result
+        metres = drawing["unit"] == "m"
+        # σ² and t² in mm² and ms²; centres in mm.
+        square, length = (1e6, 1e3) if metres else (1.0, 1.0)
+        self.sigma_plot.setLabel("left", "σ²", units="mm²" if metres else "px²")
+        self.centre_plot.setLabel("left", "centre", units="mm" if metres else "px")
+        for field in SIZES:
+            t2, sigma2, error = drawing["sigma2"][field]
+            self._draw_series(
+                self.sigma_curves[field],
+                self.sigma_errors[field],
+                (t2 * 1e6, sigma2 * square, error * square),
+            )
+            fit = drawing["fits"][field]
+            self._draw_line(
+                self.sigma_lines[field],
+                t2,
+                fit.intercept,
+                fit.slope,
+                1e6,
+                square,
+            )
+        for field in CENTRE_LABELS:
+            t2, centre, error = drawing["centres"][field]
+            self._draw_series(
+                self.centre_curves[field],
+                self.centre_errors[field],
+                (t2 * 1e6, centre * length, error * length),
+            )
+        gravity = drawing["gravity"]
+        t2 = drawing["centres"]["y0"][0]
+        self._draw_line(
+            self.gravity_line,
+            t2,
+            gravity.offset,
+            gravity.g / 2,
+            1e6,
+            length,
+        )
+        self.readout.setText(self._summary(result, metres))
+
+    @staticmethod
+    def _draw_series(curve, errors, series):
+        t2, value, error = series
+        curve.setData(t2, value)
+        errors.setData(x=t2, y=value, height=2 * np.nan_to_num(error))
+
+    @staticmethod
+    def _draw_line(line, t2, intercept, slope, t_scale, scale):
+        if t2.size == 0 or not (np.isfinite(intercept) and np.isfinite(slope)):
+            line.setData([], [])
+            return
+        ends = np.array([0.0, t2.max() * 1.05])
+        line.setData(ends * t_scale, (intercept + slope * ends) * scale)
+
+    @staticmethod
+    def _summary(result, metres):
+        drawing = result.result
+        lines = []
+        for field in SIZES:
+            fit = drawing["fits"][field]
+            name = SIZE_LABELS[field][-1]
+            if not fit.success:
+                lines.append(f"{name}: {fit.message}")
+                continue
+            sigma0 = (
+                f"σ₀ = {format_value(fit.sigma0, fit.sigma0_err, 1e3)} mm"
+                if np.isfinite(fit.sigma0)
+                else "σ₀ unresolved"
+            )
+            lines.append(
+                f"T{name} = {format_value(fit.temperature_K, fit.temperature_err_K, 1e6)} µK"
+                f"    {sigma0}    ({fit.message})"
+            )
+        gravity = drawing["gravity"]
+        if gravity.success and metres:
+            lines.append(
+                f"g = {format_value(gravity.g, gravity.g_err)} m/s² from y0, "
+                "taking +y (down the image) as down; the camera's orientation "
+                f"is not recorded    ({gravity.message})"
+            )
+        else:
+            lines.append(f"g: {gravity.message}")
+        unit_us = result.seconds_per_unit * 1e6
+        lines.append(f"t = {result.argument} × {unit_us:g} µs")
+        return "\n".join(lines)
