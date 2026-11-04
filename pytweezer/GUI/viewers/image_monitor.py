@@ -169,7 +169,6 @@ class ImageDisplay(Applet):
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
         self.sidebar = DataSidebar(self._props, self.name)
-        self.sidebar.setVisible(bool(self._show_sidebar))
 
         self.imgstream = ImageClient("imageviewer")
         self.maskstream = ImageClient("imageviewermask")
@@ -216,6 +215,7 @@ class ImageDisplay(Applet):
             plot.addItem(roi)
         layout.addWidget(graphics_layout_widget, 1)
         layout.addWidget(self.sidebar)
+        self.sidebar.setVisible(bool(self._show_sidebar))
 
         view_box = plot.getViewBox()
         view_box.invertY(True)

@@ -83,9 +83,7 @@ class FakeStream:
         return self.queue.pop(0)
 
 
-@pytest.fixture
-def monitor(qapp, monkeypatch):
-    """An Image Monitor with no hubs or Properties server behind it."""
+def fake_hubs(monkeypatch):
     for module, name, fake in [
         (applet, "Properties", FakeProps),
         (zmq_ROI, "Properties", FakeProps),
@@ -94,6 +92,12 @@ def monitor(qapp, monkeypatch):
         (data_sidebar, "DataClient", FakeStream),
     ]:
         monkeypatch.setattr(module, name, fake)
+
+
+@pytest.fixture
+def monitor(qapp, monkeypatch):
+    """An Image Monitor with no hubs or Properties server behind it."""
+    fake_hubs(monkeypatch)
     return image_monitor.ImageDisplay("Test Monitor")
 
 
@@ -153,6 +157,23 @@ def test_image_monitor_draws_row_zero_at_the_top_with_its_data_panel_on(monitor)
     assert monitor.plot.getViewBox().yInverted()
     assert monitor.image_item.axisOrder == "row-major"
     assert not monitor.sidebar.isHidden()
+
+
+def test_the_data_panel_is_never_shown_as_a_window_while_the_monitor_builds(
+    qapp, monkeypatch
+):
+    fake_hubs(monkeypatch)
+    parents_when_shown = []
+    set_visible = data_sidebar.DataSidebar.setVisible
+
+    def recording_set_visible(sidebar, visible):
+        parents_when_shown.append(sidebar.parent())
+        set_visible(sidebar, visible)
+
+    monkeypatch.setattr(data_sidebar.DataSidebar, "setVisible", recording_set_visible)
+    image_monitor.ImageDisplay("Test Monitor")
+    assert parents_when_shown
+    assert all(parent is not None for parent in parents_when_shown)
 
 
 def test_overlay_follows_the_cloud_tilt_in_the_plot(monitor):
