@@ -161,7 +161,7 @@ CONFIG = {
         },
         # The ORCA moves between PCs: keep exactly one of these two entries active.
         "CaF ORCA": {
-            "active": False,
+            "active": True,
             "class": "pytweezer.drivers.orca:ORCACamera",
             "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
             "host": HOSTS["ph-bonesaw"],
@@ -174,7 +174,7 @@ CONFIG = {
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Rb ThorCam": {
-            "active": True,
+            "active": False,
             "class": "pytweezer.drivers.thorcam:ThorCam",
             "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
             "host": SERVER_HOST,
@@ -185,7 +185,7 @@ CONFIG = {
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Tweezer Monitor ThorCam": {
-            "active": True,
+            "active": False,
             "class": "pytweezer.drivers.tweezermonitorcam:ThorCam",
             "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorLabsCamera",
             "host": SERVER_HOST,
