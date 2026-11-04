@@ -107,16 +107,14 @@ def frame_geometry(
 ) -> tuple[tuple[float, float] | None, tuple[float, float]]:
     """Return ``(resolution or None, origin)`` from a stream header.
 
-    Both ``_imgresolution`` and ``_offset`` must be present for the frame to be
-    in physical units; otherwise the resolution is ``None`` and the origin zero.
+    The origin is ``_offset`` when present, else zero. The resolution is
+    ``_imgresolution`` when present, else ``None`` (pixels).
     """
     resolution = head.get("_imgresolution")
     origin = head.get("_offset")
-    if resolution is None or origin is None:
-        return None, (0.0, 0.0)
-    return (float(resolution[0]), float(resolution[1])), (
-        float(origin[0]),
-        float(origin[1]),
+    return (
+        None if resolution is None else (float(resolution[0]), float(resolution[1])),
+        (0.0, 0.0) if origin is None else (float(origin[0]), float(origin[1])),
     )
 
 

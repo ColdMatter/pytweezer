@@ -618,6 +618,27 @@ def test_cloud_fit_analysis_publishes_fit_fields_with_geometry():
     assert out["_offset"] == list(origin)
 
 
+def test_offset_without_a_scale_places_pixels_from_the_crop_origin():
+    from pytweezer.analysis.cloud_fit import CloudFitAnalysis
+    from pytweezer.analysis.projections import Projections
+
+    frame = gaussian_frame((60, 90), x0=40.0, y0=25.0, sigma=6.0, amplitude=200.0)
+    head = {"_offset": [30.0, 10.0]}
+
+    fit = build(CloudFitAnalysis)
+    fit.process(head, frame)
+    ((out, _, _),) = fit.dataq.sent
+    assert out["units"] == "px"
+    assert out["x0"] == pytest.approx(30.0 + 40.5, abs=0.1)
+    assert out["y0"] == pytest.approx(10.0 + 25.5, abs=0.1)
+
+    proj = build(Projections)
+    proj.process(head, frame)
+    (_, x_data, _), (_, y_data, _) = proj.dataq.sent
+    np.testing.assert_allclose(x_data[0], 30.0 + np.arange(90) + 0.5)
+    np.testing.assert_allclose(y_data[0], 10.0 + np.arange(60) + 0.5)
+
+
 def test_cloud_fit_analysis_reports_pixels_without_a_scale():
     from pytweezer.analysis.cloud_fit import CloudFitAnalysis
 
@@ -713,6 +734,25 @@ def test_new_background_replaces_the_one_of_an_earlier_rid():
     _, data = analysis.process({"rid": 2}, np.full((2, 2), 60, np.uint16))
 
     np.testing.assert_array_equal(data, np.full((2, 2), 10.0))
+
+
+def test_each_stream_keeps_its_own_background():
+    from pytweezer.analysis.shot_background import ShotBackground
+
+    analysis = build(ShotBackground)
+    for stream, level in (("CamA", 10), ("CamB", 100)):
+        analysis.current_stream = stream
+        analysis.process(
+            {"rid": 1, "background": True}, np.full((3, 3), level, np.uint16)
+        )
+
+    outputs = {}
+    for stream in ("CamA", "CamB"):
+        analysis.current_stream = stream
+        _, outputs[stream] = analysis.process({"rid": 1}, np.full((3, 3), 120.0))
+
+    np.testing.assert_array_equal(outputs["CamA"], np.full((3, 3), 110.0))
+    np.testing.assert_array_equal(outputs["CamB"], np.full((3, 3), 20.0))
 
 
 @pytest.mark.parametrize(

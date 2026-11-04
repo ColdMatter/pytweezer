@@ -20,7 +20,7 @@ Properties:
 
 Coordinates follow :mod:`pytweezer.analysis.cloud_fit`: pixel ``i`` sits at
 ``(origin + i + 0.5) * resolution`` from the header's ``_offset`` and
-``_imgresolution``, in pixels when either is missing.
+``_imgresolution``, in pixels (resolution 1) without ``_imgresolution``.
 
 The fit is only trusted when it is a clear peak: ``success`` and the fit curve
 are withheld (``success`` False, ``fit_curve`` all NaN) when the least-squares

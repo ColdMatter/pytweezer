@@ -117,7 +117,7 @@ experiment that read it passes one. A change of `rid` is the natural reset for
 anything that accumulates over a task, as `tweezer_loading.py` does. Some
 publishers add `_offset` (pixel origin of a crop within its parent frame) and
 `_imgresolution` (metres per pixel). Frame coordinates are
-`(origin + pixel + 0.5) * resolution`, in pixels when either key is missing:
+`(origin + pixel + 0.5) * resolution`, in pixels (resolution 1) without `_imgresolution`:
 `cloud_fit.frame_geometry(head)` reads them.
 
 Saved trap sites (`trap_sites`, fitted by `trap_sites.fit_trap_sites`) are
