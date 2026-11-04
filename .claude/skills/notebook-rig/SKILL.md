@@ -105,8 +105,10 @@ notebook (MOTMaster's own window) save zips with no frames.
   camera, so pycaf's `ThorlabsGrabber` cannot run alongside it.
 - **Rb HamCam** (PH-BEAST, inside `Rb Rearrangement Rig`): armed as the Rb side
   last left it; set ROI, EM gain and trigger with raw calls
-  (`get_device("Rb HamCam").set_external_exposure_mode()`). Not usable from the
-  rig while a rearrangement coordinator owns it.
+  (`get_device("Rb HamCam").set_external_exposure_mode()`). Addressed directly,
+  like any composite sub-device; a rearrangement-coordinator shot stalls its
+  calls until it ends and leaves the camera out of live mode, which the next
+  `run` restores.
 
 ## Deploying a change
 
