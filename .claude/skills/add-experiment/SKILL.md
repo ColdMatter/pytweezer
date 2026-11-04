@@ -128,8 +128,10 @@ Every parameter of both machines, `SecondaryTriggerDelay` included, is a
 parameter of that one script. The link lasts one task: `prepare()` sets linked
 mode on or off on every sequencer (unlinking first) and `close_devices()`
 releases it, even after a failure. While linked, the Rb MOTMaster refuses its
-own `SetScriptPath`/`Go`, so an Rb-only task fails if someone has ticked Linked
-by hand on PH-BONESAW. Any linked failure, either machine, raises from the task.
+own `SetScriptPath`/`Go`; if someone has ticked Linked by hand on PH-BONESAW, an
+Rb-only task takes back control of it (`set_linked(False)` on the secondary),
+and fails only if a linked run is in progress. Any linked failure, either
+machine, raises from the task.
 `experiments/linked_scope_test.py` is the minimal example; the MOTMaster side
 is EDMSuite's `motmaster-linked-mode` skill.
 

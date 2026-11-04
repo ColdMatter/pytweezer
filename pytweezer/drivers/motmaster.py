@@ -20,6 +20,7 @@ from typing import Any
 
 from rich.progress import track
 
+from pytweezer.logging_utils import get_logger
 from pytweezer.servers.simulated_device import simulate
 
 # NOTE: these imports will only work with the pythonnet package
@@ -34,6 +35,8 @@ try:
     from System.Collections.Generic import Dictionary  # type: ignore
 except Exception as e:
     print(f"Error: {e} encountered, probably no pythonnet")
+
+logger = get_logger("pytweezer.drivers.motmaster")
 
 # config directory local to the package.
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "configuration"
@@ -307,12 +310,21 @@ class MotMasterInterface:
         ending in a MessageBox.
 
         Turning it on when already linked keeps the existing claim. Turning it off
-        does nothing on a MOTMaster that is not linked, including a build that
-        predates linked mode.
+        also takes back control if another MOTMaster has claimed this one as its
+        secondary (someone may have ticked Linked by hand), and does nothing on a
+        build that predates linked mode.
         """
         if not value and not hasattr(self.motmaster, "SetLinked"):
             self.linked = False
             return
+        if not value and self.motmaster.IsLockedByPrimary:
+            primary = self.motmaster.LockedBy
+            if not self.motmaster.TakeBackControl():
+                raise RuntimeError(
+                    f"MOTMaster is running a linked script for {primary}; stop that "
+                    "run before using this MOTMaster on its own."
+                )
+            logger.warning("Took back control of MOTMaster from %s", primary)
         if not (value and self.motmaster.IsLinked):
             self.motmaster.SetLinked(value)
         self.linked = value

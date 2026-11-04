@@ -328,10 +328,21 @@ class FakeLinkableDotNet(FakeDotNet):
     def __init__(self):
         super().__init__()
         self.IsLinked, self.set_linked_calls, self.go_calls = False, [], 0
+        self.LockedBy, self.secondary_run_in_progress = None, False
+
+    @property
+    def IsLockedByPrimary(self):
+        return self.LockedBy is not None
 
     def SetLinked(self, value):
         self.set_linked_calls.append(value)
         self.IsLinked = value
+
+    def TakeBackControl(self):
+        if self.secondary_run_in_progress:
+            return False
+        self.LockedBy = None
+        return True
 
     def Go(self, *args):
         self.go_calls += 1
@@ -363,6 +374,21 @@ def test_linking_an_already_linked_motmaster_keeps_its_claim():
     driver.set_linked(True)
     driver.set_linked(True)
     assert driver.motmaster.set_linked_calls == [True]
+
+
+def test_unlinking_takes_back_a_motmaster_left_claimed_as_a_secondary():
+    driver = _driver(motmaster=FakeLinkableDotNet())
+    driver.motmaster.LockedBy = "PH-BONESAW"
+    driver.set_linked(False)
+    assert not driver.motmaster.IsLockedByPrimary
+
+
+def test_unlinking_refuses_a_secondary_mid_linked_run():
+    driver = _driver(motmaster=FakeLinkableDotNet())
+    driver.motmaster.LockedBy = "PH-BONESAW"
+    driver.motmaster.secondary_run_in_progress = True
+    with pytest.raises(RuntimeError, match="PH-BONESAW"):
+        driver.set_linked(False)
 
 
 def test_unlinking_a_motmaster_built_before_linked_mode_does_nothing():
