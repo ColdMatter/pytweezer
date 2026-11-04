@@ -24,7 +24,7 @@ class TweezerArrayMeasurement(LoadTweezers):
     save_raw_images = Bool(
         False,
         group="Camera",
-        tooltip="record every shot's camera frames as first_images and second_images",
+        tooltip="record every shot's camera frames as hamcam_images",
     )
 
     # Not LoadTweezers' point: each optimiser measures its own, and this keeps

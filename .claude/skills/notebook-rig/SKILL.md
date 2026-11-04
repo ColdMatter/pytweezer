@@ -56,8 +56,9 @@ link is re-claimed before every shot.
 
 ## How frames are collected
 
-Cameras run free on hardware triggers; `Camera.arm` is called before every shot
-(idempotent), so a shared camera another task stopped comes back. `run`
+Cameras run free on hardware triggers in live mode; `Camera.start_live` is
+called before every shot (idempotent), so a shared camera another task took out
+of live mode comes back. `run`
 notes each camera's `frames_acquired()` before `Go`, waits until every count has
 been still for `frame_settle_s` (up to `frame_timeout_s`), then reads
 `read_frames_from(mark)`. Nothing configures frames per shot; a count that
@@ -68,7 +69,7 @@ cameras free-run the same way, and a simulated MOTMaster writes no zips, so the
 rig runs it with `save=False` (and says so once).
 
 The camera side is the frame-index protocol on `Camera` (`camera_base.py`):
-`arm`, `frames_acquired`, `read_frames_from`, `settings`, `start_live`/`stop_live`.
+`start_live`/`stop_live`/`is_live`, `arm`, `frames_acquired`, `read_frames_from`, `settings`.
 A pylablib-backed driver gets it for free; others implement
 `_acquisition_in_progress`, `_count_frames` and `_read_range`.
 `read_frames_from` raises if the ring buffer has already overwritten frames
@@ -98,8 +99,8 @@ notebook (MOTMaster's own window) save zips with no frames.
 
 ## Cameras
 
-- **CaF ThorCam** (ph-bonesaw): bulb trigger, rising edge, 16×16 binning, 12 dB,
-  `live: True` — it broadcasts every frame on `caf_thorcam`. Watch it in the GUI:
+- **CaF ThorCam** (ph-bonesaw): bulb trigger, rising edge, 16×16 binning, 12 dB.
+  In live mode (the rig puts it there) it broadcasts every frame on `caf_thorcam`. Watch it in the GUI:
   Applet Launcher → image viewer, image stream `caf_thorcam`. The device owns the
   camera, so pycaf's `ThorlabsGrabber` cannot run alongside it.
 - **Rb HamCam** (PH-BEAST, inside `Rb Rearrangement Rig`): armed as the Rb side

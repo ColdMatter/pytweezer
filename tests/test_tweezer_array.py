@@ -5,10 +5,9 @@ from pytweezer.analysis import analysis as an
 from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
-from pytweezer.experiment import Scan, optimisers, run_local
+from pytweezer.experiment import Scan, motmaster, optimisers, run_local
 from pytweezer.experiment.client import ManagerUnavailable
-from pytweezer.experiments import load_tweezers
-from pytweezer.experiments.load_tweezers import SAVED_SEQUENCE_PARAMETERS, LoadTweezers
+from pytweezer.experiments.load_tweezers import LoadTweezers
 from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
 from pytweezer.optimisers.optimise_molasses_shims import OptimiseMolassesShims
@@ -84,10 +83,16 @@ class FakeHamCam:
     def set_external_exposure_mode(self): ...
     def enable_em_gain(self, on): ...
     def enable_direct_em_gain(self, on): ...
-    def set_sensitivity(self, value): ...
+    def set_trigger_source(self, source): ...
+    def set_binning(self, binning): ...
+    def set_gain(self, gain): ...
     def setup_acquisition(self, nframes, mode="sequence"): ...
     def start_acquisition(self): ...
     def stop_acquisition(self): ...
+    def stop_live(self): ...
+
+    def is_live(self):
+        return False
 
     def _frame(self, occupied):
         atoms = np.tensordot(occupied, self.spots, axes=1)
@@ -131,7 +136,7 @@ def midpoint_threshold():
 
 
 SAVED = {
-    key: 1.0 + index for index, key in enumerate(SAVED_SEQUENCE_PARAMETERS.values())
+    key: 1.0 + index for index, key in enumerate(LoadTweezers.rb.saved.values())
 } | {
     "trap_sites": np.array(SITES, dtype=float) + ROI_ORIGIN,
     "trap_threshold": midpoint_threshold(),
@@ -158,7 +163,7 @@ def rig(monkeypatch):
     )
     saved = dict(SAVED)
     sequencer.saved = saved
-    for module in (load_tweezers, optimisers):
+    for module in (motmaster, optimisers):
         monkeypatch.setattr(module, "get_saved_parameters", lambda: saved)
     return sequencer
 
@@ -265,7 +270,7 @@ def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(
 ):
     run_local(experiment, **args, **{"rb.tMolCoolVCO1": 7.5})
     expected = {
-        parameter: SAVED[key] for parameter, key in SAVED_SEQUENCE_PARAMETERS.items()
+        parameter: SAVED[key] for parameter, key in LoadTweezers.rb.saved.items()
     } | {"tMolCoolVCO1": 7.5}
     for go in rig.goes:
         assert {name: go[name] for name in expected} == expected
@@ -388,10 +393,10 @@ def test_each_point_records_every_shots_counts_and_occupancy_at_every_site(rig, 
 def test_a_measurements_counts_are_the_raw_pixel_sums_of_its_frames(rig):
     measurement = run_local(ArrayBatch, **FAST, save_raw_images=True)
 
-    for name in ("first", "second"):
+    for i, name in enumerate(("first", "second")):
         np.testing.assert_array_equal(
             measurement.results[f"{name}_counts"][0],
-            window_sums(measurement.results[f"{name}_images"][0]),
+            window_sums(measurement.results["hamcam_images"][0][:, i]),
         )
 
 
@@ -406,9 +411,9 @@ def test_load_tweezers_records_each_sites_raw_counts_and_occupancy(rig):
 
     assert measurement.status == "completed", measurement.attrs.get("error")
     results = measurement.results
-    for name in ("first", "second"):
+    for i, name in enumerate(("first", "second")):
         np.testing.assert_array_equal(
-            results[f"{name}_counts"], window_sums(results[f"{name}_image"])
+            results[f"{name}_counts"], window_sums(results["hamcam_images"][:, i])
         )
     assert results["first_occupied"].shape == (10, len(SITES))
     assert results["first_occupied"].mean() == pytest.approx(LOADING, abs=0.1)
@@ -422,8 +427,7 @@ def test_load_tweezers_without_raw_images_records_no_frames(rig):
     measurement = run_local(LoadTweezers, save_raw_images=False)
 
     assert measurement.status == "completed", measurement.attrs.get("error")
-    assert "first_image" not in measurement.results
-    assert "second_image" not in measurement.results
+    assert "hamcam_images" not in measurement.results
     assert "first_occupied" in measurement.results
 
 
@@ -432,7 +436,7 @@ def test_load_tweezers_without_saved_sites_records_frames_only(rig):
     measurement = run_local(LoadTweezers)
 
     assert measurement.status == "completed", measurement.attrs.get("error")
-    assert "first_image" in measurement.results
+    assert "hamcam_images" in measurement.results
     assert "first_counts" not in measurement.results
     assert "trap_sites" not in measurement.constants
 
@@ -448,7 +452,7 @@ def test_load_tweezers_needs_the_saved_parameters(rig, monkeypatch):
     def unreachable():
         raise ManagerUnavailable("not responding")
 
-    monkeypatch.setattr(load_tweezers, "get_saved_parameters", unreachable)
+    monkeypatch.setattr(motmaster, "get_saved_parameters", unreachable)
     measurement = run_local(LoadTweezers)
 
     assert measurement.status == "failed"
@@ -470,9 +474,15 @@ def test_a_measurement_records_occupancy_and_frames_only_when_asked(
     measurement = run_local(ArrayBatch, **FAST, save_raw_images=save_raw_images)
 
     assert measurement.results["first_occupied"].shape == (1, FAST["shots"], len(SITES))
-    assert ("first_images" in measurement.results) == save_raw_images
+    assert ("hamcam_images" in measurement.results) == save_raw_images
     if save_raw_images:
-        assert measurement.results["first_images"].shape == (1, FAST["shots"], 128, 128)
+        assert measurement.results["hamcam_images"].shape == (
+            1,
+            FAST["shots"],
+            2,
+            128,
+            128,
+        )
 
 
 def test_sites_are_placed_in_the_roi_the_camera_actually_used(rig):

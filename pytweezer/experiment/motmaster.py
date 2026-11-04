@@ -15,6 +15,20 @@ shown; any other script parameter can be set by passing a dotted argument name
 Parameters not set are left at the script's own defaults. One MOTMaster is the
 master; the others are armed in trigger mode and started first.
 
+``saved=`` binds script parameters to saved parameters, read once in
+``prepare`` and sent with every run. A bare name binds the saved key of the same
+name; a dict maps a script parameter to a differently named key::
+
+    rb = MotMaster(
+        "Rb MotMaster",
+        script="RbTweezerBasic",
+        saved=("tMOTLoadRepVCO", {"tImgCoolVCO1": "tImgCoolVCO"}),
+    )
+
+A value set in the form (or scanned) beats the saved one, and an override passed
+to :meth:`MotMasterExperiment.run_sequences` beats both. The saved values sent
+are recorded as the constant ``saved_sequence``, keyed ``"rb.tMOTLoadRepVCO"``.
+
 A MOTMaster in linked mode runs one script across two machines: it claims its
 secondary itself and fires it by TTL, so the experiment declares only the
 primary, and every parameter (both machines', plus ``SecondaryTriggerDelay``)
@@ -29,9 +43,15 @@ CONFIG key and is reserved along with it::
 import difflib
 import threading
 import time
+from collections.abc import Iterable
 from typing import Any, ClassVar
 
 from pytweezer.experiment.arguments import Argument, Device, Integer, Number, collect
+from pytweezer.experiment.client import (
+    ManagerError,
+    ManagerUnavailable,
+    get_saved_parameters,
+)
 from pytweezer.experiment.experiment import Experiment, logger
 
 
@@ -48,6 +68,7 @@ class MotMaster(Device):
         iterations: int = 1,
         save: bool = False,
         follower_timeout: float = 60.0,
+        saved: Iterable[str | dict[str, str]] = (),
         timeout: float | None = None,
     ) -> None:
         super().__init__(device_name, timeout=timeout)
@@ -57,6 +78,8 @@ class MotMaster(Device):
         self.iterations = iterations
         self.save = save
         self.follower_timeout = follower_timeout
+        #: ``{script parameter: saved key}``.
+        self.saved = _saved_bindings(saved)
 
     def reserves(self) -> set[str]:
         from pytweezer.experiment.reservations import (
@@ -85,8 +108,36 @@ class MotMaster(Device):
                 "iterations": self.iterations,
                 "save": self.save,
                 "follower_timeout": self.follower_timeout,
+                "saved": dict(self.saved),
             }
         }
+
+
+def _saved_bindings(saved: Iterable[str | dict[str, str]]) -> dict[str, str]:
+    if isinstance(saved, (str, dict)):
+        saved = (saved,)
+    bindings: dict[str, str] = {}
+    for entry in saved:
+        if isinstance(entry, str):
+            pairs = {entry: entry}
+        elif isinstance(entry, dict) and all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in entry.items()
+        ):
+            pairs = entry
+        else:
+            raise TypeError(
+                f"saved= takes script parameter names and dicts of "
+                f"{{parameter: saved key}}, not {entry!r}"
+            )
+        for parameter, key in pairs.items():
+            if bindings.get(parameter, key) != key:
+                raise TypeError(
+                    f"saved= binds {parameter!r} to both {bindings[parameter]!r} "
+                    f"and {key!r}"
+                )
+            bindings[parameter] = key
+    return bindings
 
 
 class MotMasterParameter:
@@ -265,7 +316,44 @@ class MotMasterExperiment(Experiment):
             client.set_save_toggle(motmaster.save)
             client.set_trigger_mode(attribute != master)
             self._script_parameters[attribute] = client.get_params()
-        self._check_parameters(self.motmaster_parameters())
+        set_in_form = self.motmaster_parameters()
+        self._check_parameters(set_in_form)
+        self._bind_saved_parameters(set_in_form)
+
+    def _bind_saved_parameters(self, set_in_form: dict[str, dict[str, Any]]) -> None:
+        bindings = {
+            attribute: motmaster.saved
+            for attribute, motmaster in self.motmasters().items()
+            if motmaster.saved
+        }
+        self.saved_parameters: dict[str, Any] = {}
+        self.saved_sequence: dict[str, Any] = {}
+        self._saved_values: dict[str, dict[str, Any]] = {}
+        if not bindings:
+            return
+        try:
+            self.saved_parameters = get_saved_parameters()
+        except (ManagerUnavailable, ManagerError) as error:
+            raise RuntimeError(
+                f"the saved parameters could not be read: {error}"
+            ) from error
+        keys = {key for saved in bindings.values() for key in saved.values()}
+        missing = sorted(keys - set(self.saved_parameters))
+        if missing:
+            raise KeyError(f"no saved parameter {', '.join(map(repr, missing))}")
+        for attribute, saved in bindings.items():
+            for parameter in saved:
+                self._check_parameter(attribute, parameter)
+            self._saved_values[attribute] = {
+                parameter: self.saved_parameters[key]
+                for parameter, key in saved.items()
+            }
+            self.saved_sequence |= {
+                f"{attribute}.{parameter}": value
+                for parameter, value in self._saved_values[attribute].items()
+                if parameter not in set_in_form[attribute]
+            }
+        self.record("saved_sequence", self.saved_sequence)
 
     def _check_parameters(self, requested: dict[str, dict[str, Any]]) -> None:
         for attribute, parameters in requested.items():
@@ -300,11 +388,15 @@ class MotMasterExperiment(Experiment):
     def run_sequences(self, **overrides: Any) -> None:
         """Run every script once (blocking) with the current parameters plus ``overrides``.
 
-        ``overrides`` are keyed ``"attribute.parameter"``. Followers are started
+        ``overrides`` are keyed ``"attribute.parameter"`` and beat the form's
+        values, which beat the saved ones. Followers are started
         in threads first, then the master; the first error is raised once all
         have finished or timed out.
         """
-        requested = self.motmaster_parameters()
+        requested = {
+            attribute: self._saved_values.get(attribute, {}) | parameters
+            for attribute, parameters in self.motmaster_parameters().items()
+        }
         for key, value in overrides.items():
             attribute, _, parameter = key.partition(".")
             if attribute not in requested:

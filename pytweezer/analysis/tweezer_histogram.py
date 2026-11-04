@@ -10,9 +10,9 @@ same ``(header, values)`` pair from what a file recorded, in the header's
   ``analysis.convert_counts_to_photons`` when ``unit`` is ``"photons"``;
 * ``first_photons``/``second_photons`` per point (files from before raw
   counts), always in photons; or
-* ``first_image``/``second_image`` per point (``LoadTweezers`` without trap
-  sites), always in photons. The sites are found in the mean of every top-hat
-  filtered first image in the file.
+* the ``hamcam_images`` stack per point, ``(2, H, W)`` (``LoadTweezers``
+  without trap sites), always in photons. The sites are found in the mean of
+  every top-hat filtered first frame in the file.
 """
 
 from dataclasses import dataclass
@@ -30,8 +30,8 @@ from pytweezer.experiment.summary import display_value
 
 COUNTS = ("first_counts", "second_counts")
 PHOTONS = ("first_photons", "second_photons")
-FRAMES = ("first_image", "second_image")
-RESULTS = {"counts": COUNTS, "photons": PHOTONS, "frames": FRAMES}
+FRAMES = "hamcam_images"
+RESULTS = {"counts": COUNTS, "photons": PHOTONS, "frames": (FRAMES,)}
 
 
 @dataclass(frozen=True)
@@ -136,7 +136,8 @@ def tweezer_histogram(
     else:
         if not mask.any():
             return head | {"error": "No shots in this selection"}, None
-        firsts = _filtered(measurement.results[FRAMES[0]], settings)
+        stack = measurement.results[FRAMES]
+        firsts = _filtered(stack[:, 0], settings)
         sites = find_sites(
             np.mean(firsts, axis=0), settings.sites, settings.detection_step
         )
@@ -147,7 +148,7 @@ def tweezer_histogram(
         frames = (
             firsts
             if settings.image == 0
-            else _filtered(measurement.results[FRAMES[1]], settings)
+            else _filtered(stack[:, settings.image], settings)
         )
         selected = [frame for frame, keep in zip(frames, mask, strict=True) if keep]
         photons = photons_at_sites(selected, sites, settings.window_size)

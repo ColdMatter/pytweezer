@@ -36,7 +36,7 @@ class FindTrapSites(Fit, LoadTweezers):
     save_raw_images = Bool(
         False,
         group="Camera",
-        tooltip="record every shot's camera frames as first_images and second_images",
+        tooltip="record every shot's camera frames as hamcam_images",
     )
     calibration_shots = Integer(100, min=1, group=SEARCH)
     window_size = Integer(
@@ -103,7 +103,7 @@ class FindTrapSites(Fit, LoadTweezers):
         self.record("threshold", float(threshold), unit="photons")
         self.record("calibration_fidelity", float(fidelity))
         return {
-            "trap_sites": found.sites + self.roi_origin[::-1],
+            "trap_sites": found.sites + self.roi_origins["hamcam"][::-1],
             "trap_threshold": float(threshold),
             "trap_window_size": self.window_size,
             "trap_feature_size": self.feature_size,

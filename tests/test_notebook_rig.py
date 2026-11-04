@@ -49,13 +49,13 @@ class FakeCamera:
         self.count = 0
         self.late = 0
         self.polls_until_late = 0
-        self.armed_with = None
-        self.arms = 0
+        self.live_buffer = None
+        self.live_starts = 0
         self.value = lambda index: index
 
-    def arm(self, buffer_frames=1000):
-        self.armed_with = buffer_frames
-        self.arms += 1
+    def start_live(self, buffer_frames=1000):
+        self.live_buffer = buffer_frames
+        self.live_starts += 1
 
     def close_rpc(self):
         self.closed = True
@@ -192,9 +192,9 @@ def test_run_returns_each_cameras_frames_and_parameters(rig_parts):
     assert shot.params["tLoad"] == 100
 
 
-def test_cameras_are_armed_once_the_rig_is_made(rig_parts):
+def test_cameras_go_live_once_the_rig_is_made(rig_parts):
     _, _, cameras = rig_parts()
-    assert all(camera.armed_with == 1000 for camera in cameras.values())
+    assert all(camera.live_buffer == 1000 for camera in cameras.values())
 
 
 def test_saved_run_puts_caf_frames_in_motmasters_zip_and_rb_in_a_sibling(rig_parts):
@@ -390,7 +390,6 @@ def test_auto_mot_returns_each_stage_in_the_shape_the_plot_takes(
 ):
     optimiser_run.measurement = run_local(
         OptimiseMOTLasers,
-        frame_settle_s=0.0,
         v0_run=True,
         BX_run=True,
         v1_run=False,
@@ -606,11 +605,11 @@ def test_every_changed_frame_count_warns_from_the_callers_line(rig_parts):
     assert {w.filename for w in count_warnings} == {__file__}
 
 
-def test_a_camera_is_armed_again_before_every_shot(rig_parts):
+def test_a_camera_is_put_back_in_live_mode_before_every_shot(rig_parts):
     rig, _, cameras = rig_parts()
     rig.run("S", save=False)
     rig.run("S", save=False)
-    assert cameras["Rb"].arms == 3
+    assert cameras["Rb"].live_starts == 3
 
 
 def connect_by_name(monkeypatch, tmp_path, simulate=False):

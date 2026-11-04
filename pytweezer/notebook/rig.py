@@ -8,7 +8,7 @@
     shot = rig.run("LinkedRbCaFMOT", dummy=0.0)
     images, params = shot.images["CaF"], shot.params
 
-Each camera is armed once and runs free; a shot's frames are whatever each camera
+Each camera is put in live mode and runs free; a shot's frames are whatever each camera
 caught between the mark taken just before ``Go`` and the moment its frame count
 stops changing afterwards, so no frame count is configured anywhere. When saving,
 the frames are added to the zip MOTMaster wrote for the run (see
@@ -115,7 +115,7 @@ class Rig:
         element: MOTMaster's data prefix (``"CaF"``); read from the device's
             config file when ``motmaster`` is a name.
         data_root: Where MOTMaster saves its zips; as for ``element``.
-        buffer_frames: Ring-buffer size each camera is armed with.
+        buffer_frames: Ring-buffer size of each camera's live mode.
         frame_settle_s: How long every camera's frame count must stay unchanged
             after ``Go`` before the frames are read.
         frame_timeout_s: Longest wait for the counts to settle.
@@ -171,7 +171,7 @@ class Rig:
         self._shots_run = 0
         self._warned_simulated = False
         for camera in self.cameras.values():
-            camera.arm(buffer_frames)
+            camera.start_live(buffer_frames)
 
     def _connect(self, name: str) -> Any:
         client = get_device(name)
@@ -402,9 +402,9 @@ class Rig:
         mm.set_iterations(int(iterations))
         mm.set_save_toggle(save)
 
-        # Another user of a shared camera may have stopped it since the last shot.
+        # Another user of a shared camera may have taken it out of live mode.
         for camera in self.cameras.values():
-            camera.arm(self.buffer_frames)
+            camera.start_live(self.buffer_frames)
         marks = {key: camera.frames_acquired() for key, camera in self.cameras.items()}
         today = date.today()
         folders = [

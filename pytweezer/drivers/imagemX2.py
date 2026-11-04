@@ -6,10 +6,6 @@ from pytweezer.drivers.camera_base import (
 )
 from pytweezer.drivers.hamamatsu import open_dcam_camera
 
-IMAGE_DIRECTORY = (
-    "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/HamCamImages"
-)
-
 
 class ImagEMX2Camera(Camera):
     """dcam shim: translates the generic :class:`Camera` interface to the
@@ -33,7 +29,7 @@ class ImagEMX2Camera(Camera):
     ):
         self.serial_number = serial_number
         super().__init__(
-            image_dir=image_dir or IMAGE_DIRECTORY,
+            image_dir=image_dir,
             timeout=timeout,
             stream_name=stream_name,
         )

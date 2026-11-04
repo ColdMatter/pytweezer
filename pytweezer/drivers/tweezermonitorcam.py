@@ -9,10 +9,6 @@ from pytweezer.drivers.camera_base import (
 THORLABS_DLL_PATH = "C:\\Program Files\\Thorlabs\\Scientific Imaging\\Scientific Camera Support\\Scientific Camera Interfaces\\SDK\\Python Toolkit\\dlls\\64_lib"
 pll.par["devices/dlls/thorlabs_tlcam"] = THORLABS_DLL_PATH
 
-IMAGE_DIRECTORY = (
-    "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/ThorCamImages"
-)
-
 
 class ThorCam(Camera):
     """ThorLabs shim: translates the generic :class:`Camera` interface to the
@@ -27,7 +23,7 @@ class ThorCam(Camera):
         stream_name: str | None = None,
     ):
         super().__init__(
-            image_dir=image_dir or IMAGE_DIRECTORY,
+            image_dir=image_dir,
             timeout=timeout,
             stream_name=stream_name,
         )
