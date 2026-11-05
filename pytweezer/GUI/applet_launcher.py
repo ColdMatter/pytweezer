@@ -51,7 +51,7 @@ DEFAULT_APPLETS = [
     {
         "name": "SLM Monitor",
         "script": "pytweezer/GUI/viewers/slm_monitor.py",
-        "description": "Target tweezer array beside the phase mask on the SLM",
+        "description": "Target tweezer array, its simulated light and the SLM phase mask",
     },
 ]
 

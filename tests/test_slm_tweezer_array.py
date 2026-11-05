@@ -3,9 +3,15 @@
 import numpy as np
 import pytest
 
+from pytweezer.coordinators import rearrangement
 from pytweezer.experiments import slm_tweezer_array
-from pytweezer.experiments.slm_tweezer_array import render_target
-from pytweezer.helper_scripts.array_hologram import envelope, envelope_weights
+from pytweezer.experiments.slm_tweezer_array import placement, render_target
+from pytweezer.helper_scripts import array_hologram
+from pytweezer.helper_scripts.array_hologram import (
+    envelope,
+    envelope_weights,
+    focal_grid,
+)
 
 #: The lab's SLM saved parameters, in SI.
 SAVED = {
@@ -62,31 +68,76 @@ def test_envelope_weights_match_the_notebook_calibration_in_array_coordinates():
 
 
 @pytest.mark.parametrize("x_um, y_um", [(0.0, 0.0), (12.3, -4.7), (-50.05, 31.9)])
-def test_rendered_spot_peaks_where_the_returned_origin_places_the_trap(x_um, y_um):
-    pixel_um = 0.25
-    image, (x0_um, y0_um) = render_target(
-        np.array([x_um]),
-        np.array([y_um]),
-        np.array([1.0]),
-        1.0,
-        pixel_um,
-        margin_um=5.0,
+def test_target_spot_lands_where_its_header_places_it(x_um, y_um):
+    grid_x_um, grid_y_um = focal_grid(np.array([x_um]), np.array([y_um]), 0.25, 5.0)
+    image = render_target(
+        np.array([x_um]), np.array([y_um]), np.array([1.0]), 1.0, grid_x_um, grid_y_um
     )
+    header = placement(grid_x_um, grid_y_um)
 
     row, column = np.unravel_index(np.argmax(image), image.shape)
-    assert x0_um + (column + 0.5) * pixel_um == pytest.approx(x_um, abs=pixel_um / 2)
-    assert y0_um + (row + 0.5) * pixel_um == pytest.approx(y_um, abs=pixel_um / 2)
+    (offset_x, offset_y), (pixel_x_m, pixel_y_m) = (
+        header["_offset"],
+        header["_imgresolution"],
+    )
+    assert (offset_x + column + 0.5) * pixel_x_m * 1e6 == pytest.approx(x_um, abs=0.13)
+    assert (offset_y + row + 0.5) * pixel_y_m * 1e6 == pytest.approx(y_um, abs=0.13)
 
 
 def test_each_trap_is_drawn_at_its_weight():
     x_um = np.array([-10.0, 0.0, 10.0])
     weights = np.array([0.2, 0.5, 1.0])
-    image, (x0_um, _) = render_target(
-        x_um, np.zeros(3), weights, 1.0, 0.1, margin_um=5.0
+    grid_x_um, grid_y_um = focal_grid(x_um, np.zeros(3), 0.1, 5.0)
+    image = render_target(x_um, np.zeros(3), weights, 1.0, grid_x_um, grid_y_um)
+
+    columns = np.round((x_um - grid_x_um[0]) / 0.1).astype(int)
+    np.testing.assert_allclose(image.max(axis=0)[columns], weights, rtol=1e-2)
+
+
+@pytest.fixture
+def generator():
+    if not rearrangement._HAS_CUPY:
+        pytest.skip("needs a CUDA GPU")
+    return array_hologram.make_generator(array_hologram.generator_settings(SAVED))
+
+
+def test_simulated_spot_lands_where_the_blaze_steers_it(generator):
+    blaze_um = (30.0, -12.0)
+    grid_x_um, grid_y_um = focal_grid(
+        np.array([blaze_um[0]]), np.array([blaze_um[1]]), 0.1, 5.0
     )
 
-    columns = np.round((x_um - x0_um) / 0.1 - 0.5).astype(int)
-    np.testing.assert_allclose(image.max(axis=0)[columns], weights, rtol=1e-2)
+    trap_plane, _ = array_hologram.simulate(
+        generator,
+        generator.generate_blazed_grating_phasemask(*blaze_um),
+        grid_x_um,
+        grid_y_um,
+        np.zeros(1),
+    )
+
+    row, column = np.unravel_index(np.argmax(trap_plane), trap_plane.shape)
+    assert grid_x_um[column] == pytest.approx(blaze_um[0], abs=0.1)
+    assert grid_y_um[row] == pytest.approx(blaze_um[1], abs=0.1)
+
+
+def test_top_down_view_finds_the_focus_a_lens_on_the_slm_moves_to_f_squared_over_F(
+    generator,
+):
+    focus_shift_um = 5.0
+    lens_focal_length_mm = generator.f_um**2 / focus_shift_um / 1e3
+    grid_x_um, grid_y_um = focal_grid(np.zeros(1), np.zeros(1), 0.2, 5.0)
+    grid_z_um = np.linspace(-10, 10, 81)
+
+    _, top_down = array_hologram.simulate(
+        generator,
+        generator.generate_fresnel_lens_phasemask(lens_focal_length_mm),
+        grid_x_um,
+        grid_y_um,
+        grid_z_um,
+    )
+
+    focus_um = grid_z_um[np.argmax(top_down.max(axis=1))]
+    assert focus_um == pytest.approx(focus_shift_um, abs=0.25)
 
 
 class RecordingRig:
@@ -105,6 +156,11 @@ class RecordingRig:
             "y_um": y_um.ravel(),
             "weights": np.ones(rows * columns),
             "focal_pixel_um": 0.5,
+            "grid_x_um": np.arange(-5.0, 15.0, 0.125),
+            "grid_y_um": np.arange(-5.0, 10.0, 0.125),
+            "grid_z_um": np.linspace(-10, 10, 41),
+            "simulated_trap_plane": np.ones((120, 160), dtype=np.float32),
+            "simulated_top_down": np.ones((41, 160), dtype=np.float32),
             "uniformity": 0.9,
             "min_max_ratio": 0.8,
             "mse": 0.01,
@@ -165,6 +221,19 @@ def test_mask_the_rig_made_is_the_one_recorded_and_broadcast(rig_and_streams):
     np.testing.assert_array_equal(measurement.results["phasemask"][0], mask)
     np.testing.assert_array_equal(sent["slm_phasemask"], mask)
     assert sent["slm_target"].ndim == 2
+
+
+def test_target_and_simulated_trap_plane_are_sent_on_the_same_grid(rig_and_streams):
+    from pytweezer.experiment import run_local
+    from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
+
+    _, sent = rig_and_streams
+
+    measurement = run_local(SlmTweezerArray, rows=2, columns=3, iterations=5)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert sent["slm_target"].shape == sent["slm_simulated"].shape
+    assert sent["slm_top_down"].shape == (41, 160)
 
 
 def test_the_optics_come_from_the_saved_parameters_unless_the_form_sets_them(

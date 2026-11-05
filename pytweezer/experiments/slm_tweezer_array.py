@@ -2,8 +2,10 @@
 
 The rig computes the mask, writes it to the SLM and remembers the array, so
 analyses and later experiments can ask it what is there. Each point broadcasts
-the requested trap intensities (``slm_target``) and the 8-bit mask on the SLM
-(``slm_phasemask``) on the image hub, for the SLM Monitor applet.
+on the image hub, for the SLM Monitor applet: the requested trap intensities
+(``slm_target``), the simulated intensity in the trap plane
+(``slm_simulated``) and viewed top-down, summed over y with z running along the
+rows (``slm_top_down``), and the 8-bit mask on the SLM (``slm_phasemask``).
 """
 
 from __future__ import annotations
@@ -28,27 +30,30 @@ def render_target(
     y_um: np.ndarray,
     weights: np.ndarray,
     spot_sigma_um: float,
-    pixel_um: float,
-    margin_um: float,
-) -> tuple[np.ndarray, tuple[float, float]]:
-    """Draw each trap as a Gaussian spot of peak ``weight``.
+    grid_x_um: np.ndarray,
+    grid_y_um: np.ndarray,
+) -> np.ndarray:
+    """Draw each trap as a Gaussian spot of peak ``weight`` on a grid of pixel centres.
 
     Returns:
-        The image, row index along y, and the (x, y) position in µm of its
-        first pixel's corner.
+        The image, row index along y.
     """
-    x0 = x_um.min() - margin_um
-    y0 = y_um.min() - margin_um
-    nx = math.ceil((x_um.max() + margin_um - x0) / pixel_um)
-    ny = math.ceil((y_um.max() + margin_um - y0) / pixel_um)
-    x_centres = x0 + (np.arange(nx) + 0.5) * pixel_um
-    y_centres = y0 + (np.arange(ny) + 0.5) * pixel_um
     # A Gaussian spot is separable, so the image is a (ny, N) @ (N, nx) product.
     two_sigma2 = 2 * spot_sigma_um**2
-    x_profiles = np.exp(-((x_centres[None, :] - x_um[:, None]) ** 2) / two_sigma2)
-    y_profiles = np.exp(-((y_centres[None, :] - y_um[:, None]) ** 2) / two_sigma2)
+    x_profiles = np.exp(-((grid_x_um[None, :] - x_um[:, None]) ** 2) / two_sigma2)
+    y_profiles = np.exp(-((grid_y_um[None, :] - y_um[:, None]) ** 2) / two_sigma2)
     image = (y_profiles * weights[:, None]).T @ x_profiles
-    return image.astype(np.float32), (x0, y0)
+    return image.astype(np.float32)
+
+
+def placement(grid_x_um: np.ndarray, grid_y_um: np.ndarray) -> dict:
+    """Image-header keys that place an image whose pixel centres are the grids, in metres."""
+    pixel_x_um = grid_x_um[1] - grid_x_um[0]
+    pixel_y_um = grid_y_um[1] - grid_y_um[0]
+    return {
+        "_imgresolution": [pixel_x_um * 1e-6, pixel_y_um * 1e-6],
+        "_offset": [grid_x_um[0] / pixel_x_um - 0.5, grid_y_um[0] / pixel_y_um - 0.5],
+    }
 
 
 class SlmTweezerArray(Experiment):
@@ -132,37 +137,34 @@ class SlmTweezerArray(Experiment):
             damping=self.damping,
             phase_randomness=self.phase_randomness,
         )
-        mask = hologram["mask"]
-        self.broadcast(
-            np.asarray(hologram["x_um"]) + blaze_um[0],
-            np.asarray(hologram["y_um"]) + blaze_um[1],
-            np.asarray(hologram["weights"]),
-            mask,
-            spot_sigma_um=hologram["focal_pixel_um"],
-        )
-        self.record("phasemask", mask)
+        self.broadcast(hologram, blaze_um)
+        self.record("phasemask", hologram["mask"])
         for name in ("uniformity", "min_max_ratio", "mse"):
             self.record(name, hologram[name])
 
-    def broadcast(self, x_um, y_um, weights, mask, spot_sigma_um) -> None:
-        pixel_um = spot_sigma_um / 4
-        target, (x0_um, y0_um) = render_target(
-            x_um,
-            y_um,
+    def broadcast(self, hologram: dict, blaze_um: tuple[float, float]) -> None:
+        grid_x_um = np.asarray(hologram["grid_x_um"]) + blaze_um[0]
+        grid_y_um = np.asarray(hologram["grid_y_um"]) + blaze_um[1]
+        weights = np.asarray(hologram["weights"])
+        target = render_target(
+            np.asarray(hologram["x_um"]) + blaze_um[0],
+            np.asarray(hologram["y_um"]) + blaze_um[1],
             weights / weights.max(),
-            spot_sigma_um,
-            pixel_um,
-            margin_um=2 * self.spacing * 1e6 + 3 * spot_sigma_um,
+            hologram["focal_pixel_um"],
+            grid_x_um,
+            grid_y_um,
         )
-        self.stream.send(
-            {
-                "point": self.point.index,
-                "_imgresolution": [pixel_um * 1e-6, pixel_um * 1e-6],
-                "_offset": [x0_um / pixel_um, y0_um / pixel_um],
-            },
-            target,
-            channel="_target",
-        )
+        trap_plane = placement(grid_x_um, grid_y_um)
+        top_down = placement(grid_x_um, np.asarray(hologram["grid_z_um"]))
+        for channel, image, header in (
+            ("_target", target, trap_plane),
+            ("_simulated", hologram["simulated_trap_plane"], trap_plane),
+            ("_top_down", hologram["simulated_top_down"], top_down),
+        ):
+            self.stream.send(
+                {"point": self.point.index, **header}, image, channel=channel
+            )
+        mask = hologram["mask"]
         pitch_m = self.generator_settings["slm_pitch_um"] * 1e-6
         ny, nx = mask.shape
         self.stream.send(
