@@ -6,6 +6,7 @@ import pytest
 from pytweezer.experiment import Scan, run_local
 from pytweezer.experiment.camera_experiment import CameraShots
 from pytweezer.experiment.motmaster import MotMaster
+from pytweezer.experiment.scan import ListAxis
 from pytweezer.experiments.caf_fluorescence import CaFFluorescence
 from pytweezer.experiments.caf_mot import LASERS, CaFMOT
 
@@ -177,7 +178,7 @@ def test_counts_are_background_subtracted_frame_sums(caf):
         return np.full((1, 2), 11.0 + signal[iteration])
 
     caf.camera.frame = frame
-    measurement = run(CaFFluorescence)
+    measurement = run(CaFFluorescence, iterations=3)
     assert measurement.status == "completed", measurement.attrs["error"]
     # Background mean is 11 per pixel, so the frame sums are 2 * signal = [2, 4, 12].
     assert measurement.results["counts"][0] == pytest.approx(6.0)
@@ -305,7 +306,7 @@ def test_fluorescence_point_records_thorcam_cloud_fit(caf):
 
 
 def test_background_and_subtracted_frames_go_on_their_own_streams(caf):
-    measurement = run(CaFFluorescence)
+    measurement = run(CaFFluorescence, iterations=3)
 
     assert measurement.status == "completed", measurement.attrs["error"]
     assert caf.camera.streams == ["background_caf_thorcam", None]
@@ -316,6 +317,19 @@ def test_background_and_subtracted_frames_go_on_their_own_streams(caf):
     for _, image, info in caf.camera.broadcasts:
         np.testing.assert_array_equal(image, np.full((2, 3), 5.0))
         assert "rid" in info
+
+
+def test_iterations_set_the_script_iterations_and_the_frames_read(caf):
+    measurement = run(CaFMOT, iterations=4)
+
+    assert measurement.status == "completed", measurement.attrs["error"]
+    assert caf.motmaster.iterations == 4
+    assert len(caf.camera.frames) == 4
+
+
+def test_iterations_cannot_be_scanned(caf):
+    with pytest.raises(ValueError, match="iterations"):
+        run(CaFMOT, Scan(axes=[ListAxis(argument="iterations", values=[1, 2])]))
 
 
 class TestCaFMOT:

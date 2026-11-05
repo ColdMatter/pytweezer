@@ -156,7 +156,7 @@ is EDMSuite's `motmaster-linked-mode` skill.
 
 ## Camera experiments and cloud fits
 
-`CaFMOT` (`experiments/caf_mot.py`) fires the CaF MOT sequence and images the cloud, with no background;
+`CaFMOT` (`experiments/caf_mot.py`) fires the CaF MOT sequence and images the cloud, with no background (its `iterations` argument sets the script iterations and the frames read, one per iteration);
 `CaFFluorescence` extends it with one background shot per task, publishing `background_<stream>` and
 `subtracted_<stream>`.
 

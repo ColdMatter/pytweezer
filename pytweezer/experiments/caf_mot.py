@@ -1,12 +1,18 @@
 """Fire the CaF MOT sequence and image the cloud at chosen wavemeter-lock set points."""
 
 import time
+from dataclasses import replace
 
 import numpy as np
 
-from pytweezer.experiment import Bool, Number
-from pytweezer.experiment.camera_experiment import CameraExperiment, CameraShots
+from pytweezer.experiment import Bool, Integer, Number
+from pytweezer.experiment.camera_experiment import (
+    CameraExperiment,
+    CameraShots,
+    ShotSettings,
+)
 from pytweezer.experiment.motmaster import MotMaster
+from pytweezer.experiment.scan import Point, Scan
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -34,7 +40,7 @@ class CaFMOT(CameraExperiment):
 
     ``prepare`` notes every laser's set point, recorded as the constant
     ``start_set_points`` (``{laser: THz}``). Each shot runs the script's
-    iterations at its own MOT field and reads one ``thorcam`` frame per
+    ``iterations`` (an argument) at its own MOT field and reads one ``thorcam`` frame per
     iteration, with the trigger, binning and gain its CONFIG entry sets, which
     go out on the camera's own image stream. ``counts`` is the mean over its
     frames of each frame's sum, ``counts_error`` its standard error (NaN for a
@@ -49,8 +55,14 @@ class CaFMOT(CameraExperiment):
     cloud_species = "CaF"
     analyses = ("cloud_fit", "cloud_temperature")
 
-    caf = MotMaster("CaF MotMaster", script="0. DDSFourSidebands5W_noDDS", iterations=3)
-    thorcam = CameraShots("CaF ThorCam", frames=3, trigger=None, locked=("frames",))
+    caf = MotMaster("CaF MotMaster", script="0. DDSFourSidebands5W_noDDS")
+    thorcam = CameraShots("CaF ThorCam", trigger=None, locked=("frames",))
+    iterations = Integer(
+        1,
+        min=1,
+        group="MOTMaster",
+        tooltip="Script iterations per shot, with one thorcam frame read for each",
+    )
     save_mean_image = Bool(
         True,
         group="Camera",
@@ -63,6 +75,19 @@ class CaFMOT(CameraExperiment):
         group="Lasers",
         tooltip="Wait after moving any laser, before the next shot",
     )
+
+    def sequence_iterations(self, attribute: str) -> int:
+        return self.iterations
+
+    def shot_settings(self, name: str) -> ShotSettings:
+        return replace(super().shot_settings(name), frames=self.iterations)
+
+    def planned_points(self, scan: Scan) -> list[Point]:
+        if any(axis.argument == "iterations" for axis in scan.axes):
+            raise ValueError(
+                "iterations changes the shape of the shot; set it for the whole task"
+            )
+        return super().planned_points(scan)
 
     def prepare(self) -> None:
         super().prepare()
