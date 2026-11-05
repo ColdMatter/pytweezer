@@ -716,7 +716,7 @@ class ExperimentManager:
             self.copier.add(task.h5_path)
         logger.info("Task %s %s", rid, status)
         if error:
-            logger.warning("Task %s error: %s", rid, error.strip().splitlines()[-1])
+            logger.warning("Task %s error:\n%s", rid, error.strip())
         self._changed()
 
     def _record_run(self, rid: int) -> None:
