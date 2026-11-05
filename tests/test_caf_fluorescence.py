@@ -6,7 +6,8 @@ import pytest
 from pytweezer.experiment import Scan, run_local
 from pytweezer.experiment.camera_experiment import CameraShots
 from pytweezer.experiment.motmaster import MotMaster
-from pytweezer.experiments.caf_fluorescence import LASERS, CaFFluorescence
+from pytweezer.experiments.caf_fluorescence import CaFFluorescence
+from pytweezer.experiments.caf_mot import LASERS, CaFMOT
 
 START = {
     "v0": 494.431874,
@@ -26,7 +27,8 @@ class FakeCamera:
 
     def __init__(self):
         self.frames = []
-        self.headers = []
+        self.streams = []
+        self.broadcasts = []
         self.frame = lambda field, set_points, iteration: np.full(
             (2, 3), 10 + 5 * field
         )
@@ -58,8 +60,11 @@ class FakeCamera:
             if image is not None:
                 self.frames.append(np.asarray(image, dtype=np.uint16))
 
-    def acquire_n_frames(self, nframes, broadcast=False, header=None):
-        self.headers.append(header)
+    def broadcast_image(self, image, info, stream=None):
+        self.broadcasts.append((stream, np.asarray(image), info))
+
+    def acquire_n_frames(self, nframes, broadcast=False, header=None, stream=None):
+        self.streams.append(stream)
         if len(self.frames) < nframes:
             raise TimeoutError(f"{len(self.frames)} of {nframes} frames arrived")
         return np.stack(self.frames[:nframes])
@@ -113,12 +118,18 @@ class FakeCaFMotMaster:
         self.log.append(("go", dict(parameters)))
         if len(self.goes()) == self.fail_on_go:
             raise self.failure
-        self.camera.catch(
-            self.iterations, parameters["MOTCoilsCurrentValue"], dict(self.set_points)
+        field = parameters.get(
+            "MOTCoilsCurrentValue", self.get_params()["MOTCoilsCurrentValue"]
         )
+        self.camera.catch(self.iterations, field, dict(self.set_points))
 
     def goes(self):
         return [entry[1] for entry in self.log if entry[0] == "go"]
+
+    def fields(self):
+        """The MOT field of each run: the one sent, else the script's default."""
+        default = self.get_params()["MOTCoilsCurrentValue"]
+        return [go.get("MOTCoilsCurrentValue", default) for go in self.goes()]
 
     def ramps_before_last_go(self):
         last_go = max(i for i, entry in enumerate(self.log) if entry[0] == "go")
@@ -264,8 +275,8 @@ def test_a_shot_missing_frames_fails(caf):
 def test_the_background_shot_has_the_field_off(caf):
     measurement = run(CaFFluorescence, Scan(repetitions=2))
     assert measurement.status == "completed", measurement.attrs["error"]
-    fields = [go["MOTCoilsCurrentValue"] for go in caf.motmaster.goes()]
-    assert fields == [0.0, 1.0, 1.0]
+    assert caf.motmaster.fields() == [0.0, 1.0, 1.0]
+    assert all("MOTCoilsCurrentValue" not in go for go in caf.motmaster.goes()[1:])
 
 
 def gaussian_cloud_frame(field, set_points, iteration):
@@ -293,11 +304,41 @@ def test_fluorescence_point_records_thorcam_cloud_fit(caf):
     assert measurement.constants["cloud_mass_amu"] == 59.0
 
 
-def test_fluorescence_background_shot_is_marked(caf):
+def test_background_and_subtracted_frames_go_on_their_own_streams(caf):
     measurement = run(CaFFluorescence)
 
     assert measurement.status == "completed", measurement.attrs["error"]
-    assert [header.get("background") for header in caf.camera.headers] == [True, None]
+    assert caf.camera.streams == ["background_caf_thorcam", None]
+    assert [stream for stream, _, _ in caf.camera.broadcasts] == [
+        "subtracted_caf_thorcam"
+    ] * 3
+    # 10 per pixel at field 0 and 15 at field 1.
+    for _, image, info in caf.camera.broadcasts:
+        np.testing.assert_array_equal(image, np.full((2, 3), 5.0))
+        assert "rid" in info
+
+
+class TestCaFMOT:
+    def test_it_takes_no_background_and_leaves_frames_on_the_camera_stream(self, caf):
+        measurement = run(CaFMOT)
+
+        assert measurement.status == "completed", measurement.attrs["error"]
+        assert caf.motmaster.fields() == [1.0]
+        assert caf.camera.streams == [None]
+        assert caf.camera.broadcasts == []
+        # Three frames of 2 x 3 pixels at 10 + 5 * field counts each.
+        assert measurement.results["counts"][0] == pytest.approx(6 * 15.0)
+
+    def test_it_restores_the_lasers_it_moved(self, caf):
+        class Moving(CaFMOT):
+            def run_point(self):
+                for name, value in self.measure(v0=494.44).items():
+                    self.record(name, value)
+
+        measurement = run(Moving)
+
+        assert measurement.status == "completed", measurement.attrs["error"]
+        assert caf.motmaster.set_points == START
 
 
 def test_the_cloud_fit_takes_no_shot_of_its_own(caf):

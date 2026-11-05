@@ -7,7 +7,7 @@ import pytest
 from pytweezer.experiment import run_local
 from pytweezer.experiment.catalogue import Catalogue
 from pytweezer.experiment.introspect import describe
-from pytweezer.experiments.caf_fluorescence import LASERS
+from pytweezer.experiments.caf_mot import LASERS
 from pytweezer.optimisers.optimise_mot_lasers import (
     LASER_KEYS,
     OptimiseMOTLasers,

@@ -39,7 +39,7 @@ from pytweezer.experiment.optimisers import (
     proposals,
 )
 from pytweezer.experiment.task import Task, TaskStatus
-from pytweezer.experiments.caf_fluorescence import LASERS
+from pytweezer.experiments.caf_mot import LASERS
 from pytweezer.logging_utils import get_logger
 from pytweezer.notebook import zips
 from pytweezer.optimisers.optimise_mot_lasers import LASER_KEYS, OptimiseMOTLasers
@@ -280,7 +280,7 @@ class Rig:
 
         Args:
             stages: The lasers to scan, a subset of
-                :data:`~pytweezer.experiments.caf_fluorescence.LASERS`; they are
+                :data:`~pytweezer.experiments.caf_mot.LASERS`; they are
                 scanned in that order whatever order is given here.
             spans: Half-width of each laser's scan, in THz, by laser; the
                 optimiser's default for lasers not given.
@@ -293,7 +293,7 @@ class Rig:
                 scanned laser to its new set point. The ramp is skipped, with a
                 warning, while a running task uses a device the optimiser
                 reserves.
-            **arguments: Any other argument of the optimiser, e.g. ``mot_field``.
+            **arguments: Any other argument of the optimiser, e.g. ``bg_field``.
 
         Returns:
             Per laser in ``stages``: ``scan_range`` (set points in THz, one per

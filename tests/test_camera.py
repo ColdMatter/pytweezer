@@ -58,6 +58,16 @@ def test_broadcast_frames_carry_the_header_the_caller_adds():
     assert [info["rid"] for info, _image in camera.image_client.sent] == [57, 57]
 
 
+def test_frames_broadcast_on_another_stream_leave_the_camera_s_own_alone(monkeypatch):
+    camera = BufferCamera()
+    camera.image_client = RecordingImageClient()
+    other = RecordingImageClient()
+    monkeypatch.setattr(camera, "_client_for", lambda stream: other)
+    camera.acquire_n_frames(2, broadcast=True, stream="elsewhere")
+    assert camera.image_client.sent == []
+    assert len(other.sent) == 2
+
+
 def _scaled_broadcast_header(**camera_kwargs):
     camera = SimulatedCamera(**camera_kwargs)
     camera.image_client = RecordingImageClient()

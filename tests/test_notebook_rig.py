@@ -10,7 +10,7 @@ from pytweezer.experiment import run_local
 from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiment.queue import now
 from pytweezer.experiment.task import Task, TaskStatus
-from pytweezer.experiments.caf_fluorescence import LASERS
+from pytweezer.experiments.caf_mot import LASERS
 from pytweezer.notebook import Rig, plot_auto_mot_results, zips
 from pytweezer.optimisers.optimise_mot_lasers import LASER_KEYS, OptimiseMOTLasers
 from tests.helpers import in_process_client
@@ -365,7 +365,7 @@ def test_auto_mot_submits_the_chosen_stages(rig_parts, optimiser_run):
         spans={"BX": 20e-6},
         points={"v0": 12},
         centres={"v0": 494.4},
-        mot_field=2.0,
+        bg_field=2.0,
     )
     ((experiment, arguments),) = optimiser_run.submissions
     assert experiment is OptimiseMOTLasers
@@ -380,7 +380,7 @@ def test_auto_mot_submits_the_chosen_stages(rig_parts, optimiser_run):
     assert arguments["BX_span"] == 20e-6
     assert arguments["v0_points"] == 12
     assert arguments["v0_centre"] == 494.4
-    assert arguments["mot_field"] == 2.0
+    assert arguments["bg_field"] == 2.0
     assert "v1_span" not in arguments
 
 

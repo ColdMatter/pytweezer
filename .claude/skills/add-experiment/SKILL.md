@@ -156,12 +156,18 @@ is EDMSuite's `motmaster-linked-mode` skill.
 
 ## Camera experiments and cloud fits
 
+`CaFMOT` (`experiments/caf_mot.py`) fires the CaF MOT sequence and images the cloud, with no background;
+`CaFFluorescence` extends it with one background shot per task, publishing `background_<stream>` and
+`subtracted_<stream>`.
+
 A `CameraExperiment` (`experiment/camera_experiment.py`) is a `MotMasterExperiment` that declares
 cameras as `CameraShots("<device>", frames=n, ...)` and reads them each shot.
-`take_shot(background=False, **overrides)` runs the sequences once and returns
-`{camera: (frames, H, W)}`; with `background=True` the broadcast frames are marked, and the live
-`shot_background` analysis (`analysis/shot_background.py`) holds them and subtracts them from later
-frames of the same `rid`. The default `run_point` records `<camera>_images`.
+`take_shot(streams=None, **overrides)` runs the sequences once and returns
+`{camera: (frames, H, W)}`; `streams={camera: name}` broadcasts that camera's frames on another
+image stream (the driver's `acquire_n_frames(..., stream=)`) instead of its own. Subscriptions match
+by prefix, so build such names with `stream_name(camera, prefix)` (`background_<stream>`), which puts
+the prefix in front: a viewer of `<stream>` never receives them. `broadcast_frames(camera, frames,
+stream)` publishes computed frames (e.g. background-subtracted ones) the same way. The default `run_point` records `<camera>_images`.
 
 Recording a MOT cloud:
 
@@ -170,7 +176,7 @@ Recording a MOT cloud:
   `cloud_fit.FIELDS`/`ERROR_FIELDS`. Lengths are metres when the camera's CONFIG entry has
   `object_pixel_m`, pixels otherwise (unit recorded as `px`); binning and ROI origin are read from
   the camera at record time, since settings experiments change them. A failed fit is NaN, never an
-  error. Call it where the shot is taken (`CaFFluorescence.measure()` does, so every optimiser
+  error. Call it where the shot is taken (`CaFMOT.measure()` does, so every optimiser
   built on it records the fit too).
 - `save_mean_image = Bool(...)` on the experiment makes it also record `<camera>_mean_image`, which
   the Results `cloud_fit` view draws.

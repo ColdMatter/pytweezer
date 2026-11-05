@@ -31,7 +31,8 @@ re-applied before the shot of a point that changes them; ``frames``,
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import time
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -334,13 +335,13 @@ class CameraExperiment(MotMasterExperiment):
             raise errors[0]
 
     def take_shot(
-        self, *, background: bool = False, **overrides: Any
+        self, *, streams: Mapping[str, str | None] | None = None, **overrides: Any
     ) -> dict[str, np.ndarray]:
         """Run the sequences once and return every camera's frames, ``{name: (frames, H, W)}``.
 
         Args:
-            background: Mark the broadcast frames as background, which the live
-                shot-background analysis keeps for subtraction.
+            streams: ``{camera: image stream}`` to broadcast that camera's frames
+                on instead of its own stream; ``None`` leaves a camera on its own.
             **overrides: Script parameters for this run, as for
                 :meth:`run_sequences`.
         """
@@ -349,8 +350,7 @@ class CameraExperiment(MotMasterExperiment):
             if self.shot_settings(name) != self._applied[name]:
                 self.apply_camera_settings(name)
         header: dict[str, Any] = {"rid": self.rid}
-        if background:
-            header["background"] = True
+        streams = streams or {}
         frames: dict[str, np.ndarray] = {}
         failed = True
         try:
@@ -363,12 +363,42 @@ class CameraExperiment(MotMasterExperiment):
                         self._applied[name].frames,
                         broadcast=True,
                         header=header,
+                        **({"stream": streams[name]} if streams.get(name) else {}),
                     )
                 )
             failed = False
         finally:
             self._stop_cameras(names, raise_errors=not failed)
         return frames
+
+    def stream_name(self, name: str, prefix: str = "") -> str | None:
+        """Camera ``name``'s image stream with ``prefix + "_"`` in front, or ``None`` if it broadcasts none.
+
+        The prefix goes in front, not behind, because a viewer of a stream also
+        receives every stream whose name starts with it.
+        """
+        stream = get_device_config(self.camera_shots()[name].device_name).get(
+            "stream_name"
+        )
+        if stream is None or not prefix:
+            return stream
+        return f"{prefix}_{stream}"
+
+    def broadcast_frames(
+        self, name: str, frames: np.ndarray, stream: str | None
+    ) -> None:
+        """Broadcast ``frames`` through camera ``name`` on image stream ``stream``, as this task's.
+
+        Does nothing if ``stream`` is ``None``.
+        """
+        if stream is None:
+            return
+        for index, frame in enumerate(frames):
+            self.cameras[name].broadcast_image(
+                frame,
+                {"rid": self.rid, "index": index, "timestamp": time.time()},
+                stream,
+            )
 
     def _stop_cameras(self, names: list[str], *, raise_errors: bool) -> None:
         errors = []

@@ -51,6 +51,7 @@ class FakeCamera:
         self.frame = gaussian_frame()
         self.background_frame = gaussian_frame(cloud=False, seed=1)
         self.headers = []
+        self.streams = []
         self.binning = BINNING
         self.roi_origin = ROI_ORIGIN
 
@@ -73,9 +74,10 @@ class FakeCamera:
     def frame_geometry(self):
         return self.binning, self.roi_origin
 
-    def acquire_n_frames(self, nframes, broadcast=False, header=None):
+    def acquire_n_frames(self, nframes, broadcast=False, header=None, stream=None):
         self.headers.append(header)
-        shot = self.background_frame if header.get("background") else self.frame
+        self.streams.append(stream)
+        shot = self.background_frame if stream else self.frame
         return np.stack([shot] * nframes)
 
 
@@ -110,7 +112,9 @@ class Shots(CameraExperiment):
     cloud_species = "Rb"
 
     def run_point(self):
-        background = self.take_shot(background=True)["thorcam"]
+        background = self.take_shot(streams={"thorcam": "background_rb_thorcam"})[
+            "thorcam"
+        ]
         frames = self.take_shot()["thorcam"]
         self.record_cloud_fit("thorcam", frames, background.mean(axis=0))
 
@@ -121,10 +125,10 @@ def run(experiment_cls=Shots, **args):
     return measurement
 
 
-def test_background_shot_marks_broadcast_headers(camera):
+def test_a_shot_broadcasts_on_the_stream_it_is_given(camera):
     run()
 
-    assert [header.get("background") for header in camera.headers] == [True, None]
+    assert camera.streams == ["background_rb_thorcam", None]
     assert all("rid" in header for header in camera.headers)
 
 

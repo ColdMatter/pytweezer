@@ -84,6 +84,7 @@ class Camera(ABC):
         self.timeout = timeout
         self.stream_name = stream_name
         self.image_client = ImageClient(stream_name) if stream_name else None
+        self._stream_clients: dict[str, ImageClient] = {}
         # The live broadcast thread and RPC calls share the backend.
         self._lock = threading.RLock()
         self._live_thread: threading.Thread | None = None
@@ -191,8 +192,12 @@ class Camera(ABC):
         autosave: bool = False,
         broadcast: bool = False,
         header: dict | None = None,
+        stream: str | None = None,
     ) -> np.ndarray:
-        """Read ``nframes`` frames; ``header`` adds keys to each broadcast frame's header."""
+        """Read ``nframes`` frames; ``header`` adds keys to each broadcast frame's header.
+
+        ``stream`` broadcasts them on that image stream instead of the camera's own.
+        """
         start_frame = int(start_frame)
         images = self._read_frames(int(nframes), start_frame)
         for i, image in enumerate(images):
@@ -204,7 +209,7 @@ class Camera(ABC):
                     "timestamp": time.time(),
                     "index": start_frame + i,
                 }
-                self.broadcast_image(image, info)
+                self.broadcast_image(image, info, stream)
         return np.asarray(images)
 
     def acquire_single_frame(
@@ -317,13 +322,18 @@ class Camera(ABC):
                 self.broadcast_image(frame, {"timestamp": time.time(), "index": sent})
                 sent += 1
 
-    def broadcast_image(self, image: np.ndarray, info) -> None:
+    def broadcast_image(
+        self, image: np.ndarray, info, stream: str | None = None
+    ) -> None:
         """Send ``image`` on the image hub, its header saying which ROI and binning it was read with.
+
+        ``stream`` names another image stream to send it on, instead of the camera's own.
 
         With :attr:`object_pixel_m` set, the header also gives ``_imgresolution``
         (metres per binned pixel) and ``_offset`` (the ROI corner in binned pixels).
         """
-        if self.image_client is None:
+        client = self.image_client if stream is None else self._client_for(stream)
+        if client is None:
             LOGGER.error("tried to broadcast image but no client exists")
             return
         roi_x0, roi_y0 = self.roi_origin
@@ -332,7 +342,12 @@ class Camera(ABC):
             pixel_m = self.object_pixel_m * self.binning
             header["_imgresolution"] = [pixel_m, pixel_m]
             header["_offset"] = [roi_x0 / self.binning, roi_y0 / self.binning]
-        self.image_client.send({**header, **info}, image)
+        client.send({**header, **info}, image)
+
+    def _client_for(self, stream: str) -> ImageClient:
+        if stream not in self._stream_clients:
+            self._stream_clients[stream] = ImageClient(stream)
+        return self._stream_clients[stream]
 
     @classmethod
     def save_tiff(

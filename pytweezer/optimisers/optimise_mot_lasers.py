@@ -6,7 +6,8 @@ from typing import ClassVar
 
 from pytweezer.experiment.client import get_saved_parameters, set_saved_parameters
 from pytweezer.experiment.optimisers import Stage, StagedScan
-from pytweezer.experiments.caf_fluorescence import LASERS, CaFFluorescence
+from pytweezer.experiments.caf_fluorescence import CaFFluorescence
+from pytweezer.experiments.caf_mot import LASERS
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers.device_client import get_device
 
@@ -31,7 +32,7 @@ _SCANS = {
 class OptimiseMOTLasers(StagedScan, CaFFluorescence):
     """Scan each CaF laser about its saved set point for the brightest MOT.
 
-    One stage per laser, in :data:`~pytweezer.experiments.caf_fluorescence.LASERS`
+    One stage per laser, in :data:`~pytweezer.experiments.caf_mot.LASERS`
     order, each scanning that laser within its span of ``<laser>_centre``
     (the saved ``caf_laser_<laser>`` unless set) and proposing the set point
     with the most ``counts``; later lasers are scanned with the earlier ones at
