@@ -12,7 +12,6 @@ from pytweezer.experiment.camera_experiment import (
     ShotSettings,
 )
 from pytweezer.experiment.motmaster import MotMaster
-from pytweezer.experiment.scan import Point, Scan
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -76,21 +75,12 @@ class CaFMOT(CameraExperiment):
         tooltip="Wait after moving any laser, before the next shot",
     )
 
-    def sequence_iterations(self, attribute: str) -> int:
-        return self.iterations
-
     def shot_settings(self, name: str) -> ShotSettings:
         return replace(super().shot_settings(name), frames=self.iterations)
 
-    def planned_points(self, scan: Scan) -> list[Point]:
-        if any(axis.argument == "iterations" for axis in scan.axes):
-            raise ValueError(
-                "iterations changes the shape of the shot; set it for the whole task"
-            )
-        return super().planned_points(scan)
-
     def prepare(self) -> None:
         super().prepare()
+        self.caf.set_iterations(self.iterations)
         self._moved_lasers: set[str] = set()
         self.start_set_points = self.caf.laser_set_points_wml()
         self.record("start_set_points", self.start_set_points)

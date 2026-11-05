@@ -6,7 +6,6 @@ import pytest
 from pytweezer.experiment import Scan, run_local
 from pytweezer.experiment.camera_experiment import CameraShots
 from pytweezer.experiment.motmaster import MotMaster
-from pytweezer.experiment.scan import ListAxis
 from pytweezer.experiments.caf_fluorescence import CaFFluorescence
 from pytweezer.experiments.caf_mot import LASERS, CaFMOT
 
@@ -325,11 +324,6 @@ def test_iterations_set_the_script_iterations_and_the_frames_read(caf):
     assert measurement.status == "completed", measurement.attrs["error"]
     assert caf.motmaster.iterations == 4
     assert len(caf.camera.frames) == 4
-
-
-def test_iterations_cannot_be_scanned(caf):
-    with pytest.raises(ValueError, match="iterations"):
-        run(CaFMOT, Scan(axes=[ListAxis(argument="iterations", values=[1, 2])]))
 
 
 class TestCaFMOT:

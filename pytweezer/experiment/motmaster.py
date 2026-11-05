@@ -294,10 +294,6 @@ class MotMasterExperiment(Experiment):
             requested[attribute][parameter] = getattr(self, name)
         return requested
 
-    def sequence_iterations(self, attribute: str) -> int:
-        """Iterations of each run of ``attribute``'s script; the declared ones unless overridden."""
-        return self.motmasters()[attribute].iterations
-
     def prepare(self) -> None:
         master = self.master_name()
         self._script_parameters: dict[str, dict[str, Any]] = {}
@@ -316,7 +312,7 @@ class MotMasterExperiment(Experiment):
             client = getattr(self, attribute)
             client.set_motmaster_experiment(motmaster.script)
             client.set_run_until_stopped(False)
-            client.set_iterations(self.sequence_iterations(attribute))
+            client.set_iterations(motmaster.iterations)
             client.set_save_toggle(motmaster.save)
             client.set_trigger_mode(attribute != master)
             self._script_parameters[attribute] = client.get_params()
