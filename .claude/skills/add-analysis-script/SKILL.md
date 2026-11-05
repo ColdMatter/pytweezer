@@ -127,6 +127,20 @@ result is a position in the frame, decide whether to report pixels or physical
 units and say which in the docstring — `roi_slice.py` shows the conversion both
 ways.
 
+## One process, several input streams
+
+An analysis may subscribe to several streams. `self.current_stream` is the topic of the message
+`process` is handling; key any state on it (`shot_background.py` keeps one held background per
+stream, and replaces its state dict rather than mutating it). Pass the input header's `rid`,
+`_offset` and `_imgresolution` through, so downstream viewers and fits can place the result.
+
+Fits: put a fit on the Data hub as header fields (`CloudFitAnalysis` in `analysis/cloud_fit.py`:
+`fit_cloud(data, resolution, origin)` then `.as_dict()`). When it fails, publish `success: False`
+with every numeric field NaN, never the fit's seed or an exception, so a live plot shows a gap
+rather than a false zero; the Image Monitor's `overlaystreams` draws such a header over the image.
+A 1-D profile with its fit goes out as a 3xN `[coords, values, fit_curve]` array (`projections.py`;
+`live_plot.py` reads rows 0-1, an all-NaN row 2 means no trusted fit).
+
 ## Properties are the user's knobs
 
 Anything the user might want to change without editing code — a threshold, a fit

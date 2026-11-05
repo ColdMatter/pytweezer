@@ -154,6 +154,32 @@ machine, raises from the task.
 `experiments/linked_scope_test.py` is the minimal example; the MOTMaster side
 is EDMSuite's `motmaster-linked-mode` skill.
 
+## Camera experiments and cloud fits
+
+A `CameraExperiment` (`experiment/camera_experiment.py`) is a `MotMasterExperiment` that declares
+cameras as `CameraShots("<device>", frames=n, ...)` and reads them each shot.
+`take_shot(background=False, **overrides)` runs the sequences once and returns
+`{camera: (frames, H, W)}`; with `background=True` the broadcast frames are marked, and the live
+`shot_background` analysis (`analysis/shot_background.py`) holds them and subtracts them from later
+frames of the same `rid`. The default `run_point` records `<camera>_images`.
+
+Recording a MOT cloud:
+
+- `self.record_cloud_fit(camera, frames, background=None)` fits the mean of the frames (minus the
+  background frame) and records `<camera>_<field>` and `<camera>_<field>_error` for the fields in
+  `cloud_fit.FIELDS`/`ERROR_FIELDS`. Lengths are metres when the camera's CONFIG entry has
+  `object_pixel_m`, pixels otherwise (unit recorded as `px`); binning and ROI origin are read from
+  the camera at record time, since settings experiments change them. A failed fit is NaN, never an
+  error. Call it where the shot is taken (`CaFFluorescence.measure()` does, so every optimiser
+  built on it records the fit too).
+- `save_mean_image = Bool(...)` on the experiment makes it also record `<camera>_mean_image`, which
+  the Results `cloud_fit` view draws.
+- `cloud_species = "CaF"` or `"Rb"` makes `prepare()` record the constant `cloud_mass_amu`, which
+  the temperature view needs.
+- Declare `analyses = ("cloud_fit", "cloud_temperature")` for the Results tab's MOT views (see
+  Running). The temperature view reads a native time argument as seconds and a MOTMaster one as
+  ticks (10 µs default).
+
 ## Running
 
 From the GUI: **Experiments** tab → pick the class → edit, toggle "Scan" per

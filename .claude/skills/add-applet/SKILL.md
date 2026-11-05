@@ -222,6 +222,23 @@ Two pyqtgraph traps worth knowing:
 - `pg.setConfigOptions` is global and already set by `apply_theme`. Re-setting
   `background`/`foreground` in an applet only puts it out of step with the rest.
 
+## Fit overlays and the projections monitor
+
+The Image Monitor draws a fit on top of the image from a *data* stream, with no new viewer code:
+list the fit's stream in `overlaystreams` (the `CloudFitAnalysis` in `analysis/cloud_fit.py`
+publishes one; its header carries `cloud_fit.FIELDS`: `x0`, `y0`, `sigma_major`, `sigma_minor`,
+`angle`, ... in the image's plot coordinates) and `n_contours` sets how many ellipses are drawn.
+`overlay_paths(head, n)` in `viewers/image_monitor.py` turns such a header into the ellipses (`[]`
+for a failed fit); reuse it for any viewer that shows a fit. Image and fit must share a frame: the
+fit runs on the frame the image shows, so both use the header's `_offset`/`_imgresolution`
+(`cloud_fit.frame_geometry`).
+
+`viewers/image_plot_monitor.py` is the pattern for "image plus something linked to its axes": a
+subclass of `ImageDisplay` that adds a `projectionstreams` category (names of `projections.py`
+analyses; rows 0-1 of each 3xN message are the profile, row 2 its fit curve), draws the sums above
+and left of the image, and links their axes to the image view. Subclass the Image Monitor like
+this rather than copying it; override its hooks, keep its row-major drawing.
+
 ## Preview it before you call it done
 
 `scripts/preview_applet.py` builds the applet against fake Properties and fake
