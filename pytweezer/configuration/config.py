@@ -160,7 +160,7 @@ CONFIG = {
             "simulate": SIMULATING,
         },
         "ORCA": {
-            "active": False,
+            "active": True,
             "class": "pytweezer.drivers.orca:ORCACamera",
             "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
             "host": HOSTS["ph-bonesaw"],
