@@ -262,7 +262,7 @@ class Rig:
         *,
         spans: dict[str, float] | None = None,
         points: dict[str, int] | None = None,
-        centres: dict[str, float] | None = None,
+        offsets: dict[str, float] | None = None,
         display: bool = False,
         accept: bool = False,
         **arguments: Any,
@@ -275,8 +275,6 @@ class Rig:
         It does not use this rig's devices, so it must not run alongside a shot
         from this rig.
         Interrupting it (Ctrl-C) terminates the run, which then returns the lasers.
-        Run :func:`~pytweezer.optimisers.optimise_mot_lasers.create_saved_set_points`
-        once before the first run.
 
         Args:
             stages: The lasers to scan, a subset of
@@ -285,8 +283,9 @@ class Rig:
             spans: Half-width of each laser's scan, in THz, by laser; the
                 optimiser's default for lasers not given.
             points: Number of set points scanned, by laser.
-            centres: Set point each laser's scan is centred on, in THz, by laser;
-                the saved ``caf_laser_*`` for lasers not given.
+            offsets: THz added, by laser, to the set point the lock holds when
+                the run starts to centre that laser's scan; zero for lasers not
+                given.
             display: Plot the result with :func:`plot_auto_mot_results`.
             accept: Accept every proposal of the run as the Optimisers tab's
                 Accept does, saving it for the whole lab, then ramp each
@@ -313,15 +312,15 @@ class Rig:
                 f"auto_mot takes a list of laser names, e.g. ['v0', 'v1'], not "
                 f"{stages!r}; the lasers are {list(LASERS)}"
             )
-        spans, points, centres = spans or {}, points or {}, centres or {}
-        named = {*stages, *spans, *points, *centres}
+        spans, points, offsets = spans or {}, points or {}, offsets or {}
+        named = {*stages, *spans, *points, *offsets}
         if unknown := sorted(named - set(LASERS)):
             raise KeyError(f"unknown lasers {unknown}; the lasers are {list(LASERS)}")
         laser_arguments = {f"{laser}_run": laser in stages for laser in LASERS}
         for suffix, by_laser in (
             ("span", spans),
             ("points", points),
-            ("centre", centres),
+            ("offset", offsets),
         ):
             laser_arguments.update(
                 {f"{laser}_{suffix}": value for laser, value in by_laser.items()}

@@ -43,8 +43,8 @@ is skipped with a warning while another running task uses the optimiser's
 devices, and a failed ramp raises with the values left saved. It runs through
 the Experiment Manager, so it takes the same device reservations as any queued
 task.
-Run `create_saved_set_points()` from `pytweezer.optimisers.optimise_mot_lasers`
-once before the first run, or it fails for want of the saved `caf_laser_*` keys.
+Each scan is centred on the set point the lock holds when the run starts; pass
+`offsets={laser: THz}` to shift it.
 
 Moving a pycaf helper over: replace the `for fileno in range(file_start, file_end + 1):
 images, parameters_dict = CaF.readFromZip(fileno)` loop with

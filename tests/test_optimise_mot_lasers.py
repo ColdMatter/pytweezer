@@ -47,10 +47,11 @@ def caf(monkeypatch):
 
 
 @pytest.fixture
-def saved_set_points(monkeypatch):
+def stale_saved_set_points(monkeypatch):
+    """Saved set points far from where the lock is, which a scan must not follow."""
     monkeypatch.setattr(
         "pytweezer.experiment.client.get_saved_parameters",
-        lambda: {LASER_KEYS[laser]: START[laser] for laser in LASERS},
+        lambda: {LASER_KEYS[laser]: START[laser] + 1.0 for laser in LASERS},
     )
 
 
@@ -80,8 +81,8 @@ class Spying(OptimiseMOTLasers):
         return super().measure(**set_points)
 
 
-def test_each_enabled_laser_is_scanned_around_its_saved_set_point_and_best_values_chain(
-    caf, saved_set_points
+def test_each_enabled_laser_is_scanned_around_the_locks_set_point_not_the_saved_one(
+    caf, stale_saved_set_points
 ):
     Spying.calls.clear()
     measurement = run_local(Spying)
@@ -101,14 +102,20 @@ def test_each_enabled_laser_is_scanned_around_its_saved_set_point_and_best_value
     assert first_tcool_call["v1"] == pytest.approx(PEAKS["v1"], abs=SPANS["v1"] / 20)
 
 
-def test_a_laser_with_no_saved_set_point_names_the_key(caf, monkeypatch):
-    monkeypatch.setattr(
-        "pytweezer.experiment.client.get_saved_parameters",
-        lambda: {LASER_KEYS[laser]: START[laser] for laser in LASERS[1:]},
-    )
-    with pytest.raises(KeyError, match="caf_laser_v0"):
-        run_local(OptimiseMOTLasers)
-    assert caf.motmaster.log == []
+def test_a_scan_needs_no_saved_set_points(caf, monkeypatch):
+    monkeypatch.setattr("pytweezer.experiment.client.get_saved_parameters", dict)
+    measurement = run_local(OptimiseMOTLasers)
+    assert measurement.status == "completed", measurement.attrs["error"]
+
+
+def test_the_offset_moves_the_scan_off_the_locks_set_point(caf):
+    Spying.calls.clear()
+    measurement = run_local(Spying, v0_offset=0.3 * SPANS["v0"], v1_run=False)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    v0_settings = [call["v0"] for call in Spying.calls if "v1" not in call]
+    centre = START["v0"] + 0.3 * SPANS["v0"]
+    assert min(v0_settings) == pytest.approx(centre - SPANS["v0"])
+    assert max(v0_settings) == pytest.approx(centre + SPANS["v0"])
 
 
 def test_apply_ramps_only_the_accepted_lasers(caf):

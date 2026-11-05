@@ -48,7 +48,10 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   saved-backed: left empty it is the `save_as` value when the run starts, so
   every span stage's `save_as` must exist even when the stage is switched off,
   since the runner resolves it for all stages. A non-positive `_span` raises
-  `ValueError` when the run starts.
+  `ValueError` when the run starts. A subclass places the centre differently by
+  overriding `centre_argument(stage)` (the argument's name and declaration) and
+  `centre_of(stage)` (its value, read after `prepare()`, so it may use what
+  `prepare()` measured); `OptimiseMOTLasers` does.
 - `Stage(..., run=False)` makes `<setting>_run` default to false; a stage whose
   `_run` is false is not scanned, passes nothing to later stages and proposes nothing
   (`enabled_stages()` lists `(index in stages, stage)` for those that run).
@@ -142,8 +145,9 @@ add-experiment.
 ## CaF laser tuning
 
 `OptimiseMOTLasers(StagedScan, CaFFluorescence)`
-(`optimisers/optimise_mot_lasers.py`) scans each CaF laser about its saved set
-point for the most `counts`. Its six span stages are `v0`, `BX`, `v1`, `v2`,
+(`optimisers/optimise_mot_lasers.py`) scans each CaF laser about the set point the
+lock held when the run started (plus `<laser>_offset`, default 0) for the most
+`counts`. Its six span stages are `v0`, `BX`, `v1`, `v2`,
 `v3`, `TCool` (`LASERS` order), proposing the saved keys `caf_laser_<laser>`
 (THz, group `CaF lasers`); `v0`, `v1` and `TCool` are on by default. Its `apply`
 ramps each accepted laser on `CaF MotMaster`, trying every laser and raising
@@ -151,11 +155,11 @@ ramps each accepted laser on `CaF MotMaster`, trying every laser and raising
 (`CaFMOT` from `caf_mot.py` plus one background shot per run; a `CameraExperiment`
 reading `thorcam`, the CaF ThorCam) restores the lasers it moved in `finish`.
 
-Run `create_saved_set_points()` (from `pytweezer.optimisers.optimise_mot_lasers`)
-once before the first run: it creates the missing `caf_laser_*` keys from the
-lock's current set points and leaves existing ones alone. Without them the run
-fails, even for switched-off stages. From a notebook, `Rig.auto_mot` runs the
-optimiser (see notebook-rig).
+The scan never reads the saved `caf_laser_*` keys: they are only where an
+accepted proposal is saved, created on first acceptance. `create_saved_set_points()`
+(from `pytweezer.optimisers.optimise_mot_lasers`) can seed them from the lock's
+current set points, but no run needs it. From a notebook, `Rig.auto_mot` runs
+the optimiser (see notebook-rig).
 
 Tests: `tests/test_optimisers.py`, `tests/test_optimise_mot_lasers.py`,
 `tests/test_tweezer_array.py`, `tests/test_trap_sites.py`,

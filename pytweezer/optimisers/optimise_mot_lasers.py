@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from pytweezer.experiment.arguments import Argument, Number
 from pytweezer.experiment.client import get_saved_parameters, set_saved_parameters
-from pytweezer.experiment.optimisers import Stage, StagedScan
+from pytweezer.experiment.optimisers import SEARCH, Stage, StagedScan
 from pytweezer.experiments.caf_fluorescence import CaFFluorescence
 from pytweezer.experiments.caf_mot import LASERS
 from pytweezer.logging_utils import get_logger
@@ -30,15 +31,15 @@ _SCANS = {
 
 
 class OptimiseMOTLasers(StagedScan, CaFFluorescence):
-    """Scan each CaF laser about its saved set point for the brightest MOT.
+    """Scan each CaF laser about its current set point for the brightest MOT.
 
     One stage per laser, in :data:`~pytweezer.experiments.caf_mot.LASERS`
-    order, each scanning that laser within its span of ``<laser>_centre``
-    (the saved ``caf_laser_<laser>`` unless set) and proposing the set point
-    with the most ``counts``; later lasers are scanned with the earlier ones at
-    their best. v0, v1 and TCool are scanned by default. Every saved
-    ``caf_laser_*`` must exist, enabled stage or not
-    (:func:`create_saved_set_points` makes them).
+    order, each scanning that laser within its span of the set point the lock
+    held when the run started plus ``<laser>_offset``, and proposing the set
+    point with the most ``counts``; later lasers are scanned with the earlier
+    ones at their best. v0, v1 and TCool are scanned by default. The saved
+    ``caf_laser_*`` are only where a proposal is saved on acceptance; a scan
+    never reads them.
 
     Accepting a proposal also ramps that laser to it (:meth:`apply`).
     """
@@ -51,6 +52,19 @@ class OptimiseMOTLasers(StagedScan, CaFFluorescence):
     ]
     proposal_units: ClassVar[dict[str, str]] = dict.fromkeys(LASER_KEYS.values(), "THz")
     proposal_group = LASER_GROUP
+
+    @classmethod
+    def centre_argument(cls, stage: Stage) -> tuple[str, Argument]:
+        return f"{stage.setting}_offset", Number(
+            0.0,
+            group=SEARCH,
+            tooltip="added to the set point the lock held when the run started",
+        )
+
+    def centre_of(self, stage: Stage) -> float:
+        return self.start_set_points[stage.setting] + getattr(
+            self, f"{stage.setting}_offset"
+        )
 
     @classmethod
     def apply(cls, proposals: dict[str, float]) -> None:

@@ -17,7 +17,6 @@ from tests.helpers import in_process_client
 from tests.test_caf_fluorescence import START
 from tests.test_notebook_zips import fake_motmaster_zip, read_zip_like_analysis3
 from tests.test_optimise_mot_lasers import caf as caf_experiment  # noqa: F401
-from tests.test_optimise_mot_lasers import saved_set_points  # noqa: F401
 
 MONTHS = [
     "Jan",
@@ -364,7 +363,7 @@ def test_auto_mot_submits_the_chosen_stages(rig_parts, optimiser_run):
         ["BX", "v0"],
         spans={"BX": 20e-6},
         points={"v0": 12},
-        centres={"v0": 494.4},
+        offsets={"v0": 1e-6},
         bg_field=2.0,
     )
     ((experiment, arguments),) = optimiser_run.submissions
@@ -379,12 +378,12 @@ def test_auto_mot_submits_the_chosen_stages(rig_parts, optimiser_run):
     }
     assert arguments["BX_span"] == 20e-6
     assert arguments["v0_points"] == 12
-    assert arguments["v0_centre"] == 494.4
+    assert arguments["v0_offset"] == 1e-6
     assert arguments["bg_field"] == 2.0
     assert "v1_span" not in arguments
 
 
-@pytest.mark.usefixtures("caf_experiment", "saved_set_points")
+@pytest.mark.usefixtures("caf_experiment")
 def test_auto_mot_returns_each_stage_in_the_shape_the_plot_takes(
     rig_parts, optimiser_run
 ):

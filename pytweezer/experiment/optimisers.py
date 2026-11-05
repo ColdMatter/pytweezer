@@ -213,8 +213,8 @@ class StagedScan(Optimiser):
     ``<setting>_span`` and ``<setting>_centre`` if it declares a span. The
     centre takes the saved parameter ``save_as`` when it is not set, so the
     saved parameter must exist; it is read for every span stage, enabled or
-    not. The sweep of a span stage runs from ``centre - span`` to
-    ``centre + span``. Only
+    not (:meth:`centre_argument` and :meth:`centre_of` change that). The sweep
+    of a span stage runs from ``centre - span`` to ``centre + span``. Only
     enabled stages (:meth:`enabled_stages`) are scanned, and at least one must
     be. Within a stage the sweep runs ``repeats`` times. When a stage's points
     are done, :meth:`best` gives its proposal, which every later enabled stage
@@ -269,6 +269,22 @@ class StagedScan(Optimiser):
                 )
 
     @classmethod
+    def centre_argument(cls, stage: Stage) -> tuple[str, Argument]:
+        """The name and declaration of the argument that places a span ``stage``'s centre.
+
+        A subclass overrides this together with :meth:`centre_of`.
+        """
+        return f"{stage.setting}_centre", Number(
+            saved=stage.save_as,
+            group=SEARCH,
+            tooltip=f"the saved {stage.save_as} unless set",
+        )
+
+    def centre_of(self, stage: Stage) -> float:
+        """The centre of a span ``stage``'s sweep; called once the run is prepared."""
+        return getattr(self, f"{stage.setting}_centre")
+
+    @classmethod
     def generated_arguments(cls) -> dict[str, Argument]:
         arguments: dict[str, Argument] = {}
         for stage in cls.declarations():
@@ -280,11 +296,8 @@ class StagedScan(Optimiser):
                     group=SEARCH,
                     tooltip="scanned within this of the centre",
                 )
-                arguments[f"{stage.setting}_centre"] = Number(
-                    saved=stage.save_as,
-                    group=SEARCH,
-                    tooltip=f"the saved {stage.save_as} unless set",
-                )
+                name, argument = cls.centre_argument(stage)
+                arguments[name] = argument
             else:
                 arguments[f"{stage.setting}_start"] = Number(stage.start, group=SEARCH)
                 arguments[f"{stage.setting}_stop"] = Number(stage.stop, group=SEARCH)
@@ -328,7 +341,17 @@ class StagedScan(Optimiser):
         ]
 
     def number_of_points(self) -> int:
-        return len(self._schedule())
+        for _, stage in self.enabled_stages():
+            if stage.span is not None:
+                span = getattr(self, f"{stage.setting}_span")
+                if not span > 0:
+                    raise ValueError(
+                        f"{stage.setting}_span is {span}; it must be positive"
+                    )
+        return self.repeats * sum(
+            getattr(self, f"{stage.setting}_points")
+            for _, stage in self.enabled_stages()
+        )
 
     def _schedule(self) -> list[tuple[int, float]]:
         """``(stage index, setting value)`` for every point, in run order."""
@@ -339,11 +362,7 @@ class StagedScan(Optimiser):
                 stop = getattr(self, f"{stage.setting}_stop")
             else:
                 span = getattr(self, f"{stage.setting}_span")
-                if not span > 0:
-                    raise ValueError(
-                        f"{stage.setting}_span is {span}; it must be positive"
-                    )
-                centre = getattr(self, f"{stage.setting}_centre")
+                centre = self.centre_of(stage)
                 start, stop = centre - span, centre + span
             values = np.linspace(
                 start, stop, getattr(self, f"{stage.setting}_points")
@@ -358,8 +377,8 @@ class StagedScan(Optimiser):
         if not self.enabled_stages():
             names = ", ".join(f"{stage.setting}_run" for stage in self.stages)
             raise ValueError(f"no stage is enabled; set at least one of {names}")
-        self._points_schedule = self._schedule()
         super().prepare()
+        self._points_schedule = self._schedule()
 
     def run_point(self) -> None:
         stage_index, setting = self._points_schedule[self.point.index]
