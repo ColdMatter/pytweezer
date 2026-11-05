@@ -102,7 +102,7 @@ def test_image_stats_publishes_expected_statistics():
     stats_analysis = build(ImageStats)
     frame = np.array([[0, 2], [4, 6]], dtype=np.uint16)
 
-    assert stats_analysis.process({"index": 3}, frame) is None
+    assert stats_analysis.process({"index": 3, "rid": 7}, frame) is None
 
     ((head, data, channel),) = stats_analysis.dataq.sent
     assert data is None
@@ -112,6 +112,7 @@ def test_image_stats_publishes_expected_statistics():
     assert head["min"] == pytest.approx(0.0)
     assert head["max"] == pytest.approx(6.0)
     assert head["index"] == 3
+    assert head["rid"] == 7
 
 
 def test_image_selector_passes_only_the_chosen_image_of_each_shot():
@@ -182,12 +183,65 @@ def test_projections_sums_both_axes():
     np.testing.assert_allclose(y_data[1], [6, 15])
 
 
+def gaussian_frame(shape, x0, y0, sigma, amplitude, offset=5.0, seed=0):
+    """Frame whose peak sits on pixel indices ``(x0, y0)``, with Poisson noise."""
+    rows, cols = np.indices(shape)
+    model = offset + amplitude * np.exp(
+        -0.5 * ((cols - x0) ** 2 + (rows - y0) ** 2) / sigma**2
+    )
+    return np.random.default_rng(seed).poisson(model).astype(np.uint16)
+
+
 def test_projections_ignores_non_2d_data():
     from pytweezer.analysis.projections import Projections
 
     proj = build(Projections)
     assert proj.process({}, np.arange(5)) is None
     assert proj.dataq.sent == []
+
+
+def test_projection_fit_curve_matches_sums_of_a_gaussian():
+    from pytweezer.analysis.projections import Projections
+
+    resolution, origin = 2e-6, (30.0, 10.0)
+    frame = gaussian_frame((60, 90), x0=40.0, y0=25.0, sigma=6.0, amplitude=200.0)
+    head = {"_imgresolution": [resolution] * 2, "_offset": list(origin)}
+
+    proj = build(Projections)
+    proj.process(head, frame)
+
+    (x_head, x_data, x_channel), (y_head, y_data, _) = proj.dataq.sent
+    assert x_channel == "_x"
+    assert x_data.shape == (3, 90)
+    np.testing.assert_allclose(
+        x_data[0], (origin[0] + np.arange(90) + 0.5) * resolution
+    )
+    np.testing.assert_allclose(x_data[2], x_data[1], atol=0.03 * x_data[1].max())
+    assert x_head["success"] is True
+    quarter_pixel = 0.25 * resolution
+    assert x_head["center"] == pytest.approx(
+        (origin[0] + 40.5) * resolution, abs=quarter_pixel
+    )
+    assert y_head["center"] == pytest.approx(
+        (origin[1] + 25.5) * resolution, abs=quarter_pixel
+    )
+    assert y_data[0, 0] == pytest.approx((origin[1] + 0.5) * resolution)
+
+
+def test_projection_of_a_flat_noisy_frame_publishes_no_fit_curve():
+    from pytweezer.analysis.projections import Projections
+
+    frame = np.random.default_rng(3).poisson(1000.0, (60, 90)).astype(np.uint16)
+
+    proj = build(Projections)
+    proj.process({}, frame)
+
+    for head, data, _channel in proj.dataq.sent:
+        assert head["success"] is False
+        assert np.isnan(data[2]).all()
+        assert all(
+            np.isnan(head[key]) for key in ("center", "sigma", "amplitude", "offset")
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -533,3 +587,200 @@ def test_tweezer_loading_starts_afresh_when_a_new_task_sends_frames(monkeypatch)
     head, _, _ = analysis.dataq.sent[-1]
     assert (head["rid"], head["shots"]) == (2, 20)
     assert head["loading"] == pytest.approx(sum(LOADED_IN_TEN) / 10 / len(SITE_CENTRES))
+
+
+# --------------------------------------------------------------------------- #
+# cloud_fit
+# --------------------------------------------------------------------------- #
+
+
+def test_cloud_fit_analysis_publishes_fit_fields_with_geometry():
+    from pytweezer.analysis.cloud_fit import FIELDS, CloudFitAnalysis
+
+    resolution, origin = 3e-6, (20.0, 40.0)
+    frame = gaussian_frame((80, 100), x0=55.0, y0=30.0, sigma=7.0, amplitude=300.0)
+    head = {
+        "rid": 4,
+        "index": 2,
+        "_imgresolution": [resolution] * 2,
+        "_offset": list(origin),
+    }
+
+    analysis = build(CloudFitAnalysis)
+    assert analysis.process(head, frame) is None
+
+    ((out, data, channel),) = analysis.dataq.sent
+    assert data is None and channel == ""
+    assert set(FIELDS) | {"units", "success"} <= set(out)
+    assert out["success"] is True and out["units"] == "m"
+    assert out["x0"] == pytest.approx((origin[0] + 55.5) * resolution, rel=1e-3)
+    assert out["y0"] == pytest.approx((origin[1] + 30.5) * resolution, rel=1e-3)
+    assert out["sigma_x"] == pytest.approx(7.0 * resolution, rel=0.03)
+    assert (out["rid"], out["index"]) == (4, 2)
+    assert out["_imgresolution"] == [resolution] * 2
+    assert out["_offset"] == list(origin)
+
+
+def test_cloud_fit_analysis_publishes_nan_for_a_frame_with_no_cloud():
+    from pytweezer.analysis.cloud_fit import FIELDS, CloudFitAnalysis
+
+    frame = np.random.default_rng(3).poisson(100.0, (80, 100)).astype(np.uint16)
+    analysis = build(CloudFitAnalysis)
+    analysis.process({"rid": 4, "_imgresolution": [3e-6, 3e-6]}, frame)
+
+    ((out, _, _),) = analysis.dataq.sent
+    assert out["success"] is False and out["rid"] == 4 and out["units"] == "m"
+    assert all(np.isnan(out[field]) for field in FIELDS)
+
+
+def test_offset_without_a_scale_places_pixels_from_the_crop_origin():
+    from pytweezer.analysis.cloud_fit import CloudFitAnalysis
+    from pytweezer.analysis.projections import Projections
+
+    frame = gaussian_frame((60, 90), x0=40.0, y0=25.0, sigma=6.0, amplitude=200.0)
+    head = {"_offset": [30.0, 10.0]}
+
+    fit = build(CloudFitAnalysis)
+    fit.process(head, frame)
+    ((out, _, _),) = fit.dataq.sent
+    assert out["units"] == "px"
+    assert out["x0"] == pytest.approx(30.0 + 40.5, abs=0.1)
+    assert out["y0"] == pytest.approx(10.0 + 25.5, abs=0.1)
+
+    proj = build(Projections)
+    proj.process(head, frame)
+    (_, x_data, _), (_, y_data, _) = proj.dataq.sent
+    np.testing.assert_allclose(x_data[0], 30.0 + np.arange(90) + 0.5)
+    np.testing.assert_allclose(y_data[0], 10.0 + np.arange(60) + 0.5)
+
+
+def test_cloud_fit_analysis_reports_pixels_without_a_scale():
+    from pytweezer.analysis.cloud_fit import CloudFitAnalysis
+
+    analysis = build(CloudFitAnalysis)
+    analysis.process(
+        {}, gaussian_frame((80, 100), x0=55.0, y0=30.0, sigma=7.0, amplitude=300.0)
+    )
+
+    ((out, _, _),) = analysis.dataq.sent
+    assert out["units"] == "px"
+    assert out["x0"] == pytest.approx(55.5, abs=0.1)
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        np.full((40, 40), np.nan),
+        np.ones((1, 1)),
+        np.zeros((0, 5)),
+    ],
+    ids=["nan", "single-pixel", "empty"],
+)
+def test_cloud_fit_analysis_survives_a_bad_frame(frame):
+    from pytweezer.analysis.cloud_fit import CloudFitAnalysis
+
+    analysis = build(CloudFitAnalysis)
+    assert analysis.process({"rid": 1, "index": 0}, frame) is None
+
+    ((out, _, _),) = analysis.dataq.sent
+    assert out["success"] is False
+    assert (out["rid"], out["index"]) == (1, 0)
+
+
+def test_cloud_fit_analysis_ignores_non_2d_data():
+    from pytweezer.analysis.cloud_fit import CloudFitAnalysis
+
+    analysis = build(CloudFitAnalysis)
+    assert analysis.process({}, np.ones((2, 3, 4))) is None
+    assert analysis.dataq.sent == []
+
+
+# --------------------------------------------------------------------------- #
+# shot_background
+# --------------------------------------------------------------------------- #
+
+
+def test_background_frame_is_held_not_published():
+    from pytweezer.analysis.shot_background import ShotBackground
+
+    analysis = build(ShotBackground)
+    background = np.full((4, 5), 20, dtype=np.uint16)
+
+    assert analysis.process({"rid": 1, "background": True}, background) is None
+    assert analysis.client.sent == []
+
+
+def test_background_subtraction_is_signed_float():
+    from pytweezer.analysis.shot_background import ShotBackground
+
+    analysis = build(ShotBackground)
+    analysis.process({"rid": 1, "background": True}, np.full((4, 5), 20, np.uint16))
+
+    head, data = analysis.process(
+        {"rid": 1, "index": 3}, np.full((4, 5), 10, dtype=np.uint16)
+    )
+
+    assert data.dtype == np.float64
+    np.testing.assert_array_equal(data, np.full((4, 5), -10.0))
+    assert (head["rid"], head["index"]) == (1, 3)
+
+
+def test_frames_of_one_background_shot_are_averaged():
+    from pytweezer.analysis.shot_background import ShotBackground
+
+    analysis = build(ShotBackground)
+    for level in (10, 30):
+        analysis.process(
+            {"rid": 1, "background": True}, np.full((2, 2), level, np.uint16)
+        )
+
+    _, data = analysis.process({"rid": 1}, np.full((2, 2), 25, np.uint16))
+
+    np.testing.assert_array_equal(data, np.full((2, 2), 5.0))
+
+
+def test_new_background_replaces_the_one_of_an_earlier_rid():
+    from pytweezer.analysis.shot_background import ShotBackground
+
+    analysis = build(ShotBackground)
+    analysis.process({"rid": 1, "background": True}, np.full((2, 2), 10, np.uint16))
+    analysis.process({"rid": 2, "background": True}, np.full((2, 2), 50, np.uint16))
+
+    _, data = analysis.process({"rid": 2}, np.full((2, 2), 60, np.uint16))
+
+    np.testing.assert_array_equal(data, np.full((2, 2), 10.0))
+
+
+def test_each_stream_keeps_its_own_background():
+    from pytweezer.analysis.shot_background import ShotBackground
+
+    analysis = build(ShotBackground)
+    for stream, level in (("CamA", 10), ("CamB", 100)):
+        analysis.current_stream = stream
+        analysis.process(
+            {"rid": 1, "background": True}, np.full((3, 3), level, np.uint16)
+        )
+
+    outputs = {}
+    for stream in ("CamA", "CamB"):
+        analysis.current_stream = stream
+        _, outputs[stream] = analysis.process({"rid": 1}, np.full((3, 3), 120.0))
+
+    np.testing.assert_array_equal(outputs["CamA"], np.full((3, 3), 110.0))
+    np.testing.assert_array_equal(outputs["CamB"], np.full((3, 3), 20.0))
+
+
+@pytest.mark.parametrize(
+    ("rid", "shape"), [(2, (4, 5)), (1, (5, 4))], ids=["other-rid", "other-shape"]
+)
+def test_mismatched_background_passes_frame_through(rid, shape):
+    from pytweezer.analysis.shot_background import ShotBackground
+
+    analysis = build(ShotBackground)
+    analysis.process({"rid": 1, "background": True}, np.full((4, 5), 20, np.uint16))
+    frame = np.full(shape, 10, dtype=np.uint16)
+
+    head, data = analysis.process({"rid": rid}, frame)
+
+    assert data.dtype == np.float64
+    np.testing.assert_array_equal(data, frame)

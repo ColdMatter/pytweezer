@@ -7,7 +7,7 @@ import pytest
 import tifffile
 
 from pytweezer.drivers import thorcam, tweezermonitorcam
-from pytweezer.drivers.camera_base import Camera
+from pytweezer.drivers.camera_base import Camera, SimulatedCamera
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.orca import ORCACamera
 
@@ -56,6 +56,27 @@ def test_broadcast_frames_carry_the_header_the_caller_adds():
     camera.image_client = RecordingImageClient()
     camera.acquire_n_frames(2, broadcast=True, header={"rid": 57})
     assert [info["rid"] for info, _image in camera.image_client.sent] == [57, 57]
+
+
+def _scaled_broadcast_header(**camera_kwargs):
+    camera = SimulatedCamera(**camera_kwargs)
+    camera.image_client = RecordingImageClient()
+    camera.set_binning(2)
+    camera.set_roi(100, 64, 40, 64)
+    camera.broadcast_image(FRAMES[0], {"index": 0})
+    return camera.image_client.sent[0][0]
+
+
+def test_broadcast_header_carries_pixel_scale():
+    header = _scaled_broadcast_header(object_pixel_m=2e-6)
+    assert header["_imgresolution"] == pytest.approx([4e-6, 4e-6])
+    assert header["_offset"] == pytest.approx([50, 20])
+
+
+def test_broadcast_header_without_scale_is_unchanged():
+    header = _scaled_broadcast_header()
+    assert "_imgresolution" not in header
+    assert "_offset" not in header
 
 
 def test_autosave_writes_each_frame_to_its_own_tiff_in_frame_order(tmp_path):

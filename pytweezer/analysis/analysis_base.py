@@ -3,8 +3,8 @@
 An *analysis process* is a small, long-lived program that subscribes to one or
 more pub/sub streams, receives ``(message, head[, data])`` messages in a loop,
 transforms each one, and republishes the result on its own name. The existing
-scripts in this package (``data_average.py``, ``subtract_bg.py``,
-``rotate_image.py``) hand-roll the same skeleton:
+scripts in this package (``data_average.py``, ``rotate_image.py``) hand-roll
+the same skeleton:
 
     * hold a :class:`Properties` connection named after the process,
     * declare the input streams as a :class:`PropertyAttribute`,
@@ -60,6 +60,10 @@ class AnalysisProcess:
     #: Sub-channel appended to ``name`` when republishing results.
     _out_channel = ""
 
+    #: Topic of the message :meth:`process` is handling, for analyses that keep
+    #: state per input stream.
+    current_stream = None
+
     def __init__(self, name):
         self.name = name
         self._props = Properties(name)
@@ -103,6 +107,7 @@ class AnalysisProcess:
             # A header-only message (scalar streams) arrives without an array.
             msgstr, head, data = msg if len(msg) == 3 else (*msg, None)
 
+            self.current_stream = msgstr
             result = self.process(head, data)
             if result is not None:
                 out_head, out_data = result

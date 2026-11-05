@@ -1,193 +1,159 @@
-"""Image viewer with projection line plots above and to the left of the image.
+"""Image Monitor with the horizontal and vertical sums above and to the left of the image.
 
-Built on :class:`pytweezer.GUI.applet.Applet`.
+Everything :mod:`pytweezer.GUI.viewers.image_monitor` does, plus two line plots
+whose axes are linked to the image's: the sum down the columns above it, sharing
+its x-axis, and the sum across the rows to its left, sharing its y-axis. Each
+draws the sums as points and the 1-D Gaussian fit as a white line.
 
-Like :mod:`pytweezer.GUI.viewers.image_monitor` it shows an image stream with a
-colormap, histogram LUT and ROIs, but adds two line plots whose axes are linked
-to the image:
+Point ``projectionstreams`` at the ``projections.py`` analyses, by the name they
+run under: ``<name>_x`` draws in the top plot and ``<name>_y`` in the left one.
+Both publish ``[coords, sums, fit_curve]`` in the image's coordinates. The left
+plot runs its coordinate along the image's y-axis and its values along x,
+increasing towards the image. A profile whose fit was not trusted (its fit curve
+is NaN) is drawn without the line.
 
-    * a top plot sharing the image's x-axis (subscribed via ``topstreams``),
-    * a left plot sharing the image's y-axis (subscribed via ``leftstreams``).
-
-Point these at the ``projections.py`` outputs (and any ``gaussian_fit.py`` fit
-curve) to see the profiles and fits aligned with the image. Data streams carry a
-``[coords, values]`` array; the top plot draws ``values`` against ``coords`` on
-the shared x-axis, and the left plot draws ``coords`` up the shared y-axis with
-``values`` running toward the image.
+Properties (besides the Image Monitor's):
+    *   projectionstreams: ([str]) projection analyses to draw.
 """
 
-import matplotlib.pyplot as plt
 import numpy as np
-import PyQt6
 import pyqtgraph as pg
 from PyQt6 import QtCore
-from PyQt6.QtWidgets import QVBoxLayout
 
-from pytweezer.GUI.applet import Applet, run_applet
-from pytweezer.GUI.viewers.image_monitor import CameraROI
-from pytweezer.servers import DataClient, ImageClient, PropertyAttribute
+from pytweezer.GUI.applet import run_applet
+from pytweezer.GUI.viewers.image_monitor import ImageDisplay
+from pytweezer.servers import DataClient, PropertyAttribute
+
+SIDE_PLOT_SIZE = 140
+AXIS_SIZE = 60
+FIT_PEN = pg.mkPen("w", width=2)
 
 
-class ImagePlotDisplay(Applet):
-    """Image display with x/y projection plots linked to the image axes."""
+class ImageProjectionDisplay(ImageDisplay):
+    """Image display with the projection plots above and left of the image."""
 
-    stream_category = "Image"
-    poll_interval = 10
+    image_row = 1
+    image_col = 1
 
-    _roilist = PropertyAttribute("ROIs", ["slice"])
-    _imagestreams = PropertyAttribute("imagestreams", ["--None--"])
-    _topstreams = PropertyAttribute("topstreams", ["--None--"])
-    _leftstreams = PropertyAttribute("leftstreams", ["--None--"])
-    _invert_colors = PropertyAttribute("invert_colors", False)
+    _projectionstreams = PropertyAttribute("projectionstreams", ["--None--"])
 
     def init_gui(self):
-        self.imgresolution = [1, 1]
+        self.projectionclient = DataClient("imageprojectionviewer")
+        self.projection_curves: dict[str, tuple[pg.PlotDataItem, pg.PlotDataItem]] = {}
+        self.top_plot = None
+        self.left_plot = None
+        super().init_gui()
 
-        self.imgstream = ImageClient("imageplotviewer")
-        self.topclient = DataClient("imageplotviewer_top")
-        self.leftclient = DataClient("imageplotviewer_left")
-        self.topcurves = {}
-        self.leftcurves = {}
-
-        colors = np.array(plt.cm.magma.colors) * 255
-        if self._invert_colors:
-            colors = colors[::-1]
-        cmap = pg.ColorMap(pos=np.linspace(0.0, 1.0, len(colors)), color=colors)
-
-        glw = pg.GraphicsLayoutWidget()
-
-        # Grid: top plot over the image, left plot beside it, LUT on the far right.
-        self.top_plot = glw.addPlot(row=0, col=1)
-        self.left_plot = glw.addPlot(row=1, col=0)
-        self.plot = glw.addPlot(row=1, col=1)
-        lut = pg.HistogramLUTItem()
-        glw.addItem(lut, row=1, col=2)
-
-        imgdata = np.ones((100, 100))
-        self.image_item = pg.ImageItem(imgdata)
-        self.image_head = None
-        self.image_item.setRect(PyQt6.QtCore.QRect(0, 0, 100, 100))
-        lut.setImageItem(self.image_item)
-        # The colormap goes on the histogram's gradient, not on the image: a
-        # HistogramLUTItem drives its image's lookup table, so a setLookupTable
-        # here would be overwritten and the image would come out greyscale.
-        lut.gradient.setColorMap(cmap)
-        self.plot.addItem(self.image_item)
-        self.plot.setLabel("left", text="y", units="m")
-        self.plot.setLabel("bottom", text="x", units="m")
-
-        # Keep the projection plots slim and share axes with the image so the
-        # profiles line up with what is drawn below/right of them.
-        self.top_plot.setMaximumHeight(140)
+        self.top_plot = self.graphics_layout.addPlot(row=0, col=1)
+        self.left_plot = self.graphics_layout.addPlot(row=1, col=0)
+        self.top_plot.setFixedHeight(SIDE_PLOT_SIZE)
         self.top_plot.setXLink(self.plot)
         self.top_plot.hideAxis("bottom")
-        self.left_plot.setMaximumWidth(140)
+        self.left_plot.setFixedWidth(SIDE_PLOT_SIZE)
         self.left_plot.setYLink(self.plot)
         self.left_plot.hideAxis("left")
-        # Left plot's value axis points toward the image.
-        self.left_plot.getViewBox().invertX(True)
+        # The image's y-axis is inverted; a linked view follows the range but not
+        # the direction.
+        self.left_plot.getViewBox().invertY(True)
+        # Equal axis widths keep the top plot's view box above the image's.
+        for plot in (self.plot, self.top_plot):
+            plot.getAxis("left").setWidth(AXIS_SIZE)
+        for plot in (self.plot, self.left_plot):
+            plot.getAxis("bottom").setHeight(AXIS_SIZE // 2)
+        self.graphics_layout.ci.layout.setRowStretchFactor(1, 4)
+        self.graphics_layout.ci.layout.setColumnStretchFactor(1, 4)
 
-        view_box = self.plot.getViewBox()
-        view_box.setAspectLocked(True)
-
-        for region in self._roilist:
-            roi = CameraROI(self.name + "/ROI/" + region, self, invertible=True)
-            roi.addScaleHandle((1, 1), center=(0, 0))
-            self.plot.addItem(roi)
-
-        layout = QVBoxLayout()
-        layout.addWidget(glw)
-        self.setLayout(layout)
-
-        view_box.menu.addAction("Image subscriptions").triggered.connect(
-            lambda: self.open_subscription_editor()
+        self.plot.getViewBox().menu.addAction("Projections").triggered.connect(
+            self.subscribe_projections
         )
-        view_box.menu.addAction("Top plot subscriptions").triggered.connect(
-            lambda: self.open_subscription_editor("topstreams")
-        )
-        view_box.menu.addAction("Left plot subscriptions").triggered.connect(
-            lambda: self.open_subscription_editor("leftstreams")
-        )
-        view_box.menu.addAction("configure").triggered.connect(self.open_config_editor)
-
-        self.update_subscriptions()
+        self._rebuild_projection_curves()
 
     def sizeHint(self):
         return QtCore.QSize(820, 760)
 
     def update_subscriptions(self):
-        self.imgstream.unsubscribe()
-        self.imgstream.subscribe(self._imagestreams)
-        self._rebuild_curves(
-            self.topclient, self._topstreams, self.top_plot, self.topcurves
-        )
-        self._rebuild_curves(
-            self.leftclient, self._leftstreams, self.left_plot, self.leftcurves
-        )
+        super().update_subscriptions()
+        self.projectionclient.unsubscribe()
+        self.projectionclient.subscribe(self._projection_channels())
+        self._rebuild_projection_curves()
 
-    def _rebuild_curves(self, client, streams, plot, curvedict):
-        client.unsubscribe()
-        for curve in curvedict.values():
-            plot.removeItem(curve)
-        curvedict.clear()
-        client.subscribe(streams)
+    def _projection_channels(self) -> list[str]:
+        return [
+            f"{stream}{axis}"
+            for stream in self._projectionstreams
+            if stream != "--None--"
+            for axis in ("_x", "_y")
+        ]
+
+    def subscribe_projections(self):
+        active = self._props.get("/Servers/DataStream/active", {})
+        choices = sorted(
+            name[:-2]
+            for name in active
+            if name.endswith("_x") and f"{name[:-2]}_y" in active
+        )
+        self.open_subscription_editor("projectionstreams", choices=choices)
+
+    def _rebuild_projection_curves(self):
+        if self.top_plot is None:
+            return
+        for channel, curves in self.projection_curves.items():
+            plot = self.top_plot if channel.endswith("_x") else self.left_plot
+            for curve in curves:
+                plot.removeItem(curve)
+        self.projection_curves.clear()
+        streams = [s for s in self._projectionstreams if s != "--None--"]
         for index, stream in enumerate(streams):
-            if stream == "--None--":
-                continue
-            pen = pg.mkPen(self.stream_color(stream, index), width=1.5)
-            curvedict[stream] = plot.plot(pen=pen)
+            colour = self.stream_color(stream, index)
+            for axis, plot in (("_x", self.top_plot), ("_y", self.left_plot)):
+                data_curve = plot.plot(
+                    pen=None,
+                    symbol="o",
+                    symbolSize=3,
+                    symbolPen=None,
+                    symbolBrush=colour,
+                )
+                fit_curve = plot.plot(pen=FIT_PEN)
+                self.projection_curves[stream + axis] = (data_curve, fit_curve)
 
     def poll(self):
-        self._update_image()
-        self._update_curves(self.topclient, self.topcurves, orientation="top")
-        self._update_curves(self.leftclient, self.leftcurves, orientation="left")
+        super().poll()
+        self.update_projections()
 
-    def _update_image(self):
-        while self.imgstream.has_new_data():
-            msg, head, imgdata = self.imgstream.recv()
-            self.image_item.setImage(imgdata, autoLevels=True)
-            self.image_item.resetTransform()
-            self.image_head = head
-            try:
-                self.imgresolution = head["_imgresolution"]
-                offset = np.array(head["_offset"]) * np.array(self.imgresolution)
-            except Exception:
-                self.imgresolution = [1, 1]
-                offset = [0, 0]
-            h, w = imgdata.shape
-            self.image_item.setRect(
-                QtCore.QRectF(
-                    offset[0],
-                    offset[1],
-                    w * self.imgresolution[0],
-                    h * self.imgresolution[1],
-                )
-            )
+    def update_projections(self):
+        """Redraw each projection from its latest message."""
+        latest = {}
+        while self.projectionclient.has_new_data(0):
+            message = self.projectionclient.recv()
+            if message is not None and len(message) >= 3:
+                latest[message[0]] = message[2]
+        for channel, profile in latest.items():
+            if channel in self.projection_curves:
+                self.show_projection(channel, np.asarray(profile))
 
-    def _update_curves(self, client, curvedict, orientation):
-        while client.has_new_data():
-            msg = client.recv()
-            if msg is None or len(msg) < 3:
-                continue
-            streamname, head, arr = msg
-            if streamname not in curvedict:
-                continue
-            arr = np.asarray(arr)
-            if arr.ndim == 1:
-                coords = np.arange(arr.size)
-                values = arr
-            else:
-                coords, values = arr[0], arr[1]
-            if orientation == "top":
-                curvedict[streamname].setData(coords, values)
-            else:
-                # coordinate runs up the shared y-axis; value along x.
-                curvedict[streamname].setData(values, coords)
+    def show_projection(self, channel: str, profile: np.ndarray) -> None:
+        """Draw ``profile`` (``[coords, sums, fit_curve]``) in the plot ``channel`` belongs to."""
+        if profile.ndim != 2 or profile.shape[0] < 2:
+            return
+        coords, sums = profile[0], profile[1]
+        fit = profile[2] if profile.shape[0] > 2 else np.full(coords.shape, np.nan)
+        data_curve, fit_curve = self.projection_curves[channel]
+        trusted = np.isfinite(fit).all()
+        if not trusted:
+            fit, fit_coords = np.empty(0), np.empty(0)
+        else:
+            fit_coords = coords
+        if channel.endswith("_x"):
+            data_curve.setData(coords, sums)
+            fit_curve.setData(fit_coords, fit)
+        else:
+            data_curve.setData(sums, coords)
+            fit_curve.setData(fit, fit_coords)
 
 
 def main(name):
-    run_applet(ImagePlotDisplay, default_name=name)
+    run_applet(ImageProjectionDisplay, default_name=name)
 
 
 if __name__ == "__main__":
-    run_applet(ImagePlotDisplay, default_name="Image Plot Monitor")
+    run_applet(ImageProjectionDisplay, default_name="Image Plot Monitor")

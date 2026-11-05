@@ -14,7 +14,7 @@ are otherwise silent:
 A composite's sub-devices are checked one by one, then built together.
 
 Usage:
-    uv run python check_device.py "Rb ORCA"
+    uv run python check_device.py "ORCA"
     uv run python check_device.py --all
 """
 

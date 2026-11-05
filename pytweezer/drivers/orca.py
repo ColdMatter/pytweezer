@@ -15,6 +15,7 @@ class ORCACamera(Camera):
             If None, the only connected ORCA-R2 is opened.
         external_exposure: Start in :meth:`set_external_exposure_mode`; otherwise
             the camera keeps DCAM's own trigger mode (internal after power-up).
+        object_pixel_m: Metres per unbinned sensor pixel at the atoms.
     """
 
     image_prefix = "ORCA"
@@ -27,9 +28,15 @@ class ORCACamera(Camera):
         stream_name: str | None = None,
         serial_number: str | None = None,
         external_exposure: bool = False,
+        object_pixel_m: float | None = None,
     ):
         self.serial_number = serial_number
-        super().__init__(image_dir=image_dir, timeout=timeout, stream_name=stream_name)
+        super().__init__(
+            image_dir=image_dir,
+            timeout=timeout,
+            stream_name=stream_name,
+            object_pixel_m=object_pixel_m,
+        )
         if external_exposure:
             self.set_external_exposure_mode()
 

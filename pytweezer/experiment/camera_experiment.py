@@ -6,7 +6,7 @@
         rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
         hamcam = CameraShots("Rb HamCam", frames=2, exposure=20e-3, roi=(0, 512, 0, 512))
         thorcam = CameraShots("Rb ThorCam", frames=1)
-        orca = CameraShots("CaF ORCA", frames=3, binning=2, gain=1)
+        orca = CameraShots("ORCA", frames=3, binning=2, gain=1)
 
 Each :class:`CameraShots` is a device whose settings become form arguments
 named ``<camera>.frames``, ``.exposure``, ``.binning``, ``.gain``,
@@ -33,14 +33,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 
+from pytweezer.analysis.cloud_fit import SPECIES_MASS_AMU, fit_frames
 from pytweezer.experiment.arguments import Argument, Device, Integer, Number, collect
 from pytweezer.experiment.motmaster import MotMasterExperiment
 from pytweezer.experiment.scan import Point, Scan
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers.device_client import get_device_config
 
 logger = get_logger(__name__)
 
@@ -210,7 +212,13 @@ class CameraExperiment(MotMasterExperiment):
     took is in :attr:`roi_origins`. The default
     :meth:`run_point` takes one shot and records each camera's frames as
     ``<camera>_images``, ``(frames, H, W)`` per point.
+
+    :meth:`record_cloud_fit` fits the mean image of a camera's frames and
+    records the cloud's parameters; ``cloud_species`` ("CaF" or "Rb") makes
+    :meth:`prepare` record the mass as the constant ``cloud_mass_amu``.
     """
+
+    cloud_species: ClassVar[str | None] = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         inherited = collect(cls, Argument)
@@ -302,6 +310,10 @@ class CameraExperiment(MotMasterExperiment):
                 self._was_live.append(name)
             camera.stop_live()
             self.apply_camera_settings(name)
+        if self.cloud_species is not None:
+            self.record(
+                "cloud_mass_amu", SPECIES_MASS_AMU[self.cloud_species], unit="u"
+            )
 
     def finish(self) -> None:
         try:
@@ -321,10 +333,14 @@ class CameraExperiment(MotMasterExperiment):
         if errors:
             raise errors[0]
 
-    def take_shot(self, **overrides: Any) -> dict[str, np.ndarray]:
+    def take_shot(
+        self, *, background: bool = False, **overrides: Any
+    ) -> dict[str, np.ndarray]:
         """Run the sequences once and return every camera's frames, ``{name: (frames, H, W)}``.
 
         Args:
+            background: Mark the broadcast frames as background, which the live
+                shot-background analysis keeps for subtraction.
             **overrides: Script parameters for this run, as for
                 :meth:`run_sequences`.
         """
@@ -332,6 +348,9 @@ class CameraExperiment(MotMasterExperiment):
         for name in names:
             if self.shot_settings(name) != self._applied[name]:
                 self.apply_camera_settings(name)
+        header: dict[str, Any] = {"rid": self.rid}
+        if background:
+            header["background"] = True
         frames: dict[str, np.ndarray] = {}
         failed = True
         try:
@@ -343,7 +362,7 @@ class CameraExperiment(MotMasterExperiment):
                     self.cameras[name].acquire_n_frames(
                         self._applied[name].frames,
                         broadcast=True,
-                        header={"rid": self.rid},
+                        header=header,
                     )
                 )
             failed = False
@@ -366,6 +385,50 @@ class CameraExperiment(MotMasterExperiment):
         """Record each ``{camera: stack}`` entry as ``<camera>_images``."""
         for name, stack in frames.items():
             self.record(f"{name}_images", stack)
+
+    def record_cloud_fit(
+        self, name: str, frames: np.ndarray, background: np.ndarray | None = None
+    ) -> None:
+        """Fit the mean of camera ``name``'s ``frames`` and record the cloud.
+
+        Records ``<name>_<field>`` for every field of
+        :data:`~pytweezer.analysis.cloud_fit.FIELDS` and ``<name>_<field>_error``
+        for each of :data:`~pytweezer.analysis.cloud_fit.ERROR_FIELDS`, in metres
+        when the camera's CONFIG entry gives ``object_pixel_m`` and pixels
+        otherwise; fields the fit could not find, or all of them for a frame
+        with no cloud in it, are NaN. With a true ``save_mean_image`` argument
+        it also records ``<name>_mean_image``.
+
+        Args:
+            name: The camera's attribute name.
+            frames: ``(n, H, W)`` stack from :meth:`take_shot`.
+            background: Frame subtracted from the mean, or ``None``.
+        """
+        resolution, origin = self._cloud_geometry(name)
+        values, mean_image = fit_frames(frames, background, resolution, origin)
+        length = "px" if resolution is None else "m"
+        for field, value in values.items():
+            quantity = field.removesuffix("_error")
+            unit = {"angle": "rad", "amplitude": "counts", "offset": "counts"}.get(
+                quantity, "counts" if quantity == "integral" else length
+            )
+            self.record(f"{name}_{field}", value, unit=unit)
+        if getattr(self, "save_mean_image", False):
+            self.record(f"{name}_mean_image", mean_image, unit="counts")
+
+    def _cloud_geometry(
+        self, name: str
+    ) -> tuple[tuple[float, float] | None, tuple[float, float]]:
+        """``(resolution, origin)`` of camera ``name``'s frames for :func:`fit_frames`.
+
+        Binning and ROI origin are read from the camera, which may have been set
+        outside this experiment.
+        """
+        conf = get_device_config(self.camera_shots()[name].device_name)
+        binning, (x0, y0) = self.cameras[name].frame_geometry()
+        pixel_m = conf.get("object_pixel_m")
+        resolution = None if pixel_m is None else (pixel_m * binning,) * 2
+        return resolution, (x0 / binning, y0 / binning)
 
     def run_point(self) -> None:
         self.record_frames(self.take_shot())

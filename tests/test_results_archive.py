@@ -193,3 +193,14 @@ def test_a_clone_reads_the_same_archive_over_its_own_connection(tmp_path, remote
         assert clone._lock is not archive._lock
         day = archive.days()[0]
         assert clone.runs(day) == archive.runs(day)
+
+
+def test_one_points_result_reads_as_that_row_of_a_full_load(tmp_path, remote):
+    relative = f"{DAY}/{make_file(tmp_path).name}"
+    full = ResultsArchive(tmp_path).load(relative)
+
+    for archive in (ResultsArchive(tmp_path), remote):
+        image = archive.point_result(relative, "image", 2)
+        np.testing.assert_array_equal(image, full.results["image"][2])
+        assert image.dtype == np.uint16
+        assert archive.point_result(relative, "note", 2) == full.results["note"][2]

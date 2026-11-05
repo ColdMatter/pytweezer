@@ -272,7 +272,7 @@
         "sidebarstreams": [
             "--None--"
         ],
-        "show_sidebar": false
+        "show_sidebar": true
     },
     "Updating Plot": {
         "datastreams": [
@@ -310,7 +310,7 @@
         "sidebarstreams": [
             "--None--"
         ],
-        "show_sidebar": false
+        "show_sidebar": true
     },
     "Applet Launcher": {
         "Applets": {

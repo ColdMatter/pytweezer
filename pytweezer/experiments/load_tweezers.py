@@ -241,9 +241,12 @@ class LoadTweezers(CameraExperiment):
         )
 
     def run_point(self):
-        frames = self.take_shot()
+        self.record_shot(self.take_shot())
+
+    def record_shot(self, frames: dict[str, np.ndarray]) -> None:
+        """Record the tweezer results of one shot's ``hamcam`` frames."""
         if self.save_raw_images:
-            self.record_frames(frames)
+            self.record_frames({"hamcam": frames["hamcam"]})
         first_image, second_image = frames["hamcam"]
         self.record(
             "signal_counts",
@@ -251,12 +254,44 @@ class LoadTweezers(CameraExperiment):
             unit="counts",
         )
         if self.trap_sites is not None:
-            frames = [first_image, second_image]
-            first, second = self.site_photons(frames) > self.trap_threshold
+            images = [first_image, second_image]
+            first, second = self.site_photons(images) > self.trap_threshold
             self.record("first_occupied", first)
             self.record("second_occupied", second)
             self.record("loading", float(first.mean()))
             if self.save_tweezer_counts:
-                first, second = self.site_counts(frames)
+                first, second = self.site_counts(images)
                 self.record("first_counts", first, unit="counts")
                 self.record("second_counts", second, unit="counts")
+
+
+class LoadTweezersMOTImage(LoadTweezers):
+    """:class:`LoadTweezers` that also fits the Rb MOT imaged on the ORCA.
+
+    The ORCA takes one frame in the same MOTMaster run as the HamCam's two, so
+    each point is still one shot. Its cloud fit is recorded as ``orca_*`` with no
+    background subtracted
+    (:meth:`~pytweezer.experiment.camera_experiment.CameraExperiment.record_cloud_fit`),
+    and the ORCA's frame is not recorded itself unless ``save_mean_image`` is set.
+    """
+
+    cloud_species = "Rb"
+    analyses = (*LoadTweezers.analyses, "cloud_fit", "cloud_temperature")
+
+    orca = CameraShots("ORCA", frames=1, locked=("frames",))
+
+    save_mean_image = Bool(
+        True,
+        group="Camera",
+        tooltip="record the ORCA's frame, beside the fit to it",
+    )
+
+    def configure_camera(self, name: str, camera) -> None:
+        # The HamCam's EM-gain calls don't exist on the ORCA.
+        if name == "hamcam":
+            super().configure_camera(name, camera)
+
+    def run_point(self):
+        frames = self.take_shot()
+        self.record_shot(frames)
+        self.record_cloud_fit("orca", frames["orca"])

@@ -5,7 +5,8 @@ Input:
 
 Output:
     A data message (no array) carrying ``mean``, ``std``, ``stderr``, ``min``,
-    ``max``, ``sum`` and the pixel count ``n``, published on ``<name>`` (the
+    ``max``, ``sum`` and the pixel count ``n``, plus the input's ``index``,
+    ``timestamp`` and ``rid`` when it has them, published on ``<name>`` (the
     Data hub). Intended for the image viewer's data sidebar.
 
 Properties:
@@ -44,10 +45,9 @@ class ImageStats(ImageAnalysis):
             "max": float(values.max()),
             "sum": float(values.sum()),
         }
-        if "index" in head:
-            stats["index"] = head["index"]
-        if "timestamp" in head:
-            stats["timestamp"] = head["timestamp"]
+        for key in ("index", "timestamp", "rid"):
+            if key in head:
+                stats[key] = head[key]
 
         self.dataq.send(stats, None)
         return

@@ -69,7 +69,7 @@ class ImageStats(ImageAnalysis):
 
 then `self.dataq.send(head, data, channel=...)` inside `process` and `return
 None`, since the base's republish path would put them on the wrong hub.
-`projections.py` (image in, two data profiles out) and `image_stats.py` are the
+`projections.py` (image in, two data profiles with Gaussian fits out) and `image_stats.py` are the
 two examples to copy from.
 
 ## Writing `process`
@@ -95,7 +95,8 @@ A few conventions that come from the transport rather than the maths:
   client converts numpy integers, floats and arrays, but not a numpy bool (any
   comparison of array values), which raises — wrap it in `bool()`.
 - **Emit 1-D traces as a 2xN `[coords, values]` array**, so `live_plot.py` and
-  `gaussian_fit.py` can read `A[0]` as the axis and `A[1]` as the values.
+  `gaussian_fit.py` can read `A[0]` as the axis and `A[1]` as the values. Extra
+  rows are fine (`projections.py` adds a fit curve as row 2); readers use rows 0-1.
 - **Accumulate in `float64`** (`data.sum(axis=0, dtype=np.float64)`) — raw camera
   frames are integer and overflow quietly.
 - **Return `None` rather than raising** on a message you can't handle. An
@@ -115,7 +116,9 @@ pixels per frame pixel, per side) and `rid` when the
 experiment that read it passes one. A change of `rid` is the natural reset for
 anything that accumulates over a task, as `tweezer_loading.py` does. Some
 publishers add `_offset` (pixel origin of a crop within its parent frame) and
-`_imgresolution` (metres per pixel).
+`_imgresolution` (metres per pixel). Frame coordinates are
+`(origin + pixel + 0.5) * resolution`, in pixels (resolution 1) without `_imgresolution`:
+`cloud_fit.frame_geometry(head)` reads them.
 
 Saved trap sites (`trap_sites`, fitted by `trap_sites.fit_trap_sites`) are
 full-sensor `(y, x)` pixels; place them in a frame with
@@ -123,6 +126,20 @@ full-sensor `(y, x)` pixels; place them in a frame with
 result is a position in the frame, decide whether to report pixels or physical
 units and say which in the docstring — `roi_slice.py` shows the conversion both
 ways.
+
+## One process, several input streams
+
+An analysis may subscribe to several streams. `self.current_stream` is the topic of the message
+`process` is handling; key any state on it (`shot_background.py` keeps one held background per
+stream, and replaces its state dict rather than mutating it). Pass the input header's `rid`,
+`_offset` and `_imgresolution` through, so downstream viewers and fits can place the result.
+
+Fits: put a fit on the Data hub as header fields (`CloudFitAnalysis` in `analysis/cloud_fit.py`:
+`fit_cloud(data, resolution, origin)` then `.as_dict()`). When it fails, publish `success: False`
+with every numeric field NaN, never the fit's seed or an exception, so a live plot shows a gap
+rather than a false zero; the Image Monitor's `overlaystreams` draws such a header over the image.
+A 1-D profile with its fit goes out as a 3xN `[coords, values, fit_curve]` array (`projections.py`;
+`live_plot.py` reads rows 0-1, an all-NaN row 2 means no trusted fit).
 
 ## Properties are the user's knobs
 

@@ -26,6 +26,7 @@ class ThorCam(Camera):
         trigger_polarity: str = "rise",
         binning: int | None = None,
         gain_db: float | None = None,
+        object_pixel_m: float | None = None,
     ):
         """Open the camera and apply whichever settings are given.
 
@@ -37,12 +38,14 @@ class ThorCam(Camera):
                 with a ``trigger_mode``.
             binning: Square binning over the full sensor.
             gain_db: Analogue gain in dB.
+            object_pixel_m: Metres per unbinned sensor pixel at the atoms.
         """
         self.serial_number = serial_number
         super().__init__(
             image_dir=image_dir,
             timeout=timeout,
             stream_name=stream_name,
+            object_pixel_m=object_pixel_m,
         )
         if trigger_mode is not None:
             self._backend.set_trigger_mode(trigger_mode)

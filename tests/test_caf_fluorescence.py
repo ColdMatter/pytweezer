@@ -26,6 +26,7 @@ class FakeCamera:
 
     def __init__(self):
         self.frames = []
+        self.headers = []
         self.frame = lambda field, set_points, iteration: np.full(
             (2, 3), 10 + 5 * field
         )
@@ -38,6 +39,9 @@ class FakeCamera:
 
     def stop_live(self):
         pass
+
+    def frame_geometry(self):
+        return 1, (0, 0)
 
     def setup_acquisition(self, nframes, mode="sequence"):
         pass
@@ -55,6 +59,7 @@ class FakeCamera:
                 self.frames.append(np.asarray(image, dtype=np.uint16))
 
     def acquire_n_frames(self, nframes, broadcast=False, header=None):
+        self.headers.append(header)
         if len(self.frames) < nframes:
             raise TimeoutError(f"{len(self.frames)} of {nframes} frames arrived")
         return np.stack(self.frames[:nframes])
@@ -261,6 +266,45 @@ def test_the_background_shot_has_the_field_off(caf):
     assert measurement.status == "completed", measurement.attrs["error"]
     fields = [go["MOTCoilsCurrentValue"] for go in caf.motmaster.goes()]
     assert fields == [0.0, 1.0, 1.0]
+
+
+def gaussian_cloud_frame(field, set_points, iteration):
+    """A 100-count cloud on an offset of 20 when the field is on; the offset alone when off."""
+    y, x = np.mgrid[:60, :80]
+    cloud = 100 * np.exp(-((x - 40) ** 2 / (2 * 6**2) + (y - 30) ** 2 / (2 * 4**2)))
+    return 20 + (cloud if field else 0 * cloud)
+
+
+def test_fluorescence_point_records_thorcam_cloud_fit(caf):
+    caf.camera.frame = gaussian_cloud_frame
+    measurement = run(CaFFluorescence)
+
+    assert measurement.status == "completed", measurement.attrs["error"]
+    results = measurement.results
+    assert results["thorcam_sigma_x"][0] == pytest.approx(6, rel=0.03)
+    assert results["thorcam_sigma_y"][0] == pytest.approx(4, rel=0.03)
+    assert results["thorcam_x0"][0] == pytest.approx(40.5, abs=0.2)
+    assert results["thorcam_y0"][0] == pytest.approx(30.5, abs=0.2)
+    # The prepare background has the offset, so none is left in the fit.
+    assert abs(results["thorcam_offset"][0]) < 2
+    assert results["counts"][0] == pytest.approx(
+        results["thorcam_mean_image"][0].sum(), rel=1e-4
+    )
+    assert measurement.constants["cloud_mass_amu"] == 59.0
+
+
+def test_fluorescence_background_shot_is_marked(caf):
+    measurement = run(CaFFluorescence)
+
+    assert measurement.status == "completed", measurement.attrs["error"]
+    assert [header.get("background") for header in caf.camera.headers] == [True, None]
+
+
+def test_the_cloud_fit_takes_no_shot_of_its_own(caf):
+    measurement = run(CaFFluorescence, Scan(repetitions=2))
+
+    assert measurement.status == "completed", measurement.attrs["error"]
+    assert len(caf.motmaster.goes()) == 3
 
 
 def test_runs_against_the_simulated_motmaster_and_camera():

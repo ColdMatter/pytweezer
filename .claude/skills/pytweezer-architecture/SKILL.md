@@ -54,7 +54,9 @@ host to do it (see the `pytweezer-gui-internals` skill).
 - `CONFIG["Devices"]` — one entry per physical device, each with its own `host`.
   An entry that depends on another device names it by its key
   (`"motmaster": "CaF MotMaster"` on the NI Cards entries, `"linked_partner"`
-  on a linked MotMaster).
+  on a linked MotMaster). `"active"` is the lab's current state, switched
+  freely from one day to the next; no code or design decision may depend on
+  the value checked in.
 - `CONFIG["Loggers"]` — database loggers (Postgres + TimescaleDB on the server
   PC; connection string in `DATABASE["dsn"]`).
 - `CONFIG["GUI"]` — standalone GUI tools (StreamMonitor, Applet Launcher, …).

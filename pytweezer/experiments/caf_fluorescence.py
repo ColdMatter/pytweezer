@@ -4,7 +4,7 @@ import time
 
 import numpy as np
 
-from pytweezer.experiment import Number
+from pytweezer.experiment import Bool, Number
 from pytweezer.experiment.camera_experiment import CameraExperiment, CameraShots
 from pytweezer.experiment.motmaster import MotMaster, MotMasterNumber
 from pytweezer.logging_utils import get_logger
@@ -24,16 +24,28 @@ class CaFFluorescence(CameraExperiment):
     at ``mot_field`` and reads one ``thorcam`` frame per iteration, with the
     trigger, binning and gain its CONFIG entry sets; ``counts`` is the mean over its frames of each frame's
     background-subtracted sum, ``counts_error`` its standard error (NaN for a
-    single frame). ``finish`` ramps every laser :meth:`set_lasers` moved back
-    to its starting set point, whatever happened; a laser it never moved is
-    left alone.
+    single frame). Each :meth:`measure` also records the Gaussian fit of the
+    cloud in the mean background-subtracted frame as ``thorcam_*``
+    (:meth:`~pytweezer.experiment.camera_experiment.CameraExperiment.record_cloud_fit`),
+    from the same shot as ``counts``, so optimisers built on it record it too.
+    ``finish`` ramps every laser :meth:`set_lasers` moved back to its starting
+    set point, whatever happened; a laser it never moved is left alone.
     """
+
+    cloud_species = "CaF"
+    analyses = ("cloud_fit", "cloud_temperature")
 
     caf = MotMaster("CaF MotMaster", script="0. DDSFourSidebands5W_noDDS", iterations=3)
     thorcam = CameraShots("CaF ThorCam", frames=3, trigger=None, locked=("frames",))
     mot_field = MotMasterNumber(1.0, parameter="MOTCoilsCurrentValue")
     bg_field = Number(
         0.0, group="MOTMaster", tooltip="MOTCoilsCurrentValue for the background shot"
+    )
+    save_mean_image = Bool(
+        True,
+        group="Camera",
+        tooltip="record each point's mean background-subtracted frame, "
+        "beside the fit to it",
     )
     settle_s = Number(
         0.0,
@@ -49,7 +61,7 @@ class CaFFluorescence(CameraExperiment):
         self.start_set_points = self.caf.laser_set_points_wml()
         self.record("start_set_points", self.start_set_points)
         background_frames = self.take_shot(
-            **{"caf.MOTCoilsCurrentValue": self.bg_field}
+            background=True, **{"caf.MOTCoilsCurrentValue": self.bg_field}
         )["thorcam"]
         self.background = background_frames.astype(float).mean(axis=0)
 
@@ -73,11 +85,15 @@ class CaFFluorescence(CameraExperiment):
         v3: float | None = None,
         TCool: float | None = None,
     ) -> dict[str, float]:
-        """Fluorescence counts with the given set points (THz); ``None`` leaves a laser alone."""
+        """Fluorescence counts with the given set points (THz); ``None`` leaves a laser alone.
+
+        Also records the shot's ``thorcam_*`` cloud fit, so it must run inside a point.
+        """
         self.set_lasers(v0=v0, BX=BX, v1=v1, v2=v2, v3=v3, TCool=TCool)
-        frames = self.take_shot()["thorcam"].astype(float)
-        frame_counts = (frames - self.background).sum(axis=(1, 2))
+        frames = self.take_shot()["thorcam"]
+        frame_counts = (frames.astype(float) - self.background).sum(axis=(1, 2))
         n_frames = len(frame_counts)
+        self.record_cloud_fit("thorcam", frames, self.background)
         return {
             "counts": float(np.mean(frame_counts)),
             "counts_error": float(np.std(frame_counts, ddof=1) / np.sqrt(n_frames))

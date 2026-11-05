@@ -155,9 +155,9 @@ Not everything worth viewing is a stream:
 - **Trap sites** (`trap_sites`) are saved as full-sensor `(y, x)` pixels. Place
   them in a frame with `analysis/trap_sites.to_roi(sites, head.get("roi_y0", 0),
   head.get("roi_x0", 0))`, or they sit off the atoms whenever the camera reads an
-  ROI. The Image Monitor draws frames transposed; to match the Optimisers tab and
-  the notebooks (row 0 at the top), use `show_rows_down` from
-  `viewers/tweezer_monitor.py`, which shows the whole pattern.
+  ROI. The Image Monitor draws frames row-major, row 0 at the top and x along the
+  columns, as the Optimisers tab and the notebooks do, so a subclass gets that
+  for free.
 
 A plot that another panel also shows belongs in a widget module under
 `pytweezer/GUI/` that the applet only wraps: `tweezer_loading_plots.py` is drawn
@@ -221,6 +221,23 @@ Two pyqtgraph traps worth knowing:
   `lut.gradient.setColorMap(cmap)`.
 - `pg.setConfigOptions` is global and already set by `apply_theme`. Re-setting
   `background`/`foreground` in an applet only puts it out of step with the rest.
+
+## Fit overlays and the projections monitor
+
+The Image Monitor draws a fit on top of the image from a *data* stream, with no new viewer code:
+list the fit's stream in `overlaystreams` (the `CloudFitAnalysis` in `analysis/cloud_fit.py`
+publishes one; its header carries `cloud_fit.FIELDS`: `x0`, `y0`, `sigma_major`, `sigma_minor`,
+`angle`, ... in the image's plot coordinates) and `n_contours` sets how many ellipses are drawn.
+`overlay_paths(head, n)` in `viewers/image_monitor.py` turns such a header into the ellipses (`[]`
+for a failed fit); reuse it for any viewer that shows a fit. Image and fit must share a frame: the
+fit runs on the frame the image shows, so both use the header's `_offset`/`_imgresolution`
+(`cloud_fit.frame_geometry`).
+
+`viewers/image_plot_monitor.py` is the pattern for "image plus something linked to its axes": a
+subclass of `ImageDisplay` that adds a `projectionstreams` category (names of `projections.py`
+analyses; rows 0-1 of each 3xN message are the profile, row 2 its fit curve), draws the sums above
+and left of the image, and links their axes to the image view. Subclass the Image Monitor like
+this rather than copying it; override its hooks, keep its row-major drawing.
 
 ## Preview it before you call it done
 
@@ -336,10 +353,13 @@ what was built or why.
   header says so.
 - `viewers/image_monitor.py` — image stream, colormap + histogram LUT, ROIs
   (`CameraROI`: right-click copies one as a sensor-pixel camera ROI), and
-  a hideable sidebar; shows a second stream category (masks) on its own
-  `streamkey`.
-- `viewers/image_plot_monitor.py` — image with axis-linked projection plots;
-  the example to copy for multiple linked plots in one window.
+  a data panel below the image (`DataSidebar`: the latest message of each
+  subscribed data stream, one block per stream; on by default); shows a second
+  stream category (masks) on its own `streamkey`, and cloud-fit contour ellipses
+  from `overlaystreams` (`overlay_paths`).
+- `viewers/image_plot_monitor.py` — the Image Monitor plus the x and y sums
+  (`projectionstreams`) in plots above and left of the image, linked to its
+  axes; the example to copy for multiple linked plots in one window.
 
 `viewers/archive/` holds retired viewers — do not use them as models, though
 `zmq_ROI` is still imported from there by the image viewers.

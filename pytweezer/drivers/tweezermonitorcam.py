@@ -21,11 +21,13 @@ class ThorCam(Camera):
         image_dir: str | None = None,
         timeout: float = 5.0,
         stream_name: str | None = None,
+        object_pixel_m: float | None = None,
     ):
         super().__init__(
             image_dir=image_dir,
             timeout=timeout,
             stream_name=stream_name,
+            object_pixel_m=object_pixel_m,
         )
 
     # ------------------------------------------------------------------ #

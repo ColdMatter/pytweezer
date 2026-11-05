@@ -388,6 +388,20 @@ def read_planned_points(path: Path | str) -> dict[str, np.ndarray]:
         return {name: _decode(ds, ds[()]) for name, ds in f["points"].items()}
 
 
+def read_point_result(path: Path | str, name: str, index: int) -> Any:
+    """Point ``index``'s value of result ``name``, reading nothing else of the file.
+
+    Raises:
+        IndexError: If point ``index`` has not run.
+        KeyError: If the file has no result ``name``.
+    """
+    with h5py.File(path, "r", locking=False) as f:
+        if not 0 <= index < int(f.attrs["n_done"]):
+            raise IndexError(f"point {index} of {path} has not run")
+        dataset = f["results"][name]
+        return _decode(dataset, dataset[index])
+
+
 def read_arguments(path: Path | str) -> dict[str, Any]:
     """The effective argument values only, without loading points or results."""
     with h5py.File(path, "r", locking=False) as f:

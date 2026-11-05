@@ -38,7 +38,7 @@ pytweezer/GUI/applet.py                 (base class + entry-point helper)
 
 pytweezer/GUI/viewers/                   (the applet scripts themselves)
 ├── image_monitor.py       ImageDisplay(Applet)      image  (stream_category="Image")
-├── image_plot_monitor.py  ImagePlotDisplay(Applet)  image + linked projections
+├── image_plot_monitor.py  ImageProjectionDisplay(ImageDisplay)  image + linked sum plots
 ├── live_plot.py           LivePlot(Applet)          data   (stream_category="Data")
 └── scalar_history.py      ScalarHistory(Applet)     data, one header field vs shot
       (viewers/archive/ holds retired/experimental viewers — ignore them)

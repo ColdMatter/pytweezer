@@ -61,6 +61,15 @@ Rules that matter:
   queued task's worker also refuses a bare `get_device()` of anything outside
   it (`device_client.restrict_devices`). The declarations are what the
   manager reserves (see "Pipelines and device reservations").
+- **A variant that uses other devices is another experiment.** Loading the
+  tweezers with a MOT image on the ORCA and without it are two classes (the
+  imaging one usually a subclass), not one class with an option or a device
+  used only when it happens to be available. Each declares exactly the devices
+  it uses.
+- **Never design around a device's `active` flag.** Which CONFIG entries are
+  active is lab state that anyone switches at any time; the value checked in
+  says nothing about how the device will be used. An experiment declares what
+  it needs and fails plainly if that device isn't running.
 - `record(name, value, unit="")`: in `run_point` it stores into
   `/results/<name>` row `point.index`; in `prepare`/`finish` into
   `/constants/<name>`. Each name's shape and dtype are fixed by its first
@@ -145,6 +154,32 @@ machine, raises from the task.
 `experiments/linked_scope_test.py` is the minimal example; the MOTMaster side
 is EDMSuite's `motmaster-linked-mode` skill.
 
+## Camera experiments and cloud fits
+
+A `CameraExperiment` (`experiment/camera_experiment.py`) is a `MotMasterExperiment` that declares
+cameras as `CameraShots("<device>", frames=n, ...)` and reads them each shot.
+`take_shot(background=False, **overrides)` runs the sequences once and returns
+`{camera: (frames, H, W)}`; with `background=True` the broadcast frames are marked, and the live
+`shot_background` analysis (`analysis/shot_background.py`) holds them and subtracts them from later
+frames of the same `rid`. The default `run_point` records `<camera>_images`.
+
+Recording a MOT cloud:
+
+- `self.record_cloud_fit(camera, frames, background=None)` fits the mean of the frames (minus the
+  background frame) and records `<camera>_<field>` and `<camera>_<field>_error` for the fields in
+  `cloud_fit.FIELDS`/`ERROR_FIELDS`. Lengths are metres when the camera's CONFIG entry has
+  `object_pixel_m`, pixels otherwise (unit recorded as `px`); binning and ROI origin are read from
+  the camera at record time, since settings experiments change them. A failed fit is NaN, never an
+  error. Call it where the shot is taken (`CaFFluorescence.measure()` does, so every optimiser
+  built on it records the fit too).
+- `save_mean_image = Bool(...)` on the experiment makes it also record `<camera>_mean_image`, which
+  the Results `cloud_fit` view draws.
+- `cloud_species = "CaF"` or `"Rb"` makes `prepare()` record the constant `cloud_mass_amu`, which
+  the temperature view needs.
+- Declare `analyses = ("cloud_fit", "cloud_temperature")` for the Results tab's MOT views (see
+  Running). The temperature view reads a native time argument as seconds and a MOTMaster one as
+  ticks (10 µs default).
+
 ## Running
 
 From the GUI: **Experiments** tab → pick the class → edit, toggle "Scan" per
@@ -160,10 +195,18 @@ analyses the experiment declares as a class attribute (inherited), e.g.
 an optimiser declares none. Each file records the names (root attr
 `analyses`), so the tab never imports the experiment. Names map to views in
 `pytweezer/GUI/experiments/analyses.py` (`ANALYSES`; a new one is a Qt-free
-computation in `pytweezer/analysis/` plus an `AnalysisView` registered there).
+computation in `pytweezer/analysis/` plus an `AnalysisView` registered there,
+usually a `ComputedAnalysisView`, which loads and computes off the GUI thread
+through its hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`;
+`compute` reads one point's large result, such as an image, with `point_result`).
 A view reads only what the file recorded, so record what it needs (the tweezer
 histograms take `first_counts`/`second_counts` with `trap_sites` and
-`threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`).
+`threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`;
+the MOT Gaussian fit, `cloud_fit`, takes what `record_cloud_fit` records,
+`<camera>_<field>`, `_error` and `<camera>_mean_image`: `analysis/cloud_results.py`;
+`cloud_temperature` fits the time-of-flight expansion of those sizes against a scanned
+time argument, and needs the constant `cloud_mass_amu`, recorded by the experiment's
+`cloud_species`).
 A name this GUI doesn't know is listed disabled, and every analysis is disabled
 until the measurement finishes. An analysis only reads the file, through its
 own archive connection, off the GUI thread. The tab remembers the choice per
@@ -352,6 +395,9 @@ The Rb tweezer experiments, in the order a session uses them:
    (`(2, H, W)` per point) only with `save_raw_images`.
    `LoadTweezers` runs without sites only if it records frames;
    `TweezerArrayMeasurement` always needs them.
+   `LoadTweezersMOTImage` is `LoadTweezers` plus the ORCA's one frame of the Rb
+   MOT from the same shot, recorded as an `orca_*` cloud fit (`record_cloud_fit`);
+   `LoadTweezers` itself never touches the ORCA.
 4. `LoadTweezers.take_shots(n, **sequence)` runs a batch, for the classes
    whose point is one: `TweezerArrayMeasurement` (`score_batch()`, used by the
    Bayesian optimisers) and `FindTrapSites`. Their
@@ -392,7 +438,8 @@ Other PCs never read the manager's disk: it serves the files as sipyco RPC
 target `"results"` on `results_port` (`pytweezer/experiment/archive.py`).
 `ResultsArchive(root)` reads files directly and `RemoteArchive` is the same
 interface over RPC (`days`, `runs(day)`, `find(rid)`, `load(path, results)`,
-`planned_points(path)`, paths relative to `data_root`). `default_archive()` is
+`planned_points(path)`, `point_result(path, name, index)` for one point's value,
+paths relative to `data_root`). `default_archive()` is
 local on the manager's PC or with `PYTWEEZER_DATA_DIR` set, remote elsewhere;
 the Results tab, `Dataset(rid)`, `fetch_measurement` and
 `points_with_readings(rid, ...)` all go through it. Its reads run in threads, so
