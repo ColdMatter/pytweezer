@@ -107,8 +107,8 @@ class ExperimentsPanel(QWidget):
         self.editor.submit_requested.connect(self._submit)
         self.editor.last_requested.connect(self._load_last)
         self.editor.defaults_requested.connect(self._defaults_requested)
-        self.catalogue.recipe_selected.connect(self._recipe_selected)
-        self.catalogue.recipe_action_requested.connect(self._recipe_action)
+        self.editor.recipe_selected.connect(self._recipe_selected)
+        self.editor.recipe_action_requested.connect(self._recipe_action)
         self.editor.save_recipe_requested.connect(self._save_recipe)
         self.queue_view.action_requested.connect(self._action)
         self.queue_view.edit_requested.connect(
@@ -150,7 +150,7 @@ class ExperimentsPanel(QWidget):
         if reply is None:
             return
         self._recipes_version = reply.get("version")
-        self.catalogue.set_recipes(reply["recipes"])
+        self.editor.set_recipes(reply["recipes"])
 
     def refresh_saved_parameters(self):
         """Fetch the saved parameters that saved-backed arguments show in the form."""
@@ -287,14 +287,6 @@ class ExperimentsPanel(QWidget):
     # -- recipes -------------------------------------------------------------
 
     def _recipe_selected(self, recipe):
-        key = (recipe["experiment"], recipe["class_name"])
-        schema = self.catalogue.schema_for(*key)
-        if schema is None:
-            return
-        if key != self._current_key:
-            self._save_draft()
-            self._current_key = key
-            self.editor.set_experiment(schema)
         self.editor.load_request(Recipe.model_validate(recipe))
         self.editor.set_recipe_name(recipe["name"])
 
@@ -305,7 +297,7 @@ class ExperimentsPanel(QWidget):
         exists = any(
             (r["experiment"], r["class_name"], r["name"])
             == (request.experiment, request.class_name, name)
-            for r in self.catalogue.recipes
+            for r in self.editor.recipes
         )
         if exists and not self.confirm(
             "Replace recipe", f"Replace the saved recipe '{name}' for every PC?"

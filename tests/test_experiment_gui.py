@@ -48,8 +48,6 @@ from pytweezer.optimisers.demo_staged_scan import DemoStagedScan
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
 from tests.helpers import FakeFeed, settle, until
 
-Left, Right = QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton
-
 
 class Demo(Experiment):
     """A demo."""
@@ -236,20 +234,10 @@ def test_optimisers_are_not_offered_in_the_experiments_tab(qapp):
             }
         ]
     )
-    module = view.tree.topLevelItem(0)
-    names = [module.child(i).text(0) for i in range(module.childCount())]
+    root = view.tree.invisibleRootItem()
+    names = [root.child(i).text(0) for i in range(root.childCount())]
     assert names == ["Demo"]
     assert view.schema_for("pytweezer.experiments.rabi_demo", "DemoStagedScan") is None
-
-
-def test_a_module_of_base_classes_only_is_not_listed(qapp):
-    view = CatalogueView()
-    base_only = {"module": "pytweezer.experiments.base", "classes": [], "error": None}
-    view.set_modules([base_only, *MODULES])
-    names = [
-        view.tree.topLevelItem(i).text(0) for i in range(view.tree.topLevelItemCount())
-    ]
-    assert "base" not in names and "broken" in names
 
 
 class Tiny(Experiment):
@@ -1026,30 +1014,14 @@ def test_an_integer_parameter_scans_in_whole_steps_but_a_draft_keeps_any(qapp):
     assert editor.request().scan.axes[0].values == [1, 2, 7]
 
 
-def recipe_dict(name="check", **kwargs):
+def recipe_dict(name="check", class_name="Demo", **kwargs):
     return Recipe(
         experiment=SCHEMA["module"],
-        class_name="Demo",
+        class_name=class_name,
         name=name,
         submitter="me@pc",
         **kwargs,
     ).model_dump(mode="json")
-
-
-def demo_item(view):
-    for i in range(view.tree.topLevelItemCount()):
-        module_item = view.tree.topLevelItem(i)
-        for j in range(module_item.childCount()):
-            if module_item.child(j).text(0) == "Demo":
-                return module_item.child(j)
-    raise AssertionError("Demo not in the tree")
-
-
-def catalogue_with(*recipes):
-    view = CatalogueView()
-    view.set_modules(MODULES)
-    view.set_recipes(list(recipes))
-    return view
 
 
 def recipe_panel(*recipes):
@@ -1060,53 +1032,127 @@ def recipe_panel(*recipes):
     return panel, client, feed
 
 
-def test_recipes_appear_under_their_experiment_and_filter(qapp):
-    view = catalogue_with(recipe_dict("MOT check", args={"shots": 5}))
-    demo = demo_item(view)
-    assert demo.childCount() == 1
-    recipe_item = demo.child(0)
-    assert recipe_item.text(0) == "MOT check"
-
-    view.filter.setText("mot ch")
-    assert not recipe_item.isHidden() and not demo.isHidden()
-    view.filter.setText("Demo")
-    assert not recipe_item.isHidden()
-    view.filter.setText("nothing like it")
-    assert recipe_item.isHidden() and demo.isHidden()
+def recipe_menu_entries(editor):
+    return [a.text() for a in editor.recipes_button.menu().actions() if a.text()]
 
 
-def test_selecting_a_recipe_emits_it_and_a_refresh_keeps_it_quietly(qapp):
-    view = catalogue_with(recipe_dict("a"), recipe_dict("b"))
-    selected, experiments = [], []
-    view.recipe_selected.connect(selected.append)
-    view.experiment_selected.connect(experiments.append)
-    assert view.select_recipe(SCHEMA["module"], "Demo", "b")
-    assert [r["name"] for r in selected] == ["b"] and experiments == []
+def choose_recipe(editor, name, submenu=None):
+    menu = editor.recipes_button.menu()
+    if submenu is not None:
+        menu = next(a.menu() for a in menu.actions() if a.text() == submenu)
+    next(a for a in menu.actions() if a.text().rstrip("…") == name).trigger()
+
+
+def tree_layout(item):
+    """``{text: children}`` below ``item``, a leaf's children being ``None``."""
+    return {
+        item.child(i).text(0): tree_layout(item.child(i))
+        if item.child(i).childCount()
+        else None
+        for i in range(item.childCount())
+    }
+
+
+def schema_in(module, class_name, doc=""):
+    return {**SCHEMA, "module": module, "class_name": class_name, "doc": doc}
+
+
+def test_catalogue_tree_is_the_folder_structure_with_one_item_per_experiment(qapp):
+    package = "pytweezer.experiments"
+    view = CatalogueView(package)
+    view.set_modules(
+        [
+            {
+                "module": f"{package}.cameras",
+                "classes": [
+                    schema_in(f"{package}.cameras", "ThorCamSettings"),
+                    schema_in(f"{package}.cameras", "OrcaSettings"),
+                ],
+            },
+            {
+                "module": f"{package}.rb.tweezers.load",
+                "classes": [schema_in(f"{package}.rb.tweezers.load", "LoadTweezers")],
+            },
+            {"module": f"{package}.rb.bases", "classes": []},
+            {"module": f"{package}.rb.broken", "classes": [], "error": "boom"},
+            {
+                "module": f"{package}.caf.mot",
+                "classes": [schema_in(f"{package}.caf.mot", "Mot")],
+            },
+        ]
+    )
+    assert tree_layout(view.tree.invisibleRootItem()) == {
+        "caf": {"Mot": None},
+        "rb": {"tweezers": {"LoadTweezers": None}, "broken.py": None},
+        "OrcaSettings": None,
+        "ThorCamSettings": None,
+    }
+    assert view.select(f"{package}.rb.tweezers.load", "LoadTweezers")
+
+    view.filter.setText("rb")
+    shown = [
+        item.text(0)
+        for item in view.tree.findItems(
+            "", QtCore.Qt.MatchFlag.MatchContains | QtCore.Qt.MatchFlag.MatchRecursive
+        )
+        if not item.isHidden()
+    ]
+    assert shown == ["rb", "tweezers", "LoadTweezers", "broken.py"]
+
+
+def test_docstrings_show_only_their_first_line(qapp):
+    doc = "Atom number against loading time.\n\nScans the MOT loading time."
+    schema = schema_in(SCHEMA["module"], "Demo", doc)
+    view = CatalogueView()
+    view.set_modules([{"module": SCHEMA["module"], "classes": [schema]}])
+    assert view.select(SCHEMA["module"], "Demo")
+    assert view.tree.currentItem().toolTip(0).splitlines()[0] == (
+        "Atom number against loading time."
+    )
+    assert "Scans" not in view.tree.currentItem().toolTip(0)
+    editor = ArgumentEditor()
+    editor.set_experiment(schema)
+    assert editor.doc.text() == "Atom number against loading time."
+
+
+def test_a_catalogue_refresh_keeps_the_selection_quietly(qapp):
+    view = CatalogueView()
+    view.set_modules(MODULES)
+    selected = []
+    view.experiment_selected.connect(selected.append)
+    assert view.select(SCHEMA["module"], "Demo")
+    view.set_modules(MODULES)
+    assert len(selected) == 1
     assert view.selected_key() == (SCHEMA["module"], "Demo")
 
-    view.set_recipes([recipe_dict("a"), recipe_dict("b"), recipe_dict("c")])
-    view.set_modules(MODULES)
-    assert len(selected) == 1 and experiments == []
-    assert view.tree.currentItem().text(0) == "b"
+
+def test_recipes_button_offers_only_the_current_experiments_recipes(qapp):
+    panel, _client, _feed = recipe_panel(
+        recipe_dict("b"), recipe_dict("a"), recipe_dict("x", class_name="Other")
+    )
+    assert not panel.editor.recipes_button.isEnabled()
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    assert panel.editor.recipes_button.isEnabled()
+    assert recipe_menu_entries(panel.editor) == ["a", "b", "Submit now", "Delete"]
 
 
 def test_panel_lists_recipes_and_refetches_when_they_change(qapp):
     panel, client, feed = recipe_panel(recipe_dict("a"))
-    assert [r["name"] for r in panel.catalogue.recipes] == ["a"]
+    assert [r["name"] for r in panel.editor.recipes] == ["a"]
     fetches = len(commands(client, "recipes"))
     snapshot = {"running": [], "queue": [], "history": [], "recipes_version": 0}
     feed.queue_changed.emit(snapshot)
     assert len(commands(client, "recipes")) == fetches
     client.recipes = [recipe_dict("a"), recipe_dict("b")]
     feed.queue_changed.emit({**snapshot, "recipes_version": 1})
-    assert [r["name"] for r in panel.catalogue.recipes] == ["a", "b"]
+    assert [r["name"] for r in panel.editor.recipes] == ["a", "b"]
 
 
-def test_selecting_a_recipe_fills_the_form_and_a_list_refresh_keeps_edits(qapp):
+def test_choosing_a_recipe_fills_the_form_and_a_list_refresh_keeps_edits(qapp):
     recipe = recipe_dict("check", args={"shots": 5, "mode": "b"}, label="nightly")
     panel, client, feed = recipe_panel(recipe)
-    assert panel.catalogue.select_recipe(SCHEMA["module"], "Demo", "check")
-    assert panel.editor.schema["class_name"] == "Demo"
+    panel.catalogue.select(SCHEMA["module"], "Demo")
+    choose_recipe(panel.editor, "check")
     assert panel.editor.rows["shots"].value.value() == 5
     assert panel.editor.rows["mode"].value.value() == "b"
     assert panel.editor.label.text() == "nightly"
@@ -1118,7 +1164,7 @@ def test_selecting_a_recipe_fills_the_form_and_a_list_refresh_keeps_edits(qapp):
         {"running": [], "queue": [], "history": [], "recipes_version": 1}
     )
     assert panel.editor.rows["shots"].value.value() == 8
-    assert panel.catalogue.tree.currentItem().text(0) == "check"
+    assert panel.editor.recipe_name == "check"
 
 
 def test_save_as_recipe_asks_for_a_name_and_confirms_a_replacement(qapp):
@@ -1152,7 +1198,7 @@ def test_save_as_recipe_asks_for_a_name_and_confirms_a_replacement(qapp):
 def test_submit_now_queues_the_recipe_or_shows_why_not(qapp):
     recipe = recipe_dict("check")
     panel, client, _feed = recipe_panel(recipe)
-    panel.catalogue.recipe_action_requested.emit("submit", recipe)
+    panel.editor.recipe_action_requested.emit("submit", recipe)
     [fields] = commands(client, "submit_recipe")
     assert (fields["experiment"], fields["class_name"], fields["name"]) == (
         SCHEMA["module"],
@@ -1163,7 +1209,7 @@ def test_submit_now_queues_the_recipe_or_shows_why_not(qapp):
     assert "13" in panel.status.text()
 
     client.errors["submit_recipe"] = "Demo no longer has argument(s) ['old']"
-    panel.catalogue.recipe_action_requested.emit("submit", recipe)
+    panel.editor.recipe_action_requested.emit("submit", recipe)
     assert "no longer has argument(s) ['old']" in panel.status.text()
 
 
@@ -1171,53 +1217,13 @@ def test_deleting_a_recipe_needs_confirmation(qapp):
     recipe = recipe_dict("check")
     panel, client, _feed = recipe_panel(recipe)
     panel.confirm = lambda title, question: False
-    panel.catalogue.recipe_action_requested.emit("delete", recipe)
+    panel.editor.recipe_action_requested.emit("delete", recipe)
     assert commands(client, "delete_recipe") == []
     panel.confirm = lambda title, question: True
-    panel.catalogue.recipe_action_requested.emit("delete", recipe)
+    panel.editor.recipe_action_requested.emit("delete", recipe)
     assert commands(client, "delete_recipe") == [
         {"experiment": SCHEMA["module"], "class_name": "Demo", "name": "check"}
     ]
-
-
-def test_clicks_on_the_catalogue_only_reload_a_recipe_on_a_left_click(qapp):
-    panel, _client, _feed = recipe_panel(
-        recipe_dict("check", args={"shots": 5}), recipe_dict("other")
-    )
-    panel.resize(600, 800)
-    panel.show()
-    qapp.processEvents()
-    tree = panel.catalogue.tree
-    demo = demo_item(panel.catalogue)
-    check, other = demo.child(0), demo.child(1)
-
-    def click(item, button):
-        QTest.mouseClick(
-            tree.viewport(), button, pos=tree.visualItemRect(item).center()
-        )
-
-    def shots():
-        return panel.editor.rows["shots"].value
-
-    panel.catalogue.select(SCHEMA["module"], "Demo")
-    shots().widget.setValue(8)
-    click(check, Right)
-    assert shots().value() == 8 and panel.editor.recipe_name == ""
-    assert tree.currentItem() is demo
-
-    panel.catalogue.select_recipe(SCHEMA["module"], "Demo", "check")
-    shots().widget.setValue(8)
-    click(demo, Right)
-    assert shots().value() == 8 and panel.editor.recipe_name == "check"
-    assert tree.currentItem() is check
-
-    click(check, Left)
-    assert shots().value() == 5
-
-    loaded = []
-    panel.catalogue.recipe_selected.connect(loaded.append)
-    click(other, Left)
-    assert [r["name"] for r in loaded] == ["other"], "loaded exactly once"
 
 
 class FakeSavedParameterClient:
