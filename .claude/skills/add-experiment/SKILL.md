@@ -277,10 +277,12 @@ array of the numeric scalars. `aggregate`/`describe` live in
 
 A recipe is a named, saved form — arguments, scan, priority and label — kept by
 the Experiment Manager in `{data_root}/recipes.json`, so every PC sees the same
-ones. In the **Experiments** tab recipes sit under their experiment in the
-tree: click one to load it into the form (the header names it), **Save as
-recipe…** stores the form (asks before replacing a name), right-click → *Submit
-now* queues it unchanged, *Delete…* removes it for everyone.
+ones. In the **Experiments** tab (its tree has one item per experiment class,
+in sections that follow the folders under `pytweezer/experiments/`) the
+**Recipes** button lists the selected experiment's recipes: pick one to load it
+into the form (the header names it), *Submit now* queues one unchanged,
+*Delete* removes one for everyone. **Save as recipe…** stores the form (asks
+before replacing a name).
 
 ```python
 from pytweezer.experiment.client import (

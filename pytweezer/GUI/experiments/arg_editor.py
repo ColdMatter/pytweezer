@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QSpinBox,
     QStackedWidget,
@@ -30,6 +31,7 @@ from PyQt6.QtWidgets import (
 from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
 from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.components import CompactDoubleSpinBox, set_state
+from pytweezer.GUI.experiments.catalogue_view import doc_summary
 from pytweezer.GUI.experiments.motmaster_params import (
     DeviceParameterSource,
     MotMasterBox,
@@ -390,12 +392,15 @@ class ArgumentEditor(QWidget):
     submit_requested = QtCore.pyqtSignal(object)
     last_requested = QtCore.pyqtSignal(str, str)
     save_recipe_requested = QtCore.pyqtSignal(object)
+    recipe_selected = QtCore.pyqtSignal(dict)
+    recipe_action_requested = QtCore.pyqtSignal(str, dict)
     defaults_requested = QtCore.pyqtSignal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.schema = None
         self.recipe_name = ""
+        self.recipes = []
         self.rows = {}
         self._saved_values = {}
         self.fetcher = ParameterFetcher(DeviceParameterSource())
@@ -509,6 +514,8 @@ class ArgumentEditor(QWidget):
                 )
             )
         )
+        self.recipes_button = QPushButton("Recipes")
+        self.recipes_button.setMenu(QMenu(self.recipes_button))
         self.save_recipe_button = QPushButton("Save as recipe…")
         self.save_recipe_button.setToolTip(
             "Keep these settings under a name, shared with every PC"
@@ -524,6 +531,7 @@ class ArgumentEditor(QWidget):
         )
         buttons.addWidget(self.defaults_button)
         buttons.addWidget(self.last_button)
+        buttons.addWidget(self.recipes_button)
         buttons.addWidget(self.save_recipe_button)
         buttons.addStretch(1)
         buttons.addWidget(self.point_count)
@@ -544,6 +552,7 @@ class ArgumentEditor(QWidget):
             self.submit_button,
         ):
             widget.setEnabled(enabled)
+        self._rebuild_recipe_menu()
 
     # -- building --------------------------------------------------------
 
@@ -552,8 +561,8 @@ class ArgumentEditor(QWidget):
         self.set_recipe_name("")
         self.title.setText(schema["class_name"])
         self.module.setText(schema["module"])
-        self.doc.setText(schema.get("doc", ""))
-        self.doc.setVisible(bool(schema.get("doc")))
+        self.doc.setText(doc_summary(schema.get("doc")))
+        self.doc.setVisible(bool(self.doc.text()))
         while self.arguments_layout.count():
             item = self.arguments_layout.takeAt(0)
             if item.widget():
@@ -889,6 +898,53 @@ class ArgumentEditor(QWidget):
         self.error.clear()
         signal.emit(request)
 
+    def set_recipes(self, recipes):
+        """Offer, from every saved recipe, the current experiment's under the Recipes button."""
+        self.recipes = recipes
+        self._rebuild_recipe_menu()
+
+    def _own_recipes(self):
+        if self.schema is None:
+            return []
+        key = (self.schema["module"], self.schema["class_name"])
+        return sorted(
+            (r for r in self.recipes if (r["experiment"], r["class_name"]) == key),
+            key=lambda r: r["name"].lower(),
+        )
+
+    def _rebuild_recipe_menu(self):
+        recipes = self._own_recipes()
+        menu = self.recipes_button.menu()
+        menu.clear()
+        menu.setToolTipsVisible(True)
+        for recipe in recipes:
+            action = menu.addAction(recipe["name"])
+            action.setToolTip(_recipe_tooltip(recipe))
+            action.triggered.connect(
+                lambda _checked, r=recipe: self.recipe_selected.emit(r)
+            )
+        if recipes:
+            menu.addSeparator()
+            for action, title in (("submit", "Submit now"), ("delete", "Delete")):
+                submenu = menu.addMenu(title)
+                for recipe in recipes:
+                    submenu.addAction(
+                        recipe["name"] + ("…" if action == "delete" else "")
+                    ).triggered.connect(
+                        lambda _checked, a=action, r=recipe: (
+                            self.recipe_action_requested.emit(a, r)
+                        )
+                    )
+        self.recipes_button.setText(
+            f"Recipes ({len(recipes)})" if recipes else "Recipes"
+        )
+        self.recipes_button.setEnabled(bool(recipes))
+        self.recipes_button.setToolTip(
+            "Load a saved recipe into the form, submit one unchanged, or delete one"
+            if recipes
+            else "No recipes saved for this experiment"
+        )
+
     def set_recipe_name(self, name):
         """Name the recipe the form was loaded from; empty when it wasn't."""
         self.recipe_name = name
@@ -898,3 +954,11 @@ class ArgumentEditor(QWidget):
     def show_error(self, text):
         self.error.setText(text)
         set_state(self.error, "crashed" if text else "")
+
+
+def _recipe_tooltip(recipe):
+    saved = recipe.get("saved_at", "")[:16].replace("T", " ")
+    tooltip = f"Saved by {recipe.get('submitter') or 'unknown'} on {saved}"
+    if recipe.get("label"):
+        tooltip += f"\nLabel: {recipe['label']}"
+    return tooltip

@@ -174,7 +174,7 @@ CONFIG = {
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Rb ThorCam": {
-            "active": True,
+            "active": False,
             "class": "pytweezer.drivers.thorcam:ThorCam",
             "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
             "host": SERVER_HOST,
@@ -186,7 +186,7 @@ CONFIG = {
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Tweezer Monitor ThorCam": {
-            "active": True,
+            "active": False,
             "class": "pytweezer.drivers.tweezermonitorcam:ThorCam",
             "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorLabsCamera",
             "host": SERVER_HOST,

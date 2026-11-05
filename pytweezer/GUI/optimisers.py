@@ -57,6 +57,7 @@ from pytweezer.experiment.task import Action, Task, TaskRequest, TaskStatus
 from pytweezer.GUI.background import BackgroundReader
 from pytweezer.GUI.components import Region, set_state, status_icon
 from pytweezer.GUI.experiments.arg_editor import ValueField
+from pytweezer.GUI.experiments.catalogue_view import doc_summary
 from pytweezer.GUI.experiments.feed import ExperimentFeed
 from pytweezer.GUI.saved_parameters import display_value, when_text
 from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND
@@ -560,7 +561,7 @@ class OptimisersPanel(QWidget):
         saves = ", ".join(schema["optimiser"]["proposes"])
         item = QTreeWidgetItem([schema["class_name"], "never run", "never", saves])
         item.setData(0, _KEY, (schema["module"], schema["class_name"]))
-        item.setToolTip(0, schema.get("doc") or schema["module"])
+        item.setToolTip(0, doc_summary(schema.get("doc")) or schema["module"])
         item.setToolTip(OptimiserRow.SAVES, f"Proposes values for {saves}")
         self.table.addTopLevelItem(item)
         return OptimiserRow(schema, item)
