@@ -11,10 +11,10 @@ Subscribes to four image streams, one per panel, which
     ``phase_cmap`` over a fixed range of one ``phase_period`` so that 0 and 2π
     share a colour and phase wraps are invisible.
 
-The three intensities are drawn with ``target_cmap``, and their x axes move
-together, as do the target's and trap plane's y axes. Images are placed in
+The three intensities are drawn with ``target_cmap``. Images are placed in
 metres when their header carries ``_offset``/``_imgresolution``, in pixels
-otherwise. Each panel's context menu edits that panel's subscriptions.
+otherwise. Each panel pans and zooms on its own, and its context menu edits
+its own subscriptions.
 
 Properties:
     *   targetstreams: ([str]) target-array image streams.
@@ -102,9 +102,6 @@ class SlmMonitor(Applet):
         graphics.nextRow()
         self.phase = ImagePanel(graphics, "Phase mask")
         self.top_down = ImagePanel(graphics, "Simulated top-down", vertical="z")
-        self.simulated.plot.setXLink(self.target.plot)
-        self.simulated.plot.setYLink(self.target.plot)
-        self.top_down.plot.setXLink(self.simulated.plot)
 
         self.panels = {
             "targetstreams": self.target,
