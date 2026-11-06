@@ -349,8 +349,8 @@ what was built or why.
 - `viewers/tweezer_loading.py` — a thin applet around a shared plot widget.
 - `viewers/tweezer_monitor.py` — subclasses the Image Monitor to draw the saved
   trap sites over each frame by its ROI origin.
-- `viewers/slm_monitor.py` — two image streams side by side, in metres when the
-  header says so.
+- `viewers/slm_monitor.py` — four image streams in a grid, each with its own
+  subscription, in metres when the header says so.
 - `viewers/image_monitor.py` — image stream, colormap + histogram LUT, ROIs
   (`CameraROI`: right-click copies one as a sensor-pixel camera ROI), and
   a data panel below the image (`DataSidebar`: the latest message of each
