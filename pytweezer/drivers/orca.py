@@ -92,8 +92,14 @@ class ORCACamera(Camera):
     # ------------------------------------------------------------------ #
 
     def set_binning(self, binning: int):
-        self._backend.set_attribute_value("binning", int(binning))
-        self.binning = int(binning)
+        # Through set_roi: DCAM rejects a bare BINNING write while the frame
+        # buffer is attached (DCAMERR_NOTSTABLE), and pylablib's set_roi frees it.
+        hstart, hend, vstart, vend, *_ = self._backend.get_roi()
+        hstart, _, vstart, _, hbin, _ = self._backend.set_roi(
+            hstart, hend, vstart, vend, int(binning), int(binning)
+        )
+        self.roi_origin = (int(hstart), int(vstart))
+        self.binning = int(hbin)
 
     def set_readout_speed(self, speed: int):
         self._backend.set_attribute_value("readout_speed", int(speed))

@@ -177,6 +177,22 @@ def test_setting_the_roi_keeps_the_binning(cls):
     assert driver._backend.binning == (4, 4)
 
 
+def _refuse_bare_binning_write(*args, **kwargs):
+    raise AssertionError("DCAMERR_NOTSTABLE: frame buffer attached")
+
+
+@pytest.mark.parametrize("cls", [ImagEMX2Camera, ORCACamera], ids=["imagemX2", "orca"])
+def test_dcam_binning_goes_through_set_roi_and_keeps_the_roi(cls):
+    # DCAM refuses a bare BINNING write while the frame buffer is attached, which
+    # it is whenever the camera has been live; pylablib's set_roi frees it.
+    driver = _driver(cls)
+    driver._backend.set_attribute_value = _refuse_bare_binning_write
+    driver.set_binning(8)
+    assert driver._backend.binning == (8, 8)
+    assert driver._backend.calls["roi"] == (0, 1024, 0, 1024)
+    assert driver.binning == 8
+
+
 @pytest.mark.parametrize("cls", DRIVERS, ids=DRIVER_IDS)
 def test_drivers_keep_the_roi_origin_the_camera_used(cls):
     driver = _driver(cls)
