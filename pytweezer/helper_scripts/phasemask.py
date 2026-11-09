@@ -966,8 +966,8 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             raise ValueError(
                 f"profile must be 'minimum_jerk' or 'linear', got {profile!r}"
             )
-        w1, phi1, x1, y1 = terms1
-        w2, phi2, x2, y2 = terms2
+        w1, phi1, x1, y1 = (cp.asarray(v) for v in terms1)
+        w2, phi2, x2, y2 = (cp.asarray(v) for v in terms2)
         occ_mask = cp.asarray(occ_mask)
 
         pos1 = cp.stack((x1, y1), axis=-1)
