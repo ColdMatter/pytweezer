@@ -2004,7 +2004,7 @@ class OptimisationBasedPhasemaskGeneratorGPU3D:
         curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
         curr_x = cp.asarray(x1, dtype=cp.float32).copy()
         curr_y = cp.asarray(y1, dtype=cp.float32).copy()
-        curr_z = cp.asarray(z1, dtype=cp.float32)
+        curr_z = cp.asarray(z1, dtype=cp.float32).copy()
 
         # Pre-calculate the minimum jerk step multipliers on the GPU
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)

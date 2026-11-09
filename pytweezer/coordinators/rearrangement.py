@@ -407,6 +407,7 @@ class Rearrangement(Coordinator):
         window_size: int,
         feature_size: int,
         follow_up_frames: int = 2,
+        frame_timeout_s: float = 20.0,
     ) -> dict:
         """Build the target array that :meth:`rearrange` moves the atoms of the array on the SLM to.
 
@@ -423,18 +424,22 @@ class Rearrangement(Coordinator):
             threshold_photons: Photons above which a site is occupied (see
                 :func:`~pytweezer.analysis.array_loading.occupied_sites`).
             follow_up_frames: HamCam frames read after the move.
+            frame_timeout_s: How long :meth:`rearrange` waits for each HamCam
+                read, the occupancy frame's included; it becomes the camera's
+                ``timeout``.
 
         Returns:
             The target's ``x_um``, ``y_um`` and requested ``weights``, and the
             optimisation's final ``uniformity``, ``min_max_ratio`` and ``mse``.
 
         Raises:
-            RuntimeError: There is no GPU, or the array on the SLM is not one
-                :meth:`make_array` put there.
+            RuntimeError: There is no GPU or camera, or the array on the SLM
+                is not one :meth:`make_array` put there.
             ValueError: ``kind`` is unknown, or ``occupancy_sites`` does not
                 have one site per trap of the array.
         """
         self._require_gpu()
+        self._require_camera()
         made = self._made_array
         if made is None or self.get_array() is None:
             raise RuntimeError(
@@ -487,6 +492,7 @@ class Rearrangement(Coordinator):
             "feature_size": int(feature_size),
             "follow_up_frames": int(follow_up_frames),
         }
+        self.camera.timeout = float(frame_timeout_s)
         return {
             key: target[key]
             for key in ("x_um", "y_um", "weights", "uniformity", "min_max_ratio", "mse")
@@ -576,8 +582,10 @@ class Rearrangement(Coordinator):
                 header=header,
             )
         finally:
-            self.camera.stop_acquisition()
-            self.slm.update_mask(initial_mask)
+            try:
+                self.camera.stop_acquisition()
+            finally:
+                self.slm.update_mask(initial_mask)
 
         # The device syncs of reading the plan back stay out of the timed spans.
         if plan is None:

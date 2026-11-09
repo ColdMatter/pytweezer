@@ -137,8 +137,12 @@ def optimise_terms(
     iterations: int,
     damping: float,
 ) -> dict:
-    """Optimise the superposition of traps at ``x_um``, ``y_um`` and return its phase and converged terms."""
-    array_phase, (w, theta, x, y), (uniformity, min_max, mse, _) = (
+    """Optimise the superposition of traps at ``x_um``, ``y_um`` and return its phase and converged terms.
+
+    ``array_phase`` is the phase of the returned terms, so a rearrangement
+    starting from them starts from the mask they make.
+    """
+    _, (w, theta, x, y), (uniformity, min_max, mse, _) = (
         generator.superposition_optimization(
             [weights, phases, x_um, y_um],
             max_iter=iterations,
@@ -147,7 +151,7 @@ def optimise_terms(
         )
     )
     return {
-        "array_phase": array_phase,
+        "array_phase": generator.generate_phasemask((w, theta, x, y)),
         "optimised_weights": w.get(),
         "phases": theta.get(),
         "x_um": np.asarray(x_um, dtype=float),

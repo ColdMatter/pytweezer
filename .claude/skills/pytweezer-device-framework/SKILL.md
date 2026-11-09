@@ -131,7 +131,9 @@ to release the backends before they are torn down.
 The rig's queued path is `prepare_rearrangement(...)` (once, builds the target
 array on the one `make_array` made) and `rearrange(d0_um=, profile=, header=)`
 (one shot). `rearrange` is one synchronous call that blocks the rig server
-while it waits for the HamCam's occupancy frame, so an experiment runs it in
+while it waits for the HamCam's occupancy frame (up to the `frame_timeout_s`,
+20 s by default, that `prepare_rearrangement` sets as the camera's `timeout`),
+so an experiment runs it in
 parallel with MOTMaster's Go (`run_parallel`, with `RearrangeTweezers.arm_delay`
 between the two) rather than before it.
 

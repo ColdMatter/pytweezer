@@ -87,7 +87,7 @@ class FakeGenerator:
 def three_site_target(generator, **_):
     return {
         "weights": np.ones(3),
-        "optimised_weights": np.ones(3),
+        "optimised_weights": np.array([0.9, 1.0, 1.1]),
         "phases": np.zeros(3),
         "x_um": np.array([0.0, 5.0, 10.0]),
         "y_um": np.zeros(3),
@@ -112,7 +112,7 @@ def fake_gpu(monkeypatch):
             "y_um": y_um.ravel(),
             "weights": np.ones(rows * columns),
             "phases": np.zeros(rows * columns),
-            "optimised_weights": np.ones(rows * columns),
+            "optimised_weights": np.linspace(0.5, 1.5, rows * columns),
         }
 
     generator = FakeGenerator()
@@ -309,8 +309,25 @@ def test_a_shot_moves_the_occupied_atoms_and_returns_three_frames(rig, fake_gpu)
     np.testing.assert_array_equal(shot["occupied"], [True, False, True, False])
     np.testing.assert_array_equal(shot["destination"], [1, -1, 0, -1])
     assert shot["frames"].shape[0] == 3
+    assert shot["n_frames"] == fake_gpu.n_frames
     assert rig.camera.reads() == [(1, 0, True, HEADER), (2, 1, True, HEADER)]
     np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
+    (plan,) = fake_gpu.plans
+    np.testing.assert_array_equal(plan["occ_mask"], shot["occupied"])
+    for given, made in zip(
+        plan["terms1"],
+        [hologram[key] for key in ("optimised_weights", "phases", "x_um", "y_um")],
+        strict=True,
+    ):
+        np.testing.assert_array_equal(given, made)
+    target = three_site_target(None)
+    for given, wanted in zip(
+        plan["terms2"],
+        [target[key] for key in ("optimised_weights", "phases", "x_um", "y_um")],
+        strict=True,
+    ):
+        np.testing.assert_array_equal(given, wanted)
+    assert plan["d0"] == 0.5
 
 
 def test_a_shot_with_no_atoms_plans_nothing_and_still_reads_the_follow_up_frames(
@@ -323,6 +340,16 @@ def test_a_shot_with_no_atoms_plans_nothing_and_still_reads_the_follow_up_frames
     assert shot["n_frames"] == 0
     assert fake_gpu.plans == []
     assert rig.camera.reads() == [(1, 0, True, HEADER), (2, 1, True, HEADER)]
+
+
+def test_an_unknown_target_kind_is_refused():
+    with pytest.raises(ValueError, match="hexagonal"):
+        array_hologram.target_terms(
+            None,
+            **(TARGET | {"kind": "hexagonal"}),
+            envelope=None,
+            blaze_um=(48.0, 4.0),
+        )
 
 
 def test_destinations_send_surplus_atoms_nowhere():
@@ -356,6 +383,23 @@ def test_a_failed_follow_up_read_still_stops_the_camera_and_restores_the_mask(
     np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
 
 
+def test_a_camera_that_fails_to_stop_still_gets_the_initial_mask_restored(
+    rig, fake_gpu
+):
+    hologram = prepare_shot(rig, lit=[1, 0, 1, 0])
+    fake_gpu.moving_idx, fake_gpu.final_idx = [0, 2], [1, 0]
+
+    def stop_fails():
+        raise TimeoutError("camera did not stop")
+
+    rig.camera.stop_acquisition = stop_fails
+
+    with pytest.raises(TimeoutError):
+        rig.rearrange(d0_um=0.5, profile="minimum_jerk", header=HEADER)
+
+    np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
+
+
 def test_a_shot_refuses_once_something_else_has_written_the_slm(rig, fake_gpu):
     prepare_shot(rig, lit=[1, 0, 1, 0])
     rig.slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
@@ -364,6 +408,17 @@ def test_a_shot_refuses_once_something_else_has_written_the_slm(rig, fake_gpu):
         rig.rearrange(d0_um=0.5, profile="minimum_jerk", header=HEADER)
 
     assert rig.camera.calls == []
+
+
+def test_prepare_rearrangement_gives_the_occupancy_frame_its_own_timeout(rig, fake_gpu):
+    rig.camera.timeout = 2  # as initialise() leaves it
+    rig.make_array(**SHOT_ARRAY, **OPTICS)
+
+    rig.prepare_rearrangement(
+        **TARGET, occupancy_sites=SHOT_SITES, threshold_photons=0.0, **SCORING
+    )
+
+    assert rig.camera.timeout == 20.0
 
 
 def test_prepare_rearrangement_refuses_without_an_array_on_the_slm(rig, fake_gpu):
@@ -401,6 +456,42 @@ def test_plan_is_built_on_the_layers_make_array_used(rig, fake_gpu):
         "zernike": True,
     }
     assert fake_gpu.pupil == (8704.0, 100.0, 0.0)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [TARGET, TARGET | {"kind": "kagome", "sites": 6}],
+    ids=["square", "kagome"],
+)
+def test_a_shot_on_the_gpu_moves_atoms_and_puts_the_array_back(rig, target):
+    if not rearrangement._HAS_CUPY:
+        pytest.skip("needs a CUDA GPU")
+    small_slm = OPTICS | {
+        "generator_settings": OPTICS["generator_settings"] | {"slm_res": (64, 64)}
+    }
+    hologram = rig.make_array(**SHOT_ARRAY, **small_slm)
+    prepared = rig.prepare_rearrangement(
+        **target,
+        occupancy_sites=SHOT_SITES,
+        threshold_photons=shot_threshold(),
+        **SCORING,
+    )
+    rig.camera = ShotCamera(
+        [shot_frame([1, 0, 1, 1]), shot_frame([0, 0, 0, 0]), shot_frame([0, 0, 0, 0])]
+    )
+
+    shot = rig.rearrange(d0_um=0.5, profile="minimum_jerk", header=HEADER)
+
+    assert shot["frames"].shape == (3, 64, 64)
+    assert shot["frames"].dtype == np.uint16
+    assert shot["n_frames"] > 0
+    destination = shot["destination"]
+    np.testing.assert_array_equal(destination[~shot["occupied"]], -1)
+    sent_to = destination[destination >= 0]
+    assert len(sent_to) == min(shot["occupied"].sum(), len(prepared["x_um"]))
+    assert len(set(sent_to)) == len(sent_to)
+    assert sent_to.max() < len(prepared["x_um"])
+    np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
 
 
 @pytest.mark.parametrize(

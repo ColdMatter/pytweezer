@@ -302,7 +302,7 @@ def test_the_first_move_frame_matches_the_mask_the_array_was_shown_with(generato
         **optics,
     )
     terms = [hologram[k] for k in ("optimised_weights", "phases", "x_um", "y_um")]
-    nudged = [terms[0], terms[1], terms[2] + 1e-3, terms[3]]
+    nudged = [terms[0], terms[1], terms[2] + 1e-6, terms[3]]
     plan = generator.plan_rearrangement(
         terms,
         nudged,
