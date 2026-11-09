@@ -751,10 +751,12 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         n_steps = int(cp.ceil(1.875 * max_dist / d0))
 
         # 3. INITIALIZE VRAM STATE MACHINE
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
 
         # Pre-calculate the minimum jerk step multipliers on the GPU
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
@@ -983,10 +985,12 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         steps_scale = 1.0 if profile == "linear" else 1.875
         n_steps = int(cp.ceil(steps_scale * max_dist / d0))
 
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
 
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
         if profile == "linear":
@@ -1955,10 +1959,12 @@ class OptimisationBasedPhasemaskGeneratorGPU3D:
         n_steps = int(cp.ceil(1.875 * max_dist / d0))
 
         # 3. INITIALIZE VRAM STATE MACHINE
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
         curr_z = cp.asarray(z1, dtype=cp.float32)
 
         # Pre-calculate the minimum jerk step multipliers on the GPU
@@ -2899,10 +2905,12 @@ class OptimisationBasedPhasemaskGeneratorGPUSeidel:
         n_steps = int(cp.ceil(1.875 * max_dist / d0))
 
         # 3. INITIALIZE VRAM STATE MACHINE
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
 
         # Pre-calculate the minimum jerk step multipliers on the GPU
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
@@ -3131,10 +3139,12 @@ class OptimisationBasedPhasemaskGeneratorGPUSeidel:
         steps_scale = 1.0 if profile == "linear" else 1.875
         n_steps = int(cp.ceil(steps_scale * max_dist / d0))
 
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
 
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
         if profile == "linear":

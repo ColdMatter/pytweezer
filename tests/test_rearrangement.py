@@ -151,3 +151,45 @@ def test_rig_builds_a_new_generator_only_when_the_optics_change(
         (48.0, 4.0),
         (50.0, 4.0),
     ]
+
+
+@pytest.mark.parametrize(
+    "generator_class",
+    [
+        "OptimisationBasedPhasemaskGeneratorGPU",
+        "OptimisationBasedPhasemaskGeneratorGPUSeidel",
+    ],
+)
+@pytest.mark.parametrize("sequence", ["planned", "generated"])
+def test_a_rearrangement_leaves_float32_initial_terms_untouched(
+    generator_class, sequence
+):
+    # The next shot plans from the same terms, so walking them would start it wrong.
+    if not rearrangement._HAS_CUPY:
+        pytest.skip("needs a CUDA GPU")
+    import cupy as cp
+
+    from pytweezer.helper_scripts import phasemask
+
+    generator = getattr(phasemask, generator_class)(slm_res=(64, 64))
+    y_um, x_um = np.mgrid[0:2, 0:3] * 5.0
+    terms1 = [
+        cp.asarray(values, dtype=cp.float32)
+        for values in (np.ones(6), np.zeros(6), x_um.ravel(), y_um.ravel())
+    ]
+    terms2 = [
+        cp.asarray(values, dtype=cp.float32)
+        for values in (np.ones(2), np.zeros(2), [20.0, 25.0], [20.0, 20.0])
+    ]
+    before = [term.get() for term in terms1]
+    occupied = np.array([True, False, True, True, False, False])
+
+    if sequence == "planned":
+        plan = generator.plan_rearrangement(terms1, terms2, occupied, d0=0.5)
+        for _ in generator.iter_rearrangement_sequence_timings(plan):
+            pass
+    else:
+        generator.generate_rearrangement_sequence(terms1, terms2, occupied, d0=0.5)
+
+    for term, original in zip(terms1, before, strict=True):
+        np.testing.assert_array_equal(term.get(), original)
