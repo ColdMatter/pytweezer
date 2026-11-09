@@ -105,48 +105,55 @@ from pytweezer.experiment.motmaster import (
 
 
 class Tof(MotMasterExperiment):
-    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
-    caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad")
-    tof = MotMasterInteger(100, device="rb", parameter="tDelay1")  # always shown
+    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic")
+    tof = MotMasterInteger(100, parameter="tDelay1")  # always shown
     camera = Device("Rb ThorCam")
+
+    def prepare(self):
+        super().prepare()  # sets the sequencer up; must come first
+        self.camera.set_trigger_source("ext")
+        self.camera.setup_acquisition(1, mode="snap")
 
     def run_point(self):
         self.camera.start_acquisition()
-        self.run_sequences()  # blocks until every Go() returns
-        self.record("image", self.camera.acquire_n_frames(1)[0])
+        try:
+            self.run_sequences()  # blocks until Go() returns
+            self.record("image", self.camera.acquire_n_frames(1)[0])
+        finally:
+            self.camera.stop_acquisition()
 ```
 
-`master=True` goes on exactly one `MotMaster` of several (a lone one is the
-master). `MotMasterInteger` vs `MotMasterNumber` must match the script's
-parameter type (.NET `Int32` vs `Double`). Any other script parameter is set by
-dotted name, `submit(Tof, **{"rb.tPulse": 3e-5})` or scanned with
-`ListAxis(argument="rb.tPulse", ...)`; the Experiments form adds these from its
-search box. Declared parameters are not searchable, Int32 ones need whole
-values, and unselected ones keep the script's defaults (not recorded in the
-file). `prepare()` sets script, iterations, save toggle and trigger mode on
-every task; repeats come from `Scan(repetitions=...)`, one stored point per
-shot; `run_sequences(**{"rb.tPulse": 3e-5})` overrides parameters for that one
-run. `MotMaster(..., saved=(...))` binds script parameters to saved parameters:
+An experiment declares **one** `MotMaster`; a second is a `TypeError` at class
+definition (run two machines together in linked mode, below).
+`MotMasterInteger` vs `MotMasterNumber` must match the script's parameter type
+(.NET `Int32` vs `Double`). Any other script parameter is set by its plain
+name, `submit(Tof, tPulse=3e-5)` or scanned with `ListAxis(argument="tPulse",
+...)`; the Experiments form adds these from its search box. Any undeclared
+identifier is taken as a script parameter, so a misspelt one is accepted at
+submit and fails in `prepare()` (or, if only scanned, just before the first
+`Go`) with a "did you mean" hint. Such names live in `self.extra_values`, not as
+attributes, so they cannot clash with the experiment's own attributes; a
+declared argument always wins over a script parameter of the same name.
+Dotted names (`rb.tPulse`, from before one-MOTMaster) are not arguments at all.
+Declared parameters are not searchable, Int32 ones need whole values, and
+unselected ones keep the script's defaults (not recorded in the file).
+`prepare()` sets linked mode, script, iterations, save toggle and untriggered
+mode on every task; repeats come from `Scan(repetitions=...)`, one stored point
+per shot; `run_sequences(tPulse=3e-5)` overrides parameters for that one run.
+`MotMaster(..., saved=(...))` binds script parameters to saved parameters:
 a bare name for the key of the same name, `{parameter: key}` for another key.
 They are read once in `prepare()` (an unreachable manager raises `RuntimeError`,
 missing keys a `KeyError`) and sent with every run; precedence is a
 `run_sequences` override > form or scan > saved > script default, and the saved
-values sent are the constant `saved_sequence` (`{"rb.<parameter>": value}`). `prepare()` puts followers in trigger mode; `run_sequences()` starts each
-follower in a thread, then the master `follower_arm_delay` later
-(`MotMasterExperiment` class attribute, default 0.5 s). A follower still running
-`follower_timeout` (a `MotMaster(...)` keyword, default 60 s) after the master
-finishes fails the task, and its device server stays blocked in the triggered
-`Go()` (Abort does not free it), so restart that device server or trigger it
-before the next task. Camera APIs differ
-between drivers — check the driver, not old notebooks.
+values sent are the constant `saved_sequence` (`{parameter: value}`). Camera
+APIs differ between drivers — check the driver, not old notebooks.
 
 **Linked mode** (one script driving PH-BONESAW and RbTweezer together, fired by
 TTL from the CaF side): declare only the primary,
-`MotMaster("CaF MotMaster", script=..., linked=True)`, and no other `MotMaster`.
-Every parameter of both machines, `SecondaryTriggerDelay` included, is a
-parameter of that one script. The link lasts one task: `prepare()` sets linked
-mode on or off on every sequencer (unlinking first) and `close_devices()`
-releases it, even after a failure. While linked, the Rb MOTMaster refuses its
+`MotMaster("CaF MotMaster", script=..., linked=True)`. Every parameter of both
+machines, `SecondaryTriggerDelay` included, is a parameter of that one script.
+The link lasts one task: `prepare()` sets linked mode on or off before setting
+the script and `close_devices()` releases it, even after a failure. While linked, the Rb MOTMaster refuses its
 own `SetScriptPath`/`Go`; if someone has ticked Linked by hand on PH-BONESAW, an
 Rb-only task takes back control of it (`set_linked(False)` on the secondary),
 and fails only if a linked run is in progress. Any linked failure, either
@@ -154,37 +161,42 @@ machine, raises from the task.
 `experiments/linked_scope_test.py` is the minimal example; the MOTMaster side
 is EDMSuite's `motmaster-linked-mode` skill.
 
-## Camera experiments and cloud fits
+## Cameras and cloud fits
 
-`CaFMOT` (`experiments/caf_mot.py`) fires the CaF MOT sequence and images the cloud, with no background (its `iterations` argument sets the script iterations and the frames read, one per iteration);
-`CaFFluorescence` extends it with one background shot per task, publishing `background_<stream>` and
-`subtracted_<stream>`.
+There is no camera base class: an experiment that uses a camera declares it as
+a `Device`, sets it up in `prepare()` (after `super().prepare()`) and reads it in
+its own shot, in plain calls. `LoadTweezers` (`experiments/load_tweezers.py`)
+is the example to copy:
 
-A `CameraExperiment` (`experiment/camera_experiment.py`) is a `MotMasterExperiment` that declares
-cameras as `CameraShots("<device>", frames=n, ...)` and reads them each shot.
-`take_shot(streams=None, **overrides)` runs the sequences once and returns
-`{camera: (frames, H, W)}`; `streams={camera: name}` broadcasts that camera's frames on another
-image stream (the driver's `acquire_n_frames(..., stream=)`) instead of its own. Subscriptions match
-by prefix, so build such names with `stream_name(camera, prefix)` (`background_<stream>`), which puts
-the prefix in front: a viewer of `<stream>` never receives them. `broadcast_frames(camera, frames,
-stream)` publishes computed frames (e.g. background-subtracted ones) the same way. The default `run_point` records `<camera>_images`.
+- `prepare()` remembers whether the camera was live and stops live mode, then
+  sets binning, ROI (`set_roi` returns the origin the camera actually used;
+  keep it), trigger source, any driver-specific options, gain, and
+  `setup_acquisition(n, mode="snap")`. `finish()` puts a camera that was live
+  back in live mode, in a `try`/`finally` around `super().finish()`.
+- The shot starts acquisition, calls `run_sequences(**overrides)`, reads with
+  `acquire_n_frames(n, broadcast=True, header={"rid": self.rid})`, and stops
+  acquisition in a `finally`.
+- Camera settings are ordinary arguments named for the camera
+  (`hamcam_gain`, `hamcam_roi_x0`...). A scannable one is re-sent before a shot
+  whose value differs from the last sent; one that cannot change mid-task (it
+  changes the frame shape, or something set in `prepare()` depends on it) is
+  refused by the experiment's own `planned_points`.
+- A subclass adding a camera wraps the parent's shot rather than adding hooks
+  to it: `LoadTweezersMOTImage` starts the ORCA, calls `take_shot()`, then reads
+  the ORCA's frame. Anything only a subclass needs stays in the subclass.
 
-Recording a MOT cloud:
-
-- `self.record_cloud_fit(camera, frames, background=None)` fits the mean of the frames (minus the
-  background frame) and records `<camera>_<field>` and `<camera>_<field>_error` for the fields in
-  `cloud_fit.FIELDS`/`ERROR_FIELDS`. Lengths are metres when the camera's CONFIG entry has
-  `object_pixel_m`, pixels otherwise (unit recorded as `px`); binning and ROI origin are read from
-  the camera at record time, since settings experiments change them. A failed fit is NaN, never an
-  error. Call it where the shot is taken (`CaFMOT.measure()` does, so every optimiser
-  built on it records the fit too).
-- `save_mean_image = Bool(...)` on the experiment makes it also record `<camera>_mean_image`, which
-  the Results `cloud_fit` view draws.
-- `cloud_species = "CaF"` or `"Rb"` makes `prepare()` record the constant `cloud_mass_amu`, which
-  the temperature view needs.
-- Declare `analyses = ("cloud_fit", "cloud_temperature")` for the Results tab's MOT views (see
-  Running). The temperature view reads a native time argument as seconds and a MOTMaster one as
-  ticks (10 µs default).
+Recording a MOT cloud: `LoadTweezersMOTImage.record_cloud_fit(frames)` fits the
+mean of the ORCA's frames with `cloud_fit.fit_frames` and records `orca_<field>`
+and `orca_<field>_error` for the fields in `cloud_fit.FIELDS`/`ERROR_FIELDS`,
+plus `orca_mean_image` with `save_mean_image`. Lengths are metres when the
+camera's CONFIG entry has `object_pixel_m`, pixels otherwise; binning and ROI
+origin are read from the camera (`frame_geometry()`) at record time. A failed
+fit is NaN, never an error. It records the constant `cloud_mass_amu`
+(`cloud_fit.SPECIES_MASS_AMU`), which the temperature view needs. Another
+experiment fitting a cloud copies that method for its own camera. Declare
+`analyses = ("cloud_fit", "cloud_temperature")` for the Results tab's MOT views
+(see Running). The temperature view reads a native time argument as seconds and
+a MOTMaster one as ticks (10 µs default).
 
 ## Running
 
@@ -208,11 +220,11 @@ through its hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailab
 A view reads only what the file recorded, so record what it needs (the tweezer
 histograms take `first_counts`/`second_counts` with `trap_sites` and
 `threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`;
-the MOT Gaussian fit, `cloud_fit`, takes what `record_cloud_fit` records,
-`<camera>_<field>`, `_error` and `<camera>_mean_image`: `analysis/cloud_results.py`;
-`cloud_temperature` fits the time-of-flight expansion of those sizes against a scanned
-time argument, and needs the constant `cloud_mass_amu`, recorded by the experiment's
-`cloud_species`).
+the MOT Gaussian fit, `cloud_fit`, takes `<camera>_<field>`, `_error` and
+`<camera>_mean_image`, as `LoadTweezersMOTImage.record_cloud_fit` records them:
+`analysis/cloud_results.py`; `cloud_temperature` fits the time-of-flight
+expansion of those sizes against a scanned time argument, and needs the constant
+`cloud_mass_amu`).
 A name this GUI doesn't know is listed disabled, and every analysis is disabled
 until the measurement finishes. An analysis only reads the file, through its
 own archive connection, off the GUI thread. The tab remembers the choice per
@@ -382,16 +394,16 @@ The Rb tweezer experiments, in the order a session uses them:
    didn't write the mask).
 2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera
    and proposes the `trap_*` saved parameters.
-3. `LoadTweezers` (`load_tweezers.py`, a `CameraExperiment` with
-   `hamcam = CameraShots("Rb HamCam", frames=2, ...)`) runs every shot at the saved
+3. `LoadTweezers` (`load_tweezers.py`, a `MotMasterExperiment` with
+   `hamcam = Device("Rb HamCam")`) runs every shot at the saved
    sequence parameters (`LoadTweezers.rb.saved`, from `saved=` on its
    `MotMaster`: script parameter → saved key; a missing key, or an unreachable manager, fails `prepare()`), a script
    parameter set in the form winning; the values used are the constant
    `saved_sequence`. It and everything built on it also read the trap sites in
    `prepare()` (`saved_trap_sites(saved)`), moved into the ROI
-   (`hamcam.roi_x0`/`roi_y0`/`roi_width`/`roi_height`, unbinned; binning is
-   locked at 1) by the origin `set_roi` returned (`roi_origins["hamcam"]`).
-   The EM-gain sensitivity is `hamcam.gain`; scans of the ROI origin are
+   (`hamcam_roi_x0`/`_y0`/`_width`/`_height`, unbinned; binning is fixed at 1)
+   by the origin `set_roi` returned (`roi_origin`, `(x0, y0)`).
+   The EM-gain sensitivity is `hamcam_gain` (scannable); scans of the ROI are
    refused. They are refused when none are saved, when
    `trap_geometry` is not the rig's array (`same_geometry`; an unreachable rig
    is not checked), or when a summing window leaves the ROI. With sites, each
@@ -402,12 +414,12 @@ The Rb tweezer experiments, in the order a session uses them:
    `LoadTweezers` runs without sites only if it records frames;
    `TweezerArrayMeasurement` always needs them.
    `LoadTweezersMOTImage` is `LoadTweezers` plus the ORCA's one frame of the Rb
-   MOT from the same shot, recorded as an `orca_*` cloud fit (`record_cloud_fit`);
+   MOT from the same shot, recorded as an `orca_*` cloud fit;
    `LoadTweezers` itself never touches the ORCA.
-4. `LoadTweezers.take_shots(n, **sequence)` runs a batch, for the classes
-   whose point is one: `TweezerArrayMeasurement` (`score_batch()`, used by the
-   Bayesian optimisers) and `FindTrapSites`. Their
-   `first_occupied`/`second_occupied`/`*_counts` are `(shots, sites)` per
+4. The classes whose point is a batch of shots each loop `take_shot()`
+   themselves: `TweezerArrayMeasurement.take_batch(**sequence)` (`score_batch()`,
+   used by the Bayesian optimisers) and `FindTrapSites.take_calibration_shots()`.
+   Their `first_occupied`/`second_occupied`/`*_counts` are `(shots, sites)` per
    point, and `save_raw_images` (off by default there) records
    `hamcam_images`, `(shots, 2, H, W)` per point. They declare no analyses; `LoadTweezers`
    itself keeps one shot per point, which the default analyses expect.
@@ -494,7 +506,7 @@ Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
   composite (CONFIG `"devices"`) itself and its sub-devices, a sub-device only
   itself, and `MotMaster(linked=True)` also its CONFIG `linked_partner` (`"CaF
   MotMaster"` names `"Rb MotMaster"`). `Device.reserves()` is the hook for other
-  hidden dependencies. Names match as `get_device()` does. Only queued tasks are subject to reservations: `Rig`, `run_local` and GUI
+  hidden dependencies. Names match as `get_device()` does. Only queued tasks are subject to reservations: `run_local` and GUI
   panels can drive a device another task holds, though `run_local` still
   refuses devices the class doesn't declare.
 - The queue view has a Pipeline column and filter chips (a dot if one is

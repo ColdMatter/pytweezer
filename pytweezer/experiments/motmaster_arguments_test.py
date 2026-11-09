@@ -26,7 +26,7 @@ class MotMasterArgumentsTest(MotMasterExperiment):
     note = Text("")
 
     def run_point(self):
-        sent = self.motmaster_parameters()["rb"]
+        sent = self.motmaster_parameters()
         for name, value in sent.items():
             self.record(f"sent_{name}", value)
         if not self.dry_run:

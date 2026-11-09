@@ -13,8 +13,7 @@ The mixin comes first, so it sets the points and runs each one; the
 measurement's own ``prepare`` and ``finish`` still run. A :class:`Fit` instead
 runs one point and proposes what its ``fit()`` returns. The values it proposes
 are recorded as constants ``proposed.<saved key>``; nothing is saved until a
-person accepts them, in the Optimisers tab or with ``Rig.auto_mot(accept=True)``,
-both through :func:`accept_proposals`.
+person accepts them in the Optimisers tab, through :func:`accept_proposals`.
 """
 
 import math
@@ -173,9 +172,9 @@ class Optimiser:
         """Put accepted proposals to use, after they are saved; does nothing by default.
 
         Called once the accepted values are saved, by the Optimisers tab (on a
-        worker thread) and by ``Rig.auto_mot(accept=True)``, neither of which
-        undoes the save if it raises; neither calls it while a running task
-        reserves one of the optimiser's devices (:func:`live_task_using`).
+        worker thread), which does not undo the save if it raises and does not
+        call it while a running task reserves one of the optimiser's devices
+        (:func:`live_task_using`).
 
         Args:
             proposals: ``{saved key: value}`` of the values accepted.

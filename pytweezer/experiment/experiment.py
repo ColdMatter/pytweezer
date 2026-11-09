@@ -47,7 +47,10 @@ class Experiment:
     analyses: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self, args: dict[str, Any] | None = None) -> None:
-        self._extra_names: list[str] = []
+        #: Undeclared arguments that :meth:`extra_argument` accepted, by name.
+        #: They are kept here rather than as attributes, so they can share a
+        #: name with an attribute of the experiment.
+        self.extra_values: dict[str, Any] = {}
         for name, value in coerce_arguments(type(self), args or {}).items():
             self.set_argument(name, value)
         self._clients: list[Any] = []
@@ -110,9 +113,10 @@ class Experiment:
         return None
 
     def set_argument(self, name: str, value: Any) -> None:
-        setattr(self, name, value)
-        if name not in self.arguments() and name not in self._extra_names:
-            self._extra_names.append(name)
+        if name in self.arguments():
+            setattr(self, name, value)
+        else:
+            self.extra_values[name] = value
 
     def resolve_saved_arguments(self, scanned: Iterable[str] = ()) -> dict[str, str]:
         """Give each unset saved-backed argument not in ``scanned`` its saved value.
@@ -141,8 +145,8 @@ class Experiment:
         return {name: argument.saved for name, argument in unset.items()}
 
     def argument_values(self) -> dict[str, Any]:
-        names = [*self.arguments(), *self._extra_names]
-        return {name: getattr(self, name) for name in names}
+        declared = {name: getattr(self, name) for name in self.arguments()}
+        return declared | self.extra_values
 
     def planned_points(self, scan: Scan) -> list[Point]:
         """The points to run for the submitted ``scan``.

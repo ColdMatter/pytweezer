@@ -59,15 +59,16 @@ failure set `self._backend = None` and raise — leaving a half-open handle make
 `is_connected()` lie. `_read_frames(nframes, start_frame)` returns frames stacked
 as `(nframes, H, W)`.
 
-The base also gives every camera a frame-index protocol, which notebooks' `Rig`
-relies on (see `notebook-rig`): `arm(buffer_frames)` starts a continuous
+The base also gives every camera a frame-index protocol, which notebooks'
+`PycafCamera` relies on (see `notebook-rig`): `arm(buffer_frames)` starts a continuous
 ring-buffer acquisition, `frames_acquired()` counts frames since it started,
 `read_frames_from(start)` returns every frame since `start`, `settings()` is
 saved beside frames in zips. Live mode is something a camera is put in and
 taken out of at run time, never a constructor option: `start_live(buffer_frames)`
 arms it and broadcasts every new frame, `stop_live()` stops the broadcast and
-the acquisition, `is_live()` says which. `CameraExperiment` takes a live camera
-out of live mode for its task and puts it back in `finish`. The defaults assume
+the acquisition, `is_live()` says which. An experiment using a camera takes a
+live one out of live mode in `prepare` and puts it back in `finish` (see
+`LoadTweezers`). The defaults assume
 a pylablib backend; otherwise implement `_acquisition_in_progress`,
 `_count_frames` and `_read_range`. Take `self._lock` around backend calls the
 live thread could race. Paths such as `image_dir` come from the CONFIG entry;
@@ -82,9 +83,8 @@ a cropped frame. `set_roi` and `set_binning` also keep the binning in
 `self.binning`, broadcast as `binning`, so a viewer can turn frame pixels back
 into sensor pixels.
 `set_binning` and `set_gain` are optional (the base raises
-`NotImplementedError`); `CameraExperiment` calls them only when a
-`CameraShots` declaration sets `binning` or `gain`, so a driver without them
-still works there.
+`NotImplementedError`); only experiments written for a camera that has them
+call them.
 
 **Match the base class signatures exactly.** `setup_acquisition(self, nframes,
 mode="sequence")` takes both, and the base `arm()` calls it; a camera with no

@@ -329,9 +329,9 @@ class ExperimentQueue:
         task.requested = None
         task.t_end = at or now()
         # TODO: devices are released however the task ended. After an abort a device
-        # call in flight still completes, a killed linked primary can leave its
-        # secondary claimed, and a timed-out follower waits for its trigger, so another
-        # pipeline may start on a sequencer that is not yet idle.
+        # call in flight still completes and a killed linked primary can leave its
+        # secondary claimed, so another pipeline may start on a sequencer that is
+        # not yet idle.
         self.state.workers = [w for w in self.state.workers if w.rid != rid]
         return task
 

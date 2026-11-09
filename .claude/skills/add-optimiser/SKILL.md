@@ -14,8 +14,7 @@ queue, files, saved parameters) applies; this skill covers what an optimiser
 adds. Device-free examples: `DemoStagedScan`/`DemoBayesian` in
 `optimisers/demo_staged_scan.py`/`demo_bayesian.py` (over
 `experiments/demo_resonance.py`); real ones `optimisers/find_trap_sites.py`,
-`optimise_tweezer_imaging.py`, `optimise_molasses_shims.py`,
-`optimise_mot_lasers.py`.
+`optimise_tweezer_imaging.py`, `optimise_molasses_shims.py`.
 
 ## Search optimisers
 
@@ -51,7 +50,7 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   `ValueError` when the run starts. A subclass places the centre differently by
   overriding `centre_argument(stage)` (the argument's name and declaration) and
   `centre_of(stage)` (its value, read after `prepare()`, so it may use what
-  `prepare()` measured); `OptimiseMOTLasers` does.
+  `prepare()` measured).
 - `Stage(..., run=False)` makes `<setting>_run` default to false; a stage whose
   `_run` is false is not scanned, passes nothing to later stages and proposes nothing
   (`enabled_stages()` lists `(index in stages, stage)` for those that run).
@@ -118,10 +117,9 @@ fit view draws the results `calibration_image` and `roi_sites`
   if the optimiser `applies`. It skips it, saying "not applied: run N is using
   X", when a running or paused task reserves any device the optimiser reserves
   (`live_task_using`). A failing `apply` is reported but never undoes the save.
-- The tab and `Rig.auto_mot(accept=True)` (see notebook-rig) share the helpers
-  in `experiment/optimisers.py`: `proposals`, `accept_proposals`,
-  `changed_summary`, `live_task_using`; keep accept behaviour there, not in
-  either caller.
+- The tab's accept logic lives in helpers in `experiment/optimisers.py`:
+  `proposals`, `accept_proposals`, `changed_summary`, `live_task_using`; keep
+  accept behaviour there, not in the tab, so any other caller shares it.
 
 ## The Rb tweezer optimisers
 
@@ -140,27 +138,9 @@ add-experiment.
 - `OptimiseTweezerImaging` and `OptimiseMolassesShims` are Bayesian with span
   dimensions around the saved `tImgCoolVCO`/`tImgCoolVVA` and
   `tMolassesShim{X,Y,Z}ccValue`, scored by `objective_of` with a fidelity or
-  loading floor.
+  loading floor. Their `measure()` passes plain script parameter names
+  (`BackgroundDrop=1`, `tMolassesShimXccValue=...`) to `score_batch()`.
 
-## CaF laser tuning
-
-`OptimiseMOTLasers(StagedScan, CaFFluorescence)`
-(`optimisers/optimise_mot_lasers.py`) scans each CaF laser about the set point the
-lock held when the run started (plus `<laser>_offset`, default 0) for the most
-`counts`. Its six span stages are `v0`, `BX`, `v1`, `v2`,
-`v3`, `TCool` (`LASERS` order), proposing the saved keys `caf_laser_<laser>`
-(THz, group `CaF lasers`); `v0`, `v1` and `TCool` are on by default. Its `apply`
-ramps each accepted laser on `CaF MotMaster`, trying every laser and raising
-`RuntimeError` naming any it missed. The measurement `experiments/caf_fluorescence.py`
-(`CaFMOT` from `caf_mot.py` plus one background shot per run; a `CameraExperiment`
-reading `thorcam`, the CaF ThorCam) restores the lasers it moved in `finish`.
-
-The scan never reads the saved `caf_laser_*` keys: they are only where an
-accepted proposal is saved, created on first acceptance. `create_saved_set_points()`
-(from `pytweezer.optimisers.optimise_mot_lasers`) can seed them from the lock's
-current set points, but no run needs it. From a notebook, `Rig.auto_mot` runs
-the optimiser (see notebook-rig).
-
-Tests: `tests/test_optimisers.py`, `tests/test_optimise_mot_lasers.py`,
+Tests: `tests/test_optimisers.py`,
 `tests/test_tweezer_array.py`, `tests/test_trap_sites.py`,
 `tests/test_saved_parameters.py`; the tab in `tests/test_experiment_gui.py`.

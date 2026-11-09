@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from pytweezer.analysis import analysis as an
 from pytweezer.analysis.array_loading import photons_at_sites
+from pytweezer.analysis.cloud_fit import SPECIES_MASS_AMU, fit_frames
 from pytweezer.analysis.trap_sites import same_geometry, to_roi
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
-from pytweezer.experiment.arguments import Bool, Device
-from pytweezer.experiment.camera_experiment import CameraExperiment, CameraShots
-from pytweezer.experiment.motmaster import MotMaster
+from pytweezer.experiment.arguments import Bool, Device, Integer, Number
+from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.experiment.scan import Point, Scan
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers.device_client import get_device_config
 
 if TYPE_CHECKING:
     # Imports cupy where it is installed, so only for the annotation.
@@ -53,18 +54,35 @@ TRAP_SITE_KEYS = (
 )
 
 
-class LoadTweezers(CameraExperiment):
+_ROI_ARGUMENTS = (
+    "hamcam_roi_x0",
+    "hamcam_roi_width",
+    "hamcam_roi_y0",
+    "hamcam_roi_height",
+)
+
+
+def _roi_argument(default: int, *, size: bool) -> Integer:
+    return Integer(
+        default,
+        min=1 if size else 0,
+        unit="px",
+        group="Camera",
+        tooltip="Unbinned sensor pixels",
+    )
+
+
+class LoadTweezers(MotMasterExperiment):
     """Run the Rb tweezer-loading sequence and image the tweezers twice per point.
 
     Every shot runs the sequence at the saved parameters ``rb`` binds
     (``LoadTweezers.rb.saved``); a script parameter set in the form wins over
     its saved value, and the values used are recorded as ``saved_sequence``.
-    :meth:`take_shots` runs a batch of shots, for subclasses whose point is one.
 
     Each shot takes two frames on ``hamcam``, exposed by the trigger pulse,
-    with EM gain on and ``hamcam.gain`` as its sensitivity. Binning is fixed at
-    1, because the trap sites are saved in sensor pixels; the ROI origin cannot
-    be scanned, because the sites are placed in the ROI set at :meth:`prepare`.
+    with EM gain on and ``hamcam_gain`` as its sensitivity. Binning is fixed at
+    1, because the trap sites are saved in sensor pixels; the ROI cannot be
+    scanned, because the sites are placed in the ROI set at :meth:`prepare`.
 
     ``signal_counts`` is the summed first frame minus the summed second.
     :meth:`prepare` also loads the accepted trap sites (see
@@ -95,16 +113,16 @@ class LoadTweezers(CameraExperiment):
     )
     analyses = ("tweezer_histogram", "tweezer_photon_histogram")
 
-    hamcam: ImagEMX2Camera = CameraShots(
-        "Rb HamCam",
-        frames=2,
-        binning=1,
-        gain=600,
-        roi=(110, 256, 220, 256),
-        locked=("frames", "binning"),
-    )
+    hamcam: ImagEMX2Camera = Device("Rb HamCam")
     rig: Rearrangement = Device("Rb Rearrangement Rig")
 
+    hamcam_gain = Number(
+        600, min=0, group="Camera", tooltip="EM-gain sensitivity of the HamCam"
+    )
+    hamcam_roi_x0 = _roi_argument(110, size=False)
+    hamcam_roi_width = _roi_argument(256, size=True)
+    hamcam_roi_y0 = _roi_argument(220, size=False)
+    hamcam_roi_height = _roi_argument(256, size=True)
     save_raw_images = Bool(
         True,
         group="Camera",
@@ -118,14 +136,9 @@ class LoadTweezers(CameraExperiment):
         "beside its occupancy",
     )
 
-    def configure_camera(self, name: str, camera: ImagEMX2Camera) -> None:
-        camera.set_external_exposure_mode()
-        camera.enable_em_gain(True)
-        camera.enable_direct_em_gain(True)
-
     def planned_points(self, scan: Scan) -> list[Point]:
         for axis in scan.axes:
-            if axis.argument in ("hamcam.roi_x0", "hamcam.roi_y0"):
+            if axis.argument in _ROI_ARGUMENTS:
                 raise ValueError(
                     f"{axis.argument} cannot be scanned: the trap sites are placed "
                     "in the ROI set before the first point"
@@ -134,6 +147,25 @@ class LoadTweezers(CameraExperiment):
 
     def prepare(self) -> None:
         super().prepare()
+        self.hamcam_was_live = self.hamcam.is_live()
+        self.hamcam.stop_live()
+        self.hamcam.set_binning(1)
+        self.roi_origin = tuple(
+            self.hamcam.set_roi(
+                self.hamcam_roi_x0,
+                self.hamcam_roi_width,
+                self.hamcam_roi_y0,
+                self.hamcam_roi_height,
+            )
+        )
+        self.hamcam.set_trigger_source("ext")
+        self.hamcam.set_external_exposure_mode()
+        self.hamcam.enable_em_gain(True)
+        self.hamcam.enable_direct_em_gain(True)
+        self.hamcam.set_gain(self.hamcam_gain)
+        self.sent_gain = self.hamcam_gain
+        self.hamcam.setup_acquisition(2, mode="snap")
+
         self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(
             self.saved_parameters
         )
@@ -151,6 +183,13 @@ class LoadTweezers(CameraExperiment):
         self.record("trap_window_size", self.trap_window_size, unit="px")
         self.record("trap_feature_size", self.trap_feature_size, unit="px")
         self.record("threshold", self.trap_threshold, unit="photons")
+
+    def finish(self) -> None:
+        try:
+            if getattr(self, "hamcam_was_live", False):
+                self.hamcam.start_live()
+        finally:
+            super().finish()
 
     def saved_trap_sites(
         self, saved: dict
@@ -184,8 +223,8 @@ class LoadTweezers(CameraExperiment):
         self.trap_feature_size = int(saved["trap_feature_size"])
         self.trap_threshold = float(saved["trap_threshold"])
         # The camera may round the ROI's corner; sites are placed by the one it used.
-        roi_x0, roi_y0 = self.roi_origins["hamcam"]
-        _, roi_width, _, roi_height = self.shot_settings("hamcam").roi
+        roi_x0, roi_y0 = self.roi_origin
+        roi_width, roi_height = self.hamcam_roi_width, self.hamcam_roi_height
         sites = np.rint(to_roi(saved["trap_sites"], roi_y0, roi_x0)).astype(int)
         half = self.trap_window_size // 2
         outside = [
@@ -199,19 +238,24 @@ class LoadTweezers(CameraExperiment):
             )
         return {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}, ""
 
-    def take_shots(self, n_shots: int, **sequence) -> tuple[list, list]:
-        """``n_shots`` shots with script parameters ``sequence``; their first and second frames.
+    def take_shot(self, **sequence: Any) -> np.ndarray:
+        """Run the sequence once with script parameters ``sequence``; the HamCam's two frames.
 
-        With ``save_raw_images`` the frames are recorded as ``hamcam_images``,
-        ``(shots, 2, height, width)`` per point.
+        The frames are broadcast on the camera's stream as this task's.
         """
-        overrides = {f"rb.{name}": value for name, value in sequence.items()}
-        stacks = np.array(
-            [self.take_shot(**overrides)["hamcam"] for _ in range(n_shots)]
-        )
-        if self.save_raw_images:
-            self.record_frames({"hamcam": stacks})
-        return list(stacks[:, 0]), list(stacks[:, 1])
+        if self.hamcam_gain != self.sent_gain:
+            self.hamcam.set_gain(self.hamcam_gain)
+            self.sent_gain = self.hamcam_gain
+        self.hamcam.start_acquisition()
+        try:
+            self.run_sequences(**sequence)
+            return np.asarray(
+                self.hamcam.acquire_n_frames(
+                    2, broadcast=True, header={"rid": self.rid}
+                )
+            )
+        finally:
+            self.hamcam.stop_acquisition()
 
     @staticmethod
     def top_hat(frames, feature_size: int) -> list[np.ndarray]:
@@ -240,14 +284,14 @@ class LoadTweezers(CameraExperiment):
             ]
         )
 
-    def run_point(self):
-        self.record_shot(self.take_shot())
+    def run_point(self) -> None:
+        self.record_tweezers(self.take_shot())
 
-    def record_shot(self, frames: dict[str, np.ndarray]) -> None:
-        """Record the tweezer results of one shot's ``hamcam`` frames."""
+    def record_tweezers(self, frames: np.ndarray) -> None:
+        """Record the tweezer results of one shot's two HamCam ``frames``."""
         if self.save_raw_images:
-            self.record_frames({"hamcam": frames["hamcam"]})
-        first_image, second_image = frames["hamcam"]
+            self.record("hamcam_images", frames)
+        first_image, second_image = frames
         self.record(
             "signal_counts",
             float(first_image.sum(dtype=float) - second_image.sum(dtype=float)),
@@ -269,16 +313,19 @@ class LoadTweezersMOTImage(LoadTweezers):
     """:class:`LoadTweezers` that also fits the Rb MOT imaged on the ORCA.
 
     The ORCA takes one frame in the same MOTMaster run as the HamCam's two, so
-    each point is still one shot. Its cloud fit is recorded as ``orca_*`` with no
-    background subtracted
-    (:meth:`~pytweezer.experiment.camera_experiment.CameraExperiment.record_cloud_fit`),
-    and the ORCA's frame is not recorded itself unless ``save_mean_image`` is set.
+    each point is still one shot. A Gaussian fit to it is recorded as
+    ``orca_<field>`` for every field of
+    :data:`~pytweezer.analysis.cloud_fit.FIELDS` and ``orca_<field>_error`` for
+    each of :data:`~pytweezer.analysis.cloud_fit.ERROR_FIELDS`, with no
+    background subtracted: in metres when the ORCA's CONFIG entry gives
+    ``object_pixel_m``, in pixels otherwise, and NaN where the fit found
+    nothing. The frame itself is recorded as ``orca_mean_image`` only with
+    ``save_mean_image``. The Rb mass is recorded as ``cloud_mass_amu``.
     """
 
-    cloud_species = "Rb"
     analyses = (*LoadTweezers.analyses, "cloud_fit", "cloud_temperature")
 
-    orca = CameraShots("ORCA", frames=1, locked=("frames",))
+    orca = Device("ORCA")
 
     save_mean_image = Bool(
         True,
@@ -286,12 +333,48 @@ class LoadTweezersMOTImage(LoadTweezers):
         tooltip="record the ORCA's frame, beside the fit to it",
     )
 
-    def configure_camera(self, name: str, camera) -> None:
-        # The HamCam's EM-gain calls don't exist on the ORCA.
-        if name == "hamcam":
-            super().configure_camera(name, camera)
+    def prepare(self) -> None:
+        super().prepare()
+        self.orca_was_live = self.orca.is_live()
+        self.orca.stop_live()
+        self.orca.set_trigger_source("ext")
+        self.orca.setup_acquisition(1, mode="snap")
+        self.record("cloud_mass_amu", SPECIES_MASS_AMU["Rb"], unit="u")
 
-    def run_point(self):
-        frames = self.take_shot()
-        self.record_shot(frames)
-        self.record_cloud_fit("orca", frames["orca"])
+    def finish(self) -> None:
+        try:
+            if getattr(self, "orca_was_live", False):
+                self.orca.start_live()
+        finally:
+            super().finish()
+
+    def run_point(self) -> None:
+        self.orca.start_acquisition()
+        try:
+            hamcam_frames = self.take_shot()
+            orca_frames = np.asarray(
+                self.orca.acquire_n_frames(1, broadcast=True, header={"rid": self.rid})
+            )
+        finally:
+            self.orca.stop_acquisition()
+        self.record_tweezers(hamcam_frames)
+        self.record_cloud_fit(orca_frames)
+
+    def record_cloud_fit(self, frames: np.ndarray) -> None:
+        """Fit the mean of the ORCA's ``frames`` and record the cloud as ``orca_*``."""
+        pixel_m = get_device_config("ORCA").get("object_pixel_m")
+        # Read from the camera, which may have been set up outside this experiment.
+        binning, (x0, y0) = self.orca.frame_geometry()
+        resolution = None if pixel_m is None else (pixel_m * binning,) * 2
+        values, mean_image = fit_frames(
+            frames, None, resolution, (x0 / binning, y0 / binning)
+        )
+        length = "px" if resolution is None else "m"
+        for field, value in values.items():
+            quantity = field.removesuffix("_error")
+            unit = {"angle": "rad", "amplitude": "counts", "offset": "counts"}.get(
+                quantity, "counts" if quantity == "integral" else length
+            )
+            self.record(f"orca_{field}", value, unit=unit)
+        if self.save_mean_image:
+            self.record("orca_mean_image", mean_image, unit="counts")

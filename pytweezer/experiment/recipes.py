@@ -129,20 +129,25 @@ class RecipeStore(ModelStore):
 def unknown_arguments(request: TaskRequest, schema: dict[str, Any]) -> list[str]:
     """Argument names ``request`` uses that the experiment ``schema`` doesn't declare.
 
-    ``attribute.parameter`` names on a declared MOTMaster are left out: they
-    name script parameters, which only the device can check.
+    On an experiment with a MOTMaster, any other identifier is left out: it
+    names a script parameter, which only the device can check. Dotted names,
+    such as the ``rb.tPulse`` of older requests, never are.
     """
-    motmasters = {
-        attribute
-        for attribute, device in schema.get("devices", {}).items()
-        if device.get("motmaster") is not None
+    arguments = schema["arguments"]
+    has_motmaster = any(
+        device.get("motmaster") is not None
+        for device in schema.get("devices", {}).values()
+    )
+    declared_parameters = {
+        argument["motmaster_parameter"]
+        for argument in arguments.values()
+        if "motmaster_parameter" in argument
     }
 
     def known(name: str) -> bool:
-        attribute, dot, parameter = name.partition(".")
-        if dot and parameter and attribute in motmasters:
+        if name in arguments:
             return True
-        return name in schema["arguments"]
+        return has_motmaster and name.isidentifier() and name not in declared_parameters
 
     names = {*request.args, *(axis.argument for axis in request.scan.axes)}
     return sorted(name for name in names if not known(name))

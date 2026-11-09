@@ -5,7 +5,8 @@ Built on :class:`pytweezer.GUI.applet.Applet`.
 Right-click an ROI and choose **Copy as camera ROI** to put
 ``(x0, width, y0, height)`` on the clipboard: the region of the last frame
 under that ROI in unbinned sensor pixels, the argument order of the
-cameras' ``set_roi`` and of ``CameraShots(roi=...)``. It is worked out from
+cameras' ``set_roi`` and of the ROI arguments of
+:class:`~pytweezer.experiments.load_tweezers.LoadTweezers`. It is worked out from
 the frame header's ``roi_x0``/``roi_y0`` and ``binning``, so it is only
 meaningful on a camera's own stream.
 

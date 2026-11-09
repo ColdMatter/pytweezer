@@ -859,7 +859,7 @@ def load_before_fetch(qapp, request):
         kinds = {name: row.schema["kind"] for name, row in editor.rows.items()}
     finally:
         source.release.set()
-    assert until(lambda: editor.motmaster_boxes["rb"].defaults, qapp=qapp)
+    assert until(lambda: editor.motmaster_box.defaults, qapp=qapp)
     return editor, kinds
 
 
@@ -868,7 +868,7 @@ def test_script_parameters_are_fetched_once_and_added_from_the_search(qapp):
     editor = sequenced_editor(source)
     editor.set_experiment(SEQUENCED)
     assert source.calls == [("Rb MotMaster", "RbTweezerBasic")]
-    box = editor.motmaster_boxes["rb"]
+    box = editor.motmaster_box
     assert box.defaults == {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5}
     offered = [label.split(" · ")[0] for label in box.completer.model().stringList()]
     assert offered == ["tDelay1", "coil_current"], "tPulse is declared as pulse"
@@ -882,21 +882,21 @@ def test_script_parameters_are_fetched_once_and_added_from_the_search(qapp):
     QTest.keyClick(box.completer.popup(), QtCore.Qt.Key.Key_Return)
     editor.close()
     assert box.search.text() == ""
-    row = editor.rows["rb.tDelay1"]
+    row = editor.rows["tDelay1"]
     assert row.schema["kind"] == "integer" and row.value.value() == 5
-    assert editor.request().args == {"pulse": 1e-6, "rb.tDelay1": 5}
+    assert editor.request().args == {"pulse": 1e-6, "tDelay1": 5}
 
 
 def test_a_searched_parameter_can_be_scanned_removed_and_reset(qapp):
     editor = sequenced_editor(Source(PARAMETERS))
-    box = editor.motmaster_boxes["rb"]
+    box = editor.motmaster_box
     box.choose("coil_current")
-    row = editor.rows["rb.coil_current"]
+    row = editor.rows["coil_current"]
     assert row.schema["kind"] == "number" and row.value.value() == 1.5
     row.scan_button.setChecked(True)
-    assert [axis.argument for axis in editor.request().scan.axes] == ["rb.coil_current"]
+    assert [axis.argument for axis in editor.request().scan.axes] == ["coil_current"]
     row.remove_button.click()
-    assert "rb.coil_current" not in editor.rows
+    assert "coil_current" not in editor.rows
     assert editor.request().scan.axes == []
     assert editor.point_count.text() == "1 point"
 
@@ -909,26 +909,41 @@ def test_load_request_restores_searched_rows_and_flags_missing_ones(qapp):
     editor = sequenced_editor(Source(PARAMETERS))
     editor.load_request(
         sequenced_request(
-            {"rb.tDelay1": 9, "rb.gone": 1.5},
-            [LinearAxis(argument="rb.coil_current", start=0, stop=2, n=3)],
+            {"tDelay1": 9, "gone": 1.5},
+            [LinearAxis(argument="coil_current", start=0, stop=2, n=3)],
         )
     )
-    assert editor.rows["rb.tDelay1"].value.value() == 9
-    assert editor.rows["rb.coil_current"].scanning
-    assert "not in script" in editor.rows["rb.gone"].label.toolTip()
-    assert "not in script" not in editor.rows["rb.tDelay1"].label.toolTip()
-    assert editor.request().args == {"pulse": 1e-6, "rb.tDelay1": 9, "rb.gone": 1.5}
+    assert editor.rows["tDelay1"].value.value() == 9
+    assert editor.rows["coil_current"].scanning
+    assert "not in script" in editor.rows["gone"].label.toolTip()
+    assert "not in script" not in editor.rows["tDelay1"].label.toolTip()
+    assert editor.request().args == {"pulse": 1e-6, "tDelay1": 9, "gone": 1.5}
+
+
+def test_load_request_leaves_out_the_dotted_names_of_older_requests(qapp):
+    editor = sequenced_editor(Source(PARAMETERS))
+    editor.load_request(
+        sequenced_request({"rb.tDelay1": 9, "hamcam.gain": 600, "coil_current": 2})
+    )
+    assert set(editor.rows) == {"pulse", "coil_current"}
+    assert editor.request().args == {"pulse": 1e-6, "coil_current": 2.0}
+
+
+def test_a_script_parameter_named_like_an_argument_is_not_offered(qapp):
+    editor = sequenced_editor(Source(PARAMETERS | {"pulse": 2.0}))
+    offered = editor.motmaster_box.completer.model().stringList()
+    assert not any(label.startswith("pulse") for label in offered)
 
 
 def test_an_unreachable_sequencer_shows_the_error_and_a_retry(qapp):
     source = Source(error="no route to host")
     editor = sequenced_editor(source)
-    box = editor.motmaster_boxes["rb"]
+    box = editor.motmaster_box
     assert "no route to host" in box.status.text()
     assert not box.retry.isHidden()
-    with pytest.raises(ValueError, match="rb.tDelay1"):
-        editor.add_motmaster_row("rb", "tDelay1")
-    assert "rb.tDelay1" not in editor.rows
+    with pytest.raises(ValueError, match="tDelay1"):
+        editor.add_motmaster_row("tDelay1")
+    assert "tDelay1" not in editor.rows
 
     source.error, source.parameters = None, PARAMETERS
     box.retry.click()
@@ -959,27 +974,27 @@ def test_the_panel_reads_simulated_sequencers_when_the_manager_simulates(qapp):
 
 
 def test_rows_restored_before_the_fetch_are_retyped_from_the_script(qapp):
-    axis = LinearAxis(argument="rb.tDelay1", start=0, stop=4, n=5)
+    axis = LinearAxis(argument="tDelay1", start=0, stop=4, n=5)
     editor, kinds_before = load_before_fetch(
-        qapp, sequenced_request({"rb.coil_current": 2}, [axis])
+        qapp, sequenced_request({"coil_current": 2}, [axis])
     )
-    assert kinds_before["rb.tDelay1"] == "number"
-    assert kinds_before["rb.coil_current"] == "integer"
+    assert kinds_before["tDelay1"] == "number"
+    assert kinds_before["coil_current"] == "integer"
 
-    delay, current = editor.rows["rb.tDelay1"], editor.rows["rb.coil_current"]
+    delay, current = editor.rows["tDelay1"], editor.rows["coil_current"]
     assert (delay.schema["kind"], delay.schema["default"]) == ("integer", 5)
     assert (current.schema["kind"], current.schema["default"]) == ("number", 1.5)
     assert delay.scanning and editor.request().scan.axes == [axis]
     assert current.value.value() == 2.0
-    assert editor.request().args == {"pulse": 1e-6, "rb.coil_current": 2.0}
+    assert editor.request().args == {"pulse": 1e-6, "coil_current": 2.0}
 
 
 def test_a_non_whole_value_for_an_integer_parameter_is_kept_and_reported(qapp):
-    axis = LinearAxis(argument="rb.tDelay1", start=0, stop=2.5, n=2)
+    axis = LinearAxis(argument="tDelay1", start=0, stop=2.5, n=2)
     editor, _ = load_before_fetch(qapp, sequenced_request(axes=[axis]))
-    row = editor.rows["rb.tDelay1"]
+    row = editor.rows["tDelay1"]
     assert row.schema["default"] == 5 and row.scan.stop.value() == 2.5
-    with pytest.raises(ValueError, match="rb.tDelay1 is an integer parameter"):
+    with pytest.raises(ValueError, match="tDelay1 is an integer parameter"):
         editor.request()
 
 
@@ -991,20 +1006,20 @@ def test_an_integer_parameter_scans_in_whole_steps_but_a_draft_keeps_any(qapp):
     editor.set_parameter_source(Source(PARAMETERS))
     editor.set_experiment(SEQUENCED)
     panel._current_key = (SEQUENCED["module"], "Sequenced")
-    editor.motmaster_boxes["rb"].choose("tDelay1")
-    row = editor.rows["rb.tDelay1"]
+    editor.motmaster_box.choose("tDelay1")
+    row = editor.rows["tDelay1"]
     row.scan_button.setChecked(True)
     row.scan.start.set_value(0)
     row.scan.stop.set_value(5)
     row.scan.steps.setValue(3)
-    message = "rb.tDelay1 is an integer parameter: 0 to 5 in 3 steps gives non-whole"
+    message = "tDelay1 is an integer parameter: 0 to 5 in 3 steps gives non-whole"
     with pytest.raises(ValueError, match=message):
         editor.request()
     editor.submit_button.click()
     assert commands(client, "submit") == []
     assert "non-whole" in editor.error.text()
     panel._save_draft()
-    assert panel._drafts[panel._current_key].scan.axes[0].argument == "rb.tDelay1"
+    assert panel._drafts[panel._current_key].scan.axes[0].argument == "tDelay1"
 
     row.scan.stop.set_value(4)
     row.scan.steps.setValue(5)

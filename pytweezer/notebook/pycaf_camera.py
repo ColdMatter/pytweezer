@@ -17,6 +17,7 @@ MOTMaster's (``Rb{ddMMMyy}{batch}_{nnn}.zip`` for the default ``key``) and
 returns them, one stack per run, then starts afresh for the next scan.
 """
 
+import json
 import re
 import warnings
 from dataclasses import dataclass
@@ -29,8 +30,16 @@ import numpy as np
 from pytweezer.drivers.shot_frames import settle_frame_counts
 from pytweezer.logging_utils import get_logger
 from pytweezer.notebook import zips
+from pytweezer.servers.device_client import get_device_config
 
 logger = get_logger("notebook pycaf camera")
+
+
+def _motmaster_file_config(name: str) -> dict[str, Any]:
+    from pytweezer.drivers.motmaster import CONFIG_DIR
+
+    with open(CONFIG_DIR / get_device_config(name)["config_file"]) as file:
+        return json.load(file)
 
 
 @dataclass
@@ -76,8 +85,6 @@ class PycafCamera:
         frame_poll_s: float = 0.05,
     ) -> None:
         if element is None or data_root is None:
-            from pytweezer.notebook.rig import _motmaster_file_config
-
             file_config = _motmaster_file_config(motmaster)
             element = element or file_config["data_prefix"]
             data_root = data_root or file_config["data_root_path"]

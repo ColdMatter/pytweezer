@@ -204,7 +204,7 @@ Load a skill when you need more than that:
 | Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Writing or accepting an optimiser (`StagedScan`, `BayesianOptimisation`, `Fit`), the Optimisers tab | `add-optimiser` |
-| Running shots, scans or auto-tune from a lab-book notebook (`Rig`), MOTMaster zips | `notebook-rig` |
+| Saving a camera's frames with pycaf MOTMaster runs from a lab-book notebook (`PycafCamera`), MOTMaster zips | `notebook-rig` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 | Writing, reviewing or deleting tests | `write-tests` |
 | MOTMaster channels (which board/port/line a signal is on), scripts, the C# side | Read `../EDMSuite/.claude/skills/motmaster-controller/SKILL.md` — EDMSuite skills don't load from here. Channel maps: `../EDMSuite/DAQ/MoleculeMOTHardware.cs` (CaF), `../EDMSuite/DAQ/RbTweezerHardware.cs` (Rb) |

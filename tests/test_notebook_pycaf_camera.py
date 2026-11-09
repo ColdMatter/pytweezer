@@ -5,8 +5,78 @@ import numpy as np
 import pytest
 
 from pytweezer.notebook import PycafCamera, zips
-from tests.test_notebook_rig import MONTHS, FakeCamera
 from tests.test_notebook_zips import fake_motmaster_zip, read_zip_like_analysis3
+
+MONTHS = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+]
+
+
+class FakeCamera:
+    """Gains ``frames_per_iteration`` frames per MOTMaster iteration when triggered.
+
+    With ``lag_polls``, the last frame of a shot only shows up after that many more
+    ``frames_acquired()`` calls, as a frame still in transit would.
+    """
+
+    def __init__(self, frames_per_iteration, lag_polls=0, shape=(4, 5)):
+        self.frames_per_iteration = frames_per_iteration
+        self.lag_polls = lag_polls
+        self.shape = shape
+        self.count = 0
+        self.late = 0
+        self.polls_until_late = 0
+        self.live_buffer = None
+        self.live_starts = 0
+        self.value = lambda index: index
+
+    def start_live(self, buffer_frames=1000):
+        self.live_buffer = buffer_frames
+        self.live_starts += 1
+
+    def close_rpc(self):
+        self.closed = True
+
+    def trigger(self, iterations):
+        n = self.frames_per_iteration * iterations
+        if self.lag_polls and n:
+            self.count += n - 1
+            self.late, self.polls_until_late = 1, self.lag_polls
+        else:
+            self.count += n
+
+    def frames_acquired(self):
+        if self.late:
+            if self.polls_until_late == 0:
+                self.count += self.late
+                self.late = 0
+            else:
+                self.polls_until_late -= 1
+        return self.count
+
+    def read_frames_from(self, start):
+        if start >= self.count:
+            return np.empty((0, 0, 0), dtype=np.uint16)
+        return np.stack(
+            [
+                np.full(self.shape, self.value(index), dtype=np.uint16)
+                for index in range(start, self.count)
+            ]
+        )
+
+    def settings(self):
+        return {"fake": True}
 
 
 class FakeHamCam(FakeCamera):

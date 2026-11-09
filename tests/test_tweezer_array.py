@@ -5,7 +5,7 @@ from pytweezer.analysis import analysis as an
 from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
-from pytweezer.experiment import Scan, motmaster, optimisers, run_local
+from pytweezer.experiment import ListAxis, Scan, motmaster, optimisers, run_local
 from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiments.load_tweezers import LoadTweezers, LoadTweezersMOTImage
 from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
@@ -42,6 +42,7 @@ ONE_POINT = {
 class FakeSequencer:
     def __init__(self):
         self.goes = []
+        self.fail = False
 
     def close_rpc(self):
         pass
@@ -57,13 +58,40 @@ class FakeSequencer:
         return dict(SIMULATED_SCRIPT_PARAMETERS["RbTweezerBasic2026_2"])
 
     def start_motmaster_experiment(self, parameters):
+        if self.fail:
+            raise RuntimeError("MOTMaster refused")
         self.goes.append(parameters)
 
 
-class FakeHamCam:
+class RecordingCamera:
+    """Records every set-up call, in order, as ``(method, args)``."""
+
+    live = False
+
+    def __init__(self):
+        self.calls = []
+
+    def close_rpc(self):
+        pass
+
+    def is_live(self):
+        return self.live
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def call(*args, **kwargs):
+            self.calls.append((name, (*args, *kwargs.values())))
+
+        return call
+
+
+class FakeHamCam(RecordingCamera):
     """Images the array twice per shot; turning the tweezers off empties the second frame."""
 
     def __init__(self, sequencer):
+        super().__init__()
         self.sequencer = sequencer
         self.headers = []
         self.rng = np.random.default_rng(1)
@@ -72,27 +100,11 @@ class FakeHamCam:
             [2000 * np.exp(-((y - sy) ** 2 + (x - sx) ** 2) / 4.5) for sy, sx in SITES]
         )
 
-    def close_rpc(self):
-        pass
-
     def set_roi(self, x0, width, y0, height):
+        self.calls.append(("set_roi", (x0, width, y0, height)))
         return self.roi_origin
 
     roi_origin = (ROI_ORIGIN[1], ROI_ORIGIN[0])
-
-    def set_external_exposure_mode(self): ...
-    def enable_em_gain(self, on): ...
-    def enable_direct_em_gain(self, on): ...
-    def set_trigger_source(self, source): ...
-    def set_binning(self, binning): ...
-    def set_gain(self, gain): ...
-    def setup_acquisition(self, nframes, mode="sequence"): ...
-    def start_acquisition(self): ...
-    def stop_acquisition(self): ...
-    def stop_live(self): ...
-
-    def is_live(self):
-        return False
 
     def _frame(self, occupied):
         atoms = np.tensordot(occupied, self.spots, axes=1)
@@ -108,10 +120,11 @@ class FakeHamCam:
         return self._frame(loaded), self._frame(kept)
 
 
-class FakeORCA:
+class FakeORCA(RecordingCamera):
     """Images a Gaussian MOT of widths (6, 4) px on every shot; has no EM gain."""
 
     def __init__(self):
+        super().__init__()
         self.headers = []
         y, x = np.mgrid[:60, :80]
         self.frame = (
@@ -119,21 +132,8 @@ class FakeORCA:
             + 200 * np.exp(-((x - 40) ** 2 / (2 * 6**2) + (y - 30) ** 2 / (2 * 4**2)))
         ).astype(np.uint16)
 
-    def close_rpc(self):
-        pass
-
-    def set_external_exposure_mode(self): ...
-    def set_trigger_source(self, source): ...
-    def setup_acquisition(self, nframes, mode="sequence"): ...
-    def start_acquisition(self): ...
-    def stop_acquisition(self): ...
-    def stop_live(self): ...
-
     def frame_geometry(self):
         return 1, (0, 0)
-
-    def is_live(self):
-        return False
 
     def acquire_n_frames(self, n, broadcast=False, header=None):
         self.headers.append(header)
@@ -184,10 +184,11 @@ def rig(monkeypatch):
     rearrangement_rig = FakeRig()
     sequencer.rearrangement_rig = rearrangement_rig
     sequencer.camera = FakeHamCam(sequencer)
+    sequencer.orca = FakeORCA()
     devices = {
         "Rb MotMaster": sequencer,
         "Rb HamCam": sequencer.camera,
-        "ORCA": FakeORCA(),
+        "ORCA": sequencer.orca,
         "Rb Rearrangement Rig": rearrangement_rig,
     }
     monkeypatch.setattr(
@@ -301,7 +302,7 @@ def test_every_shot_broadcasts_its_frames_tagged_with_the_task(rig):
 def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(
     rig, experiment, args
 ):
-    run_local(experiment, **args, **{"rb.tMolCoolVCO1": 7.5})
+    run_local(experiment, **args, tMolCoolVCO1=7.5)
     expected = {
         parameter: SAVED[key] for parameter, key in LoadTweezers.rb.saved.items()
     } | {"tMolCoolVCO1": 7.5}
@@ -596,3 +597,54 @@ def test_mot_image_variant_offers_the_cloud_analyses_after_the_tweezer_ones(rig)
         "cloud_fit",
         "cloud_temperature",
     ]
+
+
+def test_load_tweezers_sets_the_hamcam_up_for_two_triggered_frames(rig):
+    run_local(LoadTweezers)
+    assert rig.camera.calls[:9] == [
+        ("stop_live", ()),
+        ("set_binning", (1,)),
+        ("set_roi", (110, 256, 220, 256)),
+        ("set_trigger_source", ("ext",)),
+        ("set_external_exposure_mode", ()),
+        ("enable_em_gain", (True,)),
+        ("enable_direct_em_gain", (True,)),
+        ("set_gain", (600,)),
+        ("setup_acquisition", (2, "snap")),
+    ]
+
+
+def test_a_scanned_gain_is_sent_before_each_shot_that_changes_it(rig):
+    scan = Scan(axes=[ListAxis(argument="hamcam_gain", values=[600, 600, 300])])
+    measurement = run_local(LoadTweezers, scan)
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    gains = [args for name, args in rig.camera.calls if name == "set_gain"]
+    assert gains == [(600,), (300,)]
+
+
+@pytest.mark.parametrize(
+    "argument",
+    ["hamcam_roi_x0", "hamcam_roi_width", "hamcam_roi_y0", "hamcam_roi_height"],
+)
+def test_the_roi_cannot_be_scanned(rig, argument):
+    scan = Scan(axes=[ListAxis(argument=argument, values=[100, 120])])
+    with pytest.raises(ValueError, match=f"{argument} cannot be scanned"):
+        run_local(LoadTweezers, scan)
+    assert rig.goes == []
+
+
+@pytest.mark.parametrize("cls", [LoadTweezers, LoadTweezersMOTImage])
+def test_a_failed_shot_stops_the_cameras_and_puts_live_ones_back_in_live(rig, cls):
+    rig.camera.live = rig.orca.live = True
+    rig.fail = True
+    measurement = run_local(cls)
+    assert measurement.status == "failed"
+    cameras = [rig.camera, rig.orca] if cls is LoadTweezersMOTImage else [rig.camera]
+    for camera in cameras:
+        names = [name for name, _ in camera.calls]
+        assert names[-2:] == ["stop_acquisition", "start_live"]
+
+
+def test_mot_image_variant_records_the_rb_mass(rig):
+    measurement = run_local(LoadTweezersMOTImage)
+    assert measurement.constants["cloud_mass_amu"] == pytest.approx(86.909)
