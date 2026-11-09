@@ -1,11 +1,14 @@
 import numpy as np
 import pyqtgraph as pg
+import pytest
 from PyQt6 import QtCore
 
+from pytweezer.GUI.viewers import tweezer_monitor
 from pytweezer.GUI.viewers.tweezer_monitor import (
     SiteOverlay,
     sites_from_saved,
 )
+from tests.test_image_monitor import fake_hubs
 
 SITES = np.array([[10.0, 12.0], [10.0, 22.0], [30.0, 12.0]])
 ROI = {"roi_x0": 50, "roi_y0": 100}
@@ -76,3 +79,65 @@ def test_without_saved_sites_there_are_no_squares_and_a_message_says_why(qapp):
     overlay.place(image, ROI)
     assert len(overlay.squares.points()) == 0
     assert "FindTrapSites" in overlay.message.toPlainText()
+
+
+class FakeFeed(QtCore.QObject):
+    queue_changed = QtCore.pyqtSignal(dict)
+
+    def close(self):
+        pass
+
+
+@pytest.fixture
+def monitor(qapp, monkeypatch):
+    """A Tweezer Monitor with no hubs, Properties or Experiment Manager behind it."""
+    fake_hubs(monkeypatch)
+    monkeypatch.setattr(tweezer_monitor, "ExperimentFeed", FakeFeed)
+    monkeypatch.setattr(tweezer_monitor, "get_saved_parameters", lambda: SAVED)
+    return tweezer_monitor.TweezerDisplay("Test Tweezer Monitor")
+
+
+ATOMS = np.full((64, 48), 100.0)
+ATOMS[10, 12] = ATOMS[30, 12] = 900.0
+BACKGROUND = np.full((64, 48), 100.0)
+BACKGROUND[0, 0] = 110.0
+
+
+def broadcast_shot(monitor, *frames, **head):
+    for index, frame in enumerate(frames):
+        monitor.imgstream.queue.append(("cam", ROI | head | {"index": index}, frame))
+    monitor.poll()
+
+
+def test_a_shots_two_images_are_shown_side_by_side(monitor):
+    broadcast_shot(monitor, ATOMS, BACKGROUND, rid=7)
+
+    np.testing.assert_array_equal(monitor.image_item.image, ATOMS)
+    np.testing.assert_array_equal(monitor.second_item.image, BACKGROUND)
+
+
+def test_the_second_image_is_drawn_at_the_first_images_levels(monitor):
+    broadcast_shot(monitor, ATOMS, BACKGROUND, rid=7)
+    assert monitor.second_item.getLevels() == pytest.approx(
+        monitor.image_item.getLevels()
+    )
+
+    monitor.lut.setLevels(0.0, 2000.0)
+
+    assert monitor.second_item.getLevels() == pytest.approx([0.0, 2000.0])
+
+
+def test_live_frames_outside_a_shot_all_go_to_the_first_image(monitor):
+    broadcast_shot(monitor, ATOMS, BACKGROUND)
+
+    np.testing.assert_array_equal(monitor.image_item.image, BACKGROUND)
+    assert monitor.second_item.image is None
+
+
+def test_both_images_pan_and_zoom_together_with_the_sites_on_each(monitor):
+    broadcast_shot(monitor, ATOMS, BACKGROUND, rid=7)
+    monitor.plot.getViewBox().setRange(xRange=(5, 25), yRange=(5, 35), padding=0)
+
+    (x_range, y_range) = monitor.second_plot.getViewBox().viewRange()
+    assert x_range == pytest.approx([5, 25], abs=1)
+    assert len(monitor.second_overlay.squares.points()) == len(SITES)
