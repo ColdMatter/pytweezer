@@ -200,8 +200,8 @@ class LoadTweezers(MotMasterExperiment):
 
         Also sets ``trap_window_size``, ``trap_feature_size`` and
         ``trap_threshold`` from ``saved``. Sites fitted to another
-        array than the rig has on the SLM are refused; if the rig does not know
-        its array, or cannot be reached, the saved sites are used unchecked.
+        array than the rig has on the SLM are used with a warning; if the rig
+        does not know its array, or cannot be reached, they are used unchecked.
         """
         if any(key not in saved for key in TRAP_SITE_KEYS):
             return None, (
@@ -215,9 +215,10 @@ class LoadTweezers(MotMasterExperiment):
         if array and not same_geometry(
             saved["trap_geometry"], array["x_um"], array["y_um"]
         ):
-            return None, (
-                "the saved trap sites were fitted to another array than the rig "
-                "has on the SLM; run FindTrapSites again and accept its proposal"
+            logger.warning(
+                "The saved trap sites were fitted to another array than the rig "
+                "has on the SLM; using them anyway. Run FindTrapSites again and "
+                "accept its proposal to fit the current array."
             )
         self.trap_window_size = int(saved["trap_window_size"])
         self.trap_feature_size = int(saved["trap_feature_size"])

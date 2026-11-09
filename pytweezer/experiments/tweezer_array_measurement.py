@@ -16,8 +16,7 @@ class TweezerArrayMeasurement(LoadTweezers):
 
     The trap sites, summing window, top-hat size and occupancy threshold are
     those accepted from :class:`~pytweezer.optimisers.find_trap_sites.FindTrapSites`; a measurement refuses to run
-    without them, or when they were fitted to another array than the rig has
-    on the SLM.
+    without them.
     """
 
     shots = Integer(20, min=1, group="Analysis", tooltip="shots per point")

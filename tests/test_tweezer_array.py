@@ -269,7 +269,7 @@ def test_a_measurement_refuses_without_saved_sites(rig):
     assert "FindTrapSites" in measurement.attrs["error"]
 
 
-def test_a_measurement_refuses_sites_fitted_to_another_array(rig):
+def test_sites_fitted_to_another_array_are_used_with_a_warning(rig, caplog):
     x_um, y_um = default_geometry().T
     rig.rearrangement_rig.array = {
         "sites": len(SITES),
@@ -277,8 +277,9 @@ def test_a_measurement_refuses_sites_fitted_to_another_array(rig):
         "y_um": y_um,
     }
     measurement = run_local(ArrayBatch, **FAST)
-    assert measurement.status == "failed"
-    assert "another array" in measurement.attrs["error"]
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    np.testing.assert_array_equal(measurement.constants["trap_sites"], SITES)
+    assert "another array" in caplog.text
 
 
 def test_a_measurement_refuses_a_site_whose_window_leaves_the_roi(rig):
