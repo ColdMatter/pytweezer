@@ -56,25 +56,45 @@ jobs:
               return open;
             }
 
+            // GitHub keeps at most 1000 statuses per SHA and context, and the
+            // schedule would otherwise post one every 15 minutes.
+            async function unchanged(sha, state, description) {
+              const { data } = await github.rest.repos.getCombinedStatusForRef({
+                owner, repo, ref: sha, per_page: 100,
+              });
+              const latest = data.statuses.find((s) => s.context === "dependencies");
+              return latest?.state === state && latest?.description === description;
+            }
+
             async function update(pr) {
               const open = await blockers(pr.body);
-              const description = open.length
+              const state = open.length ? "failure" : "success";
+              const description = (open.length
                 ? `Waiting on ${open.join(", ")}`
-                : "No unmerged dependencies";
+                : "No unmerged dependencies").slice(0, 140);
+              if (await unchanged(pr.head.sha, state, description)) {
+                core.info(`#${pr.number}: ${description} (unchanged)`);
+                return;
+              }
               await github.rest.repos.createCommitStatus({
                 owner, repo, sha: pr.head.sha,
-                state: open.length ? "failure" : "success",
-                context: "dependencies",
-                description: description.slice(0, 140),
+                state, context: "dependencies", description,
               });
               core.info(`#${pr.number}: ${description}`);
             }
 
-            if (context.eventName === "pull_request") {
-              await update(context.payload.pull_request);
-            } else {
-              const prs = await github.paginate(github.rest.pulls.list, {
-                owner, repo, state: "open", per_page: 100,
-              });
-              for (const pr of prs) await update(pr);
+            const prs = context.eventName === "pull_request"
+              ? [context.payload.pull_request]
+              : await github.paginate(github.rest.pulls.list, {
+                  owner, repo, state: "open", per_page: 100,
+                });
+            const failed = [];
+            for (const pr of prs) {
+              try {
+                await update(pr);
+              } catch (error) {
+                core.error(`#${pr.number}: ${error.message}`);
+                failed.push(`#${pr.number}`);
+              }
             }
+            if (failed.length) core.setFailed(`Could not update ${failed.join(", ")}`);
