@@ -954,7 +954,13 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             yield frame.get() if to_host else frame
 
     def plan_rearrangement(
-        self, terms1, terms2, occ_mask, d0=0.5, profile="minimum_jerk"
+        self,
+        terms1,
+        terms2,
+        occ_mask,
+        d0=0.5,
+        profile="minimum_jerk",
+        background=None,
     ):
         if profile not in ("minimum_jerk", "linear"):
             raise ValueError(
@@ -1019,7 +1025,11 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         dw[off_mask] = 0.0
         curr_w[off_mask] = 0.0
 
-        static_background = self.superimpose([self.fresnel, self.blaze, self.zernike])
+        static_background = (
+            self.superimpose([self.fresnel, self.blaze, self.zernike])
+            if background is None
+            else background
+        )
 
         # The trailing fancy-index writes and the background superposition are
         # async launches. Without this sync their GPU tail would land on frame 0
@@ -1053,6 +1063,35 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             "pos_final": pos_final,
             "n_targets": int(pos2.shape[0]),
         }
+
+    def iter_planned_sequence(self, plan, *, to_host=False, pupil=None):
+        """Yield one uint8 frame per step of ``plan``.
+
+        ``pupil=(inside, dump)`` keeps each composite phase inside the pupil
+        and replaces the rest with the dump grating.
+        """
+        dw, dphi = plan["dw"], plan["dphi"]
+        total_dx, total_dy = plan["total_dx"], plan["total_dy"]
+        curr_w, curr_phi = plan["curr_w"], plan["curr_phi"]
+        curr_x, curr_y = plan["curr_x"], plan["curr_y"]
+        for ds in plan["ds_profile_cpu"][: plan["n_steps"]]:
+            update_state_kernel_linear(
+                dw,
+                dphi,
+                total_dx,
+                total_dy,
+                float(ds),
+                curr_w,
+                curr_phi,
+                curr_x,
+                curr_y,
+            )
+            pm_slm = self.generate_phasemask((curr_w, curr_phi, curr_x, curr_y))
+            composite = self.superimpose([pm_slm, plan["static_background"]])
+            if pupil is not None:
+                composite = cp.where(pupil[0], composite, pupil[1])
+            frame = self.transform_phase_8bit(composite)
+            yield frame.get() if to_host else frame
 
     def iter_rearrangement_sequence_timings(self, plan, to_host=False):
         dw, dphi = plan["dw"], plan["dphi"]

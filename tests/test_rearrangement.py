@@ -60,6 +60,8 @@ def fake_gpu(monkeypatch):
             "x_um": x_um.ravel(),
             "y_um": y_um.ravel(),
             "weights": np.ones(rows * columns),
+            "phases": np.zeros(rows * columns),
+            "optimised_weights": np.ones(rows * columns),
         }
 
     monkeypatch.setattr(rearrangement, "_HAS_CUPY", True)
