@@ -423,6 +423,25 @@ The Rb tweezer experiments, in the order a session uses them:
    point, and `save_raw_images` (off by default there) records
    `hamcam_images`, `(shots, 2, H, W)` per point. They declare no analyses; `LoadTweezers`
    itself keeps one shot per point, which the default analyses expect.
+5. `RearrangeTweezers` (`rearrange_tweezers.py`, a `LoadTweezers`) runs after
+   `SlmTweezerArray` and `FindTrapSites`: it moves the loaded atoms into a
+   `kagome` or `square` target array (the `target_*` arguments, not scannable;
+   `d0`, `profile` and `arm_delay` are). `prepare()` refuses without the array
+   on the SLM (`rig.get_array()`), without saved trap sites, when the affine map
+   from the array's trap positions to the sites fits worse than half the
+   summing window (`affine_residual_px`), or when a target site leaves the ROI;
+   it then has the rig build the target (`rig.prepare_rearrangement(...)`) and
+   needs the GPU host (no GPU fails in `prepare`). One shot per point:
+   `run_parallel(rig.rearrange, after(arm_delay, run_sequences))`, because
+   `rearrange` blocks until the HamCam's occupancy frame arrives, and the
+   Assemble script fires MOTMaster `arm_delay` after the rig is asked. The
+   HamCam takes three frames: occupancy, then two of the target array. Records:
+   `occupied`, `loading`, `destination` (target index per initial site, -1 for
+   none), `target_filled_1`/`_2`, `fill_fraction_1`/`_2`, `n_frames`, the rig's
+   `occupancy_ms`/`calculation_and_upload_ms`/`total_rearrangement_ms`,
+   `rearrangement_images` with `save_raw_images`, and (once, from `prepare`)
+   `target_sites`, `target_x_um`/`_y_um`, `target_weights` and
+   `affine_residual_px`. `analyses = ()`.
 
 Shots broadcast their HamCam frames with `header={"rid": self.rid}`; the live
 tweezer loading analysis (`analysis/tweezer_loading.py`) starts afresh whenever

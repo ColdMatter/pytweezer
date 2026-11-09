@@ -128,6 +128,13 @@ to release the backends before they are torn down.
 `pytweezer/coordinators/rearrangement.py` is the real worked example (the
 `Rb Rearrangement Rig`); `transport.py` is an unconfigured variant of it.
 
+The rig's queued path is `prepare_rearrangement(...)` (once, builds the target
+array on the one `make_array` made) and `rearrange(d0_um=, profile=, header=)`
+(one shot). `rearrange` is one synchronous call that blocks the rig server
+while it waits for the HamCam's occupancy frame, so an experiment runs it in
+parallel with MOTMaster's Go (`run_parallel`, with `RearrangeTweezers.arm_delay`
+between the two) rather than before it.
+
 Three constraints, all consequences of how sipyco serves targets:
 
 - **Every public method is a synchronous RPC method that stalls the entire

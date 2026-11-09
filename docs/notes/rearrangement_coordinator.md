@@ -92,6 +92,38 @@ static background all live in `generate_rearrangement_sequence`
 The occupancy high-pass uses `analysis.morphological_tophat_high_pass` (a
 `scipy.ndimage.white_tophat`).
 
+## The queued path: `prepare_rearrangement` / `rearrange`
+
+`RearrangeTweezers` (an `Experiment`, see the add-experiment skill) uses a
+second pair of methods beside `initialise`/`arm_rearrangement`:
+
+```python
+coord.make_array(...)  # SlmTweezerArray; the rig remembers its terms and layers
+coord.prepare_rearrangement(kind=..., occupancy_sites=..., ...)  # once, in prepare()
+shot = coord.rearrange(d0_um=0.5, profile="minimum_jerk", header={"rid": rid})  # per point
+```
+
+It differs from the notebook path in that:
+
+- The caller sends no phase masks or terms. The target terms are optimised on
+  the rig, with the generator, envelope and blaze `make_array` used
+  (`array_hologram.target_terms`).
+- The terms are numpy arrays, not an in-process phase-mask generator's objects.
+- The move's frames are built on the displayed mask's own background (Fresnel
+  lens, blaze, Zernike: `background_phase`) and pupil (`pupil_arrays`), passed
+  to `plan_rearrangement(..., background=)` and
+  `iter_planned_sequence(plan, pupil=)`, so the SLM keeps showing what
+  `make_array` showed.
+- A later `make_array` or `initialise` clears the prepared shot, and
+  `rearrange` refuses once anything else has written the SLM.
+- One call is the whole shot: it reads the occupancy frame (blocking the rig
+  server until it arrives), plays the move, reads the follow-up frames and puts
+  the initial array back. It returns the frames, `occupied`, `destination` and
+  the timings. The experiment therefore runs it in parallel with MOTMaster's Go.
+
+`initialise`/`arm_rearrangement*` are unchanged and still serve the RnD
+notebooks, which need that in-process generator.
+
 ## Remaining optimisation (do later): hardware-triggered playback
 
 `SLM.run_sequence` is **software-timed** — it writes each frame and sleeps `1/fps`.
