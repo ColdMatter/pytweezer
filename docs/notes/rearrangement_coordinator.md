@@ -108,7 +108,8 @@ It differs from the notebook path in that:
 - The caller sends no phase masks or terms. The target terms are optimised on
   the rig, with the generator, envelope and blaze `make_array` used
   (`array_hologram.target_terms`).
-- The terms are numpy arrays, not an in-process phase-mask generator's objects.
+- The rig keeps the array's optimised terms from `make_array` as numpy arrays,
+  and the generator converts them, so no `phasemask_generator` role is needed.
 - The move's frames are built on the displayed mask's own background (Fresnel
   lens, blaze, Zernike: `background_phase`) and pupil (`pupil_arrays`), passed
   to `plan_rearrangement(..., background=)` and

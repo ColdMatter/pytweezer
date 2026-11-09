@@ -24,10 +24,18 @@ def fit_affine(from_xy: np.ndarray, to_xy: np.ndarray) -> tuple[np.ndarray, floa
     Returns:
         The ``(3, 2)`` matrix for :func:`apply_affine`, and the RMS distance
         between ``to_xy`` and the mapped ``from_xy``.
+
+    Raises:
+        ValueError: ``from_xy`` are collinear, so they fix no map of the plane.
     """
     from_xy = np.asarray(from_xy, dtype=float)
     to_xy = np.asarray(to_xy, dtype=float)
-    matrix = np.linalg.lstsq(_homogeneous(from_xy), to_xy, rcond=None)[0]
+    matrix, _, rank, _ = np.linalg.lstsq(_homogeneous(from_xy), to_xy, rcond=None)
+    if rank < 3:
+        raise ValueError(
+            "the array's traps are collinear, so they cannot place a target "
+            "array off their line on the camera"
+        )
     misfit = apply_affine(matrix, from_xy) - to_xy
     return matrix, float(np.sqrt((misfit**2).sum(axis=1).mean()))
 
@@ -60,6 +68,11 @@ class RearrangeTweezers(LoadTweezers):
     and the rig's timings in ms. With ``save_raw_images`` the three frames are
     ``rearrangement_images``; with ``save_tweezer_counts`` the raw window sums
     are ``initial_counts`` (frame 0) and ``target_counts`` (frames 1 and 2).
+    Once per run it records the initial array's ``array_x_um``/``array_y_um``,
+    the fitted ``um_to_px`` (a :func:`fit_affine` matrix taking µm to HamCam
+    ``(x, y)`` ROI pixels) and its ``affine_residual_px``, and the target's
+    ``target_sites``, ``target_x_um``/``target_y_um``, ``target_weights`` and
+    uniformity figures.
     """
 
     rb = MotMaster(
@@ -73,7 +86,9 @@ class RearrangeTweezers(LoadTweezers):
     target_rows = Integer(6, min=1, group="Target array", tooltip="square only")
     target_columns = Integer(6, min=1, group="Target array", tooltip="square only")
     target_sites = Integer(70, min=1, group="Target array", tooltip="kagome only")
-    target_spacing = Number(5e-6, unit="um", scale=1e-6, min=0, group="Target array")
+    target_spacing = Number(
+        5e-6, unit="um", scale=1e-6, min=0.1e-6, group="Target array"
+    )
     target_angle = Number(
         math.radians(2.5), unit="deg", scale=math.pi / 180, group="Target array"
     )
@@ -91,7 +106,7 @@ class RearrangeTweezers(LoadTweezers):
         0.5e-6,
         unit="um",
         scale=1e-6,
-        min=0,
+        min=0.01e-6,
         group="Rearrangement",
         tooltip="largest step of any trap between SLM frames",
     )
@@ -158,6 +173,9 @@ class RearrangeTweezers(LoadTweezers):
         if outside:
             raise RuntimeError(f"target sites {outside} leave the camera's ROI")
 
+        self.record("array_x_um", np.asarray(array["x_um"], dtype=float), unit="um")
+        self.record("array_y_um", np.asarray(array["y_um"], dtype=float), unit="um")
+        self.record("um_to_px", um_to_px)
         self.record("target_sites", self.target_pixels, unit="px")
         self.record("target_x_um", np.asarray(target["x_um"]), unit="um")
         self.record("target_y_um", np.asarray(target["y_um"]), unit="um")

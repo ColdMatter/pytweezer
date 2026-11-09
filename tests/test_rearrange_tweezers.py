@@ -11,7 +11,13 @@ from pytweezer.experiments.rearrange_tweezers import (
     apply_affine,
     fit_affine,
 )
-from tests.test_tweezer_array import SAVED, SITES, FakeHamCam, FakeSequencer
+from tests.test_tweezer_array import (
+    ROI_ORIGIN,
+    SAVED,
+    SITES,
+    FakeHamCam,
+    FakeSequencer,
+)
 
 TARGET = default_geometry(3, 3, 5.0)
 
@@ -155,6 +161,19 @@ def test_target_sites_are_placed_by_the_fitted_map(rig):
     assert measurement.constants["affine_residual_px"] < 0.5
 
 
+def test_the_initial_array_and_its_map_to_the_camera_are_recorded(rig):
+    measurement = run_local(RearrangeTweezers)
+
+    constants = measurement.constants
+    array = rig.rearrangement_rig.array
+    np.testing.assert_array_equal(constants["array_x_um"], array["x_um"])
+    np.testing.assert_array_equal(constants["array_y_um"], array["y_um"])
+    array_um = np.column_stack([constants["array_x_um"], constants["array_y_um"]])
+    np.testing.assert_allclose(
+        apply_affine(constants["um_to_px"], array_um)[:, ::-1], SITES, atol=0.5
+    )
+
+
 def test_it_refuses_without_an_array_on_the_slm(rig):
     rig.rearrangement_rig.array = None
     measurement = run_local(RearrangeTweezers)
@@ -171,6 +190,24 @@ def test_it_refuses_saved_sites_in_another_order_than_the_array(rig):
 
     assert measurement.status == "failed"
     assert "do not fit the rig's array" in measurement.attrs["error"]
+
+
+def test_it_refuses_an_array_in_one_row_which_cannot_place_a_2d_target(rig):
+    # Sites that fit the row exactly, so only the map's rank can refuse it.
+    row_um = np.column_stack([5.0 * np.arange(8), np.zeros(8)])
+    rig.rearrangement_rig.array = {
+        "sites": 8,
+        "x_um": row_um[:, 0],
+        "y_um": row_um[:, 1],
+    }
+    rig.saved["trap_geometry"] = row_um
+    row_px = np.column_stack([np.full(8, 60.0), 20.0 + 10.0 * np.arange(8)])
+    rig.saved["trap_sites"] = row_px + ROI_ORIGIN
+    measurement = run_local(RearrangeTweezers)
+
+    assert measurement.status == "failed"
+    assert "collinear" in measurement.attrs["error"]
+    assert rig.goes == []
 
 
 def test_it_refuses_a_target_whose_window_leaves_the_roi(rig):

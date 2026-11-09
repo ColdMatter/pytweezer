@@ -433,15 +433,18 @@ The Rb tweezer experiments, in the order a session uses them:
    it then has the rig build the target (`rig.prepare_rearrangement(...)`) and
    needs the GPU host (no GPU fails in `prepare`). One shot per point:
    `run_parallel(rig.rearrange, after(arm_delay, run_sequences))`, because
-   `rearrange` blocks until the HamCam's occupancy frame arrives, and the
-   Assemble script fires MOTMaster `arm_delay` after the rig is asked. The
-   HamCam takes three frames: occupancy, then two of the target array. Records:
-   `occupied`, `loading`, `destination` (target index per initial site, -1 for
-   none), `target_filled_1`/`_2`, `fill_fraction_1`/`_2`, `n_frames`, the rig's
+   `rearrange` blocks until the HamCam's occupancy frame arrives: the
+   experiment fires MOTMaster's Go `arm_delay` after asking the rig, and the
+   Assemble script triggers the HamCam's three frames (occupancy, then two of
+   the target array). Records: `occupied`, `loading`, `destination` (target
+   index per initial site, -1 for none), `target_filled_1`/`_2`,
+   `fill_fraction_1`/`_2`, `n_frames`, the rig's
    `occupancy_ms`/`calculation_and_upload_ms`/`total_rearrangement_ms`,
-   `rearrangement_images` with `save_raw_images`, and (once, from `prepare`)
-   `target_sites`, `target_x_um`/`_y_um`, `target_weights` and
-   `affine_residual_px`. `analyses = ()`.
+   `rearrangement_images` with `save_raw_images`, `initial_counts`/
+   `target_counts` with `save_tweezer_counts`, and (once, from `prepare`)
+   `array_x_um`/`_y_um`, the fitted `um_to_px` and `affine_residual_px`,
+   `target_sites`, `target_x_um`/`_y_um`, `target_weights` and the target's
+   `target_uniformity`/`target_min_max_ratio`/`target_mse`. `analyses = ()`.
 
 Shots broadcast their HamCam frames with `header={"rid": self.rid}`; the live
 tweezer loading analysis (`analysis/tweezer_loading.py`) starts afresh whenever
