@@ -129,8 +129,9 @@ The measurements they run (`SlmTweezerArray`, `LoadTweezers`,
 `TweezerArrayMeasurement`) are described under "Tweezer array measurements" in
 add-experiment.
 
-- `FindTrapSites` (`Fit`) takes `calibration_shots` with the tweezers off
-  during the background drop, fits the rig's array geometry (or a
+- `FindTrapSites` (`Fit`) takes `calibration_shots` of `LoadTweezers`' own
+  sequence (form and saved values alike) plus only `BackgroundDrop=1`, so the
+  atoms load exactly as in every tweezer measurement; it fits the rig's array geometry (or a
   `default_rows` × `default_columns` grid) to their mean filtered image
   (`analysis/trap_sites.py`), fits the occupancy threshold, and proposes
   `TRAP_SITE_KEYS`: `trap_sites` (sensor pixels, `(y, x)`), `trap_threshold`,

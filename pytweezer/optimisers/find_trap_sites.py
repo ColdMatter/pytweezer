@@ -14,8 +14,9 @@ from pytweezer.experiments.load_tweezers import LoadTweezers
 class FindTrapSites(Fit, LoadTweezers):
     """Find the trap sites by fitting the array's geometry to the atoms, and propose them.
 
-    Takes ``calibration_shots`` with the tweezers off during the background
-    drop, and fits the geometry of the array the rig has on the SLM (or, when
+    Takes ``calibration_shots`` of :class:`LoadTweezers`' sequence with the
+    tweezers switched off before the second image (``BackgroundDrop``), so it
+    is a background, and fits the geometry of the array the rig has on the SLM (or, when
     it does not know, a ``default_rows`` x ``default_columns`` grid
     ``default_spacing`` apart) to their mean background-subtracted, top-hat
     filtered image, free in position, rotation and scale (see
@@ -70,12 +71,7 @@ class FindTrapSites(Fit, LoadTweezers):
         self.record("sites_from", "rig" if array else "default")
 
     def fit(self) -> dict:
-        firsts, backgrounds = self.take_shots(
-            self.calibration_shots,
-            BackgroundDrop=1,
-            tTweezerSetVVA0=0.0,
-            tTweezerSetVVA1=0.0,
-        )
+        firsts, backgrounds = self.take_shots(self.calibration_shots, BackgroundDrop=1)
         average = an.tweezer_show_bg_subtracted(firsts, backgrounds, show=False)
         self.record("calibration_image", average)
         filtered = an.morphological_tophat_high_pass(

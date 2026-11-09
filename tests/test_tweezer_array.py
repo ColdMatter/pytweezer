@@ -61,7 +61,7 @@ class FakeSequencer:
 
 
 class FakeHamCam:
-    """Images the array twice per shot; turning the tweezers off empties the second frame."""
+    """Images the array twice per shot; a background drop empties the second frame."""
 
     def __init__(self, sequencer):
         self.sequencer = sequencer
@@ -101,7 +101,7 @@ class FakeHamCam:
     def acquire_n_frames(self, n, broadcast=False, header=None):
         self.headers.append(header)
         loaded = self.rng.random(len(SITES)) < LOADING
-        if self.sequencer.goes[-1].get("tTweezerSetVVA0") == 0.0:
+        if self.sequencer.goes[-1].get("BackgroundDrop") == 1:
             kept = np.zeros(len(SITES), dtype=bool)
         else:
             kept = loaded & (self.rng.random(len(SITES)) < SURVIVAL)
@@ -244,13 +244,18 @@ def test_find_trap_sites_keeps_the_rigs_order_of_its_array(rig):
     assert measurement.constants["sites_from"] == "rig"
 
 
-def test_find_trap_sites_takes_its_shots_with_the_tweezers_off_in_the_background_drop(
+def test_find_trap_sites_loads_as_load_tweezers_does_and_drops_before_the_background(
     rig,
 ):
-    run_local(FindTrapSites, calibration_shots=30)
+    form = {"rb.tMolCoolVCO1": 7.5, "rb.tTweezerSetVVA0": 9.0}
+    run_local(LoadTweezers, **form)
+    (loaded,) = rig.goes
+    rig.goes.clear()
+
+    run_local(FindTrapSites, calibration_shots=30, **form)
+
     assert len(rig.goes) == 30
-    assert all(go["BackgroundDrop"] == 1 for go in rig.goes)
-    assert all(go["tTweezerSetVVA0"] == go["tTweezerSetVVA1"] == 0.0 for go in rig.goes)
+    assert all(go == loaded | {"BackgroundDrop": 1} for go in rig.goes)
 
 
 def test_measurements_record_the_saved_sites_in_their_roi(rig):
