@@ -16,7 +16,6 @@ from pytweezer.experiment.motmaster import (
     MotMasterInteger,
     MotMasterNumber,
 )
-from pytweezer.servers import device_server
 
 
 class FakeSequencer:
@@ -58,39 +57,26 @@ class FakeSequencer:
 
 @pytest.fixture
 def rig(monkeypatch):
-    log, opened, unreachable = [], [], set()
+    log, opened = [], []
     rb_params = {
         "tDelay1": 5,
         "tPulse": 20e-6,
         "nShots": 1,
         "bField": 0.5,
-        "label": "x",
+        "tag": "x",
+        "threshold": 1.0,
     }
     fakes = {
         "Rb MotMaster": FakeSequencer(log, "rb", rb_params),
         "CaF MotMaster": FakeSequencer(log, "caf", {"tLoad": 100, "bTop": 0.5}),
-        "K MotMaster": FakeSequencer(log, "k", {}),
     }
 
     def get_device(name, timeout):
         opened.append(name)
-        # The first open is the task's own client; later ones are fresh follower clients.
-        if name in unreachable and opened.count(name) > 1:
-            raise ConnectionError(f"{name} unreachable")
         return fakes[name]
 
-    real_config = device_server.get_config()
-    config = {
-        **real_config,
-        "Devices": {
-            **real_config["Devices"],
-            "K MotMaster": {"class": "pkg:MM", "host": "127.0.0.1", "port": 1},
-        },
-    }
-    monkeypatch.setattr(device_server, "get_config", lambda: config)
     monkeypatch.setattr("pytweezer.experiment.experiment._get_device", get_device)
-    monkeypatch.setattr(MotMasterExperiment, "follower_arm_delay", 0.0)
-    return SimpleNamespace(log=log, fakes=fakes, opened=opened, unreachable=unreachable)
+    return SimpleNamespace(log=log, fakes=fakes, opened=opened)
 
 
 def goes(rig, name):
@@ -103,26 +89,14 @@ class Single(MotMasterExperiment):
     pulse = MotMasterNumber(1e-6, parameter="tPulse")
 
 
-class Pair(MotMasterExperiment):
-    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
-    caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad", follower_timeout=0.1)
-    tof = MotMasterInteger(100, device="rb", parameter="tDelay1")
-
-
 class Linked(MotMasterExperiment):
     caf = MotMaster("CaF MotMaster", script="LinkedTweezerLoad", linked=True)
     load = MotMasterInteger(100, parameter="tLoad")
 
 
-class Trio(MotMasterExperiment):
-    rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
-    caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad")
-    k = MotMaster("K MotMaster", script="KTweezer")
-
-
 def test_declared_and_searched_parameters_are_sent_typed(rig):
-    scan = Scan(axes=[ListAxis(argument="rb.nShots", values=[1, 2])])
-    measurement = run_local(Single, scan, **{"rb.bField": 3, "rb.label": 3})
+    scan = Scan(axes=[ListAxis(argument="nShots", values=[1, 2])])
+    measurement = run_local(Single, scan, bField=3, tag=3)
     assert measurement.status == "completed", measurement.attrs["error"]
     runs = goes(rig, "rb")
     assert [run["nShots"] for run in runs] == [1, 2]
@@ -135,20 +109,26 @@ def test_declared_and_searched_parameters_are_sent_typed(rig):
         "tPulse": 1e-6,
         "nShots": 1,
         "bField": 3.0,
-        "label": 3.0,
+        "tag": 3.0,
     }
-    assert list(measurement.points["rb.nShots"]) == [1, 2]
-    assert measurement.arguments["rb.bField"] == 3.0
+    assert list(measurement.points["nShots"]) == [1, 2]
+    assert measurement.arguments["bField"] == 3.0
 
 
 @pytest.mark.parametrize(
     "fixed, scanned, expected",
     [
-        ({"rb.nShots": 1.5}, None, ["nShots", "whole number"]),
-        ({"rb.tDelayy": 1}, None, ["tDelayy", "tDelay1"]),
-        ({}, "rb.tDelayy", ["tDelayy"]),
+        ({"nShots": 1.5}, None, ["nShots", "whole number"]),
+        ({"tDelayy": 1}, None, ["tDelayy", "tDelay1"]),
+        ({"pulsee": 1}, None, ["pulsee", "pulse"]),
+        ({}, "tDelayy", ["tDelayy"]),
     ],
-    ids=["fraction-for-int32", "unknown-with-suggestion", "unknown-only-scanned"],
+    ids=[
+        "fraction-for-int32",
+        "unknown-with-suggestion",
+        "suggests-a-declared-argument",
+        "unknown-only-scanned",
+    ],
 )
 def test_bad_script_parameter_fails_before_any_sequence_runs(
     rig, fixed, scanned, expected
@@ -160,59 +140,61 @@ def test_bad_script_parameter_fails_before_any_sequence_runs(
     assert goes(rig, "rb") == []
 
 
-@pytest.mark.parametrize("name", ["xx.tDelay1", "rb.", "rb.tDelay1"])
-def test_dotted_names_that_are_not_searchable_are_rejected_at_submit(name):
+@pytest.mark.parametrize("name", ["rb.tDelay1", "hamcam.gain", "rb.", "1x", "tDelay1"])
+def test_names_that_cannot_be_script_parameters_are_refused(name):
+    # tDelay1 is already set by the declared `tof`.
     with pytest.raises(ValueError, match="no argument"):
         coerce_arguments(Single, {name: 1})
     with pytest.raises(ValueError, match="no argument"):
         Scan(axes=[ListAxis(argument=name, values=[1])]).points(Single)
 
 
+def test_a_script_parameter_named_like_an_attribute_leaves_the_attribute_alone(rig):
+    class WithThreshold(Single):
+        threshold = 0.5
+
+        def run_point(self):
+            self.record("attribute", self.threshold)
+            super().run_point()
+
+    measurement = run_local(WithThreshold, threshold=3)
+    assert goes(rig, "rb")[0]["threshold"] == 3.0
+    assert list(measurement.results["attribute"]) == [0.5]
+
+
+def test_overrides_beat_the_form(rig):
+    class Override(Single):
+        def run_point(self):
+            self.run_sequences(tDelay1=7, bField=2)
+
+    run_local(Override, bField=1)
+    sent = goes(rig, "rb")[0]
+    assert (sent["tDelay1"], sent["bField"]) == (7, 2.0)
+
+
 class Configured(MotMasterExperiment):
     rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", iterations=3, save=True)
-    caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad", master=True)
 
 
-def test_every_sequencer_is_set_up_as_declared(rig):
+def test_the_sequencer_is_set_up_as_declared(rig):
     run_local(Configured)
     settings = {
-        name: {
-            event[1]: event[2]
-            for event in rig.log
-            if event[0] == name
-            and event[1] in ("script", "run_until_stopped", "iterations", "save")
-        }
-        for name in ("rb", "caf")
+        event[1]: event[2]
+        for event in rig.log
+        if event[1]
+        in ("script", "run_until_stopped", "iterations", "save", "triggered")
     }
     assert settings == {
-        "rb": {
-            "script": "RbTweezerBasic",
-            "run_until_stopped": False,
-            "iterations": 3,
-            "save": True,
-        },
-        "caf": {
-            "script": "CaFTweezerLoad",
-            "run_until_stopped": False,
-            "iterations": 1,
-            "save": False,
-        },
+        "script": "RbTweezerBasic",
+        "run_until_stopped": False,
+        "iterations": 3,
+        "save": True,
+        "triggered": False,
     }
-
-
-def test_master_is_untriggered_and_followers_start_first(rig, monkeypatch):
-    monkeypatch.setattr(MotMasterExperiment, "follower_arm_delay", 0.05)
-    run_local(Pair, **{"caf.bTop": 0.7})
-    assert ("rb", "triggered", False) in rig.log
-    assert ("caf", "triggered", True) in rig.log
-    assert [event[0] for event in rig.log if event[1] == "start"] == ["caf", "rb"]
-    # Only parameters that were chosen are sent; the rest keep the script's defaults.
-    assert goes(rig, "caf") == [{"bTop": 0.7}]
-    assert goes(rig, "rb") == [{"tDelay1": 100}]
 
 
 def test_linked_sequencer_is_linked_untriggered_and_run_alone(rig):
-    run_local(Linked, **{"caf.bTop": 0.7})
+    run_local(Linked, bTop=0.7)
     assert ("caf", "linked", True) in rig.log
     assert ("caf", "triggered", False) in rig.log
     assert goes(rig, "caf") == [{"tLoad": 100, "bTop": 0.7}]
@@ -227,60 +209,19 @@ def test_link_is_released_when_the_task_ends(rig, fail_go):
     assert rig.log[-1] == ("caf", "linked", False)
 
 
-def test_every_sequencer_is_unlinked_before_any_script_is_set(rig):
-    # A secondary still claimed by an earlier linked task refuses SetScriptPath.
-    run_local(Pair)
-    events = [event[:2] for event in rig.log if event[1] in ("linked", "script")]
-    assert events[:2] == [("rb", "linked"), ("caf", "linked")]
-    assert ("rb", "linked", False) in rig.log and ("caf", "linked", False) in rig.log
-
-
-def test_failure_opening_a_follower_client_starts_no_follower(rig):
-    rig.unreachable.add("K MotMaster")
-    measurement = run_local(Trio)
-    assert measurement.status == "failed"
-    assert "K MotMaster unreachable" in measurement.attrs["error"]
-    assert goes(rig, "caf") == []
-
-
-@pytest.mark.parametrize("device", ["Rb MotMaster", "CaF MotMaster"])
-def test_master_or_follower_failure_fails_the_task(rig, device):
-    rig.fakes[device].fail_go = True
-    measurement = run_local(Pair)
-    assert measurement.status == "failed"
-    assert f"{rig.fakes[device].name} refused" in measurement.attrs["error"]
-
-
-def test_follower_that_never_finishes_fails_after_its_timeout(rig):
-    rig.fakes["CaF MotMaster"].go_delay = 1.0
-    started = time.monotonic()
-    measurement = run_local(Pair)
-    assert time.monotonic() - started < 0.9
-    assert measurement.status == "failed"
-    error = measurement.attrs["error"]
-    assert "did not finish within 0.1 s" in error
-    assert "Restart the 'CaF MotMaster' device server" in error
+def test_an_unlinked_sequencer_is_unlinked_before_its_script_is_set(rig):
+    # A MOTMaster still claimed by an earlier linked task refuses SetScriptPath.
+    run_local(Configured)
+    events = [event[1:] for event in rig.log if event[1] in ("linked", "script")]
+    assert events[:2] == [("linked", False), ("script", "RbTweezerBasic")]
 
 
 def test_declaration_rules_are_checked_at_class_definition():
-    with pytest.raises(TypeError, match="exactly one"):
+    with pytest.raises(TypeError, match="linked mode"):
 
-        class TwoMasters(MotMasterExperiment):
-            a = MotMaster("Rb MotMaster", script="s", master=True)
-            b = MotMaster("CaF MotMaster", script="s", master=True)
-
-    with pytest.raises(TypeError, match="exactly one"):
-
-        class NoMaster(MotMasterExperiment):
+        class Two(MotMasterExperiment):
             a = MotMaster("Rb MotMaster", script="s")
             b = MotMaster("CaF MotMaster", script="s")
-
-    with pytest.raises(TypeError, match="device="):
-
-        class Ambiguous(MotMasterExperiment):
-            a = MotMaster("Rb MotMaster", script="s", master=True)
-            b = MotMaster("CaF MotMaster", script="s")
-            x = MotMasterNumber(1.0)
 
     with pytest.raises(TypeError, match="Twice.tPulse and Twice.pulse"):
 
@@ -288,24 +229,6 @@ def test_declaration_rules_are_checked_at_class_definition():
             a = MotMaster("Rb MotMaster", script="s")
             tPulse = MotMasterNumber(1.0)
             pulse = MotMasterNumber(1.0, parameter="tPulse")
-
-    with pytest.raises(TypeError, match="a and b both use 'Rb MotMaster'"):
-
-        class SharedDevice(MotMasterExperiment):
-            a = MotMaster("Rb MotMaster", script="s", master=True)
-            b = MotMaster("Rb MotMaster", script="t")
-
-    with pytest.raises(TypeError, match="declare no other MotMaster"):
-
-        class LinkedPlusFollower(MotMasterExperiment):
-            a = MotMaster("CaF MotMaster", script="s", master=True, linked=True)
-            b = MotMaster("Rb MotMaster", script="t")
-
-    with pytest.raises(TypeError, match="'nope'"):
-
-        class UnknownDevice(MotMasterExperiment):
-            a = MotMaster("Rb MotMaster", script="s")
-            x = MotMasterNumber(1.0, device="nope")
 
 
 class FakeDotNet:
@@ -550,16 +473,16 @@ def test_simulated_sequencer_serves_and_validates_parameters():
 def test_simulated_end_to_end_with_searched_parameters():
     from pytweezer.experiments.motmaster_arguments_test import MotMasterArgumentsTest
 
-    scan = Scan(axes=[ListAxis(argument="rb.tDelay1", values=[10, 20])])
+    scan = Scan(axes=[ListAxis(argument="tDelay1", values=[10, 20])])
     measurement = run_local(
-        MotMasterArgumentsTest, scan, simulate=True, **{"rb.coil_current": 2.0}
+        MotMasterArgumentsTest, scan, simulate=True, coil_current=2.0
     )
     assert measurement.status == "completed", measurement.attrs["error"]
-    assert list(measurement.points["rb.tDelay1"]) == [10, 20]
+    assert list(measurement.points["tDelay1"]) == [10, 20]
     assert list(measurement.results["sent_tDelay1"]) == [10, 20]
     assert list(measurement.results["sent_coil_current"]) == [2.0, 2.0]
     assert list(measurement.results["sent_tPulse"]) == [20e-6, 20e-6]
-    assert measurement.arguments["rb.coil_current"] == 2.0
+    assert measurement.arguments["coil_current"] == 2.0
 
 
 def test_a_simulated_run_lasts_long_enough_for_simulated_cameras(monkeypatch):

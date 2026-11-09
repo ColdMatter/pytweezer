@@ -301,7 +301,7 @@ def test_every_shot_broadcasts_its_frames_tagged_with_the_task(rig):
 def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(
     rig, experiment, args
 ):
-    run_local(experiment, **args, **{"rb.tMolCoolVCO1": 7.5})
+    run_local(experiment, **args, tMolCoolVCO1=7.5)
     expected = {
         parameter: SAVED[key] for parameter, key in LoadTweezers.rb.saved.items()
     } | {"tMolCoolVCO1": 7.5}

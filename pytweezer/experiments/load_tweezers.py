@@ -205,9 +205,8 @@ class LoadTweezers(CameraExperiment):
         With ``save_raw_images`` the frames are recorded as ``hamcam_images``,
         ``(shots, 2, height, width)`` per point.
         """
-        overrides = {f"rb.{name}": value for name, value in sequence.items()}
         stacks = np.array(
-            [self.take_shot(**overrides)["hamcam"] for _ in range(n_shots)]
+            [self.take_shot(**sequence)["hamcam"] for _ in range(n_shots)]
         )
         if self.save_raw_images:
             self.record_frames({"hamcam": stacks})

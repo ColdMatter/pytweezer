@@ -91,10 +91,11 @@ class ParameterFetcher(QtCore.QObject):
 
 
 class MotMasterBox(QGroupBox):
-    """One sequencer's group: a search field and the rows chosen from it.
+    """The experiment's sequencer: a search field and the rows chosen from it.
 
-    ``declared`` names script parameters the experiment already declares as
-    arguments; they are not offered. A ``linked`` sequencer's script also drives
+    ``declared`` names script parameters the experiment already sets through an
+    argument, and the experiment's argument names, which a script parameter
+    cannot take; neither is offered. A ``linked`` sequencer's script also drives
     its secondary MOTMaster, so its parameters include the secondary's.
     """
 
@@ -102,7 +103,6 @@ class MotMasterBox(QGroupBox):
 
     def __init__(
         self,
-        attribute: str,
         device: str,
         script: str,
         parent=None,
@@ -111,14 +111,14 @@ class MotMasterBox(QGroupBox):
         linked: bool = False,
     ):
         mode = ", linked" if linked else ""
-        super().__init__(f"MOTMaster: {attribute} ({script}{mode})", parent)
+        super().__init__(f"MOTMaster ({script}{mode})", parent)
         if linked:
             self.setToolTip(
                 f"{device} runs {script} in linked mode: one script drives both "
                 "MOTMasters, so the secondary's parameters are set here too"
             )
         self.setObjectName("EditorGroup")
-        self.attribute, self.device, self.script = attribute, device, script
+        self.device, self.script = device, script
         self.declared = frozenset(declared)
         self.defaults: dict[str, int | float] = {}
         self.status = QLabel()

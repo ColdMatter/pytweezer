@@ -97,7 +97,7 @@ def test_replay_keeps_the_recipes_pipeline_unless_overridden():
 
 def test_unknown_arguments_lists_names_the_experiment_lacks():
     schema = {
-        "arguments": {"atoms": {}},
+        "arguments": {"atoms": {"motmaster_parameter": "tAtoms"}},
         "devices": {
             "rb": {"device": "Rb MotMaster", "timeout": None, "motmaster": {}},
             "cam": {"device": "Cam", "timeout": None},
@@ -107,9 +107,12 @@ def test_unknown_arguments_lists_names_the_experiment_lacks():
         experiment="m",
         class_name="C",
         args=dict.fromkeys(
-            ["atoms", "old", "rb.tPulse", "cam.exposure", "rb", "rb."], 1
+            ["atoms", "tPulse", "rb.tPulse", "cam.exposure", "rb.", "1x", "tAtoms"], 1
         ),
         scan=Scan(axes=[ListAxis(argument="gone", values=[1])]),
     )
-    expected = ["cam.exposure", "gone", "old", "rb", "rb."]
+    # Any other identifier may be a script parameter, but not one `atoms` sets.
+    expected = ["1x", "cam.exposure", "rb.", "rb.tPulse", "tAtoms"]
     assert unknown_arguments(request, schema) == expected
+    del schema["devices"]["rb"]
+    assert "tPulse" in unknown_arguments(request, schema)

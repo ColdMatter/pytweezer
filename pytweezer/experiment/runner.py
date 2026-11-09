@@ -92,7 +92,7 @@ def open_writer(
 
 def _argument_schema(experiment_cls: type, experiment: Experiment, scan: Scan) -> dict:
     schema = experiment_cls.schema()["arguments"]
-    for name in [*experiment._extra_names, *(axis.argument for axis in scan.axes)]:
+    for name in [*experiment.extra_values, *(axis.argument for axis in scan.axes)]:
         argument = experiment_cls.extra_argument(name) if name not in schema else None
         if argument is not None:
             schema[name] = argument.to_schema()

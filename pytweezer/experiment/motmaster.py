@@ -1,19 +1,21 @@
-"""Experiments that run MOTMaster sequences once per point.
+"""Experiments that run a MOTMaster sequence once per point.
 
 ::
 
     class TofImaging(MotMasterExperiment):
-        rb = MotMaster("Rb MotMaster", script="RbTweezerBasic", master=True)
-        caf = MotMaster("CaF MotMaster", script="CaFTweezerLoad")
+        rb = MotMaster("Rb MotMaster", script="RbTweezerBasic")
 
-        tof = MotMasterInteger(100, device="rb", parameter="tDelay1", unit="ms/100")
+        tof = MotMasterInteger(100, parameter="tDelay1", unit="ms/100")
 
-Each :class:`MotMaster` names a device and the script it runs. Parameters
-declared with :class:`MotMasterNumber`/:class:`MotMasterInteger` are always
-shown; any other script parameter can be set by passing a dotted argument name
-(``"rb.tPulse"``), which the Experiments form offers through a search box.
-Parameters not set are left at the script's own defaults. One MOTMaster is the
-master; the others are armed in trigger mode and started first.
+An experiment declares one :class:`MotMaster`: the device and the script it
+runs. Parameters declared with :class:`MotMasterNumber`/:class:`MotMasterInteger`
+are always shown; any other script parameter is set by passing its name as an
+argument (``tPulse``), which the Experiments form offers through a search box.
+A name the experiment declares as an argument is always that argument, never a
+script parameter of the same name. Only MOTMaster knows its script's
+parameters, so a misspelt one is accepted at submit and refused in
+:meth:`MotMasterExperiment.prepare`, before any sequence runs. Parameters not
+set are left at the script's own defaults.
 
 ``saved=`` binds script parameters to saved parameters, read once in
 ``prepare`` and sent with every run. A bare name binds the saved key of the same
@@ -27,9 +29,9 @@ name; a dict maps a script parameter to a differently named key::
 
 A value set in the form (or scanned) beats the saved one, and an override passed
 to :meth:`MotMasterExperiment.run_sequences` beats both. The saved values sent
-are recorded as the constant ``saved_sequence``, keyed ``"rb.tMOTLoadRepVCO"``.
+are recorded as the constant ``saved_sequence``, keyed by script parameter.
 
-A MOTMaster in linked mode runs one script across two machines: it claims its
+Two machines are run together by MOTMaster's linked mode: the primary claims its
 secondary itself and fires it by TTL, so the experiment declares only the
 primary, and every parameter (both machines', plus ``SecondaryTriggerDelay``)
 belongs to its script. The secondary is named by the primary's ``linked_partner``
@@ -41,10 +43,8 @@ CONFIG key and is reserved along with it::
 """
 
 import difflib
-import threading
-import time
 from collections.abc import Iterable
-from typing import Any, ClassVar
+from typing import Any
 
 from pytweezer.experiment.arguments import Argument, Device, Integer, Number, collect
 from pytweezer.experiment.client import (
@@ -63,21 +63,17 @@ class MotMaster(Device):
         device_name: str,
         *,
         script: str,
-        master: bool = False,
         linked: bool = False,
         iterations: int = 1,
         save: bool = False,
-        follower_timeout: float = 60.0,
         saved: Iterable[str | dict[str, str]] = (),
         timeout: float | None = None,
     ) -> None:
         super().__init__(device_name, timeout=timeout)
         self.script = script
-        self.master = master
         self.linked = linked
         self.iterations = iterations
         self.save = save
-        self.follower_timeout = follower_timeout
         #: ``{script parameter: saved key}``.
         self.saved = _saved_bindings(saved)
 
@@ -103,11 +99,9 @@ class MotMaster(Device):
         return super().to_schema() | {
             "motmaster": {
                 "script": self.script,
-                "master": self.master,
                 "linked": self.linked,
                 "iterations": self.iterations,
                 "save": self.save,
-                "follower_timeout": self.follower_timeout,
                 "saved": dict(self.saved),
             }
         }
@@ -141,20 +135,9 @@ def _saved_bindings(saved: Iterable[str | dict[str, str]]) -> dict[str, str]:
 
 
 class MotMasterParameter:
-    """Marks an argument as a MOTMaster script parameter (default group "MOTMaster").
+    """Marks an argument as a MOTMaster script parameter (default group "MOTMaster")."""
 
-    ``device`` is the name of a :class:`MotMaster` attribute; it may be omitted
-    when the experiment has only one.
-    """
-
-    def __init__(
-        self,
-        *args: Any,
-        device: str | None = None,
-        parameter: str | None = None,
-        **kwargs: Any,
-    ) -> None:
-        self.device = device
+    def __init__(self, *args: Any, parameter: str | None = None, **kwargs: Any) -> None:
         self.parameter = parameter
         kwargs.setdefault("group", "MOTMaster")
         super().__init__(*args, **kwargs)
@@ -164,10 +147,7 @@ class MotMasterParameter:
         return self.parameter or self.name
 
     def to_schema(self) -> dict[str, Any]:
-        return super().to_schema() | {
-            "motmaster_device": self.device,
-            "motmaster_parameter": self.motmaster_name,
-        }
+        return super().to_schema() | {"motmaster_parameter": self.motmaster_name}
 
 
 class MotMasterNumber(MotMasterParameter, Number):
@@ -183,55 +163,39 @@ class _MotMasterOverride(Number):
 
 
 class MotMasterExperiment(Experiment):
-    """Base class for an experiment driven by one or more MOTMaster scripts.
+    """Base class for an experiment driven by one MOTMaster script.
 
-    :meth:`prepare` configures every sequencer completely on each task, since
-    their settings persist between tasks. Repeated shots come from the scan's
+    :meth:`prepare` configures the sequencer completely on each task, since its
+    settings persist between tasks. Repeated shots come from the scan's
     ``repetitions``, giving one stored point per shot.
     """
 
-    #: Seconds to wait after arming the followers before the master starts.
-    follower_arm_delay: ClassVar[float] = 0.5
-
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        sequencers = cls.motmasters()
-        if not sequencers:
-            return
-        linked = [name for name, sequencer in sequencers.items() if sequencer.linked]
-        if linked and len(sequencers) > 1:
+        sequencers = collect(cls, MotMaster)
+        if len(sequencers) > 1:
             raise TypeError(
-                f"{cls.__name__}.{linked[0]} is linked, so it drives its secondary "
-                "MOTMaster itself; declare no other MotMaster"
+                f"{cls.__name__} declares MotMasters {sorted(sequencers)}; an "
+                "experiment drives one MOTMaster. Run two machines together in "
+                "linked mode: MotMaster(..., linked=True) on the primary"
             )
-        masters = [name for name, sequencer in sequencers.items() if sequencer.master]
-        if len(sequencers) > 1 and len(masters) != 1:
-            raise TypeError(
-                f"{cls.__name__} has {len(sequencers)} MOTMasters; exactly one "
-                f"must have master=True (found {len(masters)})"
-            )
-        by_device: dict[str, str] = {}
-        for name, sequencer in sequencers.items():
-            if sequencer.device_name in by_device:
+        targets: dict[str, str] = {}
+        for name, argument in cls.motmaster_arguments().items():
+            parameter = argument.motmaster_name
+            if parameter in targets:
                 raise TypeError(
-                    f"{cls.__name__}: {by_device[sequencer.device_name]} and {name} "
-                    f"both use {sequencer.device_name!r}; a follower waiting for its "
-                    "trigger would block the master on the shared device server"
+                    f"{cls.__name__}.{targets[parameter]} and {cls.__name__}.{name} "
+                    f"both set {parameter}"
                 )
-            by_device[sequencer.device_name] = name
-        cls._declared_targets()
+            targets[parameter] = name
 
     @classmethod
-    def motmasters(cls) -> dict[str, MotMaster]:
-        return collect(cls, MotMaster)
-
-    @classmethod
-    def master_name(cls) -> str:
-        sequencers = cls.motmasters()
+    def motmaster(cls) -> tuple[str, MotMaster]:
+        """The attribute name and declaration of the experiment's MOTMaster."""
+        sequencers = collect(cls, MotMaster)
         if not sequencers:
-            raise TypeError(f"{cls.__name__} must declare at least one MotMaster(...)")
-        flagged = [name for name, sequencer in sequencers.items() if sequencer.master]
-        return flagged[0] if flagged else next(iter(sequencers))
+            raise TypeError(f"{cls.__name__} must declare a MotMaster(...)")
+        return next(iter(sequencers.items()))
 
     @classmethod
     def motmaster_arguments(cls) -> dict[str, MotMasterParameter]:
@@ -242,93 +206,50 @@ class MotMasterExperiment(Experiment):
         }
 
     @classmethod
-    def _parameter_device(cls, name: str, argument: MotMasterParameter) -> str:
-        sequencers = cls.motmasters()
-        if argument.device is None:
-            if len(sequencers) != 1:
-                raise TypeError(
-                    f"{cls.__name__}.{name} needs device= to say which of "
-                    f"{sorted(sequencers)} it belongs to"
-                )
-            return next(iter(sequencers))
-        if argument.device not in sequencers:
-            raise TypeError(
-                f"{cls.__name__}.{name}: device={argument.device!r} is not one of "
-                f"the MOTMasters {sorted(sequencers)}"
-            )
-        return argument.device
-
-    @classmethod
-    def _declared_targets(cls) -> dict[tuple[str, str], str]:
-        """``{(MotMaster attribute, script parameter): declared argument name}``."""
-        targets: dict[tuple[str, str], str] = {}
-        for name, argument in cls.motmaster_arguments().items():
-            target = (cls._parameter_device(name, argument), argument.motmaster_name)
-            if target in targets:
-                raise TypeError(
-                    f"{cls.__name__}.{targets[target]} and {cls.__name__}.{name} "
-                    f"both set {target[0]}.{target[1]}"
-                )
-            targets[target] = name
-        return targets
-
-    @classmethod
     def extra_argument(cls, name: str) -> Argument | None:
-        attribute, dot, parameter = name.partition(".")
-        if not dot or not parameter or attribute not in cls.motmasters():
+        """A script parameter for undeclared ``name``, unless it cannot be one.
+
+        Dotted and other non-identifier names cannot, nor can a parameter a
+        declared argument already sets.
+        """
+        if not collect(cls, MotMaster) or not name.isidentifier():
             return None
-        if (attribute, parameter) in cls._declared_targets():
+        if any(a.motmaster_name == name for a in cls.motmaster_arguments().values()):
             return None
-        argument = _MotMasterOverride(0.0, group=f"MOTMaster: {attribute}")
+        argument = _MotMasterOverride(0.0, group="MOTMaster")
         argument.name = name
         return argument
 
-    def motmaster_parameters(self) -> dict[str, dict[str, Any]]:
-        """``{MotMaster attribute: {script parameter: value}}`` for everything set explicitly."""
-        requested: dict[str, dict[str, Any]] = {name: {} for name in self.motmasters()}
-        for name, argument in self.motmaster_arguments().items():
-            device = self._parameter_device(name, argument)
-            requested[device][argument.motmaster_name] = getattr(self, name)
-        for name in self._extra_names:
-            attribute, _, parameter = name.partition(".")
-            requested[attribute][parameter] = getattr(self, name)
-        return requested
+    def motmaster_parameters(self) -> dict[str, Any]:
+        """``{script parameter: value}`` for everything set explicitly."""
+        requested = {
+            argument.motmaster_name: getattr(self, name)
+            for name, argument in self.motmaster_arguments().items()
+        }
+        return requested | self.extra_values
 
     def prepare(self) -> None:
-        master = self.master_name()
-        self._script_parameters: dict[str, dict[str, Any]] = {}
-        self._follower_clients: dict[str, Any] = {}
-        self._linked: list[str] = []
-        # Linked mode persists in MOTMaster, so set it on every sequencer, unlinking
-        # first: a secondary still claimed by another primary refuses SetScriptPath
-        # and SetTriggered.
-        for attribute, motmaster in sorted(
-            self.motmasters().items(), key=lambda item: item[1].linked
-        ):
-            getattr(self, attribute).set_linked(motmaster.linked)
-            if motmaster.linked:
-                self._linked.append(attribute)
-        for attribute, motmaster in self.motmasters().items():
-            client = getattr(self, attribute)
-            client.set_motmaster_experiment(motmaster.script)
-            client.set_run_until_stopped(False)
-            client.set_iterations(motmaster.iterations)
-            client.set_save_toggle(motmaster.save)
-            client.set_trigger_mode(attribute != master)
-            self._script_parameters[attribute] = client.get_params()
+        attribute, motmaster = self.motmaster()
+        self._linked = False
+        client = getattr(self, attribute)
+        # Linked mode persists in MOTMaster, so set it on every task.
+        client.set_linked(motmaster.linked)
+        self._linked = motmaster.linked
+        client.set_motmaster_experiment(motmaster.script)
+        client.set_run_until_stopped(False)
+        client.set_iterations(motmaster.iterations)
+        client.set_save_toggle(motmaster.save)
+        client.set_trigger_mode(False)
+        self._script_parameters: dict[str, Any] = client.get_params()
         set_in_form = self.motmaster_parameters()
         self._check_parameters(set_in_form)
         self._bind_saved_parameters(set_in_form)
 
-    def _bind_saved_parameters(self, set_in_form: dict[str, dict[str, Any]]) -> None:
-        bindings = {
-            attribute: motmaster.saved
-            for attribute, motmaster in self.motmasters().items()
-            if motmaster.saved
-        }
+    def _bind_saved_parameters(self, set_in_form: dict[str, Any]) -> None:
+        bindings = self.motmaster()[1].saved
         self.saved_parameters: dict[str, Any] = {}
         self.saved_sequence: dict[str, Any] = {}
-        self._saved_values: dict[str, dict[str, Any]] = {}
+        self._saved_values: dict[str, Any] = {}
         if not bindings:
             return
         try:
@@ -337,134 +258,61 @@ class MotMasterExperiment(Experiment):
             raise RuntimeError(
                 f"the saved parameters could not be read: {error}"
             ) from error
-        keys = {key for saved in bindings.values() for key in saved.values()}
-        missing = sorted(keys - set(self.saved_parameters))
+        missing = sorted(set(bindings.values()) - set(self.saved_parameters))
         if missing:
             raise KeyError(f"no saved parameter {', '.join(map(repr, missing))}")
-        for attribute, saved in bindings.items():
-            for parameter in saved:
-                self._check_parameter(attribute, parameter)
-            self._saved_values[attribute] = {
-                parameter: self.saved_parameters[key]
-                for parameter, key in saved.items()
-            }
-            self.saved_sequence |= {
-                f"{attribute}.{parameter}": value
-                for parameter, value in self._saved_values[attribute].items()
-                if parameter not in set_in_form[attribute]
-            }
+        self._check_parameters(bindings)
+        self._saved_values = {
+            parameter: self.saved_parameters[key] for parameter, key in bindings.items()
+        }
+        self.saved_sequence = {
+            parameter: value
+            for parameter, value in self._saved_values.items()
+            if parameter not in set_in_form
+        }
         self.record("saved_sequence", self.saved_sequence)
 
-    def _check_parameters(self, requested: dict[str, dict[str, Any]]) -> None:
-        for attribute, parameters in requested.items():
-            for parameter in parameters:
-                self._check_parameter(attribute, parameter)
+    def _check_parameters(self, parameters: Iterable[str]) -> None:
+        known = self._script_parameters
+        for parameter in parameters:
+            if parameter in known:
+                continue
+            script = self.motmaster()[1].script
+            close = difflib.get_close_matches(
+                parameter, [*known, *self.arguments()], n=3
+            )
+            hint = f"; did you mean {close}?" if close else ""
+            raise ValueError(f"script {script!r} has no parameter {parameter!r}{hint}")
 
-    def _check_parameter(self, attribute: str, parameter: str) -> None:
-        known = self._script_parameters[attribute]
-        if parameter in known:
-            return
-        script = self.motmasters()[attribute].script
-        close = difflib.get_close_matches(parameter, known, n=3)
-        hint = f"; did you mean {close}?" if close else ""
-        raise ValueError(
-            f"{attribute}: script {script!r} has no parameter {parameter!r}{hint}"
-        )
-
-    def _typed(self, attribute: str, parameter: str, value: Any) -> Any:
-        default = self._script_parameters[attribute][parameter]
+    def _typed(self, parameter: str, value: Any) -> Any:
+        default = self._script_parameters[parameter]
         if isinstance(default, bool) or not isinstance(default, (int, float)):
             return value
         if isinstance(default, float):
             return float(value)
         if not float(value).is_integer():
-            script = self.motmasters()[attribute].script
+            script = self.motmaster()[1].script
             raise ValueError(
-                f"{attribute}.{parameter} is an Int32 in script {script!r}; "
+                f"{parameter} is an Int32 in script {script!r}; "
                 f"{value!r} is not a whole number"
             )
         return int(value)
 
     def run_sequences(self, **overrides: Any) -> None:
-        """Run every script once (blocking) with the current parameters plus ``overrides``.
+        """Run the script once (blocking) with the current parameters plus ``overrides``.
 
-        ``overrides`` are keyed ``"attribute.parameter"`` and beat the form's
-        values, which beat the saved ones. Followers are started
-        in threads first, then the master; the first error is raised once all
-        have finished or timed out.
+        ``overrides`` are keyed by script parameter and beat the form's values,
+        which beat the saved ones.
         """
-        requested = {
-            attribute: self._saved_values.get(attribute, {}) | parameters
-            for attribute, parameters in self.motmaster_parameters().items()
-        }
-        for key, value in overrides.items():
-            attribute, _, parameter = key.partition(".")
-            if attribute not in requested:
-                raise KeyError(f"no MotMaster attribute {attribute!r} for {key!r}")
-            requested[attribute][parameter] = value
-        # A name that is only scanned reaches the instance at its first point, after prepare().
+        requested = self._saved_values | self.motmaster_parameters() | overrides
+        # A name that is only scanned reaches the experiment at its first point,
+        # after prepare().
         self._check_parameters(requested)
         sent = {
-            attribute: {
-                parameter: self._typed(attribute, parameter, value)
-                for parameter, value in parameters.items()
-            }
-            for attribute, parameters in requested.items()
+            parameter: self._typed(parameter, value)
+            for parameter, value in requested.items()
         }
-
-        master = self.master_name()
-        errors: list[tuple[str, BaseException]] = []
-
-        def go(attribute: str, client: Any) -> None:
-            try:
-                client.start_motmaster_experiment(sent[attribute])
-            except Exception as error:
-                errors.append((attribute, error))
-
-        follower_names = [name for name in self.motmasters() if name != master]
-        for attribute in follower_names:
-            if attribute not in self._follower_clients:
-                motmaster = self.motmasters()[attribute]
-                self._follower_clients[attribute] = self.device(
-                    motmaster.device_name, fresh=True, timeout=motmaster.timeout
-                )
-        followers: dict[str, threading.Thread] = {}
-        for attribute in follower_names:
-            thread = threading.Thread(
-                target=go,
-                args=(attribute, self._follower_clients[attribute]),
-                name=f"motmaster-{attribute}",
-            )
-            thread.daemon = True
-            thread.start()
-            followers[attribute] = thread
-        if followers:
-            time.sleep(self.follower_arm_delay)
-        go(master, getattr(self, master))
-        master_finished = time.monotonic()
-        for attribute, thread in followers.items():
-            timeout = self.motmasters()[attribute].follower_timeout
-            thread.join(max(0.0, master_finished + timeout - time.monotonic()))
-            if thread.is_alive():
-                # Its client is still blocked in Go(); a later call needs another.
-                del self._follower_clients[attribute]
-                errors.append(
-                    (
-                        attribute,
-                        TimeoutError(
-                            f"{attribute} did not finish within {timeout} s; it may "
-                            "still be waiting for its trigger. Restart the "
-                            f"{self.motmasters()[attribute].device_name!r} device "
-                            "server (or trigger it) before the next task."
-                        ),
-                    )
-                )
-        # A timed-out follower may still append to errors; sorted() works on a copy.
-        failures = sorted(errors, key=lambda entry: entry[0] != master)
-        if failures:
-            for attribute, error in failures[1:]:
-                logger.error("MOTMaster %s also failed: %r", attribute, error)
-            raise failures[0][1]
+        getattr(self, self.motmaster()[0]).start_motmaster_experiment(sent)
 
     def run_point(self) -> None:
         self.run_sequences()
@@ -472,12 +320,10 @@ class MotMasterExperiment(Experiment):
     def close_devices(self) -> None:
         # Here rather than in finish(), which subclasses override: a link left on
         # would lock the secondary MOTMaster against every other task.
-        for attribute in getattr(self, "_linked", []):
+        if getattr(self, "_linked", False):
             try:
-                getattr(self, attribute).set_linked(False)
+                getattr(self, self.motmaster()[0]).set_linked(False)
             except Exception:
-                logger.warning(
-                    "Could not release the %s link", attribute, exc_info=True
-                )
-        self._linked = []
+                logger.warning("Could not release the MOTMaster link", exc_info=True)
+        self._linked = False
         super().close_devices()
