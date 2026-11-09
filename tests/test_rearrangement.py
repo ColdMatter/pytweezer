@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+from pytweezer.analysis import analysis as an
+from pytweezer.analysis.array_loading import photons_at_sites
 from pytweezer.coordinators import rearrangement
 from pytweezer.helper_scripts import array_hologram
 from pytweezer.servers import device_server
@@ -49,9 +51,58 @@ def rig():
     spec.teardown()
 
 
+class FakeGenerator:
+    """Records the plans asked of it and plays ``n_frames`` blank frames for each."""
+
+    def __init__(self):
+        self.plans = []
+        self.moving_idx, self.final_idx = [], []
+        self.n_frames = 3
+        self.pupil = None
+
+    def plan_rearrangement(
+        self, terms1, terms2, occ_mask, d0=0.5, profile="minimum_jerk", background=None
+    ):
+        self.plans.append(
+            {
+                "terms1": terms1,
+                "terms2": terms2,
+                "occ_mask": occ_mask,
+                "d0": d0,
+                "profile": profile,
+                "background": background,
+            }
+        )
+        return {
+            "moving_idx": np.array(self.moving_idx),
+            "final_idx": np.array(self.final_idx),
+        }
+
+    def iter_planned_sequence(self, plan, *, to_host=False, pupil=None):
+        self.pupil = pupil
+        for _ in range(self.n_frames):
+            yield np.zeros((1024, 1024), dtype=np.uint8)
+
+
+def three_site_target(generator, **_):
+    return {
+        "weights": np.ones(3),
+        "optimised_weights": np.ones(3),
+        "phases": np.zeros(3),
+        "x_um": np.array([0.0, 5.0, 10.0]),
+        "y_um": np.zeros(3),
+        "uniformity": 0.99,
+        "min_max_ratio": 0.98,
+        "mse": 1e-3,
+    }
+
+
 @pytest.fixture
 def fake_gpu(monkeypatch):
-    """Stands in for the GPU hologram: a mask filled with the array's row count."""
+    """Stands in for the GPU hologram: a mask filled with the array's row count.
+
+    Returns the :class:`FakeGenerator` the rig builds its arrays and moves with.
+    """
 
     def hologram(generator, *, rows, columns, **_):
         y_um, x_um = np.mgrid[0:rows, 0:columns] * 5.0
@@ -64,9 +115,24 @@ def fake_gpu(monkeypatch):
             "optimised_weights": np.ones(rows * columns),
         }
 
+    generator = FakeGenerator()
     monkeypatch.setattr(rearrangement, "_HAS_CUPY", True)
-    monkeypatch.setattr(array_hologram, "make_generator", lambda settings: object())
+    monkeypatch.setattr(array_hologram, "make_generator", lambda settings: generator)
     monkeypatch.setattr(array_hologram, "array_hologram", hologram)
+    monkeypatch.setattr(array_hologram, "target_terms", three_site_target)
+    monkeypatch.setattr(
+        array_hologram, "background_phase", lambda generator, **layers: layers
+    )
+    monkeypatch.setattr(
+        array_hologram,
+        "pupil_arrays",
+        lambda generator, radius_um, dump_dx_um, dump_dy_um: (
+            radius_um,
+            dump_dx_um,
+            dump_dy_um,
+        ),
+    )
+    return generator
 
 
 ARRAY = {"rows": 3, "columns": 4, "spacing_um": 5.0, "angle_deg": 2.5}
@@ -153,6 +219,188 @@ def test_rig_builds_a_new_generator_only_when_the_optics_change(
         (48.0, 4.0),
         (50.0, 4.0),
     ]
+
+
+#: Where the 2x2 shot array's sites image, ``(y, x)`` in the HamCam ROI.
+SHOT_SITES = np.array([(16, 16), (16, 48), (48, 16), (48, 48)])
+SHOT_ARRAY = {"rows": 2, "columns": 2, "spacing_um": 5.0, "angle_deg": 0.0}
+TARGET = {
+    "kind": "square",
+    "rows": 1,
+    "columns": 3,
+    "sites": 0,
+    "spacing_um": 5.0,
+    "angle_deg": 0.0,
+    "iterations": 5,
+    "damping": 0.5,
+    "phase_randomness": 1.0,
+}
+SCORING = {"window_size": 5, "feature_size": 10}
+HEADER = {"rid": 7}
+
+
+def shot_frame(lit):
+    y, x = np.mgrid[:64, :64]
+    spots = np.array(
+        [np.exp(-((y - sy) ** 2 + (x - sx) ** 2) / 4.5) for sy, sx in SHOT_SITES]
+    )
+    return (100 + 2000 * np.tensordot(lit, spots, axes=1)).astype(np.uint16)
+
+
+def shot_threshold():
+    """Halfway between the photons of an empty and a full site."""
+    sites = dict(enumerate(map(tuple, SHOT_SITES)))
+
+    def photons(lit):
+        frame = an.morphological_tophat_high_pass(
+            shot_frame(lit).astype(float), feature_size=SCORING["feature_size"]
+        )
+        return photons_at_sites([frame], sites, SCORING["window_size"]).mean()
+
+    return (photons([1, 1, 1, 1]) + photons([0, 0, 0, 0])) / 2
+
+
+class ShotCamera:
+    """Hands out a shot's three frames and records the calls; can fail one read."""
+
+    def __init__(self, frames, fail_at_frame=None):
+        self.frames = np.asarray(frames)
+        self.fail_at_frame = fail_at_frame
+        self.calls = []
+
+    def start_acquisition(self):
+        self.calls.append("start")
+
+    def stop_acquisition(self):
+        self.calls.append("stop")
+
+    def acquire_n_frames(self, n, start_frame=0, broadcast=False, header=None):
+        self.calls.append(("read", n, start_frame, broadcast, header))
+        if start_frame == self.fail_at_frame:
+            raise TimeoutError("camera timed out")
+        return self.frames[start_frame : start_frame + n]
+
+    def reads(self):
+        return [call[1:] for call in self.calls if call[0] == "read"]
+
+
+def prepare_shot(rig, lit, fail_at_frame=None, optics=OPTICS):
+    """Put the 2x2 array on the SLM, prepare a move and give the rig a HamCam showing ``lit``."""
+    hologram = rig.make_array(**SHOT_ARRAY, **optics)
+    rig.prepare_rearrangement(
+        **TARGET,
+        occupancy_sites=SHOT_SITES,
+        threshold_photons=shot_threshold(),
+        **SCORING,
+    )
+    rig.camera = ShotCamera(
+        [shot_frame(lit), shot_frame([0, 0, 0, 0]), shot_frame([0, 0, 0, 0])],
+        fail_at_frame,
+    )
+    return hologram
+
+
+def test_a_shot_moves_the_occupied_atoms_and_returns_three_frames(rig, fake_gpu):
+    hologram = prepare_shot(rig, lit=[1, 0, 1, 0])
+    fake_gpu.moving_idx, fake_gpu.final_idx = [0, 2], [1, 0]
+
+    shot = rig.rearrange(d0_um=0.5, profile="minimum_jerk", header=HEADER)
+
+    np.testing.assert_array_equal(shot["occupied"], [True, False, True, False])
+    np.testing.assert_array_equal(shot["destination"], [1, -1, 0, -1])
+    assert shot["frames"].shape[0] == 3
+    assert rig.camera.reads() == [(1, 0, True, HEADER), (2, 1, True, HEADER)]
+    np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
+
+
+def test_a_shot_with_no_atoms_plans_nothing_and_still_reads_the_follow_up_frames(
+    rig, fake_gpu
+):
+    prepare_shot(rig, lit=[0, 0, 0, 0])
+
+    shot = rig.rearrange(d0_um=0.5, profile="minimum_jerk", header=HEADER)
+
+    assert shot["n_frames"] == 0
+    assert fake_gpu.plans == []
+    assert rig.camera.reads() == [(1, 0, True, HEADER), (2, 1, True, HEADER)]
+
+
+def test_destinations_send_surplus_atoms_nowhere():
+    destination = rearrangement.destinations(5, [0, 3], [1, 0])
+
+    np.testing.assert_array_equal(destination, [1, -1, -1, 0, -1])
+    targets = destination[destination >= 0]
+    assert len(set(targets)) == len(targets)
+
+
+def test_a_failed_occupancy_read_names_arm_delay_and_stops_the_camera(rig, fake_gpu):
+    hologram = prepare_shot(rig, lit=[1, 0, 1, 0], fail_at_frame=0)
+
+    with pytest.raises(RuntimeError, match="arm_delay"):
+        rig.rearrange(d0_um=0.5, profile="minimum_jerk", header=HEADER)
+
+    assert rig.camera.calls[-1] == "stop"
+    np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
+
+
+def test_a_failed_follow_up_read_still_stops_the_camera_and_restores_the_mask(
+    rig, fake_gpu
+):
+    hologram = prepare_shot(rig, lit=[1, 0, 1, 0], fail_at_frame=1)
+    fake_gpu.moving_idx, fake_gpu.final_idx = [0, 2], [1, 0]
+
+    with pytest.raises(TimeoutError):
+        rig.rearrange(d0_um=0.5, profile="minimum_jerk", header=HEADER)
+
+    assert rig.camera.calls[-1] == "stop"
+    np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
+
+
+def test_a_shot_refuses_once_something_else_has_written_the_slm(rig, fake_gpu):
+    prepare_shot(rig, lit=[1, 0, 1, 0])
+    rig.slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
+
+    with pytest.raises(RuntimeError):
+        rig.rearrange(d0_um=0.5, profile="minimum_jerk", header=HEADER)
+
+    assert rig.camera.calls == []
+
+
+def test_prepare_rearrangement_refuses_without_an_array_on_the_slm(rig, fake_gpu):
+    with pytest.raises(RuntimeError):
+        rig.prepare_rearrangement(
+            **TARGET,
+            occupancy_sites=SHOT_SITES,
+            threshold_photons=0.0,
+            **SCORING,
+        )
+
+
+def test_prepare_rearrangement_refuses_without_a_gpu(rig, monkeypatch):
+    monkeypatch.setattr(rearrangement, "_HAS_CUPY", False)
+
+    with pytest.raises(RuntimeError, match="needs cupy/lap and a CUDA GPU"):
+        rig.prepare_rearrangement(
+            **TARGET,
+            occupancy_sites=SHOT_SITES,
+            threshold_photons=0.0,
+            **SCORING,
+        )
+
+
+def test_plan_is_built_on_the_layers_make_array_used(rig, fake_gpu):
+    optics = OPTICS | {"zernike": True}
+    prepare_shot(rig, lit=[1, 0, 0, 0], optics=optics)
+    fake_gpu.moving_idx, fake_gpu.final_idx = [0], [1]
+
+    rig.rearrange(d0_um=0.5, profile="minimum_jerk", header=HEADER)
+
+    assert fake_gpu.plans[0]["background"] == {
+        "blaze_um": (48.0, 4.0),
+        "fresnel_focal_length_mm": 1125.0,
+        "zernike": True,
+    }
+    assert fake_gpu.pupil == (8704.0, 100.0, 0.0)
 
 
 @pytest.mark.parametrize(

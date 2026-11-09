@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from pytweezer.analysis import analysis as an
-from pytweezer.analysis.array_loading import photons_at_sites
+from pytweezer.analysis.array_loading import occupied_sites, photons_at_sites
 from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
 from pytweezer.experiment import ListAxis, Scan, motmaster, optimisers, run_local
@@ -200,6 +200,21 @@ def rig(monkeypatch):
     for module in (motmaster, optimisers):
         monkeypatch.setattr(module, "get_saved_parameters", lambda: saved)
     return sequencer
+
+
+def test_occupied_sites_counts_only_sites_above_threshold():
+    loaded = np.arange(len(SITES)) % 2 == 0
+    frame = FakeHamCam(None)._frame(loaded)
+
+    occupied = occupied_sites(
+        frame,
+        np.array(SITES),
+        window_size=5,
+        feature_size=10,
+        threshold=midpoint_threshold(),
+    )
+
+    np.testing.assert_array_equal(occupied, loaded)
 
 
 def test_a_point_measures_the_loading_and_survival_put_in(rig):

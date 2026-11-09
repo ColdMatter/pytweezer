@@ -31,6 +31,10 @@ the coordinator contract):
   on the SLM. :meth:`get_array` then says which array is on the SLM, for
   analyses and experiments that need the number or positions of the sites; it
   returns ``None`` once anything else has written the SLM.
+* :meth:`prepare_rearrangement` — build a target array on the generator and
+  layers :meth:`make_array` used; :meth:`rearrange` then runs one shot: score
+  the HamCam's occupancy frame, move the atoms to the target, read the
+  follow-up frames and put the initial array back.
 * :meth:`test` / :meth:`status` / :meth:`shutdown`.
 
 Generation and upload are pipelined: the GPU loop pushes each finished frame onto a
@@ -55,10 +59,12 @@ import time
 import numpy as np
 
 from pytweezer import analysis as an
+from pytweezer.analysis import array_loading
 from pytweezer.coordinators.base import Coordinator
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.slm import SLM
 from pytweezer.helper_scripts import array_hologram
+from pytweezer.logging_utils import get_logger
 
 try:
     import cupy as cp
@@ -69,6 +75,8 @@ except Exception:  # pragma: no cover - depends on the machine's GPU stack
     cp = None
     _HAS_CUPY = False
 
+
+LOGGER = get_logger("rearrangement")
 
 USE_SUM_CPP = False
 
@@ -128,6 +136,17 @@ def _pinned_like(frame):
     except Exception:
         print("Pinned allocation failed; using pageable memory.")
         return np.empty(shape, dtype)
+
+
+def destinations(n_sites: int, moving_idx, final_idx) -> np.ndarray:
+    """The target index each initial site's atom is sent to; -1 where none is sent."""
+    destination = np.full(int(n_sites), -1, dtype=int)
+    destination[np.asarray(moving_idx, dtype=int)] = np.asarray(final_idx, dtype=int)
+    return destination
+
+
+def _to_host(values) -> np.ndarray:
+    return values.get() if hasattr(values, "get") else np.asarray(values)
 
 
 def _steady_median(values):
@@ -193,6 +212,11 @@ class Rearrangement(Coordinator):
         self._array_mask = None
         self._array_generator = None
         self._array_settings = None
+        #: How :meth:`make_array` built the array on the SLM, for
+        #: :meth:`prepare_rearrangement`; ``None`` for any other array.
+        self._made_array = None
+        #: What :meth:`rearrange` needs, set by :meth:`prepare_rearrangement`.
+        self._prepared = None
 
         #: ``time.perf_counter()`` at which the most recent
         #: :meth:`_play_sequence_pipelined` finished displaying its *first* frame,
@@ -316,9 +340,26 @@ class Rearrangement(Coordinator):
             spacing_um=float(spacing_um),
             angle_deg=float(angle_deg),
         )
+        self._made_array = {
+            "generator": self._array_generator,
+            "terms": (
+                np.asarray(hologram["optimised_weights"]),
+                np.asarray(hologram["phases"]),
+                np.asarray(hologram["x_um"]),
+                np.asarray(hologram["y_um"]),
+            ),
+            "envelope": envelope,
+            "blaze_um": tuple(blaze_um),
+            "fresnel_focal_length_mm": float(fresnel_focal_length_mm),
+            "zernike": bool(zernike),
+            "pupil_radius_um": float(pupil_radius_um),
+            "pupil_dump_um": tuple(pupil_dump_um),
+        }
         return hologram
 
     def _remember_array(self, mask, *, x_um, y_um, weights, **geometry) -> None:
+        self._made_array = None
+        self._prepared = None
         self._array_mask = np.array(mask, dtype=np.uint8)
         self._array = {
             "sites": len(x_um),
@@ -344,6 +385,228 @@ class Rearrangement(Coordinator):
         ):
             return None
         return dict(self._array)
+
+    # ------------------------------------------------------------------ #
+    # One rearrangement shot of a queued experiment
+    # ------------------------------------------------------------------ #
+
+    def prepare_rearrangement(
+        self,
+        *,
+        kind: str,
+        rows: int,
+        columns: int,
+        sites: int,
+        spacing_um: float,
+        angle_deg: float,
+        iterations: int,
+        damping: float,
+        phase_randomness: float,
+        occupancy_sites: np.ndarray,
+        threshold_photons: float,
+        window_size: int,
+        feature_size: int,
+        follow_up_frames: int = 2,
+    ) -> dict:
+        """Build the target array that :meth:`rearrange` moves the atoms of the array on the SLM to.
+
+        The target is a ``kind`` ("square" or "kagome") array (see
+        :func:`~pytweezer.helper_scripts.array_hologram.target_terms`; ``rows``
+        and ``columns`` make a square one, ``sites`` a kagome one), optimised on
+        the generator, envelope and blaze :meth:`make_array` used. The move's
+        frames are built on that array's Fresnel lens, blaze, Zernike flag and
+        pupil.
+
+        Args:
+            occupancy_sites: ``(N, 2)`` ``(y, x)`` HamCam ROI pixels of the
+                array's sites, in the array's order.
+            threshold_photons: Photons above which a site is occupied (see
+                :func:`~pytweezer.analysis.array_loading.occupied_sites`).
+            follow_up_frames: HamCam frames read after the move.
+
+        Returns:
+            The target's ``x_um``, ``y_um`` and requested ``weights``, and the
+            optimisation's final ``uniformity``, ``min_max_ratio`` and ``mse``.
+
+        Raises:
+            RuntimeError: There is no GPU, or the array on the SLM is not one
+                :meth:`make_array` put there.
+            ValueError: ``kind`` is unknown, or ``occupancy_sites`` does not
+                have one site per trap of the array.
+        """
+        self._require_gpu()
+        made = self._made_array
+        if made is None or self.get_array() is None:
+            raise RuntimeError(
+                "No array from make_array() is on the SLM; make one before "
+                "preparing a rearrangement."
+            )
+        occupancy_sites = np.asarray(occupancy_sites, dtype=int)
+        n_sites = len(made["terms"][0])
+        if len(occupancy_sites) != n_sites:
+            raise ValueError(
+                f"{len(occupancy_sites)} occupancy sites for an array of {n_sites}"
+            )
+        generator = made["generator"]
+        target = array_hologram.target_terms(
+            generator,
+            kind=kind,
+            rows=int(rows),
+            columns=int(columns),
+            sites=int(sites),
+            spacing_um=float(spacing_um),
+            angle_deg=float(angle_deg),
+            envelope=made["envelope"],
+            blaze_um=made["blaze_um"],
+            iterations=int(iterations),
+            damping=float(damping),
+            phase_randomness=float(phase_randomness),
+        )
+        self._prepared = {
+            "generator": generator,
+            "initial_mask": self._array_mask,
+            "initial_terms": made["terms"],
+            "target_terms": (
+                target["optimised_weights"],
+                target["phases"],
+                target["x_um"],
+                target["y_um"],
+            ),
+            "background": array_hologram.background_phase(
+                generator,
+                blaze_um=made["blaze_um"],
+                fresnel_focal_length_mm=made["fresnel_focal_length_mm"],
+                zernike=made["zernike"],
+            ),
+            "pupil": array_hologram.pupil_arrays(
+                generator, made["pupil_radius_um"], *made["pupil_dump_um"]
+            ),
+            "occupancy_sites": occupancy_sites,
+            "threshold_photons": float(threshold_photons),
+            "window_size": int(window_size),
+            "feature_size": int(feature_size),
+            "follow_up_frames": int(follow_up_frames),
+        }
+        return {
+            key: target[key]
+            for key in ("x_um", "y_um", "weights", "uniformity", "min_max_ratio", "mse")
+        }
+
+    def rearrange(self, *, d0_um: float, profile: str, header: dict) -> dict:
+        """Run one shot: score the occupancy frame, move the atoms, read the follow-up frames.
+
+        The HamCam must already be set up for the shot's frames. Each frame is
+        broadcast on the camera's stream with ``header``. Whatever happens, the
+        acquisition is stopped and the initial array is put back on the SLM.
+
+        Args:
+            d0_um: Largest step of any trap between frames.
+            profile: ``"minimum_jerk"`` or ``"linear"``.
+            header: Keys added to each broadcast frame's header.
+
+        Returns:
+            ``frames`` ``(1 + follow_up_frames, H, W)``; per initial site,
+            ``occupied`` and ``destination`` (the target index its atom was sent
+            to, -1 if empty or discarded); ``n_frames`` played on the SLM; and
+            ``occupancy_ms``, ``calculation_and_upload_ms`` and
+            ``total_rearrangement_ms``.
+
+        Raises:
+            RuntimeError: :meth:`prepare_rearrangement` has not run since the
+                array was made, the array is no longer on the SLM, or the
+                occupancy frame never arrived.
+        """
+        if self._prepared is None:
+            raise RuntimeError(
+                "No rearrangement prepared; call prepare_rearrangement() first."
+            )
+        if self.get_array() is None:
+            raise RuntimeError(
+                "The prepared array is no longer on the SLM; something else wrote it."
+            )
+        self._require_camera()
+        prepared = self._prepared
+        generator = prepared["generator"]
+        initial_mask = prepared["initial_mask"]
+
+        self.slm.update_mask(initial_mask)
+        try:
+            self.camera.start_acquisition()
+            try:
+                occupancy_frame = self.camera.acquire_n_frames(
+                    1, start_frame=0, broadcast=True, header=header
+                )[0]
+            except Exception as exc:
+                raise RuntimeError(
+                    "no occupancy frame: MOTMaster may have fired before the camera "
+                    f"was armed (arm_delay): {exc}"
+                ) from exc
+            t1 = time.perf_counter()
+
+            occupied = array_loading.occupied_sites(
+                occupancy_frame,
+                prepared["occupancy_sites"],
+                window_size=prepared["window_size"],
+                feature_size=prepared["feature_size"],
+                threshold=prepared["threshold_photons"],
+            )
+            t2 = time.perf_counter()
+
+            plan = None
+            n_frames = 0
+            # The planner cannot pair an empty array.
+            if occupied.any():
+                plan = generator.plan_rearrangement(
+                    prepared["initial_terms"],
+                    prepared["target_terms"],
+                    occupied,
+                    d0=float(d0_um),
+                    profile=profile,
+                    background=prepared["background"],
+                )
+                n_frames = self._play_sequence_pipelined(
+                    generator.iter_planned_sequence(plan, pupil=prepared["pupil"])
+                )
+            t3 = time.perf_counter()
+
+            follow_up = self.camera.acquire_n_frames(
+                prepared["follow_up_frames"],
+                start_frame=1,
+                broadcast=True,
+                header=header,
+            )
+        finally:
+            self.camera.stop_acquisition()
+            self.slm.update_mask(initial_mask)
+
+        # The device syncs of reading the plan back stay out of the timed spans.
+        if plan is None:
+            destination = np.full(len(occupied), -1, dtype=int)
+        else:
+            destination = destinations(
+                len(occupied), _to_host(plan["moving_idx"]), _to_host(plan["final_idx"])
+            )
+        timings = {
+            "occupancy_ms": (t2 - t1) * 1000,
+            "calculation_and_upload_ms": (t3 - t2) * 1000,
+            "total_rearrangement_ms": (t3 - t1) * 1000,
+        }
+        LOGGER.info(
+            "Rearranged %d of %d atoms in %d frames: %.3f ms",
+            int((destination >= 0).sum()),
+            int(occupied.sum()),
+            n_frames,
+            timings["total_rearrangement_ms"],
+        )
+        return {
+            "frames": np.concatenate(
+                [np.asarray(occupancy_frame)[None], np.asarray(follow_up)]
+            ),
+            "occupied": occupied,
+            "destination": destination,
+            "n_frames": n_frames,
+            **timings,
+        }
 
     # ------------------------------------------------------------------ #
     # Initialise
