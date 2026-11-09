@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import pytest
 
@@ -42,6 +44,7 @@ ONE_POINT = {
 class FakeSequencer:
     def __init__(self):
         self.goes = []
+        self.go_times = []
         self.fail = False
 
     def close_rpc(self):
@@ -60,6 +63,7 @@ class FakeSequencer:
     def start_motmaster_experiment(self, parameters):
         if self.fail:
             raise RuntimeError("MOTMaster refused")
+        self.go_times.append(time.monotonic())
         self.goes.append(parameters)
 
 
@@ -88,16 +92,19 @@ class RecordingCamera:
 
 
 class FakeHamCam(RecordingCamera):
-    """Images the array twice per shot; turning the tweezers off empties the second frame."""
+    """Images the array twice per shot; turning the tweezers off empties the second frame.
 
-    def __init__(self, sequencer):
+    An atom is a Gaussian spot at one of ``sites``, ``(y, x)`` pixels.
+    """
+
+    def __init__(self, sequencer, sites=SITES):
         super().__init__()
         self.sequencer = sequencer
         self.headers = []
         self.rng = np.random.default_rng(1)
         y, x = np.mgrid[:128, :128]
         self.spots = np.array(
-            [2000 * np.exp(-((y - sy) ** 2 + (x - sx) ** 2) / 4.5) for sy, sx in SITES]
+            [2000 * np.exp(-((y - sy) ** 2 + (x - sx) ** 2) / 4.5) for sy, sx in sites]
         )
 
     def set_roi(self, x0, width, y0, height):

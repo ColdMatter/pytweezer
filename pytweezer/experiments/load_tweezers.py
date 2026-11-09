@@ -224,28 +224,31 @@ class LoadTweezers(MotMasterExperiment):
         self.trap_threshold = float(saved["trap_threshold"])
         # The camera may round the ROI's corner; sites are placed by the one it used.
         roi_x0, roi_y0 = self.roi_origin
-        roi_width, roi_height = self.hamcam_roi_width, self.hamcam_roi_height
         sites = np.rint(to_roi(saved["trap_sites"], roi_y0, roi_x0)).astype(int)
-        half = self.trap_window_size // 2
-        outside = [
-            index
-            for index, (y, x) in enumerate(sites)
-            if min(y, x) < half or y + half >= roi_height or x + half >= roi_width
-        ]
+        outside = self.windows_leaving_roi(sites)
         if outside:
             return None, (
                 f"the summing windows of trap sites {outside} leave the camera's ROI"
             )
         return {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}, ""
 
+    def windows_leaving_roi(self, sites: np.ndarray) -> list[int]:
+        """The indices of ``sites`` (``(y, x)`` ROI pixels) whose summing window leaves the ROI."""
+        half = self.trap_window_size // 2
+        return [
+            index
+            for index, (y, x) in enumerate(sites)
+            if min(y, x) < half
+            or y + half >= self.hamcam_roi_height
+            or x + half >= self.hamcam_roi_width
+        ]
+
     def take_shot(self, **sequence: Any) -> np.ndarray:
         """Run the sequence once with script parameters ``sequence``; the HamCam's two frames.
 
         The frames are broadcast on the camera's stream as this task's.
         """
-        if self.hamcam_gain != self.sent_gain:
-            self.hamcam.set_gain(self.hamcam_gain)
-            self.sent_gain = self.hamcam_gain
+        self.update_gain()
         self.hamcam.start_acquisition()
         try:
             self.run_sequences(**sequence)
@@ -256,6 +259,12 @@ class LoadTweezers(MotMasterExperiment):
             )
         finally:
             self.hamcam.stop_acquisition()
+
+    def update_gain(self) -> None:
+        """Send ``hamcam_gain`` to the HamCam if it differs from the gain last sent."""
+        if self.hamcam_gain != self.sent_gain:
+            self.hamcam.set_gain(self.hamcam_gain)
+            self.sent_gain = self.hamcam_gain
 
     @staticmethod
     def top_hat(frames, feature_size: int) -> list[np.ndarray]:
