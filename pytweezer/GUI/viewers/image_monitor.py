@@ -203,6 +203,7 @@ class ImageDisplay(Applet):
         # add a LUT to the image display
         lut = pg.HistogramLUTItem()
         lut.setImageItem(image_item)
+        self.lut = lut
         graphics_layout_widget.addItem(lut, row=self.image_row, col=self.image_col + 1)
         image_item.setRect(frame_rect({}, imgdata.shape))
         # The colormap goes on the histogram's gradient, not on the image: a
@@ -273,13 +274,17 @@ class ImageDisplay(Applet):
             msg, head, imgdata = self.imgstream.recv()
             if self.image_index != -1 and head["index"] != self.image_index:
                 continue
-            self.image_item.setImage(imgdata, autoLevels=True)
-            self.image_item.resetTransform()
-            self.image_item.setRect(frame_rect(head, imgdata.shape))
-            self.imgdata = imgdata
-            self.image_head = head
+            self.show_frame(head, imgdata)
         self.update_mask()
         self.update_overlays()
+
+    def show_frame(self, head: dict, imgdata: np.ndarray) -> None:
+        """Draw one frame from the image streams, scaled to its own levels."""
+        self.image_item.setImage(imgdata, autoLevels=True)
+        self.image_item.resetTransform()
+        self.image_item.setRect(frame_rect(head, imgdata.shape))
+        self.imgdata = imgdata
+        self.image_head = head
 
     def update_mask(self):
         while self.maskstream.has_new_data():
