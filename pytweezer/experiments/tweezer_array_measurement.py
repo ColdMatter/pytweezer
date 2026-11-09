@@ -37,6 +37,17 @@ class TweezerArrayMeasurement(LoadTweezers):
             raise RuntimeError(self.no_trap_sites_reason)
         self.threshold = self.trap_threshold
 
+    def take_batch(self, **sequence) -> tuple[list, list]:
+        """``shots`` shots with script parameters ``sequence``; their first and second frames.
+
+        With ``save_raw_images`` the frames are recorded as ``hamcam_images``,
+        ``(shots, 2, height, width)`` per point.
+        """
+        stacks = np.array([self.take_shot(**sequence) for _ in range(self.shots)])
+        if self.save_raw_images:
+            self.record("hamcam_images", stacks)
+        return list(stacks[:, 0]), list(stacks[:, 1])
+
     def score_batch(self, **sequence) -> dict[str, float]:
         """Loading, survival from the first image to the second, and fidelity, over ``shots`` shots.
 
@@ -45,7 +56,7 @@ class TweezerArrayMeasurement(LoadTweezers):
         ``save_tweezer_counts``, their raw pixel sums as ``first_counts`` and
         ``second_counts``.
         """
-        firsts, seconds = self.take_shots(self.shots, **sequence)
+        firsts, seconds = self.take_batch(**sequence)
         if self.save_tweezer_counts:
             self.record("first_counts", self.site_counts(firsts), unit="counts")
             self.record("second_counts", self.site_counts(seconds), unit="counts")

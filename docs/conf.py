@@ -58,13 +58,3 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
 }
-
-
-def _skip_dotted_member(app, what, name, obj, skip, options):
-    # CameraExperiment sets its camera arguments as class attributes named
-    # "<camera>.<setting>", which autodoc would read as a nested path.
-    return True if "." in name else None
-
-
-def setup(app):
-    app.connect("autodoc-skip-member", _skip_dotted_member)

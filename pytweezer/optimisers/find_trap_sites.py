@@ -69,13 +69,26 @@ class FindTrapSites(Fit, LoadTweezers):
             )
         self.record("sites_from", "rig" if array else "default")
 
-    def fit(self) -> dict:
-        firsts, backgrounds = self.take_shots(
-            self.calibration_shots,
-            BackgroundDrop=1,
-            tTweezerSetVVA0=0.0,
-            tTweezerSetVVA1=0.0,
+    def take_calibration_shots(self) -> tuple[list, list]:
+        """``calibration_shots`` shots with the tweezers off in the background drop.
+
+        Returns their first and second frames. With ``save_raw_images`` the
+        frames are recorded as ``hamcam_images``, ``(shots, 2, height, width)``.
+        """
+        stacks = np.array(
+            [
+                self.take_shot(
+                    BackgroundDrop=1, tTweezerSetVVA0=0.0, tTweezerSetVVA1=0.0
+                )
+                for _ in range(self.calibration_shots)
+            ]
         )
+        if self.save_raw_images:
+            self.record("hamcam_images", stacks)
+        return list(stacks[:, 0]), list(stacks[:, 1])
+
+    def fit(self) -> dict:
+        firsts, backgrounds = self.take_calibration_shots()
         average = an.tweezer_show_bg_subtracted(firsts, backgrounds, show=False)
         self.record("calibration_image", average)
         filtered = an.morphological_tophat_high_pass(
@@ -103,7 +116,7 @@ class FindTrapSites(Fit, LoadTweezers):
         self.record("threshold", float(threshold), unit="photons")
         self.record("calibration_fidelity", float(fidelity))
         return {
-            "trap_sites": found.sites + self.roi_origins["hamcam"][::-1],
+            "trap_sites": found.sites + self.roi_origin[::-1],
             "trap_threshold": float(threshold),
             "trap_window_size": self.window_size,
             "trap_feature_size": self.feature_size,

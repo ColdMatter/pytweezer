@@ -7,9 +7,9 @@
 
 Each setting is sent only when its box is ticked, or, for a choice, when it is
 not "unchanged"; the camera keeps everything else. The settings last until
-something changes them, and a :class:`~pytweezer.experiment.camera_experiment.CameraExperiment`
-sends its own on every task, so these are for the settings it leaves alone
-(exposure mode, EM gain, readout speed) and for a camera used live or from a
+something changes them, and an experiment that uses a camera sets what it needs
+in its own ``prepare`` on every task, so these are for the settings it leaves
+alone (readout speed, for example) and for a camera used live or from a
 notebook.
 """
 

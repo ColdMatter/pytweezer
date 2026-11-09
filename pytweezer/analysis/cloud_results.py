@@ -1,7 +1,8 @@
 """The cloud fits a measurement file recorded, for the Results tab.
 
-Reads what :meth:`~pytweezer.experiment.camera_experiment.CameraExperiment.record_cloud_fit`
-records per point for each camera: ``<camera>_<field>`` for every field of
+Reads the cloud fits an experiment records per point for each camera, as
+:meth:`~pytweezer.experiments.load_tweezers.LoadTweezersMOTImage.record_cloud_fit`
+does for the ORCA: ``<camera>_<field>`` for every field of
 :data:`~pytweezer.analysis.cloud_fit.FIELDS`, ``<camera>_<field>_error`` for
 each of :data:`~pytweezer.analysis.cloud_fit.ERROR_FIELDS`, and optionally
 ``<camera>_mean_image``.
