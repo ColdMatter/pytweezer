@@ -84,3 +84,22 @@ def loading_statistics(
         "background": background,
         "signal": signal,
     }
+
+
+def imaging_survival(first: np.ndarray, second: np.ndarray, threshold: float) -> dict:
+    """Of the sites occupied in the first image, the fraction still occupied in the second.
+
+    ``first`` and ``second`` are ``(shots, sites)`` in the unit of ``threshold``,
+    pooled over every shot and site. ``survival`` and its binomial standard
+    error are ``None`` when no site was occupied in the first image.
+    """
+    loaded = first > threshold
+    atoms = int(loaded.sum())
+    if not atoms:
+        return {"survival": None, "survival_error": None, "survival_atoms": 0}
+    survival = float((second > threshold)[loaded].mean())
+    return {
+        "survival": survival,
+        "survival_error": float(np.sqrt(survival * (1 - survival) / atoms)),
+        "survival_atoms": atoms,
+    }

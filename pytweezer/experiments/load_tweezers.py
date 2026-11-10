@@ -84,7 +84,8 @@ class LoadTweezers(MotMasterExperiment):
     occupancy ``threshold`` they are scored with. With them, each point records
     whether each site was occupied in each frame (``first_occupied``,
     ``second_occupied``: its top-hat filtered photons above the threshold), the
-    fraction of sites occupied in the first frame (``loading``) and,
+    fraction of sites occupied in the first frame (``loading``), the fraction
+    of those still occupied in the second (``survival``, NaN if none were) and,
     with ``save_tweezer_counts``, the sum of the camera's raw pixel values in
     its window (``first_counts``, ``second_counts``). The frames themselves
     (``hamcam_images``, ``(2, H, W)`` per point) are recorded only with
@@ -288,6 +289,9 @@ class LoadTweezers(MotMasterExperiment):
             self.record("first_occupied", first)
             self.record("second_occupied", second)
             self.record("loading", float(first.mean()))
+            self.record(
+                "survival", float(second[first].mean()) if first.any() else np.nan
+            )
             if self.save_tweezer_counts:
                 first, second = self.site_counts(images)
                 self.record("first_counts", first, unit="counts")

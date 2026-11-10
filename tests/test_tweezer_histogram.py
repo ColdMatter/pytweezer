@@ -14,7 +14,12 @@ from tests.test_analysis import (
     patterned_frame,
     tweezer_frame,
 )
-from tests.test_tweezer_array import FAST, ArrayBatch, rig  # noqa: F401
+from tests.test_tweezer_array import (  # noqa: F401
+    FAST,
+    SURVIVAL,
+    ArrayBatch,
+    rig,
+)
 
 FRAMES_SETTINGS = HistogramSettings(sites=len(SITE_CENTRES), detection_step=10)
 
@@ -130,6 +135,34 @@ def test_a_load_tweezers_file_is_scored_at_its_recorded_sites(rig):  # noqa: F81
     assert counts == pytest.approx(measurement.results["first_counts"])
     sites = measurement.constants["trap_sites"]
     assert head["site_rows"] == list(sites[:, 0])
+
+
+@pytest.mark.parametrize("image", [0, 1])
+def test_the_imaging_survival_is_the_same_whichever_image_is_shown(
+    rig,  # noqa: F811
+    image,
+):
+    measurement = run_local(LoadTweezers, Scan(repetitions=20))
+
+    head, _ = tweezer_histogram(measurement, HistogramSettings(image=image))
+
+    assert head["survival"] == pytest.approx(SURVIVAL, abs=0.05)
+    assert head["survival_atoms"] == measurement.results["first_occupied"].sum()
+
+
+def test_a_frames_file_with_an_empty_second_image_has_no_survivors():
+    head, _ = tweezer_histogram(frames_file(), FRAMES_SETTINGS)
+
+    assert head["survival"] == 0
+    assert head["survival_atoms"] > 0
+
+
+def test_no_atoms_in_the_first_image_gives_no_survival():
+    from pytweezer.analysis.array_loading import imaging_survival
+
+    empty = np.zeros((3, 4))
+
+    assert imaging_survival(empty, empty, threshold=1.0)["survival"] is None
 
 
 def test_a_scan_value_pools_its_repetitions():

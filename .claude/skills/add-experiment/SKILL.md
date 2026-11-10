@@ -221,7 +221,7 @@ usually a `ComputedAnalysisView`, which loads and computes off the GUI thread
 through its hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`;
 `compute` reads one point's large result, such as an image, with `point_result`).
 A view reads only what the file recorded, so record what it needs (the tweezer
-histograms take `first_counts`/`second_counts` with `trap_sites` and
+histograms, whose readout also gives the imaging survival, take `first_counts`/`second_counts` with `trap_sites` and
 `threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`;
 the MOT Gaussian fit, `cloud_fit`, takes `<camera>_<field>`, `_error` and
 `<camera>_mean_image`, as `LoadTweezersMOTImage.record_cloud_fit` records them:
@@ -411,8 +411,9 @@ The Rb tweezer experiments, in the order a session uses them:
    leaves the ROI; when `trap_geometry` is not the rig's array
    (`same_geometry`; an unreachable rig is not checked) they are used with a
    logged warning. With sites, each
-   point records `first_occupied`/`second_occupied` (bool per site) and
-   `loading`, plus raw `first_counts`/`second_counts` with
+   point records `first_occupied`/`second_occupied` (bool per site),
+   `loading` and the imaging `survival` (of the first image's atoms, the
+   fraction in the second; NaN if none), plus raw `first_counts`/`second_counts` with
    `save_tweezer_counts`; frames are recorded as `hamcam_images`
    (`(2, H, W)` per point) only with `save_raw_images`.
    `LoadTweezers` runs without sites only if it records frames;

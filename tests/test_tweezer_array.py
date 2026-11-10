@@ -501,6 +501,7 @@ def test_load_tweezers_records_each_sites_raw_counts_and_occupancy(rig):
     assert results["second_occupied"].mean() == pytest.approx(
         LOADING * SURVIVAL, abs=0.1
     )
+    assert np.nanmean(results["survival"]) == pytest.approx(SURVIVAL, abs=0.05)
     np.testing.assert_array_equal(measurement.constants["trap_sites"], SITES)
 
 

@@ -47,6 +47,7 @@ def test_view_draws_the_histogram_of_a_frames_file(qapp, tmp_path):
 
     assert until(lambda: "loading" in view.plots.readout.text(), qapp=qapp)
     assert not view.sites.isHidden()
+    assert "imaging survival 0.0 %" in view.plots.readout.text()
     assert view.message.text() == ""
 
 

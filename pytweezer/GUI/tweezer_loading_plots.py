@@ -279,6 +279,14 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
             f"fidelity {percent(head.get('fidelity'), 3)}",
             f"threshold {head['threshold']:.1f} {unit}",
         ]
+        if "survival" in head:
+            survival = head["survival"]
+            parts.insert(
+                1,
+                f"imaging survival {percent(survival)} ± {percent(head['survival_error'])}"
+                if survival is not None
+                else "imaging survival --",
+            )
         if head.get("background") and head.get("signal"):
             parts.append(
                 f"empty {head['background'][0]:.1f} / full {head['signal'][0]:.1f} {unit}"

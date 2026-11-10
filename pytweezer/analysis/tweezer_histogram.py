@@ -13,6 +13,10 @@ same ``(header, values)`` pair from what a file recorded, in the header's
 * the ``hamcam_images`` stack per point, ``(2, H, W)`` (``LoadTweezers``
   without trap sites), always in photons. The sites are found in the mean of
   every top-hat filtered first frame in the file.
+
+Whichever image is histogrammed, the header also gives the imaging survival
+from the first image to the second, with both scored against the first
+image's threshold.
 """
 
 from dataclasses import dataclass
@@ -22,6 +26,7 @@ import numpy as np
 from pytweezer.analysis import analysis as an
 from pytweezer.analysis.array_loading import (
     find_sites,
+    imaging_survival,
     loading_statistics,
     photons_at_sites,
 )
@@ -120,8 +125,12 @@ def tweezer_histogram(
     head = {"shots": 0, "sites": settings.sites, "source": kind, "unit": unit}
 
     if kind in ("counts", "photons"):
-        recorded = np.asarray(measurement.results[RESULTS[kind][settings.image]], float)
-        photons = recorded[mask].reshape(-1, recorded.shape[-1])
+        images = [
+            np.asarray(measurement.results[name], float)[mask].reshape(
+                -1, len(measurement.constants["trap_sites"])
+            )
+            for name in RESULTS[kind]
+        ]
         sites = {
             i: (int(row), int(col))
             for i, (row, col) in enumerate(measurement.constants["trap_sites"])
@@ -130,7 +139,7 @@ def tweezer_histogram(
             measurement.constants.get("threshold", settings.fallback_threshold)
         )
         if kind == "counts" and unit == "photons":
-            photons = an.convert_counts_to_photons(photons)
+            images = [an.convert_counts_to_photons(image) for image in images]
         elif kind == "counts":
             fallback_threshold = float(an.convert_photons_to_counts(fallback_threshold))
     else:
@@ -145,19 +154,27 @@ def tweezer_histogram(
             return head | {
                 "error": f"Found no {settings.sites} trap sites in the mean first image"
             }, None
-        frames = (
-            firsts
-            if settings.image == 0
-            else _filtered(stack[:, settings.image], settings)
-        )
-        selected = [frame for frame, keep in zip(frames, mask, strict=True) if keep]
-        photons = photons_at_sites(selected, sites, settings.window_size)
+        images = [
+            photons_at_sites(
+                [frame for frame, keep in zip(frames, mask, strict=True) if keep],
+                sites,
+                settings.window_size,
+            )
+            for frames in (firsts, _filtered(stack[:, 1], settings))
+        ]
         fallback_threshold = settings.fallback_threshold
 
+    photons = images[settings.image]
     head |= {"shots": len(photons), "sites": len(sites)}
     if not len(photons):
         return head | {"error": "No shots in this selection"}, None
-    return head | loading_statistics(photons, sites, fallback_threshold), photons
+    head |= loading_statistics(photons, sites, fallback_threshold)
+    first_threshold = (
+        head["threshold"]
+        if settings.image == 0
+        else loading_statistics(images[0], sites, fallback_threshold)["threshold"]
+    )
+    return head | imaging_survival(*images, first_threshold), photons
 
 
 def _filtered(frames, settings):
