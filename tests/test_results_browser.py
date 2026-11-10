@@ -272,6 +272,38 @@ def test_queue_changes_drive_refreshes_and_polling_slows(qapp, tmp_path, monkeyp
     assert calls == [1, 1], "a hidden tab is not polled"
 
 
+def test_running_file_is_listed_once_its_worker_creates_it(qapp, tmp_path):
+    feed = FakeFeed()
+    panel = ResultsPanel(root=tmp_path, feed=feed)
+    panel.show_unfinished.setChecked(True)
+    panel.show()
+    settle(qapp)
+    # The queue reports the task running before its worker has created the file.
+    feed.queue_changed.emit(
+        {
+            "running": [
+                {"rid": 1, "status": "running", "h5_path": "2026/10/07/000001_Sweep.h5"}
+            ],
+            "queue": [],
+            "history": [],
+        }
+    )
+    settle(qapp)
+    assert days(panel) == []
+
+    running_file(tmp_path)
+    panel._poll_tick()
+    settle(qapp)
+    newest = panel.tree.topLevelItem(0)
+    assert [newest.child(0).text(i) for i in range(2)] == ["000001  Sweep", "running"]
+
+    calls = []
+    panel.refresh = lambda: calls.append(1)
+    panel._poll_tick()
+    assert calls == [], "once listed, the poll waits for the slow fallback again"
+    panel.hide()
+
+
 def test_queue_snapshot_without_running_list_is_tolerated(qapp, tmp_path):
     feed = FakeFeed()
     panel = ResultsPanel(root=tmp_path, feed=feed)

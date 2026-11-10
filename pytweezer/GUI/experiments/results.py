@@ -10,8 +10,10 @@ With an :class:`~pytweezer.GUI.experiments.feed.ExperimentFeed` connected, a
 running measurement is plotted from the points the manager publishes rather
 than by re-reading its file (which HDF5 does not support while it is being
 written); its file is read once for its metadata, and again when the manager
-reports it finished. The tree updates whenever the queue changes, with a slow
-poll for files written outside the manager.
+reports it finished. The tree updates whenever the queue changes, every couple
+of seconds while a running task's file has yet to appear (a worker creates it
+after the queue reports the task running), and on a slow poll for files
+written outside the manager.
 
 Without a connected feed the tab polls the archive every couple of seconds
 while visible, re-reading a selected running measurement each time.
@@ -242,6 +244,8 @@ class ResultsPanel(QWidget):
 
         #: Every measurement seen: path -> (status, label, tree item or None if hidden).
         self._files = {}
+        #: Files of the tasks the feed last reported running.
+        self._running_paths = set()
         self._poll = QtCore.QTimer(self)
         self._poll.timeout.connect(self._poll_tick)
         self._poll.start(_POLL_MS)
@@ -263,11 +267,29 @@ class ResultsPanel(QWidget):
             return
         if self.measurement is None and self._wanted is not None:
             self.load(self._wanted)
-        if not self.live or time.monotonic() - self._last_refresh > _FALLBACK_POLL_S:
+        if (
+            not self.live
+            or self._running_file_unlisted()
+            or time.monotonic() - self._last_refresh > _FALLBACK_POLL_S
+        ):
             self.refresh()
 
+    def _running_file_unlisted(self):
+        """Whether a running task's file belongs in the tree but has not been listed."""
+        if not self.show_unfinished.isChecked():
+            return False
+        for path in self._running_paths - self._files.keys():
+            day = self._day_item(PurePosixPath(path).parent.as_posix())
+            if day is None or day.data(0, _FILLED):
+                return True
+        return False
+
     def _queue_changed(self, snapshot):
-        tasks = [*(snapshot.get("running") or []), *snapshot.get("queue", [])]
+        running = snapshot.get("running") or []
+        self._running_paths = {
+            task["h5_path"] for task in running if task.get("h5_path")
+        }
+        tasks = [*running, *snapshot.get("queue", [])]
         tasks += snapshot.get("history", [])
         statuses = {task["rid"]: task["status"] for task in tasks}
         if statuses == self._task_statuses:
