@@ -347,6 +347,9 @@ class ArgumentRow(QtCore.QObject):
         self.scan_button.setToolTip("Scan this argument instead of using one value")
         self.scan_button.setCheckable(True)
         self.scan_button.toggled.connect(self._scan_toggled)
+        if not schema.get("scannable", True):
+            self.scan_button.setEnabled(False)
+            self.scan_button.setToolTip("This argument cannot be scanned")
         self.value.changed.connect(self._update)
         self.scan.changed.connect(self._update)
         self._update()
@@ -650,6 +653,8 @@ class ArgumentEditor(QWidget):
         for axis in request.scan.axes:
             if axis.argument in self.rows:
                 row = self.rows[axis.argument]
+                if not row.scan_button.isEnabled():
+                    continue
                 row.scan_button.setChecked(True)
                 row.scan.set_axis(axis)
         self.repetitions.setValue(request.scan.repetitions)

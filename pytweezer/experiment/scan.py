@@ -84,6 +84,10 @@ class Scan(BaseModel):
                 raise ValueError(
                     f"{experiment_cls.__name__} has no argument {axis.argument!r} to scan"
                 )
+            if not argument.scannable:
+                raise ValueError(
+                    f"{axis.argument} cannot be scanned; set it for the whole task"
+                )
             raw = axis.raw_values()
             if isinstance(argument, Integer) and isinstance(axis, LinearAxis):
                 raw = [round(value) for value in raw]

@@ -46,7 +46,10 @@ Rules that matter:
 - **Arguments are class attributes** (`Number`, `Integer`, `Bool`, `Choice`,
   `Text` in `pytweezer/experiment/arguments.py`). Values are SI; `unit`/`scale`
   only control display (`Number(5e6, unit="MHz", scale=1e6)` shows "5 MHz").
-  `group=` and `tooltip=` lay out the form. Defaults are validated at import.
+  `group=` and `tooltip=` lay out the form. `scannable=False` marks an
+  argument that must be one value for the whole task (something `prepare()`
+  depends on): the form greys out its Scan button and a scan of it is refused
+  by `submit`, `save_recipe` and `run_local`. Defaults are validated at import.
   Submitted values are checked by the GUI
   form and by `submit(ExperimentClass, ...)`; anything else (a
   `"module:Class"` string) is only checked when the task starts.
@@ -180,7 +183,7 @@ is the example to copy:
   (`hamcam_gain`, `hamcam_roi_x0`...). A scannable one is re-sent before a shot
   whose value differs from the last sent; one that cannot change mid-task (it
   changes the frame shape, or something set in `prepare()` depends on it) is
-  refused by the experiment's own `planned_points`.
+  declared `scannable=False`.
 - A subclass adding a camera wraps the parent's shot rather than adding hooks
   to it: `LoadTweezersMOTImage` starts the ORCA, calls `take_shot()`, then reads
   the ORCA's frame. Anything only a subclass needs stays in the subclass.
