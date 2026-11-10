@@ -298,6 +298,41 @@ class LoadTweezers(MotMasterExperiment):
                 self.record("second_counts", second, unit="counts")
 
 
+
+class LoadTweezersNImages(LoadTweezers):
+    """Load the tweezers and image them ``n_images`` times per point."""
+
+    rb = MotMaster(
+        "Rb MotMaster",
+        script="RbTweezerBasic2026_multiple_images",
+    )
+
+    def take_shot(self, **sequence: Any) -> np.ndarray:
+        """Run the sequence once with script parameters ``sequence``; the HamCam's two frames.
+
+        The frames are broadcast on the camera's stream as this task's.
+        """
+        if self.hamcam_gain != self.sent_gain:
+            self.hamcam.set_gain(self.hamcam_gain)
+            self.sent_gain = self.hamcam_gain
+        self.hamcam.start_acquisition()
+        self.rb: MotMaster
+        try:
+            self.run_sequences(**sequence)
+            return np.asarray(
+                self.hamcam.acquire_n_frames(
+                    10, broadcast=True, header={"rid": self.rid}, stream="hamcam_n_images"
+                )
+            )
+        finally:
+            self.hamcam.stop_acquisition()
+
+    def run_point(self) -> None:
+        self.take_shot()
+    
+
+
+
 class LoadTweezersMOTImage(LoadTweezers):
     """:class:`LoadTweezers` that also fits the Rb MOT imaged on the ORCA.
 
