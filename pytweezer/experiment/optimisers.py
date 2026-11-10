@@ -65,8 +65,9 @@ class Dimension:
     """One setting searched by a :class:`BayesianOptimisation`.
 
     It is searched between ``low`` and ``high`` or, given ``span`` instead,
-    within ``span`` of the value ``save_as`` holds when the run starts. Its best
-    value is proposed for the saved parameter ``save_as``.
+    within ``span`` of the value ``save_as`` holds when the run starts, never
+    outside ``limits`` (the ``(low, high)`` the hardware takes). Its best value
+    is proposed for the saved parameter ``save_as``.
     """
 
     setting: str
@@ -75,6 +76,7 @@ class Dimension:
     low: float | None = None
     high: float | None = None
     span: float | None = None
+    limits: tuple[float, float] | None = None
 
 
 class Optimiser:
@@ -459,10 +461,18 @@ class BayesianOptimisation(Optimiser):
 
         Raises:
             TypeError: As :meth:`Optimiser.check_declarations`, or if a
-                dimension's ``low`` is not below its ``high``.
+                dimension's ``low`` is not below its ``high``, or the first of
+                its ``limits`` not below the second.
         """
         super().check_declarations()
         for dimension in cls.declarations():
+            if dimension.limits is not None and not (
+                dimension.limits[0] < dimension.limits[1]
+            ):
+                raise TypeError(
+                    f"{cls.__name__}: dimension {dimension.setting!r} has "
+                    f"limits {dimension.limits}; the first must be below the second"
+                )
             if dimension.span is not None:
                 if dimension.low is not None or dimension.high is not None:
                     raise TypeError(
@@ -507,10 +517,11 @@ class BayesianOptimisation(Optimiser):
         return arguments
 
     def search_bounds(self) -> dict[str, tuple[float, float]]:
-        """``(low, high)`` of each setting for this run, by setting.
+        """``(low, high)`` of each setting for this run, by setting, within its ``limits``.
 
         Raises:
-            ValueError: If a span is not positive.
+            ValueError: If a span is not positive, or a setting's range lies
+                outside its ``limits``.
             KeyError: If a spanned setting's saved parameter does not exist.
         """
         spanned = [d for d in self.dimensions if d.span is not None]
@@ -518,23 +529,30 @@ class BayesianOptimisation(Optimiser):
         bounds = {}
         for dimension in self.dimensions:
             if dimension.span is None:
-                bounds[dimension.setting] = (
-                    getattr(self, f"{dimension.setting}_low"),
-                    getattr(self, f"{dimension.setting}_high"),
-                )
-                continue
-            span = getattr(self, f"{dimension.setting}_span")
-            if not span > 0:
-                raise ValueError(
-                    f"{dimension.setting}_span is {span}; it must be positive"
-                )
-            if dimension.save_as not in saved:
-                raise KeyError(
-                    f"{dimension.setting} is searched around saved parameter "
-                    f"{dimension.save_as!r}, which does not exist"
-                )
-            centre = float(saved[dimension.save_as])
-            bounds[dimension.setting] = (centre - span, centre + span)
+                low = getattr(self, f"{dimension.setting}_low")
+                high = getattr(self, f"{dimension.setting}_high")
+            else:
+                span = getattr(self, f"{dimension.setting}_span")
+                if not span > 0:
+                    raise ValueError(
+                        f"{dimension.setting}_span is {span}; it must be positive"
+                    )
+                if dimension.save_as not in saved:
+                    raise KeyError(
+                        f"{dimension.setting} is searched around saved parameter "
+                        f"{dimension.save_as!r}, which does not exist"
+                    )
+                centre = float(saved[dimension.save_as])
+                low, high = centre - span, centre + span
+            if dimension.limits is not None:
+                low = max(low, dimension.limits[0])
+                high = min(high, dimension.limits[1])
+                if not low < high:
+                    raise ValueError(
+                        f"{dimension.setting} would be searched outside its "
+                        f"limits {dimension.limits}"
+                    )
+            bounds[dimension.setting] = (low, high)
         return bounds
 
     def number_of_points(self) -> int:

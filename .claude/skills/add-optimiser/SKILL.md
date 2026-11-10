@@ -37,7 +37,9 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   `Dimension` `<setting>_low/_high`); declare one of those names yourself to
   override it. `Dimension(..., span=0.5, save_as=...)` instead searches its
   `save_as` value at the start of the run ± `<setting>_span`; every Bayesian run
-  records its `search_bounds`. Duplicate settings or `save_as`, a bad `goal`,
+  records its `search_bounds`. `Dimension(..., limits=(low, high))` clips
+  either kind of range to what the hardware takes (an analog output's ±10 V);
+  a range wholly outside them raises `ValueError` at `prepare()`. Duplicate settings or `save_as`, a bad `goal`,
   `low >= high`, neither bounds nor span, a non-positive span, or a span with
   bounds raise `TypeError` when the class is defined (a `Stage` likewise:
   `start`/`stop` or `span`, not both).
@@ -137,7 +139,7 @@ add-experiment.
   current array, so rerun it after changing the array.
 - `OptimiseTweezerImaging` and `OptimiseMolassesShims` are Bayesian with span
   dimensions around the saved `tImgCoolVCO`/`tImgCoolVVA` and
-  `tMolassesShim{X,Y,Z}ccValue`, scored by `objective_of` with a fidelity or
+  `tMolassesShim{X,Y,Z}ccValue` (limited to the card's ±10 V), scored by `objective_of` with a fidelity or
   loading floor. Their `measure()` passes plain script parameter names
   (`BackgroundDrop=1`, `tMolassesShimXccValue=...`) to `score_batch()`.
 

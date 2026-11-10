@@ -306,6 +306,23 @@ def test_a_spanned_dimension_searches_only_around_its_saved_value(monkeypatch):
     assert list(m.constants["search_bounds"]["detuning"]) == [1.75, 2.25]
 
 
+class AtTheRail(DemoBayesian):
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("detuning", span=0.5, save_as="demo_resonance", limits=(-2, 2)),
+        Dimension("power", low=0.1, high=1.0, save_as="demo_power"),
+    ]
+
+
+def test_a_dimension_is_never_searched_beyond_its_limits(monkeypatch):
+    monkeypatch.setattr(
+        optimisers, "get_saved_parameters", lambda: {"demo_resonance": 2.0}
+    )
+    m = run_local(AtTheRail, n_calls=8, n_initial=4)
+    assert m.status == "completed", m.attrs["error"]
+    assert list(m.constants["search_bounds"]["detuning"]) == [1.5, 2.0]
+    assert np.all(m.results["detuning"] <= 2.0)
+
+
 class LowestCounts(DemoBayesian):
     goal = "min"
 

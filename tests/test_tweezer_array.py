@@ -168,7 +168,7 @@ def midpoint_threshold():
 
 
 SAVED = {
-    key: 1.0 + index for index, key in enumerate(LoadTweezers.rb.saved.values())
+    key: 1.0 + index / 10 for index, key in enumerate(LoadTweezers.rb.saved.values())
 } | {
     "trap_sites": np.array(SITES, dtype=float) + ROI_ORIGIN,
     "trap_threshold": midpoint_threshold(),
