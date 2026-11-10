@@ -29,6 +29,11 @@ DEFAULT_APPLETS = [
         "description": "Grid of live plots of data streams, header fields and experiment results",
     },
     {
+        "name": "Stacked Plotter",
+        "script": "pytweezer/GUI/viewers/stacked_plotter.py",
+        "description": "Live plots stacked one above another, sharing their x axis",
+    },
+    {
         "name": "Image Plot Monitor",
         "script": "pytweezer/GUI/viewers/image_plot_monitor.py",
         "description": "Image Monitor with the x and y sums, and their Gaussian fits, above and left of the image",

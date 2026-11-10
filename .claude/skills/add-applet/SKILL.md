@@ -348,6 +348,9 @@ what was built or why.
   with its own subscriptions under its key in `plots`: a curve per data
   stream's array, a rolling history per chosen header field, and markers per
   experiment result from `ExperimentFeed`.
+- `viewers/stacked_plotter.py` — the Live Plot in one column with x axes
+  linked, by overriding its `arrange` hook; the pattern for another layout of
+  the same plots.
 - `viewers/tweezer_loading.py` — a thin applet around a shared plot widget.
 - `viewers/tweezer_monitor.py` — subclasses the Image Monitor to draw the saved
   trap sites over each frame by its ROI origin.

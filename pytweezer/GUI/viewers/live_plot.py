@@ -147,6 +147,7 @@ class PlotPanel:
         self.result_curves = {}
         self.result_argument = None
         self.seen_fields = set()
+        self.show_x_label = True
 
         menu = self.plot.getViewBox().menu
         menu.addAction("subscriptions").triggered.connect(
@@ -272,7 +273,9 @@ class PlotPanel:
         self._label_x()
 
     def _label_x(self):
-        if self.result_curves:
+        if not self.show_x_label:
+            self.plot.setLabel("bottom", "")
+        elif self.result_curves:
             self.plot.setLabel("bottom", self.result_argument or ARRIVAL_ORDER)
         elif self.fields:
             self.plot.setLabel("bottom", MESSAGES_RECEIVED)
@@ -323,11 +326,15 @@ class LivePlot(Applet):
         for key in keys:
             if key not in self.panels:
                 self.panels[key] = PlotPanel(self, key)
+        self.arrange(keys)
+        for key in keys:
+            self.panels[key].update(self.results)
+
+    def arrange(self, keys):
+        """Place the panels of ``keys``, in order, in the grid."""
         for index, key in enumerate(keys):
             row, column = grid_position(index, len(keys), int(self._columns))
             self.grid.addWidget(self.panels[key].widget, row, column)
-        for key in keys:
-            self.panels[key].update(self.results)
 
     def add_plot(self):
         keys = self._plots
