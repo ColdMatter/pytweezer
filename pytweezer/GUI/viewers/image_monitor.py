@@ -24,6 +24,10 @@ Properties:
     *   overlaystreams: ([str]) data streams of cloud fits, drawn as contour
         ellipses over the frame.
     *   n_contours: (int) contour ellipses per fit.
+    *   autoscale: (bool) scale the colours to each frame (context menu, *auto
+        scale*); off holds ``manual_levels``.
+    *   manual_levels: ([float]) ``[low, high]`` last set by dragging the
+        histogram's levels, which also turns autoscale off.
     *   show_sidebar: (bool) the data panel below the image: the latest message
         of each stream in ``sidebarstreams``.
 """
@@ -161,6 +165,8 @@ class ImageDisplay(Applet):
     _overlaystreams = PropertyAttribute("overlaystreams", ["--None--"])
     _n_contours = PropertyAttribute("n_contours", 8)
     _show_sidebar = PropertyAttribute("show_sidebar", True)
+    _autoscale = PropertyAttribute("autoscale", True)
+    _manual_levels = PropertyAttribute("manual_levels", [])
 
     #: Grid cell of the image plot in :attr:`graphics_layout`; its colour bar sits
     #: one column to the right. Subclasses move it to leave room for more plots.
@@ -210,6 +216,8 @@ class ImageDisplay(Applet):
         # HistogramLUTItem drives its image's lookup table, so a setLookupTable
         # here would be overwritten and the image would come out greyscale.
         lut.gradient.setColorMap(cmap)
+        self.lut = lut
+        lut.sigLevelChangeFinished.connect(self._levels_dragged)
         plot.addItem(image_item)
         self.plot = plot
 
@@ -231,6 +239,11 @@ class ImageDisplay(Applet):
         view_box.invertY(True)
         # we want to keep the aspect ratio correct when plotting images
         view_box.setAspectLocked(True)
+        self.autoscale_action = view_box.menu.addAction("auto scale")
+        self.autoscale_action.setCheckable(True)
+        self.autoscale_action.setChecked(bool(self._autoscale))
+        self.autoscale_action.toggled.connect(self.set_autoscale)
+        self.set_autoscale(bool(self._autoscale))
         view_box.menu.addAction("subscriptions").triggered.connect(
             lambda: self.open_subscription_editor()
         )
@@ -243,6 +256,17 @@ class ImageDisplay(Applet):
         view_box.menu.addAction("Data sidebar subscriptions").triggered.connect(
             self.sidebar.edit_subscriptions
         )
+
+    def set_autoscale(self, enabled):
+        """Scale the colours to each frame, or hold the last manual levels."""
+        self._autoscale = enabled
+        if not enabled and len(self._manual_levels) == 2:
+            self.lut.setLevels(*self._manual_levels)
+
+    def _levels_dragged(self):
+        """Dragging the histogram's levels is a manual scale: record it and stop autoscaling."""
+        self._manual_levels = [float(level) for level in self.lut.getLevels()]
+        self.autoscale_action.setChecked(False)
 
     def toggle_sidebar(self):
         show = not self.sidebar.isVisible()
@@ -274,7 +298,7 @@ class ImageDisplay(Applet):
             msg, head, imgdata = self.imgstream.recv()
             if self.image_index != -1 and head["index"] != self.image_index:
                 continue
-            self.image_item.setImage(imgdata, autoLevels=True)
+            self.image_item.setImage(imgdata, autoLevels=bool(self._autoscale))
             self.image_item.resetTransform()
             self.image_item.setRect(frame_rect(head, imgdata.shape))
             self.imgdata = imgdata

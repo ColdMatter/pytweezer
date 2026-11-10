@@ -6,7 +6,10 @@ The window is a grid of plots, filled row by row (context menu → *add plot*,
 
 Data streams: one curve per stream named in ``<plot>/datastreams`` that sends
 an array, redrawn from each message's array (a 1-D array is drawn against its
-index, a 2xN one as ``[coords, values]``).
+index, a 2xN one as ``[coords, values]``). A plot with header fields chosen
+draws no arrays: a stream such as ``tweezer_loading.py``'s sends a
+``(shots, sites)`` array that is not a curve, and its scalars are plotted as
+header fields instead.
 
 Header fields: one curve per subscribed stream and field named in
 ``<plot>/fields`` (context menu → *header fields*, which offers the numeric
@@ -148,6 +151,7 @@ class PlotPanel:
         self.result_argument = None
         self.seen_fields = set()
         self.show_x_label = True
+        self.colour_offset = 0
 
         menu = self.plot.getViewBox().menu
         menu.addAction("subscriptions").triggered.connect(
@@ -169,7 +173,9 @@ class PlotPanel:
         )
 
     def _new_curve(self, name, markers=False, **style):
-        colour = self.applet.stream_color(name, len(self.plot.listDataItems()))
+        colour = self.applet.stream_color(
+            f"{self.key}/{name}", self.colour_offset + len(self.plot.listDataItems())
+        )
         if markers:
             style |= {"pen": None, "symbol": "o", "symbolSize": 6}
             style |= {"symbolPen": None, "symbolBrush": colour}
@@ -233,7 +239,7 @@ class PlotPanel:
                     self.field_points[channel, field] = points
                 points.append(values[field])
                 changed = True
-            if len(message) >= 3:
+            if len(message) >= 3 and not self.fields:
                 self._draw_array(channel, message[2], rotated)
         if changed:
             self._draw_fields()

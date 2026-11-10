@@ -83,6 +83,8 @@ PLOT_TICK_POINT_SIZE = 13
 PLOT_LABEL_POINT_SIZE = 14
 PLOT_LINE_WIDTH = 2
 PLOT_SYMBOL_SIZE = 10
+# Solid line drawn between plots stacked in one window.
+PLOT_SEPARATOR = "#6a6b78"
 
 # Default curve colours, cycled by index so a plot with several streams gives
 # each one a distinguishable colour without the user configuring anything.
