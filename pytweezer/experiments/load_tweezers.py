@@ -13,7 +13,6 @@ from pytweezer.analysis.trap_sites import same_geometry, to_roi
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.experiment.arguments import Bool, Device, Integer, Number
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
-from pytweezer.experiment.scan import Point, Scan
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers.device_client import get_device_config
 
@@ -54,21 +53,15 @@ TRAP_SITE_KEYS = (
 )
 
 
-_ROI_ARGUMENTS = (
-    "hamcam_roi_x0",
-    "hamcam_roi_width",
-    "hamcam_roi_y0",
-    "hamcam_roi_height",
-)
-
-
 def _roi_argument(default: int, *, size: bool) -> Integer:
     return Integer(
         default,
         min=1 if size else 0,
         unit="px",
         group="Camera",
-        tooltip="Unbinned sensor pixels",
+        tooltip="Unbinned sensor pixels; the trap sites are placed in the ROI set "
+        "before the first point, so it cannot be scanned",
+        scannable=False,
     )
 
 
@@ -135,15 +128,6 @@ class LoadTweezers(MotMasterExperiment):
         tooltip="record the sum of the raw pixel values in each site's window, "
         "beside its occupancy",
     )
-
-    def planned_points(self, scan: Scan) -> list[Point]:
-        for axis in scan.axes:
-            if axis.argument in _ROI_ARGUMENTS:
-                raise ValueError(
-                    f"{axis.argument} cannot be scanned: the trap sites are placed "
-                    "in the ROI set before the first point"
-                )
-        return super().planned_points(scan)
 
     def prepare(self) -> None:
         super().prepare()

@@ -76,6 +76,7 @@ def test_schema_is_read_from_the_class_without_instantiating():
         "default": -12e6,
         "tooltip": "",
         "group": "",
+        "scannable": True,
         "unit": "MHz",
         "scale": 1e6,
         "min": -50e6,

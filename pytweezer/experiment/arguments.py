@@ -39,10 +39,18 @@ class Argument:
     #: The saved parameter an unset value is taken from; ``""`` for none.
     saved = ""
 
-    def __init__(self, default: Any, *, tooltip: str = "", group: str = "") -> None:
+    def __init__(
+        self,
+        default: Any,
+        *,
+        tooltip: str = "",
+        group: str = "",
+        scannable: bool = True,
+    ) -> None:
         self.name = ""
         self.tooltip = tooltip
         self.group = group
+        self.scannable = scannable
         self.default = self.accept(default)
 
     def __set_name__(self, owner: type, name: str) -> None:
@@ -69,6 +77,7 @@ class Argument:
             "default": self.default,
             "tooltip": self.tooltip,
             "group": self.group,
+            "scannable": self.scannable,
         }
         if self.saved:
             schema["saved"] = self.saved
