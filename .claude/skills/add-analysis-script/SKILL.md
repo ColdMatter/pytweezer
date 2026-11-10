@@ -90,8 +90,9 @@ A few conventions that come from the transport rather than the maths:
   message you were handed; mutating it in place surprises anything that reads it
   after you.
 - **Send scalars in the header with `data=None`.** `DataClient` publishes a
-  header-only message fine, and that's how the viewers' data sidebar and
-  `scalar_history.py` pick up derived numbers. The header goes as JSON: the
+  header-only message fine, and that's how the viewers' data sidebar,
+  `scalar_history.py` and `live_plot.py` (*header fields*) pick up derived
+  numbers. The header goes as JSON: the
   client converts numpy integers, floats and arrays, but not a numpy bool (any
   comparison of array values), which raises — wrap it in `bool()`.
 - **Emit 1-D traces as a 2xN `[coords, values]` array**, so `live_plot.py` and

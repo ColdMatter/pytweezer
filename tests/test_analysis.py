@@ -590,6 +590,67 @@ def test_tweezer_loading_starts_afresh_when_a_new_task_sends_frames(monkeypatch)
 
 
 # --------------------------------------------------------------------------- #
+# tweezer_counts
+# --------------------------------------------------------------------------- #
+
+
+def counts_analysis(monkeypatch, saved, **properties):
+    from pytweezer.analysis import tweezer_counts
+    from pytweezer.analysis.tweezer_counts import TweezerCounts
+
+    monkeypatch.setattr(tweezer_counts, "get_saved_parameters", lambda: saved)
+    return build(TweezerCounts, properties)
+
+
+def test_tweezer_counts_splits_the_frame_into_site_boxes_and_the_rest(monkeypatch):
+    analysis = counts_analysis(monkeypatch, saved_sites(trap_window_size=3))
+    frame = np.ones((72, 72), dtype=np.uint16)
+    row, col = SITE_CENTRES[0]
+    frame[row, col] = 101
+    frame[0, 0] = 51
+
+    analysis.process({"index": 0, "rid": 4, **ROI_ORIGIN}, frame)
+
+    ((head, data, _),) = analysis.dataq.sent
+    box_pixels = 9 * len(SITE_CENTRES)
+    assert data is None
+    assert head["atom_pixels"] == box_pixels
+    assert head["atom_counts"] == box_pixels + 100
+    assert head["background_pixels"] == 72 * 72 - box_pixels
+    assert head["background_counts"] == 72 * 72 - box_pixels + 50
+    assert head["rid"] == 4
+
+
+def test_tweezer_counts_counts_overlapping_and_clipped_boxes_once(monkeypatch):
+    saved = {"trap_sites": [[0, 0], [0, 1]], "trap_window_size": 3}
+    analysis = counts_analysis(monkeypatch, saved)
+
+    analysis.process({}, np.ones((10, 10)))
+
+    ((head, _, _),) = analysis.dataq.sent
+    assert head["atom_pixels"] == 2 * 3
+    assert head["atom_counts"] + head["background_counts"] == 100
+
+
+def test_tweezer_counts_skips_other_frames_of_the_shot(monkeypatch):
+    analysis = counts_analysis(monkeypatch, saved_sites(), image_index=0)
+
+    analysis.process({"index": 1}, np.ones((40, 40)))
+
+    assert analysis.dataq.sent == []
+
+
+def test_tweezer_counts_publishes_nan_counts_without_saved_sites(monkeypatch):
+    analysis = counts_analysis(monkeypatch, {})
+
+    analysis.process({"rid": 4}, np.ones((40, 40)))
+
+    ((head, _, _),) = analysis.dataq.sent
+    assert np.isnan(head["atom_counts"]) and np.isnan(head["background_counts"])
+    assert head["error"]
+
+
+# --------------------------------------------------------------------------- #
 # cloud_fit
 # --------------------------------------------------------------------------- #
 
