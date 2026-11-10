@@ -26,7 +26,7 @@ DEFAULT_APPLETS = [
     {
         "name": "Live Plot",
         "script": "pytweezer/GUI/viewers/live_plot.py",
-        "description": "Live plot of data streams and experiment results",
+        "description": "Grid of live plots of data streams, header fields and experiment results",
     },
     {
         "name": "Image Plot Monitor",

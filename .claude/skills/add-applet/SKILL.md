@@ -344,7 +344,9 @@ what was built or why.
 
 - `viewers/scalar_history.py` — the smallest complete applet: a header field
   from each data stream, correct drain and unpack handling.
-- `viewers/live_plot.py` — one curve per data stream plus markers per
+- `viewers/live_plot.py` — a grid of plots (context menu → *add plot*), each
+  with its own subscriptions under its key in `plots`: a curve per data
+  stream's array, a rolling history per chosen header field, and markers per
   experiment result from `ExperimentFeed`.
 - `viewers/tweezer_loading.py` — a thin applet around a shared plot widget.
 - `viewers/tweezer_monitor.py` — subclasses the Image Monitor to draw the saved
