@@ -76,6 +76,13 @@ UI_FONT_POINT_SIZE = 10
 # data without dropping below readable contrast.
 PLOT_BACKGROUND = "#1b1c22"
 PLOT_FOREGROUND = "#9a9aa5"
+# Tick numbers and axis titles are read from across the lab, so they are
+# brighter and larger than the axis lines they label.
+PLOT_TEXT = "#d0d1da"
+PLOT_TICK_POINT_SIZE = 13
+PLOT_LABEL_POINT_SIZE = 14
+PLOT_LINE_WIDTH = 2
+PLOT_SYMBOL_SIZE = 10
 
 # Default curve colours, cycled by index so a plot with several streams gives
 # each one a distinguishable colour without the user configuring anything.
@@ -104,6 +111,32 @@ def curve_color(index):
     """
     hexcode = CURVE_COLORS[index % len(CURVE_COLORS)]
     return 0xFF000000 | int(hexcode.lstrip("#"), 16)
+
+
+def style_plot(plot, axes=("left", "bottom")):
+    """Give a pyqtgraph ``PlotWidget`` or ``PlotItem`` readable axes.
+
+    Call it before ``setLabel``: the label style set here persists through
+    later ``setLabel`` calls that pass no style of their own.
+    """
+    from PyQt6.QtGui import QFont
+
+    tick_font = QFont(UI_FONT_FAMILY, PLOT_TICK_POINT_SIZE)
+    for name in axes:
+        axis = plot.getAxis(name)
+        axis.setPen(PLOT_FOREGROUND)
+        axis.setTextPen(PLOT_TEXT)
+        axis.setTickFont(tick_font)
+        axis.labelStyle = {
+            "color": PLOT_TEXT,
+            "font-size": f"{PLOT_LABEL_POINT_SIZE}pt",
+        }
+        axis._updateLabel()
+
+
+def plot_title_style():
+    """Keyword arguments for ``setTitle`` matching :func:`style_plot`'s labels."""
+    return {"color": PLOT_TEXT, "size": f"{PLOT_LABEL_POINT_SIZE}pt"}
 
 
 def apply_theme(app):

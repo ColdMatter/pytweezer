@@ -16,7 +16,7 @@ from PyQt6 import QtWidgets
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 
-from pytweezer.GUI.theme import CURVE_COLORS
+from pytweezer.GUI.theme import CURVE_COLORS, plot_title_style, style_plot
 
 TEXT_COLOUR = "#e6e6e6"
 DATA_COLOUR = CURVE_COLORS[7]
@@ -65,10 +65,15 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
         win = pg.GraphicsLayoutWidget()
         layout.addWidget(win)
 
-        self.site_plot = win.addPlot(title="Each site")
-        self.total_plot = win.addPlot(title="All sites")
-        self.map_plot = win.addPlot(title="Loading probability")
+        self.site_plot = win.addPlot()
+        self.total_plot = win.addPlot()
+        self.map_plot = win.addPlot()
         self.plot_items = (self.site_plot, self.total_plot, self.map_plot)
+        for plot, title in zip(
+            self.plot_items, ("Each site", "All sites", "Loading probability")
+        ):
+            plot.setTitle(title, **plot_title_style())
+            style_plot(plot)
         for plot in (self.site_plot, self.total_plot):
             plot.showGrid(x=True, y=True, alpha=0.15)
             plot.setLabel("bottom", "photons")

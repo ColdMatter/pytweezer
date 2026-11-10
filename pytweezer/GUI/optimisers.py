@@ -60,7 +60,7 @@ from pytweezer.GUI.experiments.arg_editor import ValueField
 from pytweezer.GUI.experiments.catalogue_view import doc_summary
 from pytweezer.GUI.experiments.feed import ExperimentFeed
 from pytweezer.GUI.saved_parameters import display_value, when_text
-from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND
+from pytweezer.GUI.theme import PLOT_BACKGROUND, plot_title_style, style_plot
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.GUI.optimisers")
@@ -1420,10 +1420,9 @@ def _failed(measurement) -> bool:
 def _plot(title, x_label, objective):
     plot = pg.PlotWidget(background=PLOT_BACKGROUND)
     plot.setMinimumSize(280, 200)
-    plot.setTitle(title, color=PLOT_FOREGROUND, size="10pt")
+    plot.setTitle(title, **plot_title_style())
+    style_plot(plot)
     for axis in ("left", "bottom"):
-        plot.getAxis(axis).setPen(PLOT_FOREGROUND)
-        plot.getAxis(axis).setTextPen(PLOT_FOREGROUND)
         plot.getAxis(axis).enableAutoSIPrefix(False)
     plot.setLabel("bottom", x_label)
     plot.setLabel("left", objective or "objective")

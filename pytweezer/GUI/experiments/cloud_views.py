@@ -23,7 +23,14 @@ from pytweezer.analysis.cloud_results import (
 from pytweezer.experiment.summary import display_value
 from pytweezer.GUI.components import CompactDoubleSpinBox
 from pytweezer.GUI.experiments.analyses import ComputedAnalysisView
-from pytweezer.GUI.theme import CURVE_COLORS, PLOT_BACKGROUND, PLOT_FOREGROUND
+from pytweezer.GUI.theme import (
+    CURVE_COLORS,
+    PLOT_BACKGROUND,
+    PLOT_FOREGROUND,
+    PLOT_LINE_WIDTH,
+    PLOT_SYMBOL_SIZE,
+    style_plot,
+)
 
 POINT_INDEX = "index"
 OUTLINE_PEN = pg.mkPen("w", width=1)
@@ -36,9 +43,7 @@ TIME_UNITS = ("s", "ms", "us", "µs", "ns")
 
 def themed_plot() -> pg.PlotWidget:
     plot = pg.PlotWidget(background=PLOT_BACKGROUND)
-    for axis in ("left", "bottom"):
-        plot.getAxis(axis).setPen(PLOT_FOREGROUND)
-        plot.getAxis(axis).setTextPen(PLOT_FOREGROUND)
+    style_plot(plot)
     return plot
 
 
@@ -133,13 +138,17 @@ class CloudFitView(ComputedAnalysisView):
             self.size_curves[field] = self.size_plot.plot(
                 [],
                 [],
-                pen=colour,
+                pen=pg.mkPen(colour, width=PLOT_LINE_WIDTH),
                 symbol="o",
+                symbolSize=PLOT_SYMBOL_SIZE,
                 symbolBrush=colour,
                 name=SIZE_LABELS[field],
             )
             self.size_errors[field] = pg.ErrorBarItem(
-                x=np.empty(0), y=np.empty(0), height=np.empty(0), pen=colour
+                x=np.empty(0),
+                y=np.empty(0),
+                height=np.empty(0),
+                pen=pg.mkPen(colour, width=PLOT_LINE_WIDTH),
             )
             self.size_plot.addItem(self.size_errors[field])
         self.point_marker = pg.InfiniteLine(
@@ -349,14 +358,14 @@ class CloudTemperatureView(ComputedAnalysisView):
                 self.sigma_plot, CURVE_COLORS[i], SIZE_LABELS[field]
             )
             self.sigma_lines[field] = self.sigma_plot.plot(
-                [], [], pen=pg.mkPen(CURVE_COLORS[i], width=1.5)
+                [], [], pen=pg.mkPen(CURVE_COLORS[i], width=PLOT_LINE_WIDTH)
             )
         for i, field in enumerate(CENTRE_LABELS):
             self.centre_curves[field], self.centre_errors[field] = self._series(
                 self.centre_plot, CURVE_COLORS[i], CENTRE_LABELS[field]
             )
         self.gravity_line = self.centre_plot.plot(
-            [], [], pen=pg.mkPen(CURVE_COLORS[1], width=1.5)
+            [], [], pen=pg.mkPen(CURVE_COLORS[1], width=PLOT_LINE_WIDTH)
         )
 
         # Monospaced so the digits hold their columns as the values change.
@@ -382,9 +391,20 @@ class CloudTemperatureView(ComputedAnalysisView):
 
     @staticmethod
     def _series(plot, colour, name):
-        curve = plot.plot([], [], pen=None, symbol="o", symbolBrush=colour, name=name)
+        curve = plot.plot(
+            [],
+            [],
+            pen=None,
+            symbol="o",
+            symbolSize=PLOT_SYMBOL_SIZE,
+            symbolBrush=colour,
+            name=name,
+        )
         errors = pg.ErrorBarItem(
-            x=np.empty(0), y=np.empty(0), height=np.empty(0), pen=colour
+            x=np.empty(0),
+            y=np.empty(0),
+            height=np.empty(0),
+            pen=pg.mkPen(colour, width=PLOT_LINE_WIDTH),
         )
         plot.addItem(errors)
         return curve, errors

@@ -58,7 +58,12 @@ from pytweezer.GUI.background import BackgroundReader
 from pytweezer.GUI.components import Region, status_icon
 from pytweezer.GUI.experiments.analyses import ANALYSES, declared_analyses
 from pytweezer.GUI.grafana import open_in_browser, run_url
-from pytweezer.GUI.theme import PLOT_BACKGROUND, PLOT_FOREGROUND
+from pytweezer.GUI.theme import (
+    PLOT_BACKGROUND,
+    PLOT_LINE_WIDTH,
+    PLOT_SYMBOL_SIZE,
+    style_plot,
+)
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.GUI.experiments.results")
@@ -199,9 +204,8 @@ class ResultsPanel(QWidget):
             controls.addWidget(combo)
         controls.addStretch(1)
         self.plot = pg.PlotWidget(background=PLOT_BACKGROUND)
+        style_plot(self.plot)
         for axis in ("left", "bottom"):
-            self.plot.getAxis(axis).setPen(PLOT_FOREGROUND)
-            self.plot.getAxis(axis).setTextPen(PLOT_FOREGROUND)
             # Values are already in their display units.
             self.plot.getAxis(axis).enableAutoSIPrefix(False)
         self.plot.addLegend()
@@ -693,13 +697,24 @@ class ResultsPanel(QWidget):
                 if series is None
                 else f"{series_name} = {display_value(m, series_name, value)}"
             )
+            pen = pg.mkPen(colour, width=PLOT_LINE_WIDTH)
             self.plot.plot(
-                xs, means, pen=colour, symbol="o", symbolBrush=colour, name=name
+                xs,
+                means,
+                pen=pen,
+                symbol="o",
+                symbolSize=PLOT_SYMBOL_SIZE,
+                symbolBrush=colour,
+                name=name,
             )
             if np.isfinite(sems).any():
                 self.plot.addItem(
                     pg.ErrorBarItem(
-                        x=xs, y=means, height=2 * np.nan_to_num(sems), pen=colour
+                        x=xs,
+                        y=means,
+                        height=2 * np.nan_to_num(sems),
+                        beam=0.0,
+                        pen=pen,
                     )
                 )
         x_unit = m.argument_schema.get(x_name, {}).get("unit", "")
