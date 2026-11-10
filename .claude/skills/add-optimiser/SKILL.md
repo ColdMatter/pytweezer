@@ -142,6 +142,11 @@ add-experiment.
   `tMolassesShim{X,Y,Z}ccValue` (limited to the card's ±10 V), scored by `objective_of` with a fidelity or
   loading floor. Their `measure()` passes plain script parameter names
   (`BackgroundDrop=1`, `tMolassesShimXccValue=...`) to `score_batch()`.
+- `OptimiseMOTLight` searches the MOT-loading cooling and repump VCOs and VVAs
+  (`tMOTLoad{Cool,Rep}{VCO,VVA}`) for the most loading, with no drop;
+  `OptimiseMolassesLight` searches both molasses stages' (`tMol{Cool,Rep}{VCO,VVA}{1,2}`,
+  eight dimensions), scored like `OptimiseMolassesShims`. All are limited to
+  0–10 V.
 
 Tests: `tests/test_optimisers.py`,
 `tests/test_tweezer_array.py`, `tests/test_trap_sites.py`,

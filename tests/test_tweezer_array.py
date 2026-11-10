@@ -10,7 +10,9 @@ from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiments.load_tweezers import LoadTweezers, LoadTweezersMOTImage
 from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
+from pytweezer.optimisers.optimise_molasses_light import OptimiseMolassesLight
 from pytweezer.optimisers.optimise_molasses_shims import OptimiseMolassesShims
+from pytweezer.optimisers.optimise_mot_light import OptimiseMOTLight
 from pytweezer.optimisers.optimise_tweezer_imaging import OptimiseTweezerImaging
 
 #: The default 8x8, 5 µm grid at 2 px/µm, in the pixels of the camera's ROI.
@@ -36,6 +38,8 @@ class ArrayBatch(TweezerArrayMeasurement):
 ONE_POINT = {
     OptimiseTweezerImaging: {"n_calls": 1, "n_initial": 1},
     OptimiseMolassesShims: {"n_calls": 1, "n_initial": 1},
+    OptimiseMOTLight: {"n_calls": 1, "n_initial": 1},
+    OptimiseMolassesLight: {"n_calls": 1, "n_initial": 1},
 }
 
 
@@ -313,7 +317,12 @@ def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(
 
 @pytest.mark.parametrize(
     ("experiment", "point_drop"),
-    [(OptimiseTweezerImaging, (0, None)), (OptimiseMolassesShims, (1, 3))],
+    [
+        (OptimiseTweezerImaging, (0, None)),
+        (OptimiseMolassesShims, (1, 3)),
+        (OptimiseMOTLight, (0, None)),
+        (OptimiseMolassesLight, (1, 3)),
+    ],
 )
 def test_each_point_keeps_the_tweezers_on_and_drops_as_its_measurement_needs(
     rig, experiment, point_drop
@@ -378,14 +387,51 @@ def test_each_molasses_evaluation_runs_at_its_shims(rig):
 
 
 @pytest.mark.parametrize(
+    ("cls", "sent_as"),
+    [
+        (
+            OptimiseMOTLight,
+            {
+                "cool_vco": "tMOTLoadCoolVCO",
+                "cool_vva": "tMOTLoadCoolVVA",
+                "rep_vco": "tMOTLoadRepVCO",
+                "rep_vva": "tMOTLoadRepVVA",
+            },
+        ),
+        (
+            OptimiseMolassesLight,
+            {
+                f"{beam}_{knob.lower()}{stage}": f"tMol{beam.title()}{knob}{stage}"
+                for stage in (1, 2)
+                for beam in ("cool", "rep")
+                for knob in ("VCO", "VVA")
+            },
+        ),
+    ],
+)
+def test_each_light_evaluation_runs_at_its_settings(rig, cls, sent_as):
+    measurement = run_local(cls, **FAST, n_calls=2, n_initial=2)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    evaluations = rig.goes
+    for point in range(2):
+        expected = {
+            parameter: measurement.results[setting][point]
+            for setting, parameter in sent_as.items()
+        }
+        for go in evaluations[point * FAST["shots"] : (point + 1) * FAST["shots"]]:
+            assert {parameter: go[parameter] for parameter in expected} == expected
+
+
+@pytest.mark.parametrize("cls", [OptimiseMolassesShims, OptimiseMolassesLight])
+@pytest.mark.parametrize(
     ("loading_floor", "expected"),
     [(0.5, "floor plus recapture"), (0.9, "loading")],
 )
 def test_the_molasses_score_counts_recapture_only_once_the_array_loads(
-    rig, loading_floor, expected
+    rig, cls, loading_floor, expected
 ):
     measurement = run_local(
-        OptimiseMolassesShims,
+        cls,
         **FAST,
         n_calls=1,
         n_initial=1,
@@ -413,7 +459,7 @@ def window_sums(frames, window_size=5):
     )
 
 
-@pytest.mark.parametrize("cls", [OptimiseTweezerImaging, OptimiseMolassesShims])
+@pytest.mark.parametrize("cls", list(ONE_POINT))
 def test_each_point_records_every_shots_counts_and_occupancy_at_every_site(rig, cls):
     measurement = run_local(cls, **FAST, **ONE_POINT[cls])
 
@@ -555,7 +601,7 @@ def test_tweezer_experiments_offer_counts_and_photon_histograms(rig):
 
 
 def test_optimisers_offer_no_default_analyses(rig):
-    for cls in (FindTrapSites, OptimiseTweezerImaging, OptimiseMolassesShims):
+    for cls in (FindTrapSites, *ONE_POINT):
         assert cls.schema()["analyses"] == []
 
 
