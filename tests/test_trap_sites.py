@@ -44,6 +44,25 @@ def test_the_fit_recovers_a_known_transform_with_dark_sites():
     assert fit.angle_deg == pytest.approx(-1.0, abs=0.3)
 
 
+def test_the_fit_accepts_an_unevenly_loaded_array():
+    geometry = default_geometry()
+    truth = geometry_to_pixels(geometry, 2.0, -1.0, 70.7, 60.3)
+    image = array_image(truth[48:], seed=1) + array_image(
+        truth[:48], dark=[i for i in range(48) if i % 8 >= 4], amplitude=60.0
+    )
+
+    fit = fit_trap_sites(image, geometry)
+
+    assert np.abs(fit.sites - truth).max() < 0.5
+
+
+def test_a_geometry_a_row_short_of_the_array_is_refused():
+    truth = geometry_to_pixels(default_geometry(6, 5), 2.07, -2.5, 80.0, 64.0)
+
+    with pytest.raises(ValueError, match="a site off"):
+        fit_trap_sites(array_image(truth), default_geometry(5, 5))
+
+
 def test_a_rig_geometry_keeps_its_own_order():
     geometry = default_geometry(3, 3)[[4, 0, 8, 2, 6, 1, 3, 5, 7]]
     truth = geometry_to_pixels(geometry, 2.07, -2.5, 80.0, 64.0)

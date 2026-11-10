@@ -22,7 +22,7 @@ from pytweezer.analysis.analysis import hamcam_px_per_um
 
 MAX_SCALE_ERROR = 0.2
 MIN_CONTRAST = 5.0
-MIN_EVENNESS = 0.5
+MAX_SITE_OFFSET = 1.5
 
 
 @dataclass(frozen=True)
@@ -77,8 +77,11 @@ def fit_trap_sites(
     Raises:
         ValueError: If a fitted site is off the image, the scale is more than
             ``MAX_SCALE_ERROR`` from ``px_per_um``, the median site is not
-            ``MIN_CONTRAST`` noise widths above the background, or it is less
-            than ``MIN_EVENNESS`` of the brightest tenth of sites.
+            ``MIN_CONTRAST`` noise widths above the background, the bright
+            sites sit a median of more than ``MAX_SITE_OFFSET`` pixels
+            from the nearest spot, or the array shifted by one site to a
+            nearest neighbour is not ``MIN_CONTRAST`` noise widths dimmer in
+            total. Loading need not be even: dark sites are allowed.
     """
     smoothed = ndimage.gaussian_filter(
         np.asarray(image, dtype=float), max(1.0, window_size / 3)
@@ -112,22 +115,58 @@ def fit_trap_sites(
         raise ValueError("the fitted array runs off the image")
     background = np.median(smoothed)
     noise = 1.4826 * np.median(np.abs(smoothed - background))
-    signal_at_sites = ndimage.map_coordinates(smoothed, sites.T, order=1) - background
-    typical = np.median(signal_at_sites)
+
+    def signal_at(sites):
+        return ndimage.map_coordinates(smoothed, sites.T, order=1) - background
+
+    typical = np.median(signal_at(sites))
     if not typical > MIN_CONTRAST * noise:
         raise ValueError(
             f"no array found: the typical site is {typical / noise:.1f} noise "
             f"widths above the background, not {MIN_CONTRAST:g}"
         )
-    # A fit that missed the array still lands a few sites on spots; the
-    # averaged array lights its sites roughly evenly.
-    brightest = np.percentile(signal_at_sites, 90)
-    if typical < MIN_EVENNESS * brightest:
+    # A fit at the wrong scale catches spots on its sites' edges.
+    peaks = np.argwhere(
+        (smoothed == ndimage.maximum_filter(smoothed, size=3))
+        & (smoothed > background + MIN_CONTRAST * noise)
+    )
+    bright = sites[signal_at(sites) > MIN_CONTRAST * noise]
+    offset = np.median(
+        np.linalg.norm(bright[:, None] - peaks[None], axis=-1).min(axis=1)
+    )
+    if offset > MAX_SITE_OFFSET:
         raise ValueError(
-            f"the fit missed the array: the typical site is "
-            f"{typical / brightest:.0%} as bright as the brightest tenth"
+            f"the fit missed the array: its bright sites sit a median "
+            f"{offset:.1f} px from the spots, not within {MAX_SITE_OFFSET:g}"
         )
+    # A lattice also fits a site over, keeping all but an edge row on spots, so
+    # the fit must beat each such slip; loading need not be even.
+    fitted_total = signal_at(sites).sum()
+    for shift_um in _neighbour_shifts(geometry):
+        slipped = geometry_to_pixels(geometry + shift_um, scale, angle, x0, y0)
+        if signal_at(slipped).sum() > fitted_total - MIN_CONTRAST * noise:
+            raise ValueError(
+                f"the fit may be a site off: the array shifted by "
+                f"({shift_um[0]:.3g}, {shift_um[1]:.3g}) µm fits as well"
+            )
     return TrapSiteFit(sites, float(scale), float(angle), float(x0), float(y0))
+
+
+def _neighbour_shifts(geometry: np.ndarray) -> np.ndarray:
+    """The distinct ``(x_um, y_um)`` steps from a site of ``geometry`` to a nearest neighbour."""
+    geometry = np.asarray(geometry, dtype=float)
+    if len(geometry) < 2:
+        return np.empty((0, 2))
+    separations = geometry[None, :, :] - geometry[:, None, :]
+    distance = np.linalg.norm(separations, axis=-1)
+    np.fill_diagonal(distance, np.inf)
+    nearest = distance.min(axis=1, keepdims=True)
+    tolerance = 0.1 * np.median(nearest)
+    shifts = []
+    for step in separations[distance < nearest + tolerance]:
+        if all(np.linalg.norm(step - kept) > tolerance for kept in shifts):
+            shifts.append(step)
+    return np.array(shifts)
 
 
 def _coarse_offset(smoothed, geometry, px_per_um, angle_deg) -> tuple[float, float]:
