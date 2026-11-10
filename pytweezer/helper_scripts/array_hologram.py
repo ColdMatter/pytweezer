@@ -90,16 +90,118 @@ def make_generator(settings: dict):
     return OptimisationBasedPhasemaskGeneratorGPU(**settings)
 
 
+def pupil_arrays(generator, radius_um: float, dump_dx_um: float, dump_dy_um: float):
+    """The pupil as ``(inside, dump)``: the pixels it passes, and the grating that steers the rest away."""
+    import cupy as cp
+
+    x, y = cp.meshgrid(generator.x_slm, generator.y_slm)
+    inside = x**2 + y**2 <= radius_um**2
+    dump = generator.generate_blazed_grating_phasemask(dump_dx_um, dump_dy_um)
+    return inside, dump
+
+
 def apply_pupil(
     generator, phase, radius_um: float, dump_dx_um: float, dump_dy_um: float
 ):
     """Keep ``phase`` inside a circular pupil and steer the light outside it away."""
     import cupy as cp
 
-    x, y = cp.meshgrid(generator.x_slm, generator.y_slm)
-    inside = x**2 + y**2 <= radius_um**2
-    dump = generator.generate_blazed_grating_phasemask(dump_dx_um, dump_dy_um)
+    inside, dump = pupil_arrays(generator, radius_um, dump_dx_um, dump_dy_um)
     return cp.where(inside, phase, dump)
+
+
+def background_phase(
+    generator,
+    *,
+    blaze_um: tuple[float, float],
+    fresnel_focal_length_mm: float,
+    zernike: bool,
+):
+    """The phase every frame shares with the array: Fresnel lens, blaze and optionally the Zernike correction."""
+    layers = [
+        generator.generate_fresnel_lens_phasemask(fresnel_focal_length_mm),
+        generator.generate_blazed_grating_phasemask(*blaze_um),
+    ]
+    if zernike:
+        layers.append(generator.zernike)
+    return generator.superimpose(layers)
+
+
+def optimise_terms(
+    generator,
+    weights,
+    phases,
+    x_um,
+    y_um,
+    *,
+    iterations: int,
+    damping: float,
+) -> dict:
+    """Optimise the superposition of traps at ``x_um``, ``y_um`` and return its phase and converged terms.
+
+    ``array_phase`` is the phase of the returned terms, so a rearrangement
+    starting from them starts from the mask they make.
+    """
+    _, (w, theta, x, y), (uniformity, min_max, mse, _) = (
+        generator.superposition_optimization(
+            [weights, phases, x_um, y_um],
+            max_iter=iterations,
+            damping=damping,
+            verbose=False,
+        )
+    )
+    return {
+        "array_phase": generator.generate_phasemask((w, theta, x, y)),
+        "optimised_weights": w.get(),
+        "phases": theta.get(),
+        "x_um": np.asarray(x_um, dtype=float),
+        "y_um": np.asarray(y_um, dtype=float),
+        "uniformity": float(uniformity[-1]),
+        "min_max_ratio": float(min_max[-1]),
+        "mse": float(mse[-1]),
+    }
+
+
+def target_terms(
+    generator,
+    *,
+    kind: str,
+    rows: int,
+    columns: int,
+    sites: int,
+    spacing_um: float,
+    angle_deg: float,
+    envelope: dict | None,
+    blaze_um: tuple[float, float],
+    iterations: int,
+    damping: float,
+    phase_randomness: float,
+) -> dict:
+    """The optimised terms of a ``kind`` ("square" or "kagome") target array, with the weights asked for."""
+    if kind == "square":
+        weights, phases, x_um, y_um = generator.generate_weighted_array(
+            np.ones((rows, columns)),
+            spacing_um,
+            init_phase_randomness=phase_randomness,
+            angle_deg=angle_deg,
+        )
+    elif kind == "kagome":
+        from pytweezer.helper_scripts.phasemask import rotate_coordinates
+
+        x_um, y_um = generator.generate_kagome_lattice(sites, spacing_um)
+        x_um, y_um = rotate_coordinates(x_um, y_um, angle_deg)
+        weights = np.ones(len(x_um))
+        phases = np.random.rand(len(x_um)) * phase_randomness * 2 * np.pi
+    else:
+        raise ValueError(f"kind must be 'square' or 'kagome', got {kind!r}")
+    if envelope is not None:
+        weights = envelope_weights(envelope, x_um + blaze_um[0], y_um + blaze_um[1])
+    terms = optimise_terms(
+        generator, weights, phases, x_um, y_um, iterations=iterations, damping=damping
+    )
+    del terms["array_phase"]
+    terms["weights"] = np.asarray(weights, dtype=float)
+    return terms
 
 
 def focal_grid(
@@ -186,27 +288,28 @@ def array_hologram(
     if envelope is not None:
         weights = envelope_weights(envelope, x_um + blaze_um[0], y_um + blaze_um[1])
 
-    array_phase, _, (uniformity, min_max, mse, _) = (
-        generator.superposition_optimization(
-            [weights, phases, x_um, y_um],
-            max_iter=iterations,
-            damping=damping,
-            verbose=False,
-        )
+    terms = optimise_terms(
+        generator, weights, phases, x_um, y_um, iterations=iterations, damping=damping
     )
-    layers = [
-        array_phase,
-        generator.generate_fresnel_lens_phasemask(fresnel_focal_length_mm),
-        generator.generate_blazed_grating_phasemask(*blaze_um),
-    ]
-    if zernike:
-        layers.append(generator.zernike)
+    array_phase = terms["array_phase"]
+    x_um, y_um = terms["x_um"], terms["y_um"]
     phase = apply_pupil(
-        generator, generator.superimpose(layers), pupil_radius_um, *pupil_dump_um
+        generator,
+        generator.superimpose(
+            [
+                array_phase,
+                background_phase(
+                    generator,
+                    blaze_um=blaze_um,
+                    fresnel_focal_length_mm=fresnel_focal_length_mm,
+                    zernike=zernike,
+                ),
+            ]
+        ),
+        pupil_radius_um,
+        *pupil_dump_um,
     )
 
-    x_um = np.asarray(x_um, dtype=float)
-    y_um = np.asarray(y_um, dtype=float)
     grid_x_um, grid_y_um = focal_grid(
         x_um,
         y_um,
@@ -239,13 +342,15 @@ def array_hologram(
         "x_um": x_um,
         "y_um": y_um,
         "weights": np.asarray(weights, dtype=float),
+        "optimised_weights": terms["optimised_weights"],
+        "phases": terms["phases"],
         "focal_pixel_um": float(generator.dx_f),
         "grid_x_um": grid_x_um,
         "grid_y_um": grid_y_um,
         "grid_z_um": grid_z_um,
         "simulated_trap_plane": trap_plane,
         "simulated_top_down": top_down,
-        "uniformity": float(uniformity[-1]),
-        "min_max_ratio": float(min_max[-1]),
-        "mse": float(mse[-1]),
+        "uniformity": terms["uniformity"],
+        "min_max_ratio": terms["min_max_ratio"],
+        "mse": terms["mse"],
     }

@@ -1,8 +1,10 @@
+import time
+
 import numpy as np
 import pytest
 
 from pytweezer.analysis import analysis as an
-from pytweezer.analysis.array_loading import photons_at_sites
+from pytweezer.analysis.array_loading import occupied_sites, photons_at_sites
 from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
 from pytweezer.experiment import ListAxis, Scan, motmaster, optimisers, run_local
@@ -42,6 +44,7 @@ ONE_POINT = {
 class FakeSequencer:
     def __init__(self):
         self.goes = []
+        self.go_times = []
         self.fail = False
 
     def close_rpc(self):
@@ -60,6 +63,7 @@ class FakeSequencer:
     def start_motmaster_experiment(self, parameters):
         if self.fail:
             raise RuntimeError("MOTMaster refused")
+        self.go_times.append(time.monotonic())
         self.goes.append(parameters)
 
 
@@ -88,16 +92,19 @@ class RecordingCamera:
 
 
 class FakeHamCam(RecordingCamera):
-    """Images the array twice per shot; turning the tweezers off empties the second frame."""
+    """Images the array twice per shot; turning the tweezers off empties the second frame.
 
-    def __init__(self, sequencer):
+    An atom is a Gaussian spot at one of ``sites``, ``(y, x)`` pixels.
+    """
+
+    def __init__(self, sequencer, sites=SITES):
         super().__init__()
         self.sequencer = sequencer
         self.headers = []
         self.rng = np.random.default_rng(1)
         y, x = np.mgrid[:128, :128]
         self.spots = np.array(
-            [2000 * np.exp(-((y - sy) ** 2 + (x - sx) ** 2) / 4.5) for sy, sx in SITES]
+            [2000 * np.exp(-((y - sy) ** 2 + (x - sx) ** 2) / 4.5) for sy, sx in sites]
         )
 
     def set_roi(self, x0, width, y0, height):
@@ -200,6 +207,21 @@ def rig(monkeypatch):
     for module in (motmaster, optimisers):
         monkeypatch.setattr(module, "get_saved_parameters", lambda: saved)
     return sequencer
+
+
+def test_occupied_sites_counts_only_sites_above_threshold():
+    loaded = np.arange(len(SITES)) % 2 == 0
+    frame = FakeHamCam(None)._frame(loaded)
+
+    occupied = occupied_sites(
+        frame,
+        np.array(SITES),
+        window_size=5,
+        feature_size=10,
+        threshold=midpoint_threshold(),
+    )
+
+    np.testing.assert_array_equal(occupied, loaded)
 
 
 def test_a_point_measures_the_loading_and_survival_put_in(rig):
