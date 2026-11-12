@@ -34,7 +34,7 @@ could later choose to pick it up. No experiment does so yet.
 - Changing any experiment to read the stored settings. (`LoadTweezers`,
   `ContinuousAcquisition` etc. keep setting the camera themselves.) An
   experiment that wants one later declares a saved-backed argument, e.g.
-  `Number(saved="rb_hamcam_exposure_s")`. Only `Number` and `Integer` take
+  `Number(saved="rb_hamcam_exposure")`. Only `Number` and `Integer` take
   `saved=` today, so a choice or on/off setting would be read with
   `get_saved_parameter` in `prepare` instead; extending `saved=` is not part of
   this work.
@@ -187,7 +187,7 @@ Each applied change is written to the saved parameters
 has accepted it, storing the value the camera took.
 
 - Keys: `<camera key>_<control name>`, with the camera key a slug of the CONFIG
-  name (`rb_hamcam_exposure_s`, `rb_hamcam_sensitivity`, `rb_hamcam_roi`),
+  name (`rb_hamcam_exposure`, `rb_hamcam_sensitivity`, `rb_hamcam_roi`),
   values in SI with the unit recorded. The ROI is four integer keys
   (`rb_hamcam_roi_x0`, `_roi_width`, `_roi_y0`, `_roi_height`), not an array:
   saved arrays are stored as floats, and integer keys can back an `Integer`
