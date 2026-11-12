@@ -65,9 +65,13 @@ try:
 
     # cupy imports without a usable driver; only a device count proves a GPU
     _HAS_CUPY = cp.cuda.runtime.getDeviceCount() > 0
-except Exception:  # pragma: no cover - depends on the machine's GPU stack
+    _NO_GPU_REASON = "cupy sees no CUDA device"
+except Exception as exc:  # pragma: no cover - depends on the machine's GPU stack
     cp = None
     _HAS_CUPY = False
+    # cupy wraps the real failure (e.g. a blocked DLL) in a long install banner
+    root_cause = exc.__cause__ or exc
+    _NO_GPU_REASON = f"{type(root_cause).__name__}: {root_cause}"
 
 
 USE_SUM_CPP = False
@@ -206,7 +210,7 @@ class Rearrangement(Coordinator):
             raise RuntimeError(
                 "Rearrangement needs cupy/lap and a CUDA GPU, which are not available "
                 "on this machine. Run the rig on the GPU host, or use status()/test() "
-                "only here."
+                f"only here.\nCause: {_NO_GPU_REASON}"
             )
 
     def _require_camera(self):
