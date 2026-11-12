@@ -1,7 +1,5 @@
 """Run any Rb MOTMaster script and record every frame it triggers on the chosen cameras."""
 
-from typing import Any
-
 import numpy as np
 
 from pytweezer.drivers.motmaster import script_names
@@ -11,6 +9,8 @@ from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.servers.device_client import get_device_config
 
 RB_SCRIPTS = script_names(get_device_config("Rb MotMaster")["config_file"])
+#: Device name of each camera, by the prefix of its tick box and results.
+CAMERAS = {"hamcam": "Rb HamCam", "orca": "ORCA"}
 
 
 class RbMotMasterRunner(MotMasterExperiment):
@@ -26,8 +26,6 @@ class RbMotMasterRunner(MotMasterExperiment):
     script = Choice(RB_SCRIPTS, scannable=False, tooltip="Script in the Rb folder")
     rb = MotMaster("Rb MotMaster", script_from="script")
 
-    hamcam = Device("Rb HamCam")
-    orca = Device("ORCA")
     use_hamcam = Bool(True, group="Cameras", scannable=False, tooltip="Rb HamCam")
     use_orca = Bool(False, group="Cameras", scannable=False, tooltip="ORCA")
 
@@ -54,29 +52,39 @@ class RbMotMasterRunner(MotMasterExperiment):
         tooltip="Longest wait for the frame counts to settle",
     )
 
-    def cameras(self) -> dict[str, Any]:
-        """The ticked cameras by attribute name."""
-        ticked = {"hamcam": self.use_hamcam, "orca": self.use_orca}
-        return {name: getattr(self, name) for name, use in ticked.items() if use}
+    @classmethod
+    def devices(cls) -> dict[str, Device]:
+        # Reservations are fixed per class, so every camera is reserved; only
+        # the ticked ones are connected to.
+        return super().devices() | {
+            prefix: Device(name) for prefix, name in CAMERAS.items()
+        }
 
     def prepare(self) -> None:
         super().prepare()
-        for camera in self.cameras().values():
+        ticked = {"hamcam": self.use_hamcam, "orca": self.use_orca}
+        self.cameras = {
+            prefix: self.device(CAMERAS[prefix])
+            for prefix, use in ticked.items()
+            if use
+        }
+        for camera in self.cameras.values():
             # DCAM refuses trigger settings while acquiring.
             camera.stop_live()
             camera.set_trigger_source("ext")
             camera.set_external_exposure_mode()
             camera.start_live(self.buffer_frames)
-        for name, camera in self.cameras().items():
+        for name, camera in self.cameras.items():
             self.record(f"{name}_settings", camera.settings())
         self.frames_per_run: dict[str, int] = {}
 
     def run_point(self) -> None:
-        cameras = self.cameras()
-        marks = {name: camera.frames_acquired() for name, camera in cameras.items()}
+        marks = {
+            name: camera.frames_acquired() for name, camera in self.cameras.items()
+        }
         self.run_sequences()
-        settle_frame_counts(cameras, self.frame_settle, self.frame_timeout, 0.05)
-        for name, camera in cameras.items():
+        settle_frame_counts(self.cameras, self.frame_settle, self.frame_timeout, 0.05)
+        for name, camera in self.cameras.items():
             if camera.frames_acquired() < marks[name]:
                 raise RuntimeError(
                     f"{name}'s acquisition restarted during the run; its frames are lost"
