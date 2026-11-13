@@ -37,7 +37,15 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6 import QtCore
 from PyQt6.QtGui import QAction, QCursor, QGuiApplication
-from PyQt6.QtWidgets import QDialog, QMenu, QSpinBox, QToolTip, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QMenu,
+    QSpinBox,
+    QToolTip,
+    QVBoxLayout,
+    QWidget,
+)
 
 from pytweezer.analysis.cloud_fit import (
     FIELDS,
@@ -150,6 +158,11 @@ class ImageDisplay(Applet):
     Subscribes to the image streams named in the ``imagestreams`` property and
     to optional mask streams (``maskstreams``), drawing them live with a
     colormap, histogram LUT, and configurable ROIs.
+
+    Attributes:
+        panel_layout: The applet's top-level layout, holding one widget with the image
+            and its data sidebar. A subclass can ``insertWidget(0, ...)`` to put
+            something to the left of the image.
     """
 
     stream_category = "Image"
@@ -178,9 +191,13 @@ class ImageDisplay(Applet):
         self.image_index = -1
         self.image_head = None
 
-        layout = QVBoxLayout()
+        self.panel_layout = QHBoxLayout()
+        self.panel_layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(self.panel_layout)
+        image_panel = QWidget()
+        self.panel_layout.addWidget(image_panel, 1)
+        layout = QVBoxLayout(image_panel)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.setLayout(layout)
         self.sidebar = DataSidebar(self._props, self.name)
 
         self.imgstream = ImageClient("imageviewer")
