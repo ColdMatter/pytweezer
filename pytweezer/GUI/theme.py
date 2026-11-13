@@ -708,6 +708,111 @@ QToolButton#SectionToggle:hover {
     color: #e6e6e6;
 }
 
+/* Camera applet settings sidebar (pytweezer.GUI.viewers.camera_sidebar). */
+QFrame#CameraSidebar {
+    background-color: #24252c;
+    border-right: 1px solid #33343d;
+}
+QFrame#CameraSidebar QLabel,
+QFrame#CameraSidebar QCheckBox,
+QFrame#CameraSidebar QToolButton,
+QWidget#CameraSidebarContent,
+QScrollArea#CameraSidebarScroll,
+QScrollArea#CameraSidebarScroll > QWidget {
+    background: transparent;
+    border: none;
+}
+QFrame#CameraSidebar QLineEdit,
+QFrame#CameraSidebar QComboBox {
+    background-color: #30313b;
+    border: 1px solid #44454f;
+    border-radius: 4px;
+    padding: 3px 6px;
+}
+QFrame#CameraSidebar QLineEdit[role="cameraNumber"] {
+    font-family: "Cascadia Mono", "DejaVu Sans Mono", monospace;
+}
+QFrame#CameraSidebar QLineEdit:focus,
+QFrame#CameraSidebar QComboBox:focus {
+    border-color: #5b8def;
+}
+QFrame#CameraSidebar QLineEdit[state="busy"],
+QFrame#CameraSidebar QComboBox[state="busy"] {
+    border-color: #5b8def;
+}
+QFrame#CameraSidebar QLineEdit[state="error"],
+QFrame#CameraSidebar QComboBox[state="error"] {
+    border-color: #e74c3c;
+}
+QFrame#CameraSidebar QLineEdit:disabled,
+QFrame#CameraSidebar QComboBox:disabled {
+    background-color: #1f2026;
+    border-color: #2a2b32;
+    color: #8d8e99;
+}
+QFrame#CameraSidebar QLabel:disabled,
+QFrame#CameraSidebar QCheckBox:disabled {
+    color: #8d8e99;
+}
+QFrame#CameraSidebar QPushButton {
+    padding: 5px 8px;
+}
+QFrame#CameraSidebar QPushButton#ToggleButton:disabled {
+    color: #5c5d66;
+    border-color: #2a2b32;
+}
+QFrame#CameraSidebar QCheckBox::indicator:disabled {
+    background-color: #1f2026;
+    border-color: #2a2b32;
+}
+QFrame#CameraSidebar QCheckBox::indicator:checked:disabled {
+    background-color: #44454f;
+}
+QFrame#CameraSection {
+    border-top: 1px solid #33343d;
+}
+QFrame#CameraPill {
+    background-color: #1f2026;
+    border: 1px solid #33343d;
+    border-radius: 8px;
+}
+QFrame#CameraPill[state="live"] {
+    background-color: #1f3a2b;
+    border-color: #2f5140;
+}
+QFrame#CameraPill[state="held"],
+QFrame#CameraPill[state="unknown_hold"] {
+    background-color: #3a2f1c;
+    border-color: #f5a623;
+}
+QFrame#CameraPill[state="unavailable"] {
+    background-color: #3a1512;
+    border-color: #5a2f2c;
+}
+QLabel#CameraPillTitle {
+    font-weight: 600;
+}
+QFrame#CameraPill[state="live"] QLabel#CameraPillTitle {
+    color: #2ecc71;
+}
+QFrame#CameraPill[state="held"] QLabel#CameraPillTitle,
+QFrame#CameraPill[state="unknown_hold"] QLabel#CameraPillTitle {
+    color: #f5a623;
+}
+QFrame#CameraPill[state="unavailable"] QLabel#CameraPillTitle {
+    color: #e74c3c;
+}
+QLabel#CameraPillDetail {
+    color: #9a9aa5;
+}
+QLabel#CameraTemperature {
+    color: #9a9aa5;
+}
+QLabel#CameraTemperature[state="alarm"] {
+    color: #e74c3c;
+    font-weight: 600;
+}
+
 QScrollBar:horizontal {
     background: #1b1c22;
     height: 10px;
