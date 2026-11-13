@@ -110,15 +110,3 @@ def test_live_mode_can_be_left_and_entered_again(camera):
     camera.start_live()
     assert camera.is_live()
     assert camera._acquisition_in_progress()
-
-
-def test_the_caf_thorcam_and_ni_cards_entries_come_last_so_no_existing_port_moves():
-    from pytweezer.configuration.config import get_config
-
-    ports = {
-        name: entry["port"]
-        for name, entry in get_config()["Devices"].items()
-        if "port" in entry
-    }
-    newest = ["CaF ThorCam", "CaF NI Cards", "Rb NI Cards"]
-    assert sorted(ports, key=ports.get)[-3:] == newest

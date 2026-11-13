@@ -10,6 +10,9 @@ class ORCACamera(Camera):
     Hamamatsu ORCA-R2's pylablib DCAM driver, plus its binning, readout-speed
     and contrast-gain controls.
 
+    It also runs the ORCA-Fusion BT, opened by serial number; that camera has no
+    contrast gain, so :meth:`set_gain` fails on it.
+
     Args:
         serial_number: DCAM serial number of the camera to open (e.g. ``"280187"``).
             If None, the only connected ORCA-R2 is opened.

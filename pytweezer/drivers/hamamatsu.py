@@ -1,5 +1,6 @@
 """Locating a specific Hamamatsu camera among several on one DCAM host."""
 
+import ctypes
 import subprocess
 import sys
 
@@ -12,6 +13,7 @@ PROBE_TIMEOUT_S = 60
 # scipy and would add ~6 s to every start. The struct is DCAMAPI_INIT.
 _PROBE_SCRIPT = """
 import ctypes
+ctypes.windll.ole32.CoInitializeEx(None, 0)
 class Init(ctypes.Structure):
     _fields_ = [("size", ctypes.c_int32), ("count", ctypes.c_int32),
                 ("reserved", ctypes.c_int32), ("optionbytes", ctypes.c_int32),
@@ -49,6 +51,17 @@ def set_dcam_exposure_mode(camera: DCAMCamera, mode: str) -> None:
     camera.setup_ext_trigger(invert=True)
 
 
+def _dcam_session():
+    """A DCAM library session on the calling thread.
+
+    With a USB3 camera (the ORCA-Fusion) attached, ``dcamapi_init`` fast-fails
+    the process in ``combase.dll`` unless the thread has initialised COM. Any
+    apartment will do, and initialising it again is harmless.
+    """
+    ctypes.windll.ole32.CoInitializeEx(None, 0)
+    return libctl.temp_open()
+
+
 def _normalise_serial(serial: str) -> str:
     return serial.removeprefix("S/N:").strip()
 
@@ -61,7 +74,7 @@ def list_dcam_cameras() -> list[dict[str, str]]:
     """
     idstr = dcamapi4_lib.DCAM_IDSTR
     cameras = []
-    with libctl.temp_open():
+    with _dcam_session():
         for index in range(libctl.cameras):
             model = lib.dcamdev_getstring(index, idstr.DCAM_IDSTR_MODEL)
             serial = lib.dcamdev_getstring(index, idstr.DCAM_IDSTR_CAMERAID)
@@ -132,7 +145,7 @@ def open_dcam_camera(serial_number: str | None, model_prefix: str) -> DCAMCamera
     a failed device instead of killing this one.
     """
     _probe_dcam_library()
-    with libctl.temp_open():
+    with _dcam_session():
         camera = DCAMCamera(find_dcam_index(serial_number, model_prefix))
     opened_serial = _normalise_serial(camera.get_device_info().serial_number)
     if serial_number is not None and opened_serial != _normalise_serial(
