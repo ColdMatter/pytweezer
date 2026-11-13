@@ -1,6 +1,7 @@
 """Polling a camera's sensor temperature into the database."""
 
 import threading
+import time
 from collections.abc import Callable
 
 from pytweezer.database.writer import DBWriter
@@ -39,6 +40,7 @@ class TemperatureMonitor:
         self.measurement = measurement
         self.interval_s = float(interval_s)
         self.max_c = max_c
+        self._last_reading: tuple[float, float] | None = None
         self._writer = DBWriter()
         self._stop = threading.Event()
         self._register(active=True)
@@ -53,6 +55,11 @@ class TemperatureMonitor:
         self._thread.join(timeout=self.interval_s + 5.0)
         self._register(active=False)
         self._writer.close()
+
+    def last_reading(self) -> tuple[float, float] | None:
+        """``(temperature in °C, unix time it was read)`` of the last successful read,
+        or None before the first."""
+        return self._last_reading
 
     def _register(self, active: bool) -> None:
         limits = {} if self.max_c is None else {FIELD: [None, float(self.max_c)]}
@@ -74,6 +81,7 @@ class TemperatureMonitor:
                 if failing:
                     LOGGER.info("Reading %s again", self.measurement)
                 failing = False
+                self._last_reading = (temperature, time.time())
                 self._writer.write(self.measurement, {FIELD: temperature})
                 hot = self.max_c is not None and temperature > self.max_c
                 if hot and not too_hot:
