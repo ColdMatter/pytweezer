@@ -112,6 +112,7 @@ class MotMasterBox(QGroupBox):
     ):
         mode = ", linked" if linked else ""
         super().__init__(f"MOTMaster ({script}{mode})", parent)
+        self._mode = mode
         if linked:
             self.setToolTip(
                 f"{device} runs {script} in linked mode: one script drives both "
@@ -146,6 +147,13 @@ class MotMasterBox(QGroupBox):
         layout = QVBoxLayout(self)
         layout.addLayout(top)
         layout.addLayout(self.grid)
+        self.set_loading()
+
+    def set_script(self, script: str) -> None:
+        """Run ``script`` instead; its parameters are unknown until :meth:`set_parameters`."""
+        self.script = script
+        self.defaults = {}
+        self.setTitle(f"MOTMaster ({script}{self._mode})")
         self.set_loading()
 
     def set_loading(self) -> None:

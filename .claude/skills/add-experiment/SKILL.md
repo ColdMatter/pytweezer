@@ -128,6 +128,12 @@ class Tof(MotMasterExperiment):
 
 An experiment declares **one** `MotMaster`; a second is a `TypeError` at class
 definition (run two machines together in linked mode, below).
+`MotMaster(..., script_from="script")` in place of `script=` takes the script
+from a `Choice` argument declared `scannable=False`; `self.script_name()` is
+the one the task runs, and the form's parameter search follows the choice.
+`RbMotMasterRunner` (`experiments/rb_motmaster_runner.py`) offers every script
+in the Rb script folder (`drivers.motmaster.script_names`, read from disk at
+import) and records each ticked camera's frames per run.
 `MotMasterInteger` vs `MotMasterNumber` must match the script's parameter type
 (.NET `Int32` vs `Double`). Any other script parameter is set by its plain
 name, `submit(Tof, tPulse=3e-5)` or scanned with `ListAxis(argument="tPulse",

@@ -40,13 +40,28 @@ CONFIG key and is reserved along with it::
     class LinkedLoad(MotMasterExperiment):
         mm = MotMaster("CaF MotMaster", script="LinkedTweezerLoad", linked=True)
         tof = MotMasterInteger(100, parameter="tDelay1")
+
+``script_from=`` takes the script from a ``Choice`` argument instead, chosen when
+the task is submitted; it cannot be scanned, since :meth:`MotMasterExperiment.prepare`
+loads the script once::
+
+    class RunScript(MotMasterExperiment):
+        script = Choice(["RbTweezerBasic", "RbTweezerBasic2026"], scannable=False)
+        rb = MotMaster("Rb MotMaster", script_from="script")
 """
 
 import difflib
 from collections.abc import Iterable
 from typing import Any
 
-from pytweezer.experiment.arguments import Argument, Device, Integer, Number, collect
+from pytweezer.experiment.arguments import (
+    Argument,
+    Choice,
+    Device,
+    Integer,
+    Number,
+    collect,
+)
 from pytweezer.experiment.client import (
     ManagerError,
     ManagerUnavailable,
@@ -62,7 +77,8 @@ class MotMaster(Device):
         self,
         device_name: str,
         *,
-        script: str,
+        script: str | None = None,
+        script_from: str | None = None,
         linked: bool = False,
         iterations: int = 1,
         save: bool = False,
@@ -70,7 +86,11 @@ class MotMaster(Device):
         timeout: float | None = None,
     ) -> None:
         super().__init__(device_name, timeout=timeout)
+        if (script is None) == (script_from is None):
+            raise TypeError("MotMaster takes one of script= and script_from=")
         self.script = script
+        #: Name of the ``Choice`` argument the script is read from, or ``None``.
+        self.script_from = script_from
         self.linked = linked
         self.iterations = iterations
         self.save = save
@@ -99,6 +119,7 @@ class MotMaster(Device):
         return super().to_schema() | {
             "motmaster": {
                 "script": self.script,
+                "script_from": self.script_from,
                 "linked": self.linked,
                 "iterations": self.iterations,
                 "save": self.save,
@@ -188,6 +209,19 @@ class MotMasterExperiment(Experiment):
                     f"both set {parameter}"
                 )
             targets[parameter] = name
+        if sequencers:
+            cls._check_script_from(next(iter(sequencers.values())))
+
+    @classmethod
+    def _check_script_from(cls, motmaster: MotMaster) -> None:
+        if motmaster.script_from is None:
+            return
+        argument = cls.arguments().get(motmaster.script_from)
+        if not isinstance(argument, Choice) or argument.scannable:
+            raise TypeError(
+                f"{cls.__name__}: script_from={motmaster.script_from!r} must name a "
+                "Choice argument declared with scannable=False"
+            )
 
     @classmethod
     def motmaster(cls) -> tuple[str, MotMaster]:
@@ -220,6 +254,13 @@ class MotMasterExperiment(Experiment):
         argument.name = name
         return argument
 
+    def script_name(self) -> str:
+        """The script this task runs."""
+        motmaster = self.motmaster()[1]
+        if motmaster.script_from is None:
+            return motmaster.script
+        return getattr(self, motmaster.script_from)
+
     def motmaster_parameters(self) -> dict[str, Any]:
         """``{script parameter: value}`` for everything set explicitly."""
         requested = {
@@ -235,7 +276,7 @@ class MotMasterExperiment(Experiment):
         # Linked mode persists in MOTMaster, so set it on every task.
         client.set_linked(motmaster.linked)
         self._linked = motmaster.linked
-        client.set_motmaster_experiment(motmaster.script)
+        client.set_motmaster_experiment(self.script_name())
         client.set_run_until_stopped(False)
         client.set_iterations(motmaster.iterations)
         client.set_save_toggle(motmaster.save)
@@ -277,7 +318,7 @@ class MotMasterExperiment(Experiment):
         for parameter in parameters:
             if parameter in known:
                 continue
-            script = self.motmaster()[1].script
+            script = self.script_name()
             close = difflib.get_close_matches(
                 parameter, [*known, *self.arguments()], n=3
             )
@@ -291,7 +332,7 @@ class MotMasterExperiment(Experiment):
         if isinstance(default, float):
             return float(value)
         if not float(value).is_integer():
-            script = self.motmaster()[1].script
+            script = self.script_name()
             raise ValueError(
                 f"{parameter} is an Int32 in script {script!r}; "
                 f"{value!r} is not a whole number"

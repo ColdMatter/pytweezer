@@ -146,6 +146,31 @@ def motmaster_controller(config_file: str) -> Any:
     return Activator.GetObject(MOTMaster.Controller, motmaster["remote_path"])
 
 
+def script_names(config_file: str) -> list[str]:
+    """The scripts in the script root of the MOTMaster ``config_file`` names, sorted.
+
+    Read from this PC's disk, without MOTMaster. Where the script root is not
+    on this PC, the folder of the same name in an EDMSuite clone beside this
+    repository is read instead.
+
+    Raises:
+        FileNotFoundError: If neither folder exists.
+    """
+    with open(CONFIG_DIR / config_file) as f:
+        script_root = json.load(f)["script_root_path"]
+    repository = pathlib.Path(__file__).resolve().parents[2]
+    folders = [
+        pathlib.Path(script_root),
+        repository.parent / "EDMSuite" / pathlib.PureWindowsPath(script_root).name,
+    ]
+    for folder in folders:
+        if folder.is_dir():
+            return sorted(path.stem for path in folder.glob("*.cs"))
+    raise FileNotFoundError(
+        f"no MOTMaster script folder at {' or '.join(map(str, folders))}"
+    )
+
+
 class MotMasterInterface:
     def __init__(self, config_file: str, interval: float = 0.1) -> None:
         # ``config_file`` names a JSON file in the package ``configuration/`` dir; an

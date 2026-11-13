@@ -687,9 +687,12 @@ class ArgumentEditor(QWidget):
             for argument in schema["arguments"].values()
             if "motmaster_parameter" in argument
         }
+        script_row = self.rows.get(sequencer["motmaster"].get("script_from"))
         box = MotMasterBox(
             sequencer["device"],
-            sequencer["motmaster"]["script"],
+            script_row.value.value()
+            if script_row
+            else sequencer["motmaster"]["script"],
             declared=declared | set(schema["arguments"]),
             linked=sequencer["motmaster"].get("linked", False),
         )
@@ -698,6 +701,16 @@ class ArgumentEditor(QWidget):
         self.motmaster_box = box
         self.arguments_layout.addWidget(box)
         self.fetcher.request(box.device, box.script)
+        if script_row:
+            script_row.changed.connect(
+                lambda: self._script_chosen(box, script_row.value.value())
+            )
+
+    def _script_chosen(self, box, script):
+        if box is not self.motmaster_box or script == box.script:
+            return
+        box.set_script(script)
+        self.fetcher.request(box.device, script)
 
     def _retry(self, box):
         box.set_loading()
@@ -797,6 +810,10 @@ class ArgumentEditor(QWidget):
             f"{row.name}: not in script {script}; remove it or the task will fail"
         )
 
+    def _unflag_missing(self, row, script):
+        row.label.setText(row.name)
+        row.label.setToolTip(f"{row.name} in script {script}")
+
     def _parameters_fetched(self, device, script, parameters):
         box = self.motmaster_box
         if box is None or (box.device, box.script) != (device, script):
@@ -805,6 +822,7 @@ class ArgumentEditor(QWidget):
         for name in list(self._searched):
             if name in box.defaults:
                 self._retype_motmaster_row(name, box.defaults[name])
+                self._unflag_missing(self.rows[name], script)
             else:
                 self._flag_missing(self.rows[name], script)
 
