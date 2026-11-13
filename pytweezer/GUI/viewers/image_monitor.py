@@ -163,6 +163,9 @@ class ImageDisplay(Applet):
         panel_layout: The applet's top-level layout, holding one widget with the image
             and its data sidebar. A subclass can ``insertWidget(0, ...)`` to put
             something to the left of the image.
+        image_layout: The column holding the image and, below it, the data
+            sidebar. A subclass can ``insertWidget(1, ...)`` to put something
+            directly under the image.
     """
 
     stream_category = "Image"
@@ -198,6 +201,7 @@ class ImageDisplay(Applet):
         self.panel_layout.addWidget(image_panel, 1)
         layout = QVBoxLayout(image_panel)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.image_layout = layout
         self.sidebar = DataSidebar(self._props, self.name)
 
         self.imgstream = ImageClient("imageviewer")

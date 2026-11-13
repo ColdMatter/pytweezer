@@ -8,7 +8,9 @@ camera took, and that value is stored as a saved parameter
 
 While an Experiment Manager task has reserved the camera, the settings are
 read-only and refreshed every few seconds from the values the driver keeps,
-without touching the hardware. A notebook using the camera is not noticed.
+without touching the hardware. The same holds after start-up until the
+manager's state has arrived (a few seconds at most), since a task may already
+have the camera. A notebook using the camera is not noticed.
 When the manager cannot be reached the settings stay editable, and the sidebar
 says it cannot tell whether a task holds the camera.
 
@@ -39,7 +41,7 @@ from pytweezer.drivers.camera_catalogue import camera_conf, camera_driver, camer
 from pytweezer.experiment.camera_store import store_camera_settings
 from pytweezer.experiment.reservations import canonical_device
 from pytweezer.GUI.applet import run_applet
-from pytweezer.GUI.background import _clear_tracebacks
+from pytweezer.GUI.background import clear_tracebacks
 from pytweezer.GUI.components import set_state
 from pytweezer.GUI.experiments.feed import ExperimentFeed
 from pytweezer.GUI.viewers.camera_sidebar import CameraSidebar
@@ -73,6 +75,11 @@ def error_text(error: BaseException) -> str:
     if isinstance(error, KeyError) and error.args:
         return str(error.args[0])
     return str(error) or type(error).__name__
+
+
+def control_values(controls: list[dict]) -> dict[str, Any]:
+    """``{name: value}`` of a control list."""
+    return {control["name"]: control["value"] for control in controls}
 
 
 def model_name(driver: type) -> str:
@@ -109,13 +116,13 @@ class CameraLink(QtCore.QObject):
 
     def call(self, method: str, *args: Any, callback: Callable[[Any], None]) -> None:
         """Queue the camera's ``method(*args)``; ``callback(outcome)`` runs on the GUI thread."""
-        self._calls.put((True, lambda device: getattr(device, method)(*args), callback))
+        self.submit(lambda device: getattr(device, method)(*args), callback=callback)
 
-    def run(
-        self, function: Callable, *args: Any, callback: Callable[[Any], None]
+    def submit(
+        self, function: Callable[[Any], Any], callback: Callable[[Any], None]
     ) -> None:
-        """Queue ``function(*args)``, which does not use the camera, behind the camera's calls."""
-        self._calls.put((False, lambda device: function(*args), callback))
+        """Queue ``function(client)``, for work that must run in one go on the worker."""
+        self._calls.put((function, callback))
 
     def close(self) -> None:
         """Drop every outcome from now on; calls already queued still run, then the thread ends."""
@@ -128,14 +135,14 @@ class CameraLink(QtCore.QObject):
     def _run(self) -> None:
         device = None
         while (item := self._calls.get()) is not None:
-            uses_camera, function, callback = item
+            function, callback = item
             try:
-                if uses_camera and device is None:
+                if device is None:
                     device = get_device(self.name, timeout=CALL_TIMEOUT_S)
                 outcome = function(device)
             except Exception as error:
                 outcome = error
-                if uses_camera and isinstance(error, CONNECTION_ERRORS):
+                if isinstance(error, CONNECTION_ERRORS):
                     _close_client(device)
                     device = None
             self._finished.emit(callback, outcome)
@@ -147,7 +154,7 @@ class CameraLink(QtCore.QObject):
                 callback(outcome)
         finally:
             if isinstance(outcome, BaseException):
-                _clear_tracebacks(outcome)
+                clear_tracebacks(outcome)
 
 
 def _close_client(device: Any) -> None:
@@ -180,6 +187,7 @@ class CameraApplet(ImageDisplay):
         self._apply_serial = 0
         self._live_serial = 0
         self._releasing = False
+        self._read_due = False
         self._presets: dict[str, dict[str, int]] | None = None
         self._last_poll_error = ""
         self._fps_samples: deque = deque()
@@ -204,8 +212,7 @@ class CameraApplet(ImageDisplay):
         status_layout.addWidget(self.readout)
         status_layout.addStretch(1)
         status_layout.addWidget(self.message)
-        image_panel = self.panel_layout.itemAt(1).widget()
-        image_panel.layout().insertWidget(1, self.status_bar)
+        self.image_layout.insertWidget(1, self.status_bar)
         self.plot.scene().sigMouseMoved.connect(self._mouse_moved)
 
         sidebar = self.camera_sidebar
@@ -222,10 +229,12 @@ class CameraApplet(ImageDisplay):
         self._preset_props = Properties(PRESETS_ROOT)
         self.feed = ExperimentFeed(parent=self)
         self._feed_connected = self.feed.connected
-        self._feed_grace = True
+        # Until the manager's state arrives, a running task may hold the camera:
+        # only the kept values are read and nothing is applied.
+        self._checking = not self._feed_connected
         self.feed.queue_changed.connect(self._queue_changed)
         self.feed.connection_changed.connect(self._feed_connection)
-        QtCore.QTimer.singleShot(FEED_GRACE_MS, self._end_feed_grace)
+        QtCore.QTimer.singleShot(FEED_GRACE_MS, self._end_check)
 
         self._timers = []
         for interval, slot in (
@@ -267,6 +276,7 @@ class CameraApplet(ImageDisplay):
         self._in_flight.clear()
         self._applying.clear()
         self._releasing = False
+        self._read_due = False
         self._presets = None
         self._reset_fps()
         self._show_message("")
@@ -282,6 +292,8 @@ class CameraApplet(ImageDisplay):
         except Exception as error:
             logger.warning("Camera %r: %s", name, error_text(error))
             self._camera_name, self._model = name, ""
+            self._imagestreams = ["--None--"]
+            self.update_subscriptions()
             self.camera_sidebar.set_controls([])
             self._set_unavailable("not in CONFIG")
             return
@@ -341,13 +353,13 @@ class CameraApplet(ImageDisplay):
     def _connection_failed(self, outcome: Any) -> bool:
         """Whether ``outcome`` is a lost connection, marking the camera unavailable if so.
 
-        A timeout while a task holds the camera is the server busy with that
-        task, so the camera is left as it is.
+        A timeout while a task holds the camera (or may) is the server busy with
+        that task, so the camera is left as it is.
         """
         if not isinstance(outcome, CONNECTION_ERRORS):
             return False
         if isinstance(outcome, TimeoutError):
-            if not self._held():
+            if not self._hold_locks():
                 self._set_unavailable("server not responding")
         else:
             self._set_unavailable("server not running")
@@ -366,11 +378,11 @@ class CameraApplet(ImageDisplay):
         self._render_state()
 
     def _load(self) -> None:
-        """Read every setting (the kept values while held) and whether the camera is live."""
-        held = self._held()
-        method = "controls" if held else "read_controls"
+        """Read every setting and whether the camera is live; only the kept values while it may be held."""
+        locked = self._hold_locks()
+        method = "controls" if locked else "read_controls"
         self._request("load", method, callback=self._loaded_controls)
-        if not held:
+        if not locked:
             self._request_live()
 
     def _loaded_controls(self, outcome: Any) -> None:
@@ -390,6 +402,8 @@ class CameraApplet(ImageDisplay):
         self.camera_sidebar.set_controls(outcome, self._model)
         self._refresh_busy()
         self._render_state()
+        if self._read_due and not self._hold_locks():
+            self._released()
 
     def _show(self, controls: list[dict]) -> None:
         self._controls = controls
@@ -407,7 +421,7 @@ class CameraApplet(ImageDisplay):
         self._request(
             "poll", "controls", callback=lambda outcome: self._polled(outcome, serial)
         )
-        if not self._held():
+        if not self._hold_locks():
             self._request_live()
 
     def _polled(self, outcome: Any, apply_serial: int) -> None:
@@ -436,30 +450,49 @@ class CameraApplet(ImageDisplay):
     def _held(self) -> bool:
         return self._feed_connected and self._holder is not None
 
+    def _hold_locks(self) -> bool:
+        """Whether the camera must be left alone: a task holds it, or may and the manager has not said yet."""
+        return self._checking or self._held()
+
     def _hold_unknown(self) -> bool:
-        return not self._feed_connected and not self._feed_grace
+        return not self._feed_connected and not self._checking
 
     def _queue_changed(self, snapshot: dict) -> None:
         was_held = self._held()
         self._holder = self._holder_in(snapshot)
-        if was_held and not self._held():
+        if self._checking:
+            self._end_check()
+        elif was_held and not self._held():
             self._released()
         self._render_state()
 
     def _feed_connection(self, connected: bool) -> None:
         self._feed_connected = connected
         if connected:
-            self._feed_grace = False
+            self._holder = self._holder_in(self.feed.snapshot())
+            self._end_check()
         self._render_state()
 
-    def _end_feed_grace(self) -> None:
-        self._feed_grace = False
+    def _end_check(self) -> None:
+        """The manager has said whether a task holds the camera, or has not in time."""
+        if not self._checking:
+            return
+        self._checking = False
+        if not self._held():
+            self._released()
         self._render_state()
 
     def _released(self) -> None:
-        """Read the camera once after a task lets it go; the fields stay locked until then."""
-        if self._link is None or not self._loaded:
+        """Read the camera once after a task lets it go; the fields stay locked until then.
+
+        Before the first settings have arrived, the read is made when they do.
+        """
+        if self._link is None:
             return
+        if not self._loaded:
+            self._read_due = True
+            return
+        self._read_due = False
         self._releasing = True
         self._refresh_busy()
         self._request("release", "read_controls", callback=self._release_read)
@@ -468,12 +501,7 @@ class CameraApplet(ImageDisplay):
     def _release_read(self, outcome: Any) -> None:
         self._releasing = False
         self._refresh_busy()
-        if self._connection_failed(outcome):
-            return
-        if isinstance(outcome, Exception):
-            self._log_poll_error(outcome)
-            return
-        self._show(outcome)
+        self._reread(outcome)
 
     def _refresh_busy(self) -> None:
         busy = set().union(*self._applying.values())
@@ -488,6 +516,8 @@ class CameraApplet(ImageDisplay):
         elif self._held():
             class_name, rid = self._holder
             sidebar.set_state("held", f"{class_name} (rid {rid})")
+        elif self._checking:
+            sidebar.set_state("checking")
         elif self._live:
             notes = []
             if self._control_value("trigger_source") not in (None, "int"):
@@ -503,15 +533,12 @@ class CameraApplet(ImageDisplay):
             sidebar.set_state("idle")
 
     def _control_value(self, name: str) -> Any:
-        for control in self._controls:
-            if control["name"] == name:
-                return control["value"]
-        return None
+        return control_values(self._controls).get(name)
 
     # ---- edits -----------------------------------------------------------
 
     def _apply(self, values: dict) -> None:
-        if self._link is None or not self._loaded or self._held():
+        if self._link is None or not self._loaded or self._hold_locks():
             # Disabling a field mid-edit commits it; put the camera's values back.
             self.camera_sidebar.show_values(self._controls)
             return
@@ -519,10 +546,29 @@ class CameraApplet(ImageDisplay):
         serial = self._apply_serial
         self._applying[serial] = set(values)
         self._refresh_busy()
-        self._request(
-            None,
-            "apply_controls",
-            dict(values),
+        camera = self._camera_name
+
+        def apply_and_store(device):
+            # One worker item, so the store happens even if this link is closed
+            # (camera switched, window shut) before the outcome arrives.
+            controls = device.apply_controls(dict(values))
+            taken = control_values(controls)
+            stored = {name: taken[name] for name in values if name in taken}
+            try:
+                store_camera_settings(camera, stored, "Camera applet")
+            except Exception as error:
+                logger.warning(
+                    "%s: %s applied but not stored: %s",
+                    camera,
+                    sorted(stored),
+                    error_text(error),
+                )
+                clear_tracebacks(error)
+                return controls, stored, error
+            return controls, stored, None
+
+        self._link.submit(
+            apply_and_store,
             callback=lambda outcome: self._applied(outcome, serial, values),
         )
 
@@ -530,21 +576,19 @@ class CameraApplet(ImageDisplay):
         self._applying.pop(serial, None)
         self._refresh_busy()
         if self._connection_failed(outcome):
+            self.camera_sidebar.show_values(self._controls)
             return
         if isinstance(outcome, Exception):
             self.camera_sidebar.show_error(next(iter(values)), error_text(outcome))
             self._request(None, "read_controls", callback=self._reread)
             return
-        self._show(outcome)
-        taken = {control["name"]: control["value"] for control in outcome}
-        stored = {name: taken[name] for name in values if name in taken}
-        self._link.run(
-            store_camera_settings,
-            self._camera_name,
-            stored,
-            "Camera applet",
-            callback=lambda result: self._stored(result, stored),
-        )
+        controls, stored, store_error = outcome
+        self._show(controls)
+        if store_error is not None:
+            for name in stored:
+                self.camera_sidebar.show_error(
+                    name, f"Applied, not stored: {error_text(store_error)}"
+                )
 
     def _reread(self, outcome: Any) -> None:
         if self._connection_failed(outcome):
@@ -554,22 +598,8 @@ class CameraApplet(ImageDisplay):
             return
         self._show(outcome)
 
-    def _stored(self, outcome: Any, stored: dict) -> None:
-        if not isinstance(outcome, Exception):
-            return
-        logger.warning(
-            "%s: %s applied but not stored: %s",
-            self._camera_name,
-            sorted(stored),
-            error_text(outcome),
-        )
-        for name in stored:
-            self.camera_sidebar.show_error(
-                name, f"Applied, not stored: {error_text(outcome)}"
-            )
-
     def _toggle_live(self, start: bool) -> None:
-        if self._held() or "toggle" in self._in_flight:
+        if self._hold_locks() or "toggle" in self._in_flight:
             return
         self._live_serial += 1
         self._request(
@@ -611,7 +641,7 @@ class CameraApplet(ImageDisplay):
         self._render_state()
 
     def _snap(self) -> None:
-        if self._held() or self._live or "snap" in self._in_flight:
+        if self._hold_locks() or self._live or "snap" in self._in_flight:
             return
         self._request("snap", "snap", True, callback=self._snapped)
 
@@ -626,14 +656,15 @@ class CameraApplet(ImageDisplay):
     def _roi_from_drawn(self) -> None:
         rois = [item for item in self.plot.items if isinstance(item, CameraROI)]
         if not rois:
-            self.camera_sidebar.show_error("roi_x0", "Draw an ROI on the image first.")
+            self._show_message("From drawn ROI: draw an ROI on the image first.")
         elif self.image_head is None:
-            self.camera_sidebar.show_error(
-                "roi_x0", "No frame yet: the ROI is placed on the last frame."
+            self._show_message(
+                "From drawn ROI: no frame yet; the ROI is placed on the last frame."
             )
         elif (roi := camera_roi(rois[0], self.image_item, self.image_head)) is None:
-            self.camera_sidebar.show_error("roi_x0", "The drawn ROI is off the frame.")
+            self._show_message("From drawn ROI: the drawn ROI is off the frame.")
         else:
+            self._show_message("")
             self._apply(dict(zip(ROI_NAMES, roi, strict=True)))
 
     def _full_sensor(self) -> None:
@@ -682,14 +713,14 @@ class CameraApplet(ImageDisplay):
 
     def _preset_chosen(self, name: str) -> None:
         values = (self._presets or {}).get(name)
-        current = {control["name"]: control["value"] for control in self._controls}
+        current = control_values(self._controls)
         if values is None or all(current.get(k) == v for k, v in values.items()):
             self.camera_sidebar.show_values(self._controls)
             return
         self._apply(values)
 
     def _preset_save(self, name: str) -> None:
-        current = {control["name"]: control["value"] for control in self._controls}
+        current = control_values(self._controls)
         if not all(key in current for key in ROI_NAMES):
             return
         self._preset_props.set(

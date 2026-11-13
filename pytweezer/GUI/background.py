@@ -57,10 +57,14 @@ class BackgroundReader(QtCore.QObject):
                 callback(outcome)
         finally:
             if isinstance(outcome, BaseException):
-                _clear_tracebacks(outcome)
+                clear_tracebacks(outcome)
 
 
-def _clear_tracebacks(error: BaseException) -> None:
+def clear_tracebacks(error: BaseException) -> None:
+    """Drop the tracebacks of ``error`` and of the exceptions it was raised from or during.
+
+    See :class:`BackgroundReader` for why an exception passed to the GUI thread needs this.
+    """
     seen = set()
     while error is not None and id(error) not in seen:
         seen.add(id(error))
