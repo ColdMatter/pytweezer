@@ -92,8 +92,9 @@ and the `trigger_source()` and `gain()` factories). `controls()`,
 `read_controls()` and `apply_controls()` work from it, so a driver implements
 the setters, calls `self._keep(name=value)` with the SI value the camera
 actually took, takes `self._lock` around each, and overrides
-`_read_control_values()` to read every control back (and `_apply_control` for
-one whose setter is not `set_<name>`). A driver that can read each frame's
+`_read_control_values()` to read every control back (and names, in
+`CONTROL_SETTERS`, any control whose setter is not `set_<name>`; do not override
+`_apply_control`, which the simulated twin would not inherit). A driver that can read each frame's
 camera-clock time overrides `_read_range_timed`; the live broadcast then adds it
 as `camera_timestamp`. `snap()` takes one frame from a stopped camera.
 

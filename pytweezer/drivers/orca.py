@@ -1,8 +1,23 @@
 from pytweezer.drivers.camera_base import (
+    BINNING,
+    EXPOSURE,
+    ROI,
+    TRIGGER_POLARITY,
     Camera,
+    Control,
+    gain,
     simulated_camera_for,
+    trigger_source,
 )
-from pytweezer.drivers.hamamatsu import open_dcam_camera, set_dcam_exposure_mode
+from pytweezer.drivers.hamamatsu import (
+    dcam_roi_controls,
+    dcam_trigger_controls,
+    open_dcam_camera,
+    read_dcam_controls,
+    read_dcam_range_timed,
+    set_dcam_exposure_mode,
+    set_dcam_trigger_polarity,
+)
 
 
 class ORCACamera(Camera):
@@ -24,6 +39,24 @@ class ORCACamera(Camera):
     image_prefix = "ORCA"
     model_prefix = "C10600"
 
+    CONTROLS = (
+        EXPOSURE,
+        Control(
+            "exposure_mode",
+            "Exposure mode",
+            "Exposure & trigger",
+            "choice",
+            "internal",
+            choices=("internal", "edge", "level"),
+        ),
+        trigger_source(("int", "ext", "software")),
+        TRIGGER_POLARITY,
+        gain("Contrast gain", "integer", minimum=0),
+        Control("readout_speed", "Readout speed", "Readout", "integer", 1, minimum=1),
+        BINNING,
+        *ROI,
+    )
+
     def __init__(
         self,
         image_dir: str | None = None,
@@ -42,6 +75,7 @@ class ORCACamera(Camera):
         )
         if external_exposure:
             self.set_external_exposure_mode()
+        self.read_controls()
 
     # ------------------------------------------------------------------ #
     # Camera hooks
@@ -59,20 +93,34 @@ class ORCACamera(Camera):
         if self._backend is not None:
             self._backend.close()
 
+    def _read_control_values(self) -> dict:
+        return {
+            **read_dcam_controls(self._backend),
+            "gain": int(self._backend.get_attribute_value("contrast_gain", default=0)),
+            "readout_speed": int(
+                self._backend.get_attribute_value("readout_speed", default=1)
+            ),
+        }
+
     def set_roi(self, x0: int, width: int, y0: int, height: int):
-        *_, hbin, vbin = self._backend.get_roi()
-        hstart, _, vstart, _, hbin, _ = self._backend.set_roi(
-            x0, x0 + width, y0, y0 + height, hbin, vbin
-        )
-        self.roi_origin = (int(hstart), int(vstart))
-        self.binning = int(hbin)
-        return self.roi_origin
+        with self._lock:
+            *_, hbin, vbin = self._backend.get_roi()
+            roi = self._backend.set_roi(x0, x0 + width, y0, y0 + height, hbin, vbin)
+            return self._keep_roi(roi)
 
     def set_trigger_source(self, source: str):
-        self._backend.set_trigger_mode(source)
+        with self._lock:
+            self._backend.set_trigger_mode(source)
+            self._keep(**dcam_trigger_controls(self._backend))
+
+    def set_trigger_polarity(self, polarity: str):
+        with self._lock:
+            set_dcam_trigger_polarity(self._backend, polarity)
+            self._keep(**dcam_trigger_controls(self._backend))
 
     def set_exposure_time(self, exposure: float):
-        self._backend.set_exposure(exposure)
+        with self._lock:
+            self._keep(exposure=float(self._backend.set_exposure(exposure)))
 
     def setup_acquisition(self, nframes: int, mode: str = "sequence"):
         self._backend.setup_acquisition(mode, int(nframes))
@@ -90,6 +138,9 @@ class ORCACamera(Camera):
         )
         return images
 
+    def _read_range_timed(self, start: int, stop: int):
+        return read_dcam_range_timed(self._backend, start, stop)
+
     # ------------------------------------------------------------------ #
     # ORCA-specific controls (beyond the generic Camera interface)
     # ------------------------------------------------------------------ #
@@ -97,24 +148,40 @@ class ORCACamera(Camera):
     def set_binning(self, binning: int):
         # Through set_roi: DCAM rejects a bare BINNING write while the frame
         # buffer is attached (DCAMERR_NOTSTABLE), and pylablib's set_roi frees it.
-        hstart, hend, vstart, vend, *_ = self._backend.get_roi()
-        hstart, _, vstart, _, hbin, _ = self._backend.set_roi(
-            hstart, hend, vstart, vend, int(binning), int(binning)
-        )
-        self.roi_origin = (int(hstart), int(vstart))
-        self.binning = int(hbin)
+        with self._lock:
+            hstart, hend, vstart, vend, *_ = self._backend.get_roi()
+            roi = self._backend.set_roi(
+                hstart, hend, vstart, vend, int(binning), int(binning)
+            )
+            self._keep_roi(roi)
+
+    def _keep_roi(self, roi: tuple) -> tuple[int, int]:
+        """Keep the ROI pylablib returned and the origin and binning frames are read with."""
+        controls = dcam_roi_controls(roi)
+        self.roi_origin = (controls["roi_x0"], controls["roi_y0"])
+        self.binning = controls["binning"]
+        self._keep(**controls)
+        return self.roi_origin
 
     def set_readout_speed(self, speed: int):
-        self._backend.set_attribute_value("readout_speed", int(speed))
+        with self._lock, self._backend.pausing_acquisition(clear=True):
+            self._backend.set_attribute_value("readout_speed", int(speed))
+            self._keep(
+                readout_speed=int(self._backend.get_attribute_value("readout_speed"))
+            )
 
     def set_gain(self, gain: float):
         """Set the contrast gain (an integer index)."""
-        self._backend.set_attribute_value("contrast_gain", int(gain))
+        with self._lock:
+            self._backend.set_attribute_value("contrast_gain", int(gain))
+            self._keep(gain=int(self._backend.get_attribute_value("contrast_gain")))
 
     def set_exposure_mode(self, mode: str):
         """``"internal"``, ``"edge"`` (a trigger starts an exposure of the set
         time) or ``"level"`` (the trigger pulse's width sets it)."""
-        set_dcam_exposure_mode(self._backend, mode)
+        with self._lock:
+            set_dcam_exposure_mode(self._backend, mode)
+            self._keep(**dcam_trigger_controls(self._backend))
 
     def set_external_exposure_mode(self):
         self.set_exposure_mode("level")

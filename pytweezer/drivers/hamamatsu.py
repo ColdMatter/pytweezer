@@ -4,6 +4,7 @@ import ctypes
 import subprocess
 import sys
 
+import numpy as np
 from pylablib.devices.DCAM import dcamapi4_lib
 from pylablib.devices.DCAM.DCAM import DCAMCamera, lib, libctl
 
@@ -34,21 +35,92 @@ def set_dcam_exposure_mode(camera: DCAMCamera, mode: str) -> None:
 
     In ``"edge"`` each trigger starts an exposure of the set time; in
     ``"level"`` the trigger pulse's width sets it. Both take the trigger
-    inverted (active low).
+    inverted (active low). A running acquisition is paused while the mode
+    changes, since DCAM refuses trigger properties while capturing.
 
     Raises:
         ValueError: For any other ``mode``.
     """
-    if mode == "internal":
-        camera.set_trigger_mode("int")
-        return
-    if mode not in _TRIGGER_ACTIVE:
+    if mode != "internal" and mode not in _TRIGGER_ACTIVE:
         raise ValueError(
             f"exposure mode is 'internal', 'edge' or 'level', not {mode!r}"
         )
-    camera.set_trigger_mode("ext")
-    camera.set_attribute_value("trigger_active", _TRIGGER_ACTIVE[mode])
-    camera.setup_ext_trigger(invert=True)
+    with camera.pausing_acquisition():
+        if mode == "internal":
+            camera.set_trigger_mode("int")
+            return
+        camera.set_trigger_mode("ext")
+        camera.set_attribute_value("trigger_active", _TRIGGER_ACTIVE[mode])
+        camera.setup_ext_trigger(invert=True)
+
+
+def get_dcam_exposure_mode(camera: DCAMCamera) -> str:
+    """The mode :func:`set_dcam_exposure_mode` would have set: ``"internal"``
+    for the internal trigger, otherwise ``"edge"`` or ``"level"`` by the
+    camera's ``trigger_active`` (any other activation reads as ``"edge"``)."""
+    if camera.get_trigger_mode() == "int":
+        return "internal"
+    active = int(camera.get_attribute_value("trigger_active"))
+    return {value: mode for mode, value in _TRIGGER_ACTIVE.items()}.get(active, "edge")
+
+
+def set_dcam_trigger_polarity(camera: DCAMCamera, polarity: str) -> None:
+    """Trigger on the ``"rise"`` or ``"fall"`` edge of the external trigger.
+
+    A running acquisition is paused while it changes.
+
+    Raises:
+        ValueError: For any other ``polarity``.
+    """
+    if polarity not in ("rise", "fall"):
+        raise ValueError(f"trigger polarity is 'rise' or 'fall', not {polarity!r}")
+    with camera.pausing_acquisition():
+        camera.setup_ext_trigger(invert=polarity == "fall")
+
+
+def dcam_trigger_controls(camera: DCAMCamera) -> dict:
+    """The camera's ``exposure_mode``, ``trigger_source`` and ``trigger_polarity``, as the
+    controls of that name hold them; they are coupled, so they are read together."""
+    inverted, _delay = camera.get_ext_trigger_parameters()
+    return {
+        "exposure_mode": get_dcam_exposure_mode(camera),
+        "trigger_source": camera.get_trigger_mode(),
+        "trigger_polarity": "fall" if inverted else "rise",
+    }
+
+
+def dcam_roi_controls(roi: tuple) -> dict:
+    """The ROI controls (and binning) for a pylablib ROI ``(hstart, hend, vstart, vend, hbin, vbin)``."""
+    hstart, hend, vstart, vend, hbin, _ = roi
+    return {
+        "roi_x0": int(hstart),
+        "roi_width": int(hend - hstart),
+        "roi_y0": int(vstart),
+        "roi_height": int(vend - vstart),
+        "binning": int(hbin),
+    }
+
+
+def read_dcam_controls(camera: DCAMCamera) -> dict:
+    """Every control the ImagEM and the ORCA share, read from ``camera``."""
+    return {
+        "exposure": float(camera.get_exposure()),
+        **dcam_trigger_controls(camera),
+        **dcam_roi_controls(camera.get_roi()),
+    }
+
+
+def read_dcam_range_timed(
+    camera: DCAMCamera, start: int, stop: int
+) -> tuple[np.ndarray, list[float]]:
+    """Frames ``start`` to ``stop - 1`` without marking them read, and each one's
+    camera timestamp in seconds. Both are empty when no acquisition is set up."""
+    images, infos = camera.read_multiple_images(
+        (start, stop), peek=True, return_info=True
+    )
+    if images is None:
+        return np.asarray([]), []
+    return np.asarray(images), [info.timestamp_us * 1e-6 for info in infos]
 
 
 def _dcam_session():
