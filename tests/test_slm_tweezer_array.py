@@ -3,10 +3,9 @@
 import numpy as np
 import pytest
 
-from pytweezer.coordinators import rearrangement
 from pytweezer.experiments import slm_tweezer_array
 from pytweezer.experiments.slm_tweezer_array import placement, render_target
-from pytweezer.helper_scripts import array_hologram
+from pytweezer.helper_scripts import array_hologram, rearrangement
 from pytweezer.helper_scripts.array_hologram import (
     envelope,
     envelope_weights,
@@ -140,8 +139,8 @@ def test_top_down_view_finds_the_focus_a_lens_on_the_slm_moves_to_f_squared_over
     assert focus_um == pytest.approx(focus_shift_um, abs=0.25)
 
 
-class RecordingRig:
-    """Stands in for the rearrangement rig: records what it was asked to make."""
+class RecordingSLM:
+    """Stands in for the SLM: records the arrays it was asked to make."""
 
     def __init__(self):
         self.made = []
@@ -171,17 +170,17 @@ class RecordingRig:
 
 
 @pytest.fixture
-def rig_and_streams(monkeypatch):
+def slm_and_streams(monkeypatch):
     saved = dict(SAVED)
     monkeypatch.setattr(slm_tweezer_array, "get_saved_parameters", lambda: saved)
     monkeypatch.setattr(
         "pytweezer.experiment.client.get_saved_parameters", lambda: saved
     )
-    rig = RecordingRig()
-    rig.saved = saved
+    slm = RecordingSLM()
+    slm.saved = saved
     sent = {}
     monkeypatch.setattr(
-        "pytweezer.experiment.experiment._get_device", lambda name, timeout: rig
+        "pytweezer.experiment.experiment._get_device", lambda name, timeout: slm
     )
     monkeypatch.setattr(
         "pytweezer.servers.clients.ImageClient.send",
@@ -189,30 +188,30 @@ def rig_and_streams(monkeypatch):
             self.name + channel, data
         ),
     )
-    return rig, sent
+    return slm, sent
 
 
-def test_rig_is_asked_for_the_array_in_the_form(rig_and_streams):
+def test_slm_is_asked_for_the_array_in_the_form(slm_and_streams):
     from pytweezer.experiment import run_local
     from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
 
-    rig, _ = rig_and_streams
+    slm, _ = slm_and_streams
 
     measurement = run_local(
         SlmTweezerArray, rows=2, columns=3, spacing=4e-6, iterations=5
     )
 
     assert measurement.status == "completed", measurement.attrs.get("error")
-    ((array),) = rig.made
+    ((array),) = slm.made
     assert (array["rows"], array["columns"], array["iterations"]) == (2, 3, 5)
     assert array["spacing_um"] == pytest.approx(4.0)
 
 
-def test_mask_the_rig_made_is_the_one_recorded_and_broadcast(rig_and_streams):
+def test_mask_the_slm_made_is_the_one_recorded_and_broadcast(slm_and_streams):
     from pytweezer.experiment import run_local
     from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
 
-    _, sent = rig_and_streams
+    _, sent = slm_and_streams
 
     measurement = run_local(SlmTweezerArray, rows=2, columns=3, iterations=5)
 
@@ -223,11 +222,11 @@ def test_mask_the_rig_made_is_the_one_recorded_and_broadcast(rig_and_streams):
     assert sent["slm_target"].ndim == 2
 
 
-def test_target_and_simulated_trap_plane_are_sent_on_the_same_grid(rig_and_streams):
+def test_target_and_simulated_trap_plane_are_sent_on_the_same_grid(slm_and_streams):
     from pytweezer.experiment import run_local
     from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
 
-    _, sent = rig_and_streams
+    _, sent = slm_and_streams
 
     measurement = run_local(SlmTweezerArray, rows=2, columns=3, iterations=5)
 
@@ -237,17 +236,17 @@ def test_target_and_simulated_trap_plane_are_sent_on_the_same_grid(rig_and_strea
 
 
 def test_the_optics_come_from_the_saved_parameters_unless_the_form_sets_them(
-    rig_and_streams,
+    slm_and_streams,
 ):
     from pytweezer.experiment import run_local
     from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
 
-    rig, _ = rig_and_streams
+    slm, _ = slm_and_streams
 
     measurement = run_local(SlmTweezerArray, iterations=5, blaze_x=50e-6)
 
     assert measurement.status == "completed", measurement.attrs.get("error")
-    ((array),) = rig.made
+    ((array),) = slm.made
     assert array["blaze_um"] == pytest.approx((50.0, 4.0))
     assert array["fresnel_focal_length_mm"] == pytest.approx(1125.0)
     assert array["pupil_radius_um"] == pytest.approx(8704.0)
@@ -257,23 +256,23 @@ def test_the_optics_come_from_the_saved_parameters_unless_the_form_sets_them(
     assert measurement.arguments["blaze_y"] == pytest.approx(4e-6)
 
 
-def test_an_uncompensated_array_is_made_without_the_envelope(rig_and_streams):
+def test_an_uncompensated_array_is_made_without_the_envelope(slm_and_streams):
     from pytweezer.experiment import run_local
     from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
 
-    rig, _ = rig_and_streams
+    slm, _ = slm_and_streams
 
     run_local(SlmTweezerArray, iterations=5, compensate_envelope=False)
 
-    assert rig.made[0]["envelope"] is None
+    assert slm.made[0]["envelope"] is None
 
 
-def test_a_missing_saved_optics_parameter_fails_the_run(rig_and_streams):
+def test_a_missing_saved_optics_parameter_fails_the_run(slm_and_streams):
     from pytweezer.experiment import run_local
     from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
 
-    rig, _ = rig_and_streams
-    del rig.saved["slm_envelope_sigma"]
+    slm, _ = slm_and_streams
+    del slm.saved["slm_envelope_sigma"]
 
     measurement = run_local(SlmTweezerArray, iterations=5)
 

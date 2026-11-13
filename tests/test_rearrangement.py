@@ -1,51 +1,23 @@
-"""The rearrangement coordinator as the device server builds it from config."""
+"""The tweezer array the SLM device puts on itself, as the device server builds it from config."""
 
 import numpy as np
 import pytest
 
-from pytweezer.coordinators import rearrangement
-from pytweezer.helper_scripts import array_hologram
+from pytweezer.helper_scripts import array_hologram, rearrangement
 from pytweezer.servers import device_server
 
-SIM_RIG = {
+SIM_SLM = {
+    "class": "pytweezer.drivers.slm:SLM",
+    "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
+    "teardown": "close",
     "simulate": True,
-    "devices": {
-        "Rb Rearrangement Cam": {
-            "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
-            "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
-            "role": "camera",
-            "stream_name": None,
-            "timeout": 2.0,
-        },
-        "Rb SLM": {
-            "class": "pytweezer.drivers.slm:SLM",
-            "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
-            "teardown": "close",
-            "role": "slm",
-        },
-    },
-    "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
 }
 
 
-def test_simulated_rig_builds_and_resolves_roles():
-    spec = device_server.build_spec("Rb Rearrangement Rig", conf=SIM_RIG)
-    try:
-        assert set(spec.targets) == {"coordinator", "rbrearrangementcam", "rbslm"}
-        coord = spec.targets["coordinator"]
-        # The coordinator holds the sub-device objects themselves, so it drives
-        # them in-process rather than over RPC.
-        assert coord.camera is spec.targets["rbrearrangementcam"]
-        assert coord.slm is spec.targets["rbslm"]
-        assert coord.status()["roles"] == ["camera", "slm"]
-    finally:
-        spec.teardown()
-
-
 @pytest.fixture
-def rig():
-    spec = device_server.build_spec("Rb Rearrangement Rig", conf=SIM_RIG)
-    yield spec.targets["coordinator"]
+def slm():
+    spec = device_server.build_spec("Rb SLM", conf=SIM_SLM)
+    yield next(iter(spec.targets.values()))
     spec.teardown()
 
 
@@ -89,63 +61,63 @@ OPTICS = {
 }
 
 
-def test_rig_reports_the_array_it_put_on_the_slm(rig, fake_gpu):
-    hologram = rig.make_array(**ARRAY, **OPTICS)
+def test_slm_reports_the_array_it_was_given(slm, fake_gpu):
+    hologram = slm.make_array(**ARRAY, **OPTICS)
 
-    np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
-    array = rig.get_array()
+    np.testing.assert_array_equal(slm.last_mask, hologram["mask"])
+    array = slm.get_array()
     assert array["sites"] == 12
     assert {key: array[key] for key in ARRAY} == ARRAY
     assert len(array["x_um"]) == len(array["y_um"]) == 12
 
 
-def test_rig_does_not_know_the_array_once_something_else_writes_the_slm(rig, fake_gpu):
-    rig.make_array(**ARRAY, **OPTICS)
+def test_slm_does_not_know_the_array_once_another_mask_is_written(slm, fake_gpu):
+    slm.make_array(**ARRAY, **OPTICS)
 
-    rig.slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
+    slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
 
-    assert rig.get_array() is None
-
-
-def test_rig_knows_its_array_again_when_its_mask_is_put_back(rig, fake_gpu):
-    hologram = rig.make_array(**ARRAY, **OPTICS)
-    rig.slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
-
-    rig.slm.update_mask(hologram["mask"].copy())
-
-    assert rig.get_array()["sites"] == 12
+    assert slm.get_array() is None
 
 
-def test_rig_knows_no_array_before_making_one(rig):
-    rig.slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
+def test_slm_knows_its_array_again_when_its_mask_is_put_back(slm, fake_gpu):
+    hologram = slm.make_array(**ARRAY, **OPTICS)
+    slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
 
-    assert rig.get_array() is None
+    slm.update_mask(hologram["mask"].copy())
+
+    assert slm.get_array()["sites"] == 12
 
 
-def test_rig_puts_the_computed_hologram_on_the_slm(rig):
+def test_slm_knows_no_array_before_making_one(slm):
+    slm.update_mask(np.zeros((1024, 1024), dtype=np.uint8))
+
+    assert slm.get_array() is None
+
+
+def test_slm_displays_the_computed_hologram(slm):
     if not rearrangement._HAS_CUPY:
         pytest.skip("needs a CUDA GPU")
 
-    hologram = rig.make_array(
+    hologram = slm.make_array(
         rows=2, columns=3, spacing_um=5.0, angle_deg=0.0, **OPTICS
     )
 
     assert hologram["mask"].dtype == np.uint8 and hologram["mask"].shape == (1024, 1024)
-    np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
-    assert rig.get_array()["sites"] == 6
+    np.testing.assert_array_equal(slm.last_mask, hologram["mask"])
+    assert slm.get_array()["sites"] == 6
 
 
-def test_rig_builds_a_new_generator_only_when_the_optics_change(
-    rig, fake_gpu, monkeypatch
+def test_slm_builds_a_new_generator_only_when_the_optics_change(
+    slm, fake_gpu, monkeypatch
 ):
     built = []
     monkeypatch.setattr(
         array_hologram, "make_generator", lambda settings: built.append(settings) or 1
     )
 
-    rig.make_array(**ARRAY, **OPTICS)
-    rig.make_array(**ARRAY, **OPTICS)
-    rig.make_array(**ARRAY, **(OPTICS | {"blaze_um": (50.0, 4.0)}))
+    slm.make_array(**ARRAY, **OPTICS)
+    slm.make_array(**ARRAY, **OPTICS)
+    slm.make_array(**ARRAY, **(OPTICS | {"blaze_um": (50.0, 4.0)}))
 
     assert [settings["blaze_dx_dy_um"] for settings in built] == [
         (48.0, 4.0),

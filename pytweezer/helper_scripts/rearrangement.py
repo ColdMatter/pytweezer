@@ -1,27 +1,20 @@
-"""Atom-rearrangement coordinator.
+"""Atom rearrangement and tweezer arrays on the Rb SLM.
 
-Ports the standalone ``rearrangement_node_server.py`` (a ZMQ REP server that held
-its own camera and talked to the SLM over another socket) into a composite-device
-:class:`~pytweezer.coordinators.base.Coordinator`. The camera and SLM are now
-sub-devices of the same process, so this coordinator drives them with direct
-in-process calls: the GPU-computed phase sequence goes straight to
-``slm.update_mask`` with no frame ever serialized onto a socket.
+:class:`Rearrangement` drives an SLM, and optionally a camera, with direct Python
+calls. The ``Rb SLM`` device builds one around itself and serves its
+:meth:`~Rearrangement.make_array` and :meth:`~Rearrangement.get_array`; the
+camera-driven runs (:meth:`~Rearrangement.initialise` and the ``arm_*`` calls)
+need the camera and a phasemask generator in the same process, so notebooks
+build a :class:`Rearrangement` around them directly.
 
-Roles in the composite's ``"devices"`` block:
+This was the ``Rb Rearrangement Rig`` composite's coordinator. Wrapping the class
+in a :class:`~pytweezer.coordinators.base.Coordinator` that passes its
+``slm``/``camera``/``phasemask_generator`` roles to the constructor would make it
+one again.
 
-* ``slm``    — a :class:`pytweezer.drivers.slm.SLM` (`update_mask`). Required.
-* ``camera`` — an ImagEM-X2-style camera (`setup_acquisition`, `set_roi`,
-  `enable_em_gain`, `acquire_n_frames`, ...). Optional: without it the
-  coordinator constructs SLM-only and :meth:`initialise` raises, but the phase
-  sequence generation and upload path is fully usable. Benchmarks that only
-  time frame delivery run this way.
-
-Lifecycle over RPC (all synchronous; each stalls the server for its duration, per
-the coordinator contract):
-
-* :meth:`initialise` — build the GPU phasemask generator, configure the camera,
-  precompute the initial array. Takes the two trap parameter sets (``data1``/
-  ``data2``, shape ``(4, N)``: w, phi, x, y).
+* :meth:`initialise` — configure the camera and precompute the initial array.
+  Takes the two trap parameter sets (``data1``/``data2``, shape ``(4, N)``: w,
+  phi, x, y).
 * :meth:`arm_rearrangement` — grab an image, extract the occupancy mask, then
   generate the interpolated phase sequence
   (``OptimisationBasedPhasemaskGeneratorGPU.iter_rearrangement_sequence``) and
@@ -31,22 +24,22 @@ the coordinator contract):
   on the SLM. :meth:`get_array` then says which array is on the SLM, for
   analyses and experiments that need the number or positions of the sites; it
   returns ``None`` once anything else has written the SLM.
-* :meth:`test` / :meth:`status` / :meth:`shutdown`.
 
 Generation and upload are pipelined: the GPU loop pushes each finished frame onto a
 bounded queue and a writer thread copies it to the host and DMAs it to the board, so
 synthesis of frame *n+1* overlaps the upload of frame *n*. The queue depth
 (:data:`UPLOAD_QUEUE_DEPTH`) bounds how far the GPU may run ahead.
 
-``cupy``/``lap`` and the heavy GPU math are imported lazily, so this module imports
-and :meth:`status` works on any machine; :meth:`initialise`/:meth:`arm_rearrangement`
-raise a clear error where the GPU stack is absent.
+The heavy GPU math is imported lazily and every GPU call checks for a CUDA device,
+so this module imports on any machine.
 
 The remaining timing optimisation — preloading frames into the SLM's on-board memory
 and clocking them out with a hardware trigger (``preload_sequence`` /
 ``start_auto_increment``) instead of per-frame software writes — is described in
 ``docs/notes/rearrangement_coordinator.md``.
 """
+
+from __future__ import annotations
 
 import queue
 import threading
@@ -55,9 +48,6 @@ import time
 import numpy as np
 
 from pytweezer import analysis as an
-from pytweezer.coordinators.base import Coordinator
-from pytweezer.drivers.imagemX2 import ImagEMX2Camera
-from pytweezer.drivers.slm import SLM
 from pytweezer.helper_scripts import array_hologram
 
 try:
@@ -86,7 +76,7 @@ UPLOAD_QUEUE_DEPTH = 5
 #: the board's memory, NOT a panel flip, so without this the pipeline happily
 #: writes faster than the liquid crystal can refresh and each frame overwrites the
 #: one still being displayed — the atoms then see fewer, larger jumps than ``d0``
-#: asks for. Override per instance with ``conf["panel_period_s"]``; set to 0.0 to
+#: asks for. Override per instance with ``panel_period_s``; set to 0.0 to
 #: disable pacing entirely. Only the display path needs this: preload+trigger
 #: writes to frame memory and is clocked by the Arduino.
 PANEL_PERIOD_S = 0.70e-3
@@ -170,21 +160,27 @@ def _sum_cpp():
     return _sum_cpp_module
 
 
-class Rearrangement(Coordinator):
-    """Camera + SLM rearrangement loop, run entirely in one process."""
+class Rearrangement:
+    """Camera + SLM rearrangement loop, and the tweezer array on the SLM, in one process.
 
-    camera_role = "camera"
-    slm_role = "slm"
-    pm_gen_role = "phasemask_generator"
+    ``slm`` is a :class:`pytweezer.drivers.slm.SLM` (or its simulated twin).
+    ``camera`` (an ImagEM-X2-style camera) and ``phasemask_generator`` (an
+    ``OptimisationBasedPhasemaskGeneratorGPU``) are needed only by
+    :meth:`initialise` and the ``arm_*`` calls. ``panel_period_s`` is the enforced
+    minimum interval between panel writes; see :data:`PANEL_PERIOD_S`.
+    """
 
-    def __init__(self, targets, conf):
-        super().__init__(targets, conf)
-        self.camera: ImagEMX2Camera | None = self.targets.get(self.camera_role)
-        self.slm: SLM = self.require_role(self.slm_role)
-        self.pm_gen = self.targets.get(self.pm_gen_role)
-
-        #: Enforced minimum interval between panel writes; see :data:`PANEL_PERIOD_S`.
-        self.panel_period_s = float(conf.get("panel_period_s", PANEL_PERIOD_S))
+    def __init__(
+        self,
+        slm,
+        camera=None,
+        phasemask_generator=None,
+        panel_period_s: float = PANEL_PERIOD_S,
+    ):
+        self.slm = slm
+        self.camera = camera
+        self.pm_gen = phasemask_generator
+        self.panel_period_s = float(panel_period_s)
 
         self._initialised = False
         self._state = None  # populated by initialise()
@@ -205,18 +201,14 @@ class Rearrangement(Coordinator):
         if not _HAS_CUPY:
             raise RuntimeError(
                 "Rearrangement needs cupy/lap and a CUDA GPU, which are not available "
-                "on this machine. Run the rig on the GPU host, or use status()/test() "
-                "only here."
+                "on this machine."
             )
 
     def _require_camera(self):
-        if self.camera is None:
+        if self.camera is None or self.pm_gen is None:
             raise RuntimeError(
-                f"{type(self).__name__} needs a sub-device with role "
-                f"{self.camera_role!r} for this call; this composite provides roles: "
-                f'{sorted(self.targets) or "(none)"}. Set "role": '
-                f"{self.camera_role!r} on the relevant entry in the composite's "
-                '"devices" block.'
+                "This call needs the camera and the phasemask generator; build the "
+                "Rearrangement with camera= and phasemask_generator=."
             )
 
     def _require_initialised(self):
@@ -225,24 +217,16 @@ class Rearrangement(Coordinator):
                 "Rearrangement not initialised; call initialise() first."
             )
 
-    # ------------------------------------------------------------------ #
-    # Status
-    # ------------------------------------------------------------------ #
-
     def status(self) -> dict:
         """Report readiness. Works with or without the GPU stack."""
         return {
             "gpu_available": _HAS_CUPY,
             "initialised": self._initialised,
-            "roles": sorted(self.targets),
             "camera_connected": bool(
                 getattr(self.camera, "is_connected", lambda: None)()
             ),
             "slm_connected": bool(getattr(self.slm, "is_connected", lambda: None)()),
         }
-
-    def get_slm_temperature(self) -> float:
-        return float(self.slm.get_temperature())
 
     # ------------------------------------------------------------------ #
     # The array on the SLM
@@ -907,28 +891,15 @@ class Rearrangement(Coordinator):
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
     # ------------------------------------------------------------------ #
-    # Test / teardown
+    # Teardown
     # ------------------------------------------------------------------ #
 
-    def test(self, delay_s: float = 0.0):
-        """Round-trip smoke test: return two random ``(before, after)`` images.
-
-        No GPU needed — exercises the RPC path and image marshalling only.
-        """
-        if delay_s:
-            time.sleep(delay_s)
-        rng = np.random.default_rng()
-        return (
-            rng.integers(0, 256, (10, 10), dtype=np.uint8),
-            rng.integers(0, 256, (10, 10), dtype=np.uint8),
-        )
-
     def shutdown(self) -> None:
-        """Release rearrangement state. The camera/SLM backends close themselves."""
+        """Release rearrangement state. The camera and SLM close themselves."""
         if self._initialised and self.camera is not None:
             try:
                 self.camera.stop_acquisition()
             except Exception:
-                print("camera.stop_acquisition() during shutdown failed", exc_info=True)
+                print("camera.stop_acquisition() during shutdown failed")
         self._state = None
         self._initialised = False

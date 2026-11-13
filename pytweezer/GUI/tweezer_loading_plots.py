@@ -295,7 +295,7 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
             parts.append("fit failed: fixed threshold")
         parts.append(f"{head['shots']} shots, {head['sites']} sites")
         if head.get("sites_match") is False:
-            parts.append("sites fitted to another array than the rig's: refit them")
+            parts.append("sites fitted to another array than the SLM's: refit them")
         if task := self._task(head):
             parts.insert(0, task)
         return "     ".join(parts)
