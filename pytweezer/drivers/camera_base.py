@@ -267,6 +267,7 @@ class Camera(ABC):
         self._lock = threading.RLock()
         self._live_thread: threading.Thread | None = None
         self._live_stop = threading.Event()
+        self._live_args: tuple[int, float] = (1000, 0.05)
         self._backend = None
         self._kept: dict[str, Any] = {}
         self._connect()
@@ -593,7 +594,7 @@ class Camera(ABC):
                 self.read_controls()
             finally:
                 if was_live:
-                    self.start_live()
+                    self.start_live(*self._live_args)
         return self.controls()
 
     @staticmethod
@@ -687,6 +688,7 @@ class Camera(ABC):
         self.arm(buffer_frames)
         if self.is_live():
             return
+        self._live_args = (buffer_frames, poll_s)
         self._live_stop.clear()
         self._live_thread = threading.Thread(
             target=self._broadcast_live,
