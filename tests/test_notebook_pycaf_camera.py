@@ -1,3 +1,4 @@
+import time
 import warnings
 from datetime import date
 
@@ -94,9 +95,27 @@ class FakeHamCam(FakeCamera):
         self.calls.append("start_live")
         super().start_live(buffer_frames)
 
+    def saturated_frames_since(self, start):
+        values = ((index, self.value(index)) for index in range(start, self.count))
+        return [(index, value) for index, value in values if value >= 65535]
+
+
+class FakeMotMasterController:
+    def __init__(self):
+        self.stopping = False
+        self.stops = 0
+
+    def Stop(self):
+        self.stopping = True
+        self.stops += 1
+
 
 class FakeExperiment:
-    """pycaf.Experiment's scan loop: one ``self._go`` per value, errors printed."""
+    """pycaf.Experiment's scan loop: one ``self._go`` per value, errors printed.
+
+    Each Go fires ``iterations`` shots, ``shot_s`` apart, and like MOTMaster
+    fires no more once ``motmaster.Stop()`` is called.
+    """
 
     def __init__(self, root, cameras, save=True):
         self.root = root
@@ -104,6 +123,10 @@ class FakeExperiment:
         self.save = save
         self.frames_per_run = None  # list overriding the camera's count per run
         self.gos = 0
+        self.shots = 0
+        self.iterations = 1
+        self.shot_s = 0.0
+        self.motmaster = FakeMotMasterController()
 
     def __setattr__(self, name, value):
         self.__dict__[name] = value
@@ -111,11 +134,17 @@ class FakeExperiment:
     def _go(self, dictionary=None):
         n = self.frames_per_run[self.gos] if self.frames_per_run else None
         self.gos += 1
-        for camera in self.cameras:
-            if n is None:
-                camera.trigger(1)
-            else:
-                camera.count += n
+        self.motmaster.stopping = False
+        for _ in range(self.iterations):
+            if self.motmaster.stopping:
+                break
+            self.shots += 1
+            for camera in self.cameras:
+                if n is None:
+                    camera.trigger(1)
+                else:
+                    camera.count += n
+            time.sleep(self.shot_s)
         if self.save:
             today = date.today()
             folder = zips.day_folder(self.root, today)
@@ -172,13 +201,14 @@ def test_scan_frames_are_split_per_run_and_saved_beside_each_zip(parts):
         [6, 7, 8],
         [9, 10, 11],
     ]
-    assert [path.name[:2] for path in hamcam.last_zips] == ["Rb"] * 4
-    for stack, path in zip(images, hamcam.last_zips):
+    assert hamcam.last_zips == [0, 1, 2, 3]
+    assert [path.name[:2] for path in hamcam.last_zip_paths] == ["Rb"] * 4
+    for stack, path in zip(images, hamcam.last_zip_paths):
         from_zip, params = read_zip_like_analysis3(path)
         assert np.array_equal(from_zip, stack)
         assert params == {"dummy": 0.0}
     # Each Rb zip has the same run number as the CaF zip it sits beside.
-    assert [p.name.split("_")[-1] for p in hamcam.last_zips] == [
+    assert [p.name.split("_")[-1] for p in hamcam.last_zip_paths] == [
         "000.zip",
         "001.zip",
         "002.zip",
@@ -197,7 +227,8 @@ def test_store_takes_only_runs_since_the_last_store(parts):
 
     assert len(images) == 1
     assert images[0][:, 0, 0].tolist() == [9, 10]
-    assert hamcam.last_zips[0].name.endswith("_002.zip")
+    assert hamcam.last_zips == [2]
+    assert hamcam.last_zip_paths[0].name.endswith("_002.zip")
 
 
 def test_uneven_frame_counts_stay_with_their_run_and_warn(parts):
@@ -226,12 +257,14 @@ def test_unsaved_runs_return_frames_and_warn(parts):
         images = hamcam.store_images()
     assert len(images) == 1
     assert hamcam.last_zips == [None]
+    assert hamcam.last_zip_paths == [None]
 
 
 def test_store_with_no_runs_warns(parts):
     hamcam, _, _ = parts()
     with pytest.warns(UserWarning, match="No MOTMaster runs"):
         assert hamcam.store_images() == []
+    assert hamcam.last_zips == hamcam.last_zip_paths == []
 
 
 def test_rerunning_the_cell_replaces_the_old_watcher(parts, tmp_path):
@@ -279,6 +312,61 @@ def test_closing_the_inner_of_two_cameras_keeps_the_outer(parts, tmp_path):
     assert [len(stack) for stack in outer.store_images()] == [1]
 
 
+def test_saturated_frame_stops_motmaster_and_the_scan(parts, capsys):
+    hamcam, expt, camera = parts(frames=1)
+    expt.iterations, expt.shot_s = 50, 0.01
+    camera.value = lambda index: 65535 if index == 2 else index
+
+    expt.scan_motmaster_parameter("s", "p", [1, 2, 3])
+
+    assert expt.motmaster.stops == 1
+    assert expt.gos == 1  # the rest of the scan did not run
+    assert 3 <= expt.shots < 50
+    assert "Rb camera saturated" in capsys.readouterr().out
+    # The run's frames are kept, saturated one included, to see what happened.
+    (stack,) = hamcam.store_images()
+    assert stack[2].max() == 65535
+
+
+def test_saturation_in_a_runs_last_shot_still_ends_the_scan(parts, capsys):
+    hamcam, expt, camera = parts(frames=1)
+    expt.iterations = 3  # fired with no gap: over before the watch's first look
+    camera.value = lambda index: 65535 if index == 2 else index
+
+    expt.scan_motmaster_parameter("s", "p", [1, 2])
+
+    assert expt.gos == 1
+    assert "Rb camera saturated" in capsys.readouterr().out
+    assert [len(stack) for stack in hamcam.store_images()] == [3]
+
+
+def test_saturation_before_the_run_does_not_stop_it(parts):
+    hamcam, expt, camera = parts(frames=1)
+    camera.value = lambda index: 65535 if index == 0 else index
+    camera.count += 1  # a saturated frame from before pycaf's run
+    expt.iterations = 3
+
+    expt.scan_motmaster_parameter("s", "p", [1, 2])
+
+    assert expt.motmaster.stops == 0
+    assert [len(stack) for stack in hamcam.store_images()] == [3, 3]
+
+
+def test_camera_server_without_saturation_watch_warns_and_still_collects(tmp_path):
+    class OldServerHamCam(FakeHamCam):
+        def saturated_frames_since(self, start):
+            raise RuntimeError("no such method")
+
+    camera = OldServerHamCam(1)
+    expt = FakeExperiment(tmp_path, [camera])
+    with pytest.warns(UserWarning, match="not watched for saturation"):
+        hamcam = PycafCamera(
+            expt, camera, element="CaF", data_root=tmp_path, frame_settle_s=0.03
+        )
+    expt.motmaster_single_run("s")
+    assert [len(stack) for stack in hamcam.store_images()] == [1]
+
+
 def test_key_equal_to_motmaster_element_is_refused(tmp_path):
     expt = FakeExperiment(tmp_path, [])
     with pytest.raises(ValueError, match="MOTMaster's own prefix"):
@@ -296,8 +384,8 @@ def test_run_started_outside_pycaf_between_scans_is_ignored(parts, tmp_path):
     images = hamcam.store_images()
 
     assert [stack[:, 0, 0].tolist() for stack in images] == [[0, 1], [4, 5]]
-    assert [p.name.split("_")[-1] for p in hamcam.last_zips] == ["000.zip", "002.zip"]
-    folder = hamcam.last_zips[0].parent
+    assert hamcam.last_zips == [0, 2]
+    folder = hamcam.last_zip_paths[0].parent
     assert not any(
         p.name.startswith("Rb") and p.name.endswith("_001.zip")
         for p in folder.iterdir()
