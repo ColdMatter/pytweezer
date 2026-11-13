@@ -86,6 +86,17 @@ into sensor pixels.
 `NotImplementedError`); only experiments written for a camera that has them
 call them.
 
+A camera declares the settings it offers in `CONTROLS`, a tuple of `Control`
+(`camera_base.py`; shared ones `EXPOSURE`, `BINNING`, `ROI`, `TRIGGER_POLARITY`,
+and the `trigger_source()` and `gain()` factories). `controls()`,
+`read_controls()` and `apply_controls()` work from it, so a driver implements
+the setters, calls `self._keep(name=value)` with the SI value the camera
+actually took, takes `self._lock` around each, and overrides
+`_read_control_values()` to read every control back (and `_apply_control` for
+one whose setter is not `set_<name>`). A driver that can read each frame's
+camera-clock time overrides `_read_range_timed`; the live broadcast then adds it
+as `camera_timestamp`. `snap()` takes one frame from a stopped camera.
+
 **Match the base class signatures exactly.** `setup_acquisition(self, nframes,
 mode="sequence")` takes both, and the base `arm()` calls it; a camera with no
 acquisition modes (the Thorlabs ones) accepts `mode` and ignores it. A shim

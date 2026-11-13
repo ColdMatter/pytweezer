@@ -1,10 +1,10 @@
 import pytest
 
+from pytweezer.drivers.camera_catalogue import camera_names
 from pytweezer.drivers.hamamatsu import set_dcam_exposure_mode
 from pytweezer.experiment import run_local
 from pytweezer.experiment.introspect import runnable_experiments
 from pytweezer.experiments import camera_settings as cs
-from pytweezer.experiments.camera_continuous import camera_names
 
 
 class RecordingCamera:
