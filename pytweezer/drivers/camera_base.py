@@ -237,6 +237,8 @@ class Camera(ABC):
     binning: int = 1
     #: Metres per unbinned sensor pixel at the atoms (sensor pitch over magnification); ``None`` if unknown.
     object_pixel_m: float | None = None
+    #: Sensor ``(width, height)`` in pixels, as :meth:`_sensor_shape` last read it; ``None`` if unknown.
+    _sensor_size: tuple[int, int] | None = None
 
     def __init__(
         self,
@@ -268,6 +270,7 @@ class Camera(ABC):
         self._backend = None
         self._kept: dict[str, Any] = {}
         self._connect()
+        self._keep_sensor_size()
 
     # ------------------------------------------------------------------ #
     # Hardware-specific hooks -- implemented by each concrete shim.
@@ -505,11 +508,14 @@ class Camera(ABC):
         """Each of :attr:`CONTROLS` as :meth:`Control.describe` gives it, plus its ``"value"``.
 
         Values are those last kept or read back (the control's default before
-        either); the hardware is not touched.
+        either); the hardware is not touched. Once the sensor size is known, the
+        ROI controls' ``maximum`` is the sensor's.
         """
+        limits = self._roi_limits()
         return [
             {
                 **control.describe(),
+                **limits.get(control.name, {}),
                 "value": self._kept.get(control.name, control.default),
             }
             for control in self.CONTROLS
@@ -519,7 +525,40 @@ class Camera(ABC):
         """Read every control's value back from the camera, then return :meth:`controls`."""
         with self._lock:
             self._kept.update(self._read_control_values())
+            self._keep_sensor_size()
         return self.controls()
+
+    def _sensor_shape(self) -> tuple[int, int] | None:
+        """The sensor's ``(width, height)`` in pixels, read from the hardware; ``None`` if unknown.
+
+        pylablib cameras give it as ``get_detector_size()``; a driver whose
+        backend does not overrides this.
+        """
+        detector_size = getattr(self._backend, "get_detector_size", None)
+        return None if detector_size is None else detector_size()
+
+    def _keep_sensor_size(self) -> None:
+        try:
+            shape = self._sensor_shape()
+        except Exception:
+            LOGGER.warning(
+                "%s could not read its sensor size", type(self).__name__, exc_info=True
+            )
+            return
+        if shape is not None:
+            self._sensor_size = (int(shape[0]), int(shape[1]))
+
+    def _roi_limits(self) -> dict[str, dict[str, int]]:
+        """The ROI controls' maxima from the sensor size, by control name."""
+        if self._sensor_size is None:
+            return {}
+        width, height = self._sensor_size
+        return {
+            "roi_x0": {"maximum": width - 1},
+            "roi_width": {"maximum": width},
+            "roi_y0": {"maximum": height - 1},
+            "roi_height": {"maximum": height},
+        }
 
     def apply_controls(self, values: dict[str, Any]) -> list[dict]:
         """Set the controls named in ``values`` (SI units), then read them all back.
@@ -745,6 +784,8 @@ class SimulatedCamera(Camera):
     """
 
     sim_frame_rate: float = 5.0
+    #: Sensor ``(width, height)`` the simulated camera reports.
+    sim_sensor_size: tuple[int, int] = (512, 512)
 
     def __init__(
         self,
@@ -772,6 +813,9 @@ class SimulatedCamera(Camera):
 
     def _disconnect(self) -> None:
         self._running = False
+
+    def _sensor_shape(self) -> tuple[int, int]:
+        return self.sim_sensor_size
 
     def _remember(self, **values: Any) -> None:
         """Keep ``values`` and hold them as what the simulated hardware reports."""

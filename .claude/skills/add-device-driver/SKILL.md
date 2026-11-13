@@ -94,7 +94,11 @@ the setters, calls `self._keep(name=value)` with the SI value the camera
 actually took, takes `self._lock` around each, and overrides
 `_read_control_values()` to read every control back. A control whose setter is
 not `set_<name>` is named in `CONTROL_SETTERS`; do not override
-`_apply_control`, which the simulated twin would not inherit. A driver that can
+`_apply_control`, which the simulated twin would not inherit. `controls()`
+gives the ROI controls the sensor size as their `maximum`, read once connected
+(and on each `read_controls()`) by `_sensor_shape()`, which calls the
+backend's `get_detector_size()` (pylablib cameras have it); a backend without
+one overrides `_sensor_shape()`. A driver that can
 read each frame's camera-clock time overrides `_read_range_timed`; the live
 broadcast then adds it as `camera_timestamp`. `snap()` takes one frame from a
 stopped camera. A driver that watches the sensor temperature sets
