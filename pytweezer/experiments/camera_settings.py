@@ -7,10 +7,11 @@ from pytweezer.experiment.camera_settings import CameraSettings
 
 
 class RbHamCamSettings(CameraSettings):
-    """Exposure mode, EM gain, sensitivity, exposure time and ROI of the Rb HamCam."""
+    """Settings of the Rb HamCam, from its driver's controls."""
 
     camera = Device("Rb HamCam")
     control_defaults: ClassVar[dict[str, Any]] = {
+        "gain": 600,
         "roi_x0": 110,
         "roi_width": 256,
         "roi_y0": 220,
@@ -19,25 +20,26 @@ class RbHamCamSettings(CameraSettings):
 
 
 class CaFOrcaSettings(CameraSettings):
-    """Exposure mode, readout speed, contrast gain, exposure time and ROI of the ORCA."""
+    """Settings of the ORCA, from its driver's controls."""
 
     camera = Device("ORCA")
+    control_defaults: ClassVar[dict[str, Any]] = {"roi_width": 1344}
 
 
 class RbThorCamSettings(CameraSettings):
-    """Trigger, gain, exposure time and ROI of the Rb ThorCam."""
+    """Settings of the Rb ThorCam, from its driver's controls."""
 
     camera = Device("Rb ThorCam")
 
 
 class TweezerMonitorThorCamSettings(CameraSettings):
-    """Trigger, gain, exposure time and ROI of the Tweezer Monitor ThorCam."""
+    """Settings of the Tweezer Monitor ThorCam, from its driver's controls."""
 
     camera = Device("Tweezer Monitor ThorCam")
 
 
 class CaFThorCamSettings(CameraSettings):
-    """Trigger, gain, exposure time and ROI of the CaF ThorCam."""
+    """Settings of the CaF ThorCam, from its driver's controls."""
 
     camera = Device("CaF ThorCam")
     control_defaults: ClassVar[dict[str, Any]] = {"gain": 12.0, "binning": 16}
