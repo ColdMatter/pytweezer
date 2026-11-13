@@ -33,6 +33,13 @@ people watch the same derived quantity from different PCs.
 An applet that finds itself calling `client.send()` has taken on an analysis's
 job. The preview script warns when it sees this.
 
+The one exception: an applet may **drive the one device it is about**, as the
+Camera applet sets up a camera and stores the values it took as saved
+parameters. Make every device call through a single worker-thread link (like
+`CameraLink` in `viewers/camera_applet.py`), so the GUI never waits on RPC, and
+go read-only while an Experiment Manager task holds the device (follow
+`ExperimentFeed`, as the Camera applet does).
+
 ## The shape of the file
 
 ```python
@@ -197,11 +204,8 @@ What is left to you is the composition:
 - **Let the display fill the window.** `layout.setContentsMargins(0, 0, 0, 0)`
   on the outer layout. A plot framed in 11 px of background is 11 px of data the
   user did not get.
-- **Put controls in the view-box context menu, not in buttons.** This is the
-  established pattern (`vb.menu.addAction("subscriptions")`), and it is why the
-  viewers stay all-data. A button bar costs vertical space on every frame to
-  serve a click that happens once a week. Always wire up `subscriptions` and
-  `configure`; add your own actions beside them.
+- **Wire up `subscriptions` and `configure` in the view-box context menu**
+  (`vb.menu.addAction("subscriptions")`).
 - **Colour curves with `self.stream_color(stream, index)`.** It cycles the
   shared palette so several streams are distinguishable immediately, while still
   honouring a per-stream colour the user has set. Hardcoding a pen colour means
