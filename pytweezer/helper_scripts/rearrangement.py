@@ -7,7 +7,8 @@ camera-driven runs (:meth:`~Rearrangement.initialise` and the ``arm_*`` calls)
 need the camera and a phasemask generator in the same process, so notebooks
 build a :class:`Rearrangement` around them directly.
 
-This was the ``Rb Rearrangement Rig`` composite's coordinator. Wrapping the class
+This was the ``Rb Rearrangement Rig`` composite's coordinator until
+https://github.com/ColdMatter/pytweezer/pull/62. Wrapping the class
 in a :class:`~pytweezer.coordinators.base.Coordinator` that passes its
 ``slm``/``camera``/``phasemask_generator`` roles to the constructor would make it
 one again.

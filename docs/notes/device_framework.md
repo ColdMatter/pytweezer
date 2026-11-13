@@ -20,7 +20,7 @@ whichever PC the hardware is attached to.
 | `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`, `default_simulated` (auto-generated stand-in when a device has no `sim_class`). |
 | `pytweezer/coordinators/base.py` | `Coordinator` — base for in-process coordination of a composite's backends. |
 | `pytweezer/coordinators/camera_dac_feedback.py` | `CameraDACFeedback` — worked example: frame mean → proportional DAC correction. |
-| `pytweezer/coordinators/rearrangement.py` | `Rearrangement` — camera + SLM atom-rearrangement loop (lazy GPU stack). See `docs/notes/rearrangement_coordinator.md`. |
+| `pytweezer/helper_scripts/rearrangement.py` | `Rearrangement` — camera + SLM atom-rearrangement loop and the tweezer array (lazy GPU stack), served by the `Rb SLM` device. Was a coordinator until [PR #62](https://github.com/ColdMatter/pytweezer/pull/62). See `docs/notes/rearrangement_coordinator.md`. |
 | `pytweezer/drivers/camera_base.py` | Generic camera abstraction: `Camera` (ABC), `SimulatedCamera` (one-size-fits-all sim), `simulated_camera_for`. |
 | `pytweezer/drivers/imagemX2.py`, `bfly2.py` | Concrete camera backends on `Camera`, each with `Simulated* = simulated_camera_for(...)` and a legacy standalone `main()` (kept for ad hoc debugging, not on the launch path). |
 | `pytweezer/drivers/ni_dac.py`, `slm.py` | `NIDAC`/`SimulatedNIDAC`; `SLM` (Meadowlark Blink SDK)/`SimulatedSLM`. |
@@ -388,7 +388,7 @@ connect still leaves its camera usable through `get_device("Rb HamCam")`.
 
 The **coordinator is the exception**: it drives every backend in the rig, so it is
 constructed only when *all* sub-devices built. On a partial rig it stands down and
-the composite's own name is left unserved — `get_device("Rb Rearrangement Rig")`
+the composite's own name is left unserved — `get_device("Rb Feedback Rig")`
 raises `IncompatibleServer` — rather than serving a coordinator that would fail on
 `require_role` partway through an experiment. A coordinator that raises while
 constructing is skipped the same way, leaving its sub-devices individually
@@ -434,9 +434,14 @@ config field at the class as a `"module.path:ClassName"` string. `build_spec`
 imports it and constructs it as `cls(roles, conf)`.
 `pytweezer/coordinators/camera_dac_feedback.py` is the worked example: `arm()`,
 `measure()`, `control()`, `image_to_dac()`, and `run_n()`.
-`pytweezer/coordinators/rearrangement.py` (`Rearrangement`) is a real one — a
-camera + Blink SLM atom-rearrangement loop, with the GPU stack imported lazily
-so it degrades gracefully off the GPU host; see `docs/notes/rearrangement_coordinator.md`.
+No coordinator is in use at present. The last real one,
+`pytweezer/coordinators/rearrangement.py` (`Rearrangement`, the
+`Rb Rearrangement Rig`'s camera + Blink SLM loop) and its unconfigured sibling
+`transport.py`, were removed in
+[PR #62](https://github.com/ColdMatter/pytweezer/pull/62); recover them from that
+PR's parent commit. The logic now lives in
+`pytweezer/helper_scripts/rearrangement.py`, served by the `Rb SLM` device; see
+`docs/notes/rearrangement_coordinator.md`.
 
 Three constraints, all consequences of how sipyco serves targets:
 
