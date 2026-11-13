@@ -50,6 +50,7 @@ autosummary_generate = True
 
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
+napoleon_use_ivar = True
 
 myst_enable_extensions = ["colon_fence"]
 
