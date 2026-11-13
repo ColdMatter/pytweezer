@@ -3,10 +3,14 @@
 import ctypes
 import subprocess
 import sys
+from typing import Any
 
 import numpy as np
 from pylablib.devices.DCAM import dcamapi4_lib
 from pylablib.devices.DCAM.DCAM import DCAMCamera, lib, libctl
+
+from pytweezer.drivers.camera_base import Camera, Control
+from pytweezer.drivers.temperature_monitor import TemperatureMonitor
 
 PROBE_TIMEOUT_S = 60
 
@@ -25,6 +29,15 @@ if lib.dcamapi_init(ctypes.byref(init)) >= 0:
     lib.dcamapi_uninit()
 """
 
+
+EXPOSURE_MODE = Control(
+    "exposure_mode",
+    "Exposure mode",
+    "Exposure & trigger",
+    "choice",
+    "internal",
+    choices=("internal", "edge", "level"),
+)
 
 #: DCAM ``trigger_active`` for each external exposure mode.
 _TRIGGER_ACTIVE = {"edge": 1, "level": 2}
@@ -228,3 +241,166 @@ def open_dcam_camera(serial_number: str | None, model_prefix: str) -> DCAMCamera
             f"Opened DCAM camera {opened_serial}, expected {serial_number}"
         )
     return camera
+
+
+class HamamatsuCamera(Camera):
+    """Shared base of the Hamamatsu cameras driven through pylablib's DCAM backend.
+
+    A subclass sets :attr:`model_prefix`, :attr:`image_prefix`, :attr:`default_timeout`
+    and :attr:`CONTROLS`, adds its own controls, and extends
+    :meth:`_read_control_values` with their values.
+
+    Args:
+        serial_number: DCAM serial number of the camera to open. If None, the only
+            connected camera whose model starts with :attr:`model_prefix` is opened.
+        external_exposure: Start in :meth:`set_external_exposure_mode`; otherwise
+            the camera keeps DCAM's own trigger mode (internal after power-up).
+        object_pixel_m: Metres per unbinned sensor pixel at the atoms.
+        temperature_measurement: Database measurement the sensor temperature is
+            written to every ``temperature_interval_s``; None to not monitor it.
+        max_temperature_c: Sensor temperature above which the monitor warns.
+        timeout: Seconds to wait for frames; :attr:`default_timeout` if None.
+    """
+
+    model_prefix: str
+    default_timeout: float
+
+    def __init__(
+        self,
+        image_dir: str | None = None,
+        timeout: float | None = None,
+        stream_name: str | None = None,
+        serial_number: str | None = None,
+        external_exposure: bool = False,
+        object_pixel_m: float | None = None,
+        temperature_measurement: str | None = None,
+        temperature_interval_s: float = 30.0,
+        max_temperature_c: float | None = None,
+    ):
+        self.serial_number = serial_number
+        self._temperature_monitor = None
+        super().__init__(
+            image_dir=image_dir,
+            timeout=self.default_timeout if timeout is None else timeout,
+            stream_name=stream_name,
+            object_pixel_m=object_pixel_m,
+        )
+        if external_exposure:
+            self.set_external_exposure_mode()
+        self.read_controls()
+        if temperature_measurement is not None:
+            self._temperature_monitor = TemperatureMonitor(
+                self.get_temperature,
+                temperature_measurement,
+                temperature_interval_s,
+                max_temperature_c,
+            )
+
+    # ------------------------------------------------------------------ #
+    # Camera hooks
+    # ------------------------------------------------------------------ #
+
+    def _connect(self) -> None:
+        try:
+            camera = open_dcam_camera(self.serial_number, self.model_prefix)
+        except Exception as exc:
+            self._backend = None
+            raise RuntimeError(f"Could not connect to {type(self).__name__}") from exc
+        self._backend = camera
+
+    def _disconnect(self) -> None:
+        if self._temperature_monitor is not None:
+            self._temperature_monitor.stop()
+        if self._backend is not None:
+            self._backend.close()
+
+    def _read_attribute(self, name: str, **kwargs: Any) -> Any:
+        """A DCAM attribute's value, any failure naming the camera and the attribute."""
+        try:
+            return self._backend.get_attribute_value(name, **kwargs)
+        except Exception as exc:
+            raise RuntimeError(
+                f"{type(self).__name__} could not read DCAM attribute {name!r}"
+            ) from exc
+
+    def _read_control_values(self) -> dict:
+        values = read_dcam_controls(self._backend)
+        self.roi_origin = (values["roi_x0"], values["roi_y0"])
+        self.binning = values["binning"]
+        return values
+
+    def set_roi(self, x0: int, width: int, y0: int, height: int):
+        with self._lock:
+            *_, hbin, vbin = self._backend.get_roi()
+            roi = self._backend.set_roi(x0, x0 + width, y0, y0 + height, hbin, vbin)
+            return self._keep_roi(roi)
+
+    def set_binning(self, binning: int):
+        # Through set_roi: DCAM rejects a bare BINNING write while the frame
+        # buffer is attached (DCAMERR_NOTSTABLE), and pylablib's set_roi frees it.
+        with self._lock:
+            hstart, hend, vstart, vend, *_ = self._backend.get_roi()
+            roi = self._backend.set_roi(
+                hstart, hend, vstart, vend, int(binning), int(binning)
+            )
+            self._keep_roi(roi)
+
+    def _keep_roi(self, roi: tuple) -> tuple[int, int]:
+        """Keep the ROI pylablib returned and the origin and binning frames are read with."""
+        controls = dcam_roi_controls(roi)
+        self.roi_origin = (controls["roi_x0"], controls["roi_y0"])
+        self.binning = controls["binning"]
+        self._keep(**controls)
+        return self.roi_origin
+
+    def set_trigger_source(self, source: str):
+        with self._lock:
+            self._backend.set_trigger_mode(source)
+            self._keep(**dcam_trigger_controls(self._backend))
+
+    def set_trigger_polarity(self, polarity: str):
+        with self._lock:
+            set_dcam_trigger_polarity(self._backend, polarity)
+            self._keep(**dcam_trigger_controls(self._backend))
+
+    def set_exposure_time(self, exposure: float):
+        with self._lock:
+            self._keep(exposure=float(self._backend.set_exposure(exposure)))
+
+    def set_exposure_mode(self, mode: str):
+        """``"internal"``, ``"edge"`` (a trigger starts an exposure of the set
+        time) or ``"level"`` (the trigger pulse's width sets it)."""
+        with self._lock:
+            set_dcam_exposure_mode(self._backend, mode)
+            self._keep(**dcam_trigger_controls(self._backend))
+
+    def set_external_exposure_mode(self):
+        self.set_exposure_mode("level")
+
+    def setup_acquisition(self, nframes: int, mode: str = "sequence"):
+        self._backend.setup_acquisition(mode, int(nframes))
+
+    def start_acquisition(self):
+        self._backend.start_acquisition()
+
+    def stop_acquisition(self):
+        self._backend.stop_acquisition()
+
+    def _read_frames(self, nframes: int, start_frame: int):
+        self._backend.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
+        images, _infos = self._backend.read_multiple_images(
+            (int(start_frame), int(start_frame) + int(nframes)), return_info=True
+        )
+        return images
+
+    def _read_range_timed(self, start: int, stop: int):
+        return read_dcam_range_timed(self._backend, start, stop)
+
+    def get_temperature(self) -> float:
+        """Sensor temperature in °C."""
+        with self._lock:
+            return float(self._read_attribute("sensor_temperature"))
+
+    def trigger(self):
+        """Send a software trigger to the camera."""
+        self._backend.send_software_trigger()

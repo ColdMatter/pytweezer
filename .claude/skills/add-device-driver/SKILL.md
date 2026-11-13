@@ -92,11 +92,18 @@ and the `trigger_source()` and `gain()` factories). `controls()`,
 `read_controls()` and `apply_controls()` work from it, so a driver implements
 the setters, calls `self._keep(name=value)` with the SI value the camera
 actually took, takes `self._lock` around each, and overrides
-`_read_control_values()` to read every control back (and names, in
-`CONTROL_SETTERS`, any control whose setter is not `set_<name>`; do not override
-`_apply_control`, which the simulated twin would not inherit). A driver that can read each frame's
-camera-clock time overrides `_read_range_timed`; the live broadcast then adds it
-as `camera_timestamp`. `snap()` takes one frame from a stopped camera.
+`_read_control_values()` to read every control back. A control whose setter is
+not `set_<name>` is named in `CONTROL_SETTERS`; do not override
+`_apply_control`, which the simulated twin would not inherit. A driver that can
+read each frame's camera-clock time overrides `_read_range_timed`; the live
+broadcast then adds it as `camera_timestamp`. `snap()` takes one frame from a
+stopped camera.
+
+The Hamamatsu DCAM cameras (ImagEM X2, ORCA) subclass `HamamatsuCamera`
+(`hamamatsu.py`), which holds everything they share: connecting, the common
+setters, the ROI and trigger controls, timestamps and the temperature monitor.
+A new one sets `model_prefix`, `image_prefix`, `default_timeout` and `CONTROLS`,
+and adds only its own setters and the extra keys in `_read_control_values()`.
 
 **Match the base class signatures exactly.** `setup_acquisition(self, nframes,
 mode="sequence")` takes both, and the base `arm()` calls it; a camera with no
