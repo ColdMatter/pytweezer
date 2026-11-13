@@ -202,7 +202,8 @@ class _Field(QObject):
 
     def _choice_activated(self, index: int) -> None:
         self._set_error("")
-        self.edited.emit(self.name, self.editor.itemData(index))
+        if self.editor.itemData(index) != self.value:
+            self.edited.emit(self.name, self.editor.itemData(index))
 
     def _commit_text(self) -> None:
         edit: QLineEdit = self.editor
@@ -342,7 +343,6 @@ class CameraSidebar(QFrame):
         self._collapsed: set[str] = set()
         self._presets: dict[str, dict[str, int]] = {}
         self._temperature: dict | None = None
-        self._unavailable: dict[str, str] = {}
         self._roi_widgets: list[QWidget] = []
         self._full_sensor: QPushButton | None = None
         self._preset_picker: QComboBox | None = None
@@ -418,7 +418,6 @@ class CameraSidebar(QFrame):
         The chosen camera stays chosen if it is still listed. Nothing is emitted.
         """
         chosen = self.current_camera()
-        self._unavailable = dict(unavailable)
         self.picker.clear()
         for name in names:
             self._add_camera(name, unavailable.get(name))
@@ -677,8 +676,9 @@ class CameraSidebar(QFrame):
                 control and Live/Snap are disabled), ``"checking"`` (not yet known
                 whether a task has it: locked as for ``"held"``), ``"unknown_hold"``
                 (cannot tell whether a task has it; editable) or ``"unavailable"``.
-            detail: A second line in the status pill; for ``"held"`` it is instead
-                the experiment's name in the pill's title.
+            detail: A second line in the status pill; for ``"held"`` its first line
+                is instead the experiment's name in the pill's title, and any line
+                after it replaces the read-only note.
         """
         if state not in STATES:
             raise ValueError(f"unknown camera state {state!r}; use one of {STATES}")
@@ -700,8 +700,9 @@ class CameraSidebar(QFrame):
         elif state == "live":
             title = "Live" if self._fps is None else f"Live · {self._fps:.1f} fps"
         elif state == "held":
-            title = f"Held by {detail}" if detail else "Held by an experiment"
-            second = "Settings are read-only until it finishes"
+            holder, _, note = detail.partition("\n")
+            title = f"Held by {holder}" if holder else "Held by an experiment"
+            second = note or "Settings are read-only until it finishes"
         elif state == "checking":
             title = "Checking for running experiments"
         elif state == "unknown_hold":
