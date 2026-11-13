@@ -20,7 +20,7 @@ Output:
     ``loading`` (mean over sites), ``loading_spread`` (std/mean over sites),
     ``site_loading``, ``site_rows``/``site_cols`` (pixels in the frame) and the
     fit components ``background``/``signal`` as ``[mean, variance, weight]``.
-    ``sites_match`` is ``False`` when the rig has another array on the SLM than
+    ``sites_match`` is ``False`` when the SLM has another array on it than
     the sites were fitted to, and ``rid`` is the task the frames came from.
     Without usable sites the message is header-only, with ``shots``,
     ``sites``, ``rid`` and an ``error`` saying why.
@@ -30,7 +30,7 @@ Properties:
     *   image_index: (int) which frame of a shot to score, by its ``index``
         header; 0 is the loading image.
     *   shots: (int) most recent frames of the task kept in the window.
-    *   rig: (str) device that knows which array is on the SLM, asked whether
+    *   slm: (str) SLM device that knows which array is on it, asked whether
         it is the one the sites were fitted to; empty not to ask.
     *   threshold: (float) occupancy threshold in photons, used only when the
         two-Gaussian fit fails.
@@ -39,7 +39,7 @@ A frame whose ``rid`` header differs from the last one starts the analysis
 afresh, so each task is analysed on its own shots. Frames without a ``rid``
 (from a notebook, say) count as one run of their own.
 
-The rig and the saved parameters are each asked at most every ``REFRESH_S``
+The SLM and the saved parameters are each asked at most every ``REFRESH_S``
 seconds and again on a new task, and their last answers are kept while they
 cannot be reached.
 """
@@ -65,7 +65,7 @@ from pytweezer.servers.device_client import get_device
 LOGGER = get_logger("tweezer_loading")
 
 REFRESH_S = 10.0
-RIG_TIMEOUT_S = 5.0
+SLM_TIMEOUT_S = 5.0
 TRAP_SITE_KEYS = ("trap_sites", "trap_window_size", "trap_feature_size")
 NO_SITES = "No trap sites are saved: run FindTrapSites and accept its proposal"
 
@@ -99,12 +99,12 @@ class LoadingStatistics:
 class TweezerLoading(ImageAnalysis):
     _image_index = PropertyAttribute("image_index", 0)
     _shots = PropertyAttribute("shots", 100)
-    _rig = PropertyAttribute("rig", "Rb Rearrangement Rig")
+    _slm = PropertyAttribute("slm", "Rb SLM")
     _threshold = PropertyAttribute("threshold", 100.0)
 
-    _rig_client = None
-    _rig_array = None
-    _rig_asked_at = -np.inf
+    _slm_client = None
+    _slm_array = None
+    _slm_asked_at = -np.inf
     _saved = None
     _saved_asked_at = -np.inf
     _rid = None
@@ -115,23 +115,23 @@ class TweezerLoading(ImageAnalysis):
         self.dataq = DataClient(name.split("/")[-1])
         self.statistics = LoadingStatistics()
 
-    def _array_on_rig(self):
-        """The rig's answer to which array is on the SLM, or ``None`` if it does not know."""
-        rig = self._rig
-        if not rig:
+    def _array_on_slm(self):
+        """The SLM's answer to which array is on it, or ``None`` if it does not know."""
+        slm = self._slm
+        if not slm:
             return None
         now = time.monotonic()
-        if now - self._rig_asked_at < REFRESH_S:
-            return self._rig_array
-        self._rig_asked_at = now
+        if now - self._slm_asked_at < REFRESH_S:
+            return self._slm_array
+        self._slm_asked_at = now
         try:
-            if self._rig_client is None:
-                self._rig_client = get_device(rig, timeout=RIG_TIMEOUT_S)
-            self._rig_array = self._rig_client.get_array()
-        except Exception as error:  # an unreachable rig must not stop the analysis
-            LOGGER.warning("Could not ask %s for its array: %r", rig, error)
-            self._rig_client = None
-        return self._rig_array
+            if self._slm_client is None:
+                self._slm_client = get_device(slm, timeout=SLM_TIMEOUT_S)
+            self._slm_array = self._slm_client.get_array()
+        except Exception as error:  # an unreachable SLM must not stop the analysis
+            LOGGER.warning("Could not ask %s for its array: %r", slm, error)
+            self._slm_client = None
+        return self._slm_array
 
     def _saved_parameters(self):
         now = time.monotonic()
@@ -171,7 +171,7 @@ class TweezerLoading(ImageAnalysis):
             self._rid = rid
             self.statistics = LoadingStatistics()
             # A new task may have just put a new array on the SLM, or new sites.
-            self._rig_asked_at = self._saved_asked_at = -np.inf
+            self._slm_asked_at = self._saved_asked_at = -np.inf
         sites, why_not = self._sites_in(head, data.shape)
         if sites is None:
             self.dataq.send(
@@ -191,7 +191,7 @@ class TweezerLoading(ImageAnalysis):
             window_size=int(saved["trap_window_size"]),
             fallback_threshold=float(self._threshold),
         )
-        array = self._array_on_rig()
+        array = self._array_on_slm()
         out_head["sites_match"] = not array or (
             "trap_geometry" in saved
             and same_geometry(saved["trap_geometry"], array["x_um"], array["y_um"])

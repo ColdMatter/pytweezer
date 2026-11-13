@@ -25,7 +25,7 @@ Usage (from the machine you normally drive the experiment from)::
     uv run python tools/bench_hamcam_rpc.py --frames 1,5,10 --exposure 0.005
 
 Requires the device's server to already be running (start it from the GUI's
-Devices tab, or ``uv run pytweezer-device "Rb Rearrangement Rig"``).
+Devices tab, or ``uv run pytweezer-device "Rb HamCam"``).
 """
 
 import argparse

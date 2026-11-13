@@ -74,15 +74,13 @@ notebook (MOTMaster's own window) get no frames.
   In live mode it broadcasts every frame on `caf_thorcam`. Watch it in the GUI:
   Applet Launcher → image viewer, image stream `caf_thorcam`. The device owns the
   camera, so pycaf's `ThorlabsGrabber` cannot run alongside it.
-- **Rb HamCam** (PH-BEAST, inside `Rb Rearrangement Rig`): starts in external
+- **Rb HamCam** (PH-BEAST): starts in external
   exposure mode (`external_exposure` in CONFIG, as do the ORCAs), but keeps
   whatever the Rb side or a `ContinuousAcquisition` task (internal trigger) last
   set. Set ROI, EM gain and exposure mode with an `RbHamCamSettings` task or raw
   calls; DCAM refuses trigger changes while acquiring, so `stop_live()` first
-  (`get_device("Rb HamCam").set_exposure_mode("level")`, or `"edge"`/`"internal"`). Addressed directly,
-  like any composite sub-device; a rearrangement-coordinator shot stalls its
-  calls until it ends and leaves the camera out of live mode; `PycafCamera`
-  puts it back in live mode before each run it watches.
+  (`get_device("Rb HamCam").set_exposure_mode("level")`, or `"edge"`/`"internal"`).
+  `PycafCamera` puts it back in live mode before each run it watches.
 
 ## Deploying a change
 

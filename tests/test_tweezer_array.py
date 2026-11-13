@@ -144,7 +144,7 @@ class FakeORCA(RecordingCamera):
         return np.stack([self.frame] * n)
 
 
-class FakeRig:
+class FakeSLM:
     """Knows no array unless a test gives it one."""
 
     def __init__(self):
@@ -185,15 +185,15 @@ SAVED = {
 @pytest.fixture
 def rig(monkeypatch):
     sequencer = FakeSequencer()
-    rearrangement_rig = FakeRig()
-    sequencer.rearrangement_rig = rearrangement_rig
+    slm = FakeSLM()
+    sequencer.slm = slm
     sequencer.camera = FakeHamCam(sequencer)
     sequencer.orca = FakeORCA()
     devices = {
         "Rb MotMaster": sequencer,
         "Rb HamCam": sequencer.camera,
         "ORCA": sequencer.orca,
-        "Rb Rearrangement Rig": rearrangement_rig,
+        "Rb SLM": slm,
     }
     monkeypatch.setattr(
         "pytweezer.experiment.experiment._get_device",
@@ -237,16 +237,16 @@ def test_find_trap_sites_records_the_fitted_transform(rig):
     )
 
 
-def test_find_trap_sites_keeps_the_rigs_order_of_its_array(rig):
+def test_find_trap_sites_keeps_the_order_of_the_slms_array(rig):
     order = np.random.default_rng(2).permutation(len(SITES))
     x_um, y_um = default_geometry()[order].T
-    rig.rearrangement_rig.array = {"sites": len(SITES), "x_um": x_um, "y_um": y_um}
+    rig.slm.array = {"sites": len(SITES), "x_um": x_um, "y_um": y_um}
 
     measurement = run_local(FindTrapSites, calibration_shots=30)
 
     proposed = measurement.constants["proposed.trap_sites"]
     assert np.abs(proposed - SAVED["trap_sites"][order]).max() < 0.5
-    assert measurement.constants["sites_from"] == "rig"
+    assert measurement.constants["sites_from"] == "slm"
 
 
 def test_find_trap_sites_takes_its_shots_with_the_tweezers_off_in_the_background_drop(
@@ -275,7 +275,7 @@ def test_a_measurement_refuses_without_saved_sites(rig):
 
 def test_sites_fitted_to_another_array_are_used_with_a_warning(rig, caplog):
     x_um, y_um = default_geometry().T
-    rig.rearrangement_rig.array = {
+    rig.slm.array = {
         "sites": len(SITES),
         "x_um": x_um + 0.5,
         "y_um": y_um,

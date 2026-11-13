@@ -1,39 +1,46 @@
-"""Rearrange-then-transport coordinator for the tweezer array.
+"""Atom rearrangement and tweezer arrays on the Rb SLM.
 
-:class:`Transport` is the 3D sibling of
-:class:`~pytweezer.coordinators.rearrangement.Rearrangement`: it rearranges the
-stochastically loaded array into a defect-free one, then moves that whole array
-to a second pattern (optionally lifting it out of the focal plane), imaging
-between steps. It is built directly in a notebook rather than from
-``CONFIG``, with the phasemask generator passed in as a role.
+:class:`Rearrangement` drives an SLM, and optionally a camera, with direct Python
+calls. The ``Rb SLM`` device builds one around itself and serves its
+:meth:`~Rearrangement.make_array` and :meth:`~Rearrangement.get_array`; the
+camera-driven runs (:meth:`~Rearrangement.initialise` and the ``arm_*`` calls)
+need the camera and a phasemask generator in the same process, so notebooks
+build a :class:`Rearrangement` around them directly.
 
-Roles:
+This was the ``Rb Rearrangement Rig`` composite's coordinator until
+https://github.com/ColdMatter/pytweezer/pull/62. Wrapping the class
+in a :class:`~pytweezer.coordinators.base.Coordinator` that passes its
+``slm``/``camera``/``phasemask_generator`` roles to the constructor would make it
+one again.
 
-* ``slm`` — a :class:`pytweezer.drivers.slm.SLM`. Required.
-* ``camera`` — an ImagEM-X2-style camera. Needed by :meth:`initialise` and the
-  ``arm_*`` calls.
-* ``phasemask_generator`` — an
-  ``OptimisationBasedPhasemaskGeneratorGPU3D`` from
-  :mod:`pytweezer.helper_scripts.phasemask`.
+* :meth:`initialise` — configure the camera and precompute the initial array.
+  Takes the two trap parameter sets (``data1``/``data2``, shape ``(4, N)``: w,
+  phi, x, y).
+* :meth:`arm_rearrangement` — grab an image, extract the occupancy mask, then
+  generate the interpolated phase sequence
+  (``OptimisationBasedPhasemaskGeneratorGPU.iter_rearrangement_sequence``) and
+  upload it to the SLM concurrently, then grab a reset image. Returns the
+  before/after images.
+* :meth:`make_array` — compute the phase mask for a rectangular array and put it
+  on the SLM. :meth:`get_array` then says which array is on the SLM, for
+  analyses and experiments that need the number or positions of the sites; it
+  returns ``None`` once anything else has written the SLM.
 
-Calls (each blocks for its duration):
+Generation and upload are pipelined: the GPU loop pushes each finished frame onto a
+bounded queue and a writer thread copies it to the host and DMAs it to the board, so
+synthesis of frame *n+1* overlaps the upload of frame *n*. The queue depth
+(:data:`UPLOAD_QUEUE_DEPTH`) bounds how far the GPU may run ahead.
 
-* :meth:`initialise` — takes three trap parameter sets (``data1`` loaded,
-  ``data2`` rearranged, ``data3`` transported; each ``(5, N)``: w, phi, x, y,
-  z), the step sizes and the occupancy detection settings, and precomputes the
-  initial array's phase mask.
-* :meth:`arm_transport_pattern` — image, rearrange ``data1`` → ``data2``, image,
-  transport ``data2`` → ``data3`` along ``path_fn`` (``"linear"`` or ``"lift"``),
-  image; frames are uploaded by software as they are generated.
-* :meth:`arm_rearrangement_timings` / :meth:`arm_rearrangement_preload_trigger` —
-  the rearrangement step alone, timed, uploading by software or preloading the
-  SLM's on-board memory and clocking it out with ``pulser``.
-* :meth:`status` / :meth:`test` / :meth:`shutdown`.
+The heavy GPU math is imported lazily and every GPU call checks for a CUDA device,
+so this module imports on any machine.
 
-As in ``rearrangement.py``, generation and upload are pipelined through a
-bounded queue, and the GPU stack is imported lazily so :meth:`status` works on
-any machine; see ``docs/notes/rearrangement_coordinator.md``.
+The remaining timing optimisation — preloading frames into the SLM's on-board memory
+and clocking them out with a hardware trigger (``preload_sequence`` /
+``start_auto_increment``) instead of per-frame software writes — is described in
+``docs/notes/rearrangement_coordinator.md``.
 """
+
+from __future__ import annotations
 
 import queue
 import threading
@@ -42,10 +49,7 @@ import time
 import numpy as np
 
 from pytweezer import analysis as an
-from pytweezer.coordinators.base import Coordinator
-from pytweezer.drivers.imagemX2 import ImagEMX2Camera
-from pytweezer.drivers.slm import SLM
-from pytweezer.helper_scripts.phasemask import lift_path, linear_path
+from pytweezer.helper_scripts import array_hologram
 
 try:
     import cupy as cp
@@ -77,7 +81,7 @@ UPLOAD_QUEUE_DEPTH = 5
 #: the board's memory, NOT a panel flip, so without this the pipeline happily
 #: writes faster than the liquid crystal can refresh and each frame overwrites the
 #: one still being displayed — the atoms then see fewer, larger jumps than ``d0``
-#: asks for. Override per instance with ``conf["panel_period_s"]``; set to 0.0 to
+#: asks for. Override per instance with ``panel_period_s``; set to 0.0 to
 #: disable pacing entirely. Only the display path needs this: preload+trigger
 #: writes to frame memory and is clocked by the Arduino.
 PANEL_PERIOD_S = 0.70e-3
@@ -161,39 +165,56 @@ def _sum_cpp():
     return _sum_cpp_module
 
 
-class Transport(Coordinator):
-    """Rearranges the tweezer array, then transports it, in one process."""
+class Rearrangement:
+    """Camera + SLM rearrangement loop, and the tweezer array on the SLM, in one process.
 
-    camera_role = "camera"
-    slm_role = "slm"
-    pm_gen_role = "phasemask_generator"
+    ``slm`` is a :class:`pytweezer.drivers.slm.SLM` (or its simulated twin).
+    ``camera`` (an ImagEM-X2-style camera) and ``phasemask_generator`` (an
+    ``OptimisationBasedPhasemaskGeneratorGPU``) are needed only by
+    :meth:`initialise` and the ``arm_*`` calls. ``panel_period_s`` is the enforced
+    minimum interval between panel writes; see :data:`PANEL_PERIOD_S`.
+    """
 
-    def __init__(self, targets, conf):
-        super().__init__(targets, conf)
-        self.camera: ImagEMX2Camera | None = self.targets.get(self.camera_role)
-        self.slm: SLM = self.require_role(self.slm_role)
-        self.pm_gen = self.targets.get(self.pm_gen_role)
-        self.panel_period_s = float(conf.get("panel_period_s", PANEL_PERIOD_S))
+    def __init__(
+        self,
+        slm,
+        camera=None,
+        phasemask_generator=None,
+        panel_period_s: float = PANEL_PERIOD_S,
+    ):
+        self.slm = slm
+        self.camera = camera
+        self.pm_gen = phasemask_generator
+        self.panel_period_s = float(panel_period_s)
+
         self._initialised = False
         self._state = None  # populated by initialise()
+
+        self._array = None
+        self._array_mask = None
+        self._array_generator = None
+        self._array_settings = None
+
+        #: ``time.perf_counter()`` at which the most recent
+        #: :meth:`_play_sequence_pipelined` finished displaying its *first* frame,
+        #: or ``None`` if it never did. Frame 0 must be synthesised, copied to the
+        #: host and DMA'd before anything reaches the panel, so this splits a
+        #: pipelined run into time-to-first-frame and the move proper.
         self.last_first_frame_at = None
 
     def _require_gpu(self):
         if not _HAS_CUPY:
             raise RuntimeError(
                 "Rearrangement needs cupy/lap and a CUDA GPU, which are not available "
-                "on this machine. Run the rig on the GPU host, or use status()/test() "
+                "on this machine. Run it on the GPU host, or use status()/test() "
                 f"only here.\nCause: {_NO_GPU_REASON}"
             )
 
     def _require_camera(self):
-        if self.camera is None:
+        if self.camera is None or self.pm_gen is None:
             raise RuntimeError(
-                f"{type(self).__name__} needs a sub-device with role "
-                f"{self.camera_role!r} for this call; this composite provides roles: "
-                f'{sorted(self.targets) or "(none)"}. Set "role": '
-                f"{self.camera_role!r} on the relevant entry in the composite's "
-                '"devices" block.'
+                "This call needs the camera and the phasemask generator; build the "
+                "Rearrangement with camera= and phasemask_generator=."
             )
 
     def _require_initialised(self):
@@ -202,24 +223,117 @@ class Transport(Coordinator):
                 "Rearrangement not initialised; call initialise() first."
             )
 
-    # ------------------------------------------------------------------ #
-    # Status
-    # ------------------------------------------------------------------ #
-
     def status(self) -> dict:
         """Report readiness. Works with or without the GPU stack."""
         return {
             "gpu_available": _HAS_CUPY,
             "initialised": self._initialised,
-            "roles": sorted(self.targets),
             "camera_connected": bool(
                 getattr(self.camera, "is_connected", lambda: None)()
             ),
             "slm_connected": bool(getattr(self.slm, "is_connected", lambda: None)()),
         }
 
-    def get_slm_temperature(self) -> float:
-        return float(self.slm.get_temperature())
+    # ------------------------------------------------------------------ #
+    # The array on the SLM
+    # ------------------------------------------------------------------ #
+
+    def make_array(
+        self,
+        rows: int,
+        columns: int,
+        spacing_um: float,
+        angle_deg: float,
+        *,
+        generator_settings: dict,
+        envelope: dict | None,
+        blaze_um: tuple[float, float],
+        fresnel_focal_length_mm: float,
+        zernike: bool,
+        pupil_radius_um: float,
+        pupil_dump_um: tuple[float, float],
+        iterations: int,
+        damping: float,
+        phase_randomness: float,
+    ) -> dict:
+        """Put a ``rows`` x ``columns`` tweezer array on the SLM and remember it.
+
+        See :mod:`pytweezer.helper_scripts.array_hologram` for the mask, and its
+        :func:`~pytweezer.helper_scripts.array_hologram.generator_settings` and
+        :func:`~pytweezer.helper_scripts.array_hologram.envelope` for
+        ``generator_settings`` and ``envelope`` (``None`` leaves the traps
+        unweighted). Returns its result: the mask, the trap positions and
+        weights, and the optimisation's final uniformity, min/max ratio and error.
+        """
+        self._require_gpu()
+        settings = {
+            **generator_settings,
+            "slm_res": tuple(generator_settings["slm_res"]),
+            "zernike_coeff_dict": {
+                int(index): float(value)
+                for index, value in generator_settings["zernike_coeff_dict"].items()
+            },
+            "fresnel_f_mm": float(fresnel_focal_length_mm),
+            "blaze_dx_dy_um": tuple(blaze_um),
+        }
+        if self._array_generator is None or settings != self._array_settings:
+            self._array_generator = array_hologram.make_generator(settings)
+            self._array_settings = settings
+        hologram = array_hologram.array_hologram(
+            self._array_generator,
+            rows=int(rows),
+            columns=int(columns),
+            spacing_um=float(spacing_um),
+            angle_deg=float(angle_deg),
+            envelope=envelope,
+            blaze_um=tuple(blaze_um),
+            fresnel_focal_length_mm=float(fresnel_focal_length_mm),
+            zernike=bool(zernike),
+            pupil_radius_um=float(pupil_radius_um),
+            pupil_dump_um=tuple(pupil_dump_um),
+            iterations=int(iterations),
+            damping=float(damping),
+            phase_randomness=float(phase_randomness),
+        )
+        self.slm.update_mask(hologram["mask"])
+        self._remember_array(
+            hologram["mask"],
+            x_um=hologram["x_um"],
+            y_um=hologram["y_um"],
+            weights=hologram["weights"],
+            rows=int(rows),
+            columns=int(columns),
+            spacing_um=float(spacing_um),
+            angle_deg=float(angle_deg),
+        )
+        return hologram
+
+    def _remember_array(self, mask, *, x_um, y_um, weights, **geometry) -> None:
+        self._array_mask = np.array(mask, dtype=np.uint8)
+        self._array = {
+            "sites": len(x_um),
+            "x_um": [float(x) for x in x_um],
+            "y_um": [float(y) for y in y_um],
+            "weights": [float(w) for w in weights],
+            **geometry,
+        }
+
+    def get_array(self) -> dict | None:
+        """The array on the SLM, or ``None`` if the rig did not put the SLM's mask there.
+
+        Always carries ``sites`` and the trap ``x_um``/``y_um`` (focal plane,
+        relative to the blaze spot) and ``weights``; an array from
+        :meth:`make_array` also carries ``rows``, ``columns``, ``spacing_um``
+        and ``angle_deg``.
+        """
+        if self._array is None:
+            return None
+        shown = getattr(self.slm, "last_mask", None)
+        if shown is None or not np.array_equal(
+            np.ravel(shown), self._array_mask.ravel()
+        ):
+            return None
+        return dict(self._array)
 
     # ------------------------------------------------------------------ #
     # Initialise
@@ -229,39 +343,37 @@ class Transport(Coordinator):
         self,
         data1: np.ndarray,
         data2: np.ndarray,
-        data3: np.ndarray,
         d0: float,
-        d0_z: float,
         fps: float,
         threshold: float,
         grid_positions,
         window_size: int = 5,
         feature_size: int = 10,
         profile: str = "linear",
-        refine_iters: int = 0,
-        refine_damping: float = 0.35,
-        init_refine_iters: int = 0,
-        init_refine_damping: float = 0.35,
         detector=None,
-        path_fn: str = "linear",
-        d0_transport: float = 0.0,
-        d0_z_transport: float = 0.0,
-        step_norm: str = "max",
-        d_lift: np.ndarray | None = None,
-        smooth_corners: bool = True,
-        only_moving: bool = True,
+        num_images: int = 1,
     ) -> None:
+        """Configure the camera and precompute the initial array.
 
+        A camera left live (by the Camera applet, say) is stopped, because its
+        broadcast thread would read and send the occupancy frame during the timed
+        span, and race the runs' own restarts and reads of the acquisition. Nothing restarts it afterwards;
+        start Live again from the applet once the runs are over.
+        """
         self._require_gpu()
         self._require_camera()
+        if self.camera.is_live():
+            self.camera.stop_live()
         self.camera.timeout = 2
 
-        w1, phi1, x1, y1, z1 = cp.asarray(data1)
-        w2, phi2, x2, y2, z2 = cp.asarray(data2)
-        w3, phi3, x3, y3, z3 = cp.asarray(data3)
-        terms1 = (w1, phi1, x1, y1, z1)
-        terms2 = (w2, phi2, x2, y2, z2)
-        terms3 = (w3, phi3, x3, y3, z3)
+        # cp.asarray takes host or device arrays: a no-op for the cupy terms that
+        # come straight out of superposition_optimization, a host->device copy for
+        # numpy ones. np.asarray cannot sit in front of it - it is not dispatchable
+        # under NEP-18, so a cupy input falls through to __array__ and raises.
+        w1, phi1, x1, y1 = cp.asarray(data1)
+        w2, phi2, x2, y2 = cp.asarray(data2)
+        terms1 = (w1, phi1, x1, y1)
+        terms2 = (w2, phi2, x2, y2)
 
         # The initial array to load onto the SLM before each rearrangement.
         pm_array_init = self.pm_gen.generate_phasemask(list(terms1))
@@ -269,33 +381,27 @@ class Transport(Coordinator):
             [pm_array_init, self.pm_gen.fresnel, self.pm_gen.blaze, self.pm_gen.zernike]
         )
         pm_init_uint8 = self.pm_gen.transform_phase_8bit(pm_init).get()
+        self._remember_array(
+            pm_init_uint8,
+            x_um=cp.asnumpy(x1),
+            y_um=cp.asnumpy(y1),
+            weights=cp.asnumpy(w1),
+        )
 
         self._state = {
             "PM": self.pm_gen,
             "terms1": terms1,
             "terms2": terms2,
-            "terms3": terms3,
             "pm_init_uint8": pm_init_uint8,
-            "refine_iters": refine_iters,
-            "refine_damping": refine_damping,
-            "init_refine_iters": init_refine_iters,
-            "init_refine_damping": init_refine_damping,
             "d0": d0,
-            "d0_z": d0_z,
-            "step_norm": step_norm,
             "fps": fps,
             "threshold": threshold,
             "grid_positions": grid_positions,
             "window_size": window_size,
             "feature_size": feature_size,
             "profile": profile,
-            "d0_transport": d0_transport,
-            "d0_z_transport": d0_z_transport,
-            "path_fn": path_fn,
-            "d_lift": np.zeros(3, dtype=np.float32) if d_lift is None else d_lift,
             "detector": detector,
-            "smooth_corners": smooth_corners,
-            "only_moving": only_moving,
+            "num_images": num_images,
         }
         self._initialised = True
         if detector is not None:
@@ -303,13 +409,14 @@ class Transport(Coordinator):
                 f"Occupancy via {detector.name} detector "
                 f"(window {detector.window_size}, threshold {detector.threshold:.1f})."
             )
-        print("Transport node initialised.")
+        print("Rearrangement node initialised.")
 
     # ------------------------------------------------------------------ #
     # Arm / run one rearrangement
     # ------------------------------------------------------------------ #
 
     def _extract_occupancy(self, image, threshold):
+
         detector = self._state.get("detector")
         if detector is not None:
             return detector.occupancy(image)
@@ -317,6 +424,7 @@ class Transport(Coordinator):
         grid_positions = self._state["grid_positions"]
         window_size = self._state["window_size"]
         feature_size = self._state["feature_size"]
+
         cpp_morph = _morph_cpp()
         if cpp_morph is not None and getattr(image, "dtype", None) == np.uint16:
             img = cpp_morph.tophat(
@@ -325,8 +433,25 @@ class Transport(Coordinator):
         else:
             img = an.morphological_tophat_high_pass(image, feature_size=feature_size)
 
+        # cpp_sum = _sum_cpp()
+        # if cpp_sum is not None and getattr(img, "dtype", None) == np.uint16:
+        #    pixel_sums = cpp_sum.sum_pixel_values(
+        #        img, grid_positions, array_shape, window_size=window_size
+        #    )
+        # else:
         pixel_sums = an.sum_pixel_values(img, grid_positions, window_size=window_size)
         return pixel_sums > threshold
+
+    def _broadcast_occupancy_frame(self, image):
+        """Show the occupancy frame on the camera's stream, once the follow-up acquisition is armed.
+
+        The frame is gone from the camera when that acquisition starts, so this
+        sends it from here; over RPC that ships it back to the camera server.
+        """
+        try:
+            self.camera.broadcast_image(image, {"timestamp": time.time(), "index": 0})
+        except Exception as error:
+            print(f"Occupancy frame not broadcast: {error!r}")
 
     def _play_sequence_pipelined(self, frames):
         """Display each frame on the SLM as it is produced."""
@@ -409,26 +534,28 @@ class Transport(Coordinator):
             raise errors[0]
         return n_frames
 
-    def arm_transport_pattern(self):
-        """Run one transport via software upload."""
+    def arm_rearrangement(self):
+        """Run one rearrangement via software upload."""
         self._require_gpu()
         self._require_initialised()
+
         s = self._state
         PM = s["PM"]
+
+        # Load the initial array onto the SLM.
         self.slm.update_mask(s["pm_init_uint8"])
 
-        ##############################################################################
-        print("Waiting for initial image...")
-        # 1. Stochastic intial image
+        # 1. Acquire the occupancy image.
         self.camera.start_acquisition()
         img_array0 = self.camera.acquire_n_frames(1)[0]
+        # perf_counter, not time(): time() is quantised to ~1 ms on Windows, which is
+        # the same order as the spans measured here.
         t1 = time.perf_counter()
 
         # 2. Occupancy mask.
         occ_mask = self._extract_occupancy(img_array0, s["threshold"])
         t2 = time.perf_counter()
 
-        print("Rearranging...")
         # 3. Pairing, interpolation and SLM upload, pipelined.
         frames = PM.iter_rearrangement_sequence(
             s["terms1"],
@@ -436,90 +563,33 @@ class Transport(Coordinator):
             occ_mask,
             d0=s["d0"],
             profile=s.get("profile", "minimum_jerk"),
-            refine_iters=s["refine_iters"],
-            refine_damping=s["refine_damping"],
-            init_refine_iters=s["init_refine_iters"],
-            init_refine_damping=s["init_refine_damping"],
             to_host=False,
         )
-        n_frames0 = self._play_sequence_pipelined(frames)
+        n_frames = self._play_sequence_pipelined(frames)
         t3 = time.perf_counter()
-        print("Rearrangement complete.")
-        ##############################################################################
-        print("Waiting for second image...")
-        # 4. Defect-free image
+
+        # 4. Follow up images image.
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(1)[0]
+            self._broadcast_occupancy_frame(img_array0)
+            img_array1 = self.camera.acquire_n_frames(s["num_images"], broadcast=True)
         except Exception:
-            print("Image 1 acquisition failed; returning zeros.")
-            img_array1 = np.zeros(img_array0.shape)
-        t4 = time.perf_counter()
-
-        # 5. Pairing, interpolation and SLM upload, pipelined.
-        if s["path_fn"] == "linear":
-            path = linear_path
-        elif s["path_fn"] == "lift":
-            path = lift_path(
-                s["d_lift"],
-                smooth_corners=s["smooth_corners"],
-                only_moving=s["only_moving"],
-            )
-        else:
-            raise ValueError("Invalid path function.")
-
-        print("Transporting...")
-        frames = PM.iter_transport_sequence(
-            s["terms2"],
-            s["terms3"],
-            d0=s["d0_transport"],
-            d0_z=s["d0_z_transport"],
-            step_norm=s["step_norm"],
-            path_fn=path,
-            profile=s.get("profile", "minimum_jerk"),
-            refine_iters=s["refine_iters"],
-            refine_damping=s["refine_damping"],
-            init_refine_iters=s["init_refine_iters"],
-            init_refine_damping=s["init_refine_damping"],
-            to_host=False,
-        )
-        n_frames1 = self._play_sequence_pipelined(frames)
-
-        t5 = time.perf_counter()
-
-        print("Transport complete.")
-        ##############################################################################
-        print("Waiting for reset image...")
-        # 6. Reset image.
-        try:
-            self.camera.start_acquisition()
-            img_array2 = self.camera.acquire_n_frames(1)[0]
-        except Exception as exc:
-            print("Reset-image acquisition failed. Exception:", exc)
-            img_array2 = np.zeros_like(img_array0)
+            print("Reset-image acquisition failed; returning zeros.")
+            img_array1 = np.zeros((s["num_images"], *img_array0.shape))
 
         print(
-            f"Rearrangement complete: {n_frames0} frames, {(t3 - t1) * 1000:.4f} ms total"
+            f"Rearrangement complete: {n_frames} frames, {(t3 - t1) * 1000:.4f}ms total "
+            f"(occupancy {(t2 - t1) * 1000:.4f}ms, calculation+upload {(t3 - t2) * 1000:.4f}ms)."
         )
-        print(
-            f"Transport complete: {n_frames1} frames, {(t5 - t4) * 1000:.4f} ms total"
-        )
-
+        # Generation and upload are pipelined (see docstring), so they share one
+        # measured span; both keys report it rather than a fabricated split.
         timings = {
-            "n_frames0": n_frames0,
-            "n_frames1": n_frames1,
-            "t1": t1,
-            "t2": t2,
-            "t3": t3,
-            "t4": t4,
-            "t5": t5,
+            "n_frames": n_frames,
+            "occupancy_extraction_ms": (t2 - t1) * 1000,
+            "calculation_and_upload_ms": (t3 - t2) * 1000,
+            "total_rearrangement_ms": (t3 - t1) * 1000,
         }
-        return (
-            np.asarray(img_array0),
-            np.asarray(img_array1),
-            np.asarray(img_array2),
-            timings,
-        )
+        return np.asarray(img_array0), np.asarray(img_array1), timings
 
     def _play_sequence_pipelined_timings(self, frames):
 
@@ -685,7 +755,8 @@ class Transport(Coordinator):
         # 5. Follow up images
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(s["num_images"])
+            self._broadcast_occupancy_frame(img_array0)
+            img_array1 = self.camera.acquire_n_frames(s["num_images"], broadcast=True)
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros((s["num_images"], *img_array0.shape))
@@ -822,7 +893,8 @@ class Transport(Coordinator):
         # 5. Reset image.
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(1)[0]
+            self._broadcast_occupancy_frame(img_array0)
+            img_array1 = self.camera.acquire_n_frames(1, broadcast=True)[0]
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)
@@ -847,28 +919,15 @@ class Transport(Coordinator):
         return np.asarray(img_array0), np.asarray(img_array1), timings
 
     # ------------------------------------------------------------------ #
-    # Test / teardown
+    # Teardown
     # ------------------------------------------------------------------ #
 
-    def test(self, delay_s: float = 0.0):
-        """Round-trip smoke test: return two random ``(before, after)`` images.
-
-        No GPU needed — exercises the RPC path and image marshalling only.
-        """
-        if delay_s:
-            time.sleep(delay_s)
-        rng = np.random.default_rng()
-        return (
-            rng.integers(0, 256, (10, 10), dtype=np.uint8),
-            rng.integers(0, 256, (10, 10), dtype=np.uint8),
-        )
-
     def shutdown(self) -> None:
-        """Release rearrangement state. The camera/SLM backends close themselves."""
+        """Release rearrangement state. The camera and SLM close themselves."""
         if self._initialised and self.camera is not None:
             try:
                 self.camera.stop_acquisition()
             except Exception:
-                print("camera.stop_acquisition() during shutdown failed", exc_info=True)
+                print("camera.stop_acquisition() during shutdown failed")
         self._state = None
         self._initialised = False

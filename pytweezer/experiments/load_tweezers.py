@@ -18,7 +18,7 @@ from pytweezer.servers.device_client import get_device_config
 
 if TYPE_CHECKING:
     # Imports cupy where it is installed, so only for the annotation.
-    from pytweezer.coordinators.rearrangement import Rearrangement
+    from pytweezer.drivers.slm import SLM
 
 logger = get_logger(__name__)
 
@@ -108,7 +108,7 @@ class LoadTweezers(MotMasterExperiment):
     analyses = ("tweezer_histogram", "tweezer_photon_histogram")
 
     hamcam: ImagEMX2Camera = Device("Rb HamCam")
-    rig: Rearrangement = Device("Rb Rearrangement Rig")
+    slm: SLM = Device("Rb SLM")
 
     hamcam_gain = Number(
         600, min=0, group="Camera", tooltip="EM-gain sensitivity of the HamCam"
@@ -185,7 +185,7 @@ class LoadTweezers(MotMasterExperiment):
 
         Also sets ``trap_window_size``, ``trap_feature_size`` and
         ``trap_threshold`` from ``saved``. Sites fitted to another
-        array than the rig has on the SLM are used with a warning; if the rig
+        array than the one on the SLM are used with a warning; if the SLM
         does not know its array, or cannot be reached, they are used unchecked.
         """
         if any(key not in saved for key in TRAP_SITE_KEYS):
@@ -193,16 +193,16 @@ class LoadTweezers(MotMasterExperiment):
                 "no trap sites are saved; run FindTrapSites and accept its proposal"
             )
         try:
-            array = self.rig.get_array()
-        except Exception as error:  # an unreachable rig must not stop the run
-            logger.warning("Could not ask the rig for its array: %r", error)
+            array = self.slm.get_array()
+        except Exception as error:  # an unreachable SLM must not stop the run
+            logger.warning("Could not ask the SLM for its array: %r", error)
             array = None
         if array and not same_geometry(
             saved["trap_geometry"], array["x_um"], array["y_um"]
         ):
             logger.warning(
-                "The saved trap sites were fitted to another array than the rig "
-                "has on the SLM; using them anyway. Run FindTrapSites again and "
+                "The saved trap sites were fitted to another array than the one "
+                "on the SLM; using them anyway. Run FindTrapSites again and "
                 "accept its proposal to fit the current array."
             )
         self.trap_window_size = int(saved["trap_window_size"])
@@ -298,7 +298,6 @@ class LoadTweezers(MotMasterExperiment):
                 self.record("second_counts", second, unit="counts")
 
 
-
 class LoadTweezersNImages(LoadTweezers):
     """Load the tweezers and image them ``n_images`` times per point."""
 
@@ -321,7 +320,10 @@ class LoadTweezersNImages(LoadTweezers):
             self.run_sequences(**sequence)
             return np.asarray(
                 self.hamcam.acquire_n_frames(
-                    10, broadcast=True, header={"rid": self.rid}, stream="hamcam_n_images"
+                    10,
+                    broadcast=True,
+                    header={"rid": self.rid},
+                    stream="hamcam_n_images",
                 )
             )
         finally:
@@ -329,8 +331,6 @@ class LoadTweezersNImages(LoadTweezers):
 
     def run_point(self) -> None:
         self.take_shot()
-    
-
 
 
 class LoadTweezersMOTImage(LoadTweezers):

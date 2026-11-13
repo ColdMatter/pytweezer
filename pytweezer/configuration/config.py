@@ -196,40 +196,34 @@ CONFIG = {
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
-        # Atom-rearrangement rig: a rearrangement camera and the Blink SLM in one
-        # process, with the rearrangement coordinator streaming GPU-computed phase
-        # frames straight to slm.update_mask() (no socket). Needs cupy/lap + a CUDA
-        # GPU on this host to arm; status()/test() work without them. The SLM is
-        # addressable on its own as get_device("Rb SLM").
-        "Rb Rearrangement Rig": {
+        "Rb HamCam": {
             "active": True,
+            "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
+            "sim_class": "pytweezer.drivers.imagemX2:SimulatedTweezerArrayCamera",
             "host": HOSTS["PH-BEAST"],
             "port": get_next_port(),
             "simulate": SIMULATING,
-            "devices": {
-                "Rb HamCam": {
-                    "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
-                    "sim_class": "pytweezer.drivers.imagemX2:SimulatedTweezerArrayCamera",
-                    "role": "camera",
-                    "serial_number": "000407",
-                    "stream_name": "rb_hamcam",
-                    "object_pixel_m": None,
-                    "external_exposure": True,
-                    "timeout": 20.0,
-                    "temperature_measurement": "rb_hamcam_temperature",
-                    "temperature_interval_s": 30.0,
-                    "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
-                },
-                "Rb SLM": {
-                    "class": "pytweezer.drivers.slm:SLM",
-                    "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
-                    "teardown": "close",
-                    "role": "slm",
-                    # sdk_dll / lut_file / board_number default to the lab's Blink Plus
-                    # install (see pytweezer/drivers/slm.py); override here if needed.
-                },
-            },
-            "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
+            "serial_number": "000407",
+            "stream_name": "rb_hamcam",
+            "object_pixel_m": None,
+            "external_exposure": True,
+            "timeout": 20.0,
+            "temperature_measurement": "rb_hamcam_temperature",
+            "temperature_interval_s": 30.0,
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
+        },
+        # Also serves the tweezer array on it (make_array/get_array), which needs
+        # cupy/lap + a CUDA GPU on this host.
+        "Rb SLM": {
+            "active": True,
+            "class": "pytweezer.drivers.slm:SLM",
+            "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
+            "teardown": "close",
+            "host": HOSTS["PH-BEAST"],
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            # sdk_dll / lut_file / board_number default to the lab's Blink Plus
+            # install (see pytweezer/drivers/slm.py); override here if needed.
         },
         "IDS-1054B Scope": {
             "active": False,

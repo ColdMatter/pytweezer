@@ -38,6 +38,13 @@ Three constraints on subclasses:
   frame reintroduces the serialization cost the coordinator exists to avoid.
 * **Do not define** ``__call__``. ``sipyco.pc_rpc.Server`` treats a callable
   target as a per-connection factory and invokes it instead of serving it.
+
+No coordinator is in use at present. The last one, the ``Rb Rearrangement Rig``'s
+``pytweezer/coordinators/rearrangement.py`` (with the unconfigured
+``transport.py``), was removed in
+https://github.com/ColdMatter/pytweezer/pull/62; recover it from that PR's parent
+commit. Its logic now lives in :mod:`pytweezer.helper_scripts.rearrangement`,
+which the ``Rb SLM`` device serves.
 """
 
 from pytweezer.logging_utils import get_logger

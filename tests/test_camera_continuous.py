@@ -1,5 +1,6 @@
 import pytest
 
+from pytweezer.drivers import camera_catalogue
 from pytweezer.experiment import run_local
 from pytweezer.experiments import camera_continuous as cc
 from pytweezer.servers import device_server
@@ -39,7 +40,7 @@ def test_dropdown_lists_every_camera_started_at_launch_or_not(monkeypatch):
         },
     }
     monkeypatch.setattr(device_server, "get_config", lambda: {"Devices": devices})
-    assert cc.camera_names() == ["Cam A", "Cam Off", "Rig Cam"]
+    assert camera_catalogue.camera_names() == ["Cam A", "Cam Off", "Rig Cam"]
 
 
 def test_task_reserves_every_camera_in_the_dropdown():

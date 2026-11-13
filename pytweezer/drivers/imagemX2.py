@@ -1,153 +1,85 @@
+from typing import ClassVar
+
 import numpy as np
 
 from pytweezer.drivers.camera_base import (
-    Camera,
+    BINNING,
+    EXPOSURE,
+    ROI,
+    TRIGGER_POLARITY,
+    Control,
+    gain,
     simulated_camera_for,
+    trigger_source,
 )
-from pytweezer.drivers.hamamatsu import open_dcam_camera, set_dcam_exposure_mode
-from pytweezer.drivers.temperature_monitor import TemperatureMonitor
+from pytweezer.drivers.hamamatsu import EXPOSURE_MODE, HamamatsuCamera
 
 
-class ImagEMX2Camera(Camera):
-    """dcam shim: translates the generic :class:`Camera` interface to the
-    Hamamatsu ImagEM X2's pylablib DCAM driver, plus the EM-gain/sensitivity
-    controls specific to this camera.
-
-    Args:
-        serial_number: DCAM serial number of the camera to open (e.g. ``"000407"``).
-            If None, the only connected ImagEM X2 is opened.
-        external_exposure: Start in :meth:`set_external_exposure_mode`; otherwise
-            the camera keeps DCAM's own trigger mode (internal after power-up).
-        object_pixel_m: Metres per unbinned sensor pixel at the atoms.
-        temperature_measurement: Database measurement the sensor temperature is
-            written to every ``temperature_interval_s``; None to not monitor it.
-        max_temperature_c: Sensor temperature above which the monitor warns.
-    """
+class ImagEMX2Camera(HamamatsuCamera):
+    """dcam shim for the Hamamatsu ImagEM X2, adding the EM-gain/sensitivity
+    controls specific to this camera. Arguments are those of :class:`HamamatsuCamera`;
+    with no ``serial_number`` the only connected ImagEM X2 is opened."""
 
     image_prefix = "HamTweezer"
     model_prefix = "C9100"
+    default_timeout = 20.0
     #: Full scale of the 16-bit ADC: an EMCCD should never be driven there.
     saturation_level = 65535
 
-    def __init__(
-        self,
-        image_dir: str | None = None,
-        timeout: float = 20.0,
-        stream_name: str | None = None,
-        serial_number: str | None = None,
-        external_exposure: bool = False,
-        object_pixel_m: float | None = None,
-        temperature_measurement: str | None = None,
-        temperature_interval_s: float = 30.0,
-        max_temperature_c: float | None = None,
-    ):
-        self.serial_number = serial_number
-        self._temperature_monitor = None
-        super().__init__(
-            image_dir=image_dir,
-            timeout=timeout,
-            stream_name=stream_name,
-            object_pixel_m=object_pixel_m,
-        )
-        if external_exposure:
-            self.set_external_exposure_mode()
-        if temperature_measurement is not None:
-            self._temperature_monitor = TemperatureMonitor(
-                self.get_temperature,
-                temperature_measurement,
-                temperature_interval_s,
-                max_temperature_c,
-            )
+    CONTROLS = (
+        EXPOSURE,
+        EXPOSURE_MODE,
+        trigger_source(("int", "ext", "software")),
+        TRIGGER_POLARITY,
+        gain("Sensitivity", "integer", minimum=0),
+        Control("em_gain", "EM gain", "Gain", "bool", True),
+        Control("direct_em_gain", "Direct EM gain", "Gain", "bool", False),
+        BINNING,
+        *ROI,
+    )
+    CONTROL_SETTERS: ClassVar[dict[str, str]] = {
+        "em_gain": "enable_em_gain",
+        "direct_em_gain": "enable_direct_em_gain",
+    }
 
-    # ------------------------------------------------------------------ #
-    # Camera hooks
-    # ------------------------------------------------------------------ #
-
-    def _connect(self) -> None:
-        try:
-            camera = open_dcam_camera(self.serial_number, self.model_prefix)
-        except Exception as exc:
-            self._backend = None
-            raise RuntimeError("Could not connect to ImagEM X2 camera") from exc
-        self._backend = camera
-
-    def _disconnect(self) -> None:
-        if self._temperature_monitor is not None:
-            self._temperature_monitor.stop()
-        if self._backend is not None:
-            self._backend.close()
-
-    def set_roi(self, x0: int, width: int, y0: int, height: int):
-        *_, hbin, vbin = self._backend.get_roi()
-        hstart, _, vstart, _, hbin, _ = self._backend.set_roi(
-            x0, x0 + width, y0, y0 + height, hbin, vbin
-        )
-        self.roi_origin = (int(hstart), int(vstart))
-        self.binning = int(hbin)
-        return self.roi_origin
-
-    def set_trigger_source(self, source: str):
-        self._backend.set_trigger_mode(source)
-
-    def set_exposure_time(self, exposure: float):
-        self._backend.set_exposure(exposure)
-
-    def set_binning(self, binning: int):
-        # Through set_roi: DCAM rejects a bare BINNING write while the frame
-        # buffer is attached (DCAMERR_NOTSTABLE), and pylablib's set_roi frees it.
-        hstart, hend, vstart, vend, *_ = self._backend.get_roi()
-        hstart, _, vstart, _, hbin, _ = self._backend.set_roi(
-            hstart, hend, vstart, vend, int(binning), int(binning)
-        )
-        self.roi_origin = (int(hstart), int(vstart))
-        self.binning = int(hbin)
+    def _read_control_values(self) -> dict:
+        return {
+            **super()._read_control_values(),
+            "gain": int(self._read_attribute("sensitivity")),
+            "em_gain": int(self._read_attribute("ccd_mode")) == 2,
+            "direct_em_gain": int(self._read_attribute("direct_em_gain_mode")) == 2,
+        }
 
     def set_gain(self, gain: float):
         """Set the sensitivity, the EM gain level once :meth:`enable_em_gain` is on."""
         self.set_sensitivity(int(gain))
-
-    def setup_acquisition(self, nframes: int, mode: str = "sequence"):
-        self._backend.setup_acquisition(mode, int(nframes))
-
-    def start_acquisition(self):
-        self._backend.start_acquisition()
-
-    def stop_acquisition(self):
-        self._backend.stop_acquisition()
-
-    def _read_frames(self, nframes: int, start_frame: int):
-        self._backend.wait_for_frame(nframes=int(nframes), timeout=self.timeout)
-        images, _infos = self._backend.read_multiple_images(
-            (int(start_frame), int(start_frame) + int(nframes)), return_info=True
-        )
-        return images
 
     # ------------------------------------------------------------------ #
     # ImagEM X2-specific controls (beyond the generic Camera interface)
     # ------------------------------------------------------------------ #
 
     def set_ccd_mode(self, mode: int):
-        self._backend.set_attribute_value("ccd_mode", int(mode))
+        with self._lock, self._backend.pausing_acquisition(clear=True):
+            self._backend.set_attribute_value("ccd_mode", int(mode))
+            self._keep(em_gain=int(self._read_attribute("ccd_mode")) == 2)
 
     def enable_em_gain(self, enable: bool = True):
         self.set_ccd_mode(2 if enable else 1)
 
     def set_direct_em_gain_mode(self, mode: int):
-        self._backend.set_attribute_value("direct_em_gain_mode", int(mode))
+        with self._lock, self._backend.pausing_acquisition(clear=True):
+            self._backend.set_attribute_value("direct_em_gain_mode", int(mode))
+            self._keep(
+                direct_em_gain=int(self._read_attribute("direct_em_gain_mode")) == 2
+            )
 
     def enable_direct_em_gain(self, enable: bool = True):
         self.set_direct_em_gain_mode(2 if enable else 1)
 
     def set_sensitivity(self, sensitivity: int):
-        self._backend.set_attribute_value("sensitivity", int(sensitivity))
-
-    def set_exposure_mode(self, mode: str):
-        """``"internal"``, ``"edge"`` (a trigger starts an exposure of the set
-        time) or ``"level"`` (the trigger pulse's width sets it)."""
-        set_dcam_exposure_mode(self._backend, mode)
-
-    def set_external_exposure_mode(self):
-        self.set_exposure_mode("level")
+        with self._lock:
+            self._backend.set_attribute_value("sensitivity", int(sensitivity))
+            self._keep(gain=int(self._read_attribute("sensitivity")))
 
     def get_conversion_factor(self) -> tuple[float, float]:
         """The camera's photoelectron conversion ``(coefficient, offset)`` at its current settings."""
@@ -160,15 +92,6 @@ class ImagEMX2Camera(Camera):
         """Every readable DCAM attribute's current value, enums as their text labels."""
         values = self._backend.get_all_attribute_values(enum_as_str=True)
         return values.as_dict(style="flat")
-
-    def get_temperature(self) -> float:
-        """Sensor temperature in °C."""
-        with self._lock:
-            return float(self._backend.get_attribute_value("sensor_temperature"))
-
-    def trigger(self):
-        """Send a software trigger to the camera."""
-        self._backend.send_software_trigger()
 
 
 #: One-size-fits-all simulated camera, with the ImagEM's EM-gain/sensitivity

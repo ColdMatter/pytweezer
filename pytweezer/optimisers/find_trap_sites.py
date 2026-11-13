@@ -15,8 +15,8 @@ class FindTrapSites(Fit, LoadTweezers):
     """Find the trap sites by fitting the array's geometry to the atoms, and propose them.
 
     Takes ``calibration_shots`` with the tweezers off during the background
-    drop, and fits the geometry of the array the rig has on the SLM (or, when
-    it does not know, a ``default_rows`` x ``default_columns`` grid
+    drop, and fits the geometry of the array on the SLM (or, when
+    the SLM does not know it, a ``default_rows`` x ``default_columns`` grid
     ``default_spacing`` apart) to their mean background-subtracted, top-hat
     filtered image, free in position, rotation and scale (see
     :mod:`pytweezer.analysis.trap_sites`). It then fits the occupancy
@@ -60,14 +60,14 @@ class FindTrapSites(Fit, LoadTweezers):
 
     def prepare(self) -> None:
         super().prepare()
-        array = self.rig.get_array()
+        array = self.slm.get_array()
         if array:
             self.geometry = np.column_stack([array["x_um"], array["y_um"]])
         else:
             self.geometry = default_geometry(
                 self.default_rows, self.default_columns, self.default_spacing * 1e6
             )
-        self.record("sites_from", "rig" if array else "default")
+        self.record("sites_from", "slm" if array else "default")
 
     def take_calibration_shots(self) -> tuple[list, list]:
         """``calibration_shots`` shots with the tweezers off in the background drop.

@@ -90,10 +90,11 @@ Rules that matter:
 - An experiment that chooses its own points overrides
   `planned_points(scan)`, raising `ValueError` for a scan it can't honour.
 - Each camera has a settings experiment (`experiments/camera_settings.py`,
-  bases `CameraSettings`/`ImagEMSettings`/`ORCASettings`/`ThorCamSettings`
-  in `experiment/camera_settings.py`) that sends only the settings ticked in
-  the form and leaves them; a new camera in CONFIG needs one
-  (`tests/test_camera_settings.py` checks).
+  base `CameraSettings` in `experiment/camera_settings.py`) that sends only
+  the settings ticked in the form and leaves them, then saves them as saved
+  parameters (`<camera>_<control>`, via `store_camera_settings`). Its form is
+  built from the declared camera's driver `CONTROLS`; `control_defaults`
+  overrides a default. Add one per camera that needs it.
 
 ## MOTMaster sequences
 
@@ -393,14 +394,14 @@ add-optimiser skill; a measurement it runs only needs a
 
 The Rb tweezer experiments, in the order a session uses them:
 
-1. `SlmTweezerArray` (`slm_tweezer_array.py`) puts an array on the SLM through
-   `Rb Rearrangement Rig` (`rig.make_array(...)`, one mask per point, shown on
+1. `SlmTweezerArray` (`slm_tweezer_array.py`) puts an array on `Rb SLM`
+   (`slm.make_array(...)`, one mask per point, shown on
    the `slm` image stream for the SLM Monitor applet). Its optics are `slm_*`
    saved parameters in SI: the blaze, Fresnel lens and pupil as saved-backed
    arguments, the generator, Zernike rows `[index, coefficient]` and depth
-   envelope from `array_hologram.SAVED_KEYS`. The rig remembers it:
-   `rig.get_array()` gives `sites` and trap `x_um`/`y_um` (`None` if the rig
-   didn't write the mask).
+   envelope from `array_hologram.SAVED_KEYS`. The SLM remembers it:
+   `slm.get_array()` gives `sites` and trap `x_um`/`y_um` (`None` once anything
+   else has written the SLM).
 2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera
    and proposes the `trap_*` saved parameters.
 3. `LoadTweezers` (`load_tweezers.py`, a `MotMasterExperiment` with

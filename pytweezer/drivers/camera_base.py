@@ -14,6 +14,10 @@ logic and its own simulated twin, this module defines:
   that implements those hooks with generated frames, usable in place of *any*
   real camera in simulation mode.
 
+* :class:`Control` -- a declared camera setting (name, unit, range, choices),
+  listed in a driver's :attr:`Camera.CONTROLS` so a GUI can build itself from
+  the driver instead of hard-coding each camera.
+
 * :func:`simulated_camera_for` -- adapts :class:`SimulatedCamera` to a specific
   real driver so that driver's *extra* methods (e.g. the ImagEM's EM-gain
   setters) are auto-stubbed via :func:`pytweezer.servers.simulated_device.simulate`,
@@ -30,7 +34,8 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any
+from dataclasses import asdict, dataclass
+from typing import Any, ClassVar
 
 import numpy as np
 import tifffile as tiff
@@ -40,6 +45,164 @@ from pytweezer.servers import ImageClient
 from pytweezer.servers.simulated_device import simulate
 
 LOGGER = get_logger("camera")
+
+
+@dataclass(frozen=True)
+class Control:
+    """One camera setting a driver declares in :attr:`Camera.CONTROLS`.
+
+    Drivers keep and return values in SI units; ``unit`` and ``scale`` say how to
+    display them.
+
+    Attributes:
+        name: Key in :meth:`Camera.apply_controls` and in saved parameters.
+        label: Text a GUI shows beside it.
+        section: Group a GUI puts it under.
+        kind: ``"number"``, ``"integer"``, ``"choice"`` or ``"bool"``.
+        default: Value assumed until the camera has been read.
+        unit: Display unit.
+        scale: SI units per display unit (``1e-3`` for a value stored in seconds shown in ms).
+        si_unit: Unit the driver stores the value in.
+        minimum: Smallest value allowed, in stored units; ``None`` for no limit.
+        maximum: Largest value allowed, in stored units; ``None`` for no limit.
+        choices: The options of a ``"choice"`` control.
+    """
+
+    name: str
+    label: str
+    section: str
+    kind: str
+    default: Any
+    unit: str = ""
+    scale: float = 1.0
+    si_unit: str = ""
+    minimum: float | None = None
+    maximum: float | None = None
+    choices: tuple[str, ...] = ()
+
+    def describe(self) -> dict:
+        """The control as a JSON-safe dict."""
+        return {**asdict(self), "choices": list(self.choices)}
+
+
+EXPOSURE = Control(
+    "exposure",
+    "Exposure",
+    "Exposure & trigger",
+    "number",
+    10e-3,
+    unit="ms",
+    scale=1e-3,
+    si_unit="s",
+    minimum=1e-6,
+)
+TRIGGER_POLARITY = Control(
+    "trigger_polarity",
+    "Trigger polarity",
+    "Exposure & trigger",
+    "choice",
+    "rise",
+    choices=("rise", "fall"),
+)
+BINNING = Control("binning", "Binning", "Binning & ROI", "integer", 1, minimum=1)
+ROI = (
+    Control(
+        "roi_x0",
+        "ROI x0",
+        "Binning & ROI",
+        "integer",
+        0,
+        unit="px",
+        si_unit="px",
+        minimum=0,
+    ),
+    Control(
+        "roi_width",
+        "ROI width",
+        "Binning & ROI",
+        "integer",
+        1024,
+        unit="px",
+        si_unit="px",
+        minimum=1,
+    ),
+    Control(
+        "roi_y0",
+        "ROI y0",
+        "Binning & ROI",
+        "integer",
+        0,
+        unit="px",
+        si_unit="px",
+        minimum=0,
+    ),
+    Control(
+        "roi_height",
+        "ROI height",
+        "Binning & ROI",
+        "integer",
+        1024,
+        unit="px",
+        si_unit="px",
+        minimum=1,
+    ),
+)
+
+
+def trigger_source(choices: tuple[str, ...]) -> Control:
+    """The trigger-source control, offering ``choices`` (the first is its default)."""
+    return Control(
+        "trigger_source",
+        "Trigger source",
+        "Exposure & trigger",
+        "choice",
+        choices[0],
+        choices=tuple(choices),
+    )
+
+
+def gain(
+    label: str,
+    kind: str,
+    unit: str = "",
+    minimum: float | None = None,
+    maximum: float | None = None,
+    default: Any = 0,
+) -> Control:
+    """The gain control, labelled and ranged as the driver's gain is."""
+    return Control(
+        "gain",
+        label,
+        "Gain",
+        kind,
+        default,
+        unit=unit,
+        si_unit=unit,
+        minimum=minimum,
+        maximum=maximum,
+    )
+
+
+def roi_controls(roi: tuple) -> dict:
+    """The ROI controls (and binning) for a pylablib ROI ``(hstart, hend, vstart, vend, hbin, vbin)``."""
+    hstart, hend, vstart, vend, hbin, _ = roi
+    return {
+        "roi_x0": int(hstart),
+        "roi_width": int(hend - hstart),
+        "roi_y0": int(vstart),
+        "roi_height": int(vend - vstart),
+        "binning": int(hbin),
+    }
+
+
+_SETTER_NAMES = {
+    "exposure": "set_exposure_time",
+    "trigger_source": "set_trigger_source",
+    "trigger_polarity": "set_trigger_polarity",
+    "gain": "set_gain",
+    "binning": "set_binning",
+}
+_ROI_NAMES = tuple(control.name for control in ROI)
 
 
 class Camera(ABC):
@@ -52,7 +215,20 @@ class Camera(ABC):
 
     The connected hardware handle is stored on :attr:`_backend`; ``None`` once
     :meth:`close` has run. Subclasses set it in :meth:`_connect`.
+
+    A driver lists the settings it offers in :attr:`CONTROLS`, and :meth:`controls`
+    and :meth:`apply_controls` work from that list. Each setter a driver
+    implements takes :attr:`_lock` and records what the camera took with :meth:`_keep`.
     """
+
+    #: The settings this camera offers, in the order a GUI shows them.
+    CONTROLS: tuple[Control, ...] = ()
+    #: Setter method for a control whose setter is not the shared ``set_<name>``
+    #: (see :data:`_SETTER_NAMES`), by control name; a driver adds only its own.
+    CONTROL_SETTERS: ClassVar[dict[str, str]] = {}
+    #: The :class:`~pytweezer.drivers.temperature_monitor.TemperatureMonitor` a driver
+    #: starts, if it watches the sensor temperature; :meth:`sensor_temperature` serves it.
+    _temperature_monitor = None
 
     #: Filename prefix used by :meth:`save_tiff`; override per driver.
     image_prefix: str = "image"
@@ -62,6 +238,8 @@ class Camera(ABC):
     binning: int = 1
     #: Metres per unbinned sensor pixel at the atoms (sensor pitch over magnification); ``None`` if unknown.
     object_pixel_m: float | None = None
+    #: Sensor ``(width, height)`` in pixels, as :meth:`_sensor_shape` last read it; ``None`` if unknown.
+    _sensor_size: tuple[int, int] | None = None
     #: Pixel value at which a live frame counts as saturated (see
     #: :meth:`saturated_frames_since`); ``None`` leaves saturation unwatched.
     saturation_level: int | None = None
@@ -93,10 +271,13 @@ class Camera(ABC):
         self._lock = threading.RLock()
         self._live_thread: threading.Thread | None = None
         self._live_stop = threading.Event()
+        self._live_args: tuple[int, float] = (1000, 0.05)
         # (frame number, peak value) of the saturated live frames of this acquisition.
         self._saturated: deque[tuple[int, int]] = deque(maxlen=1000)
         self._backend = None
+        self._kept: dict[str, Any] = {}
         self._connect()
+        self._keep_sensor_size()
 
     # ------------------------------------------------------------------ #
     # Hardware-specific hooks -- implemented by each concrete shim.
@@ -115,27 +296,44 @@ class Camera(ABC):
         """Restrict readout to the given region of interest (pixels).
 
         Keeps the camera's binning. Returns the ``(x0, y0)`` the camera used, which it may have rounded,
-        and keeps it as :attr:`roi_origin`.
+        and keeps it as :attr:`roi_origin`. A driver keeps the four ROI values the camera took with :meth:`_keep`.
         """
 
     @abstractmethod
     def set_trigger_source(self, source: str) -> None:
-        """Select the trigger mode/source (e.g. ``"int"``/``"ext"``)."""
+        """Select the trigger mode/source (e.g. ``"int"``/``"ext"``).
+
+        A driver keeps the source the camera took with :meth:`_keep`.
+        """
 
     @abstractmethod
     def set_exposure_time(self, exposure: float) -> None:
-        """Set the per-frame exposure time in seconds."""
+        """Set the per-frame exposure time in seconds.
+
+        A driver keeps the exposure the camera took, in seconds, with :meth:`_keep`.
+        """
 
     def set_binning(self, binning: int) -> None:
         """Bin ``binning`` x ``binning`` pixels together.
 
-        Changing it can reset the ROI, so call :meth:`set_roi` afterwards.
+        Changing it can reset the ROI, so call :meth:`set_roi` afterwards. A driver
+        keeps the binning the camera took with :meth:`_keep`.
         """
         raise NotImplementedError(f"{type(self).__name__} has no binning control")
 
     def set_gain(self, gain: float) -> None:
-        """Set the camera's gain, in the unit its driver documents."""
+        """Set the camera's gain, in the unit its driver documents.
+
+        A driver keeps the gain the camera took with :meth:`_keep`.
+        """
         raise NotImplementedError(f"{type(self).__name__} has no gain control")
+
+    def set_trigger_polarity(self, polarity: str) -> None:
+        """Trigger on the ``"rise"`` or ``"fall"`` edge of the external trigger.
+
+        A driver keeps the polarity the camera took with :meth:`_keep`.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no trigger polarity")
 
     @abstractmethod
     def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
@@ -170,6 +368,16 @@ class Camera(ABC):
         """Frames ``start`` to ``stop - 1`` without marking them read."""
         images = self._backend.read_multiple_images((start, stop), peek=True)
         return np.asarray(images if images is not None else [])
+
+    def _read_range_timed(
+        self, start: int, stop: int
+    ) -> tuple[np.ndarray, list[float] | None]:
+        """:meth:`_read_range` with each frame's camera-clock time in seconds.
+
+        The times are ``None`` where the driver cannot give them. The clock's zero
+        is arbitrary.
+        """
+        return self._read_range(start, stop), None
 
     # ------------------------------------------------------------------ #
     # Connection lifecycle (generic).
@@ -234,6 +442,21 @@ class Camera(ABC):
         )
         return images[0]
 
+    def snap(self, broadcast: bool = True) -> np.ndarray:
+        """One frame from a one-frame acquisition, which is stopped again afterwards.
+
+        Raises:
+            RuntimeError: if the camera is live; stop live first.
+        """
+        if self.is_live():
+            raise RuntimeError(f"{type(self).__name__} is live; stop live to snap")
+        self.setup_acquisition(1, mode="snap")
+        try:
+            self.start_acquisition()
+            return self.acquire_n_frames(1, broadcast=broadcast)[0]
+        finally:
+            self.stop_acquisition()
+
     def arm(self, buffer_frames: int = 1000) -> None:
         """Start a continuous ring-buffer acquisition unless one is already running.
 
@@ -258,22 +481,206 @@ class Camera(ABC):
             RuntimeError: if some of those frames were already overwritten in the
                 ring buffer.
         """
-        start = int(start)
+        return self._read_frames_timed_from(int(start))[0]
+
+    def _read_frames_timed_from(
+        self, start: int
+    ) -> tuple[np.ndarray, list[float] | None]:
+        """:meth:`read_frames_from` with each frame's camera-clock time (see :meth:`_read_range_timed`)."""
         with self._lock:
             stop = self._count_frames()
             if stop <= start:
-                return np.empty((0, 0, 0), dtype=np.uint16)
-            images = self._read_range(start, stop)
+                return np.empty((0, 0, 0), dtype=np.uint16), None
+            images, times = self._read_range_timed(start, stop)
         if len(images) != stop - start:
             raise RuntimeError(
                 f"{type(self).__name__}: only {len(images)} of frames {start}-"
                 f"{stop - 1} were still in the buffer; arm() with more buffer_frames"
             )
-        return images
+        if times is not None and len(times) != len(images):
+            raise RuntimeError(
+                f"{type(self).__name__}: {len(times)} camera times for {len(images)} frames"
+            )
+        return images, times
 
     def settings(self) -> dict:
         """Camera settings worth keeping with saved frames (JSON-safe)."""
         return {}
+
+    # ------------------------------------------------------------------ #
+    # Declared controls (generic).
+    # ------------------------------------------------------------------ #
+
+    def controls(self) -> list[dict]:
+        """Each of :attr:`CONTROLS` as :meth:`Control.describe` gives it, plus its ``"value"``.
+
+        Values are those last kept or read back (the control's default before
+        either); the hardware is not touched. Once the sensor size is known, the
+        ROI controls' ``maximum`` is the sensor's.
+        """
+        limits = self._roi_limits()
+        return [
+            {
+                **control.describe(),
+                **limits.get(control.name, {}),
+                "value": self._kept.get(control.name, control.default),
+            }
+            for control in self.CONTROLS
+        ]
+
+    def read_controls(self) -> list[dict]:
+        """Read every control's value back from the camera, then return :meth:`controls`."""
+        with self._lock:
+            self._kept.update(self._read_control_values())
+            self._keep_sensor_size()
+        return self.controls()
+
+    def _sensor_shape(self) -> tuple[int, int] | None:
+        """The sensor's ``(width, height)`` in pixels, read from the hardware; ``None`` if unknown.
+
+        pylablib cameras give it as ``get_detector_size()``; a driver whose
+        backend does not overrides this.
+        """
+        detector_size = getattr(self._backend, "get_detector_size", None)
+        return None if detector_size is None else detector_size()
+
+    def _keep_sensor_size(self) -> None:
+        try:
+            shape = self._sensor_shape()
+        except Exception:
+            LOGGER.warning(
+                "%s could not read its sensor size", type(self).__name__, exc_info=True
+            )
+            return
+        if shape is not None:
+            self._sensor_size = (int(shape[0]), int(shape[1]))
+
+    def _roi_limits(self) -> dict[str, dict[str, int]]:
+        """The ROI controls' maxima from the sensor size, by control name."""
+        if self._sensor_size is None:
+            return {}
+        width, height = self._sensor_size
+        return {
+            "roi_x0": {"maximum": width - 1},
+            "roi_width": {"maximum": width},
+            "roi_y0": {"maximum": height - 1},
+            "roi_height": {"maximum": height},
+        }
+
+    def apply_controls(self, values: dict[str, Any]) -> list[dict]:
+        """Set the controls named in ``values`` (SI units), then read them all back.
+
+        A live camera is stopped while they are set and restarted after. The four
+        ROI values are set together; any left out keep their current value.
+
+        Returns:
+            :meth:`controls`, as the camera now has them.
+
+        Raises:
+            KeyError: if a name is not one of this camera's controls.
+        """
+        by_name = {control.name: control for control in self.CONTROLS}
+        unknown = sorted(set(values) - set(by_name))
+        if unknown:
+            raise KeyError(
+                f"{type(self).__name__} has no control {unknown}; its controls are {sorted(by_name)}"
+            )
+        was_live = self.is_live()
+        if was_live:
+            self.stop_live()
+        try:
+            for name in self._application_order(by_name):
+                if name == "roi":
+                    if any(roi_name in values for roi_name in _ROI_NAMES):
+                        self._apply_roi(values)
+                elif name in values:
+                    self._apply_control(by_name[name], values[name])
+        finally:
+            try:
+                self.read_controls()
+            finally:
+                if was_live:
+                    self.start_live(*self._live_args)
+        return self.controls()
+
+    @staticmethod
+    def _application_order(by_name: dict[str, Control]) -> list[str]:
+        """Control names in the order they are set: binning, ROI, exposure and trigger, the rest, gain last."""
+        early = [
+            "binning",
+            "roi",
+            "exposure",
+            "exposure_mode",
+            "trigger_source",
+            "trigger_polarity",
+        ]
+        rest = [
+            name
+            for name in by_name
+            if name not in early and name not in _ROI_NAMES and name != "gain"
+        ]
+        return early + rest + ["gain"]
+
+    def _apply_roi(self, values: dict[str, Any]) -> None:
+        missing = [name for name in _ROI_NAMES if name not in values]
+        if any(name not in self._kept for name in missing):
+            self.read_controls()
+        x0, width, y0, height = (
+            values[name] if name in values else self._kept[name] for name in _ROI_NAMES
+        )
+        self.set_roi(int(x0), int(width), int(y0), int(height))
+
+    def _keep(self, **values: Any) -> None:
+        """Record the values the camera took, in SI units, for :meth:`controls`."""
+        self._kept.update(values)
+
+    def _rebin_keeping_roi(self, binning: int) -> None:
+        """Set the binning of a pylablib camera through its ``set_roi``, passing the current
+        ROI back with it, and keep what the camera took."""
+        with self._lock:
+            hstart, hend, vstart, vend, *_ = self._backend.get_roi()
+            roi = self._backend.set_roi(
+                hstart, hend, vstart, vend, int(binning), int(binning)
+            )
+            self._keep_roi(roi)
+
+    def _keep_roi(self, roi: tuple) -> tuple[int, int]:
+        """Keep the pylablib ROI a setter got back, with the origin and binning frames are read with."""
+        controls = roi_controls(roi)
+        self.roi_origin = (controls["roi_x0"], controls["roi_y0"])
+        self.binning = controls["binning"]
+        self._keep(**controls)
+        return self.roi_origin
+
+    def _read_control_values(self) -> dict[str, Any]:
+        """Every control's value as the camera has it now, keyed by control name.
+
+        Drivers override this; the base knows nothing the setters did not :meth:`_keep`.
+        """
+        return {}
+
+    def _apply_control(self, control: Control, value: Any) -> None:
+        """Set one control through its setter, named in :attr:`CONTROL_SETTERS` or else the shared map."""
+        name = self.CONTROL_SETTERS.get(control.name) or _SETTER_NAMES.get(
+            control.name, f"set_{control.name}"
+        )
+        setter = getattr(self, name)
+        setter(bool(value) if control.kind == "bool" else value)
+
+    def sensor_temperature(self) -> dict | None:
+        """The sensor temperature the camera's monitor last read, without touching the hardware.
+
+        Returns:
+            ``{"celsius": ..., "time": ..., "max_celsius": ...}``, ``time`` being when it
+            was read (unix seconds) and ``max_celsius`` the monitor's limit (``None`` if
+            it has none); ``None`` if the camera has no monitor or it has not read yet.
+        """
+        monitor = self._temperature_monitor
+        reading = None if monitor is None else monitor.last_reading()
+        if reading is None:
+            return None
+        celsius, read_at = reading
+        return {"celsius": celsius, "time": read_at, "max_celsius": monitor.max_c}
 
     def frame_geometry(self) -> tuple[int, tuple[int, int]]:
         """``(binning, (x0, y0))`` the camera reads frames with now: :attr:`binning` and :attr:`roi_origin`."""
@@ -287,6 +694,7 @@ class Camera(ABC):
         self.arm(buffer_frames)
         if self.is_live():
             return
+        self._live_args = (buffer_frames, poll_s)
         self._live_stop.clear()
         self._live_thread = threading.Thread(
             target=self._broadcast_live,
@@ -328,16 +736,19 @@ class Camera(ABC):
                     sent = 0
                     with self._lock:
                         self._saturated.clear()
-                frames = self.read_frames_from(sent)
+                frames, times = self._read_frames_timed_from(sent)
             except Exception as error:
                 if repr(error) != last_error:
                     LOGGER.warning("Live broadcast failed: %r", error)
                     last_error = repr(error)
                 continue
             last_error = None
-            for frame in frames:
+            for i, frame in enumerate(frames):
                 self._check_saturation(sent, frame)
-                self.broadcast_image(frame, {"timestamp": time.time(), "index": sent})
+                info = {"timestamp": time.time(), "index": sent}
+                if times is not None:
+                    info["camera_timestamp"] = times[i]
+                self.broadcast_image(frame, info)
                 sent += 1
 
     def _check_saturation(self, index: int, frame: np.ndarray) -> None:
@@ -410,6 +821,8 @@ class SimulatedCamera(Camera):
     """
 
     sim_frame_rate: float = 5.0
+    #: Sensor ``(width, height)`` the simulated camera reports.
+    sim_sensor_size: tuple[int, int] = (512, 512)
 
     def __init__(
         self,
@@ -419,6 +832,7 @@ class SimulatedCamera(Camera):
         object_pixel_m: float | None = None,
     ):
         self._shape = (256, 256)
+        self._sim_values: dict[str, Any] = {"roi_height": 256, "roi_width": 256}
         self._nframes = 1
         self._running = False
         self._started = 0.0
@@ -437,22 +851,60 @@ class SimulatedCamera(Camera):
     def _disconnect(self) -> None:
         self._running = False
 
+    def _sensor_shape(self) -> tuple[int, int]:
+        return self.sim_sensor_size
+
+    def _remember(self, **values: Any) -> None:
+        """Keep ``values`` and hold them as what the simulated hardware reports."""
+        self._keep(**values)
+        self._sim_values.update(values)
+
+    def _read_control_values(self) -> dict[str, Any]:
+        return {
+            control.name: self._sim_values.get(control.name, control.default)
+            for control in self.CONTROLS
+        }
+
+    def _apply_control(self, control: Control, value: Any) -> None:
+        with self._lock:
+            super()._apply_control(control, value)
+            self._sim_values[control.name] = value
+
     def set_roi(self, x0: int, width: int, y0: int, height: int) -> tuple[int, int]:
-        self._shape = (int(height), int(width))
-        self.roi_origin = (int(x0), int(y0))
-        return self.roi_origin
+        with self._lock:
+            self._shape = (int(height), int(width))
+            self.roi_origin = (int(x0), int(y0))
+            self._remember(
+                roi_x0=int(x0),
+                roi_width=int(width),
+                roi_y0=int(y0),
+                roi_height=int(height),
+            )
+            return self.roi_origin
 
     def set_trigger_source(self, source: str) -> None:
-        self._trigger_source = source
+        with self._lock:
+            self._trigger_source = source
+            self._remember(trigger_source=source)
+
+    def set_trigger_polarity(self, polarity: str) -> None:
+        with self._lock:
+            self._remember(trigger_polarity=polarity)
 
     def set_exposure_time(self, exposure: float) -> None:
-        self._exposure = float(exposure)
+        with self._lock:
+            self._exposure = float(exposure)
+            self._remember(exposure=self._exposure)
 
     def set_binning(self, binning: int) -> None:
-        self.binning = int(binning)
+        with self._lock:
+            self.binning = int(binning)
+            self._remember(binning=self.binning)
 
     def set_gain(self, gain: float) -> None:
-        self._gain = float(gain)
+        with self._lock:
+            self._gain = float(gain)
+            self._remember(gain=self._gain)
 
     def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
         self._nframes = max(1, int(nframes))
@@ -474,6 +926,12 @@ class SimulatedCamera(Camera):
 
     def _read_range(self, start: int, stop: int) -> np.ndarray:
         return np.stack([self._generate_frame() for _ in range(stop - start)])
+
+    def _read_range_timed(
+        self, start: int, stop: int
+    ) -> tuple[np.ndarray, list[float]]:
+        times = [self._started + i / self.sim_frame_rate for i in range(start, stop)]
+        return self._read_range(start, stop), times
 
     def settings(self) -> dict:
         return {"shape": list(self._shape)}
@@ -519,5 +977,9 @@ def simulated_camera_for(
     _Simulated.__name__ = _Simulated.__qualname__ = f"Simulated{real_cls.__name__}"
     _Simulated.image_prefix = getattr(
         real_cls, "image_prefix", SimulatedCamera.image_prefix
+    )
+    _Simulated.CONTROLS = getattr(real_cls, "CONTROLS", SimulatedCamera.CONTROLS)
+    _Simulated.CONTROL_SETTERS = getattr(
+        real_cls, "CONTROL_SETTERS", SimulatedCamera.CONTROL_SETTERS
     )
     return _Simulated
