@@ -34,7 +34,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import tifffile as tiff
@@ -210,6 +210,9 @@ class Camera(ABC):
 
     #: The settings this camera offers, in the order a GUI shows them.
     CONTROLS: tuple[Control, ...] = ()
+    #: Setter method for a control whose setter is not the shared ``set_<name>``
+    #: (see :data:`_SETTER_NAMES`), by control name; a driver adds only its own.
+    CONTROL_SETTERS: ClassVar[dict[str, str]] = {}
 
     #: Filename prefix used by :meth:`save_tiff`; override per driver.
     image_prefix: str = "image"
@@ -469,6 +472,10 @@ class Camera(ABC):
                 f"{type(self).__name__}: only {len(images)} of frames {start}-"
                 f"{stop - 1} were still in the buffer; arm() with more buffer_frames"
             )
+        if times is not None and len(times) != len(images):
+            raise RuntimeError(
+                f"{type(self).__name__}: {len(times)} camera times for {len(images)} frames"
+            )
         return images, times
 
     def settings(self) -> dict:
@@ -574,8 +581,11 @@ class Camera(ABC):
         return {}
 
     def _apply_control(self, control: Control, value: Any) -> None:
-        """Set one control through its setter; drivers override where that does not fit."""
-        setter = getattr(self, _SETTER_NAMES.get(control.name, f"set_{control.name}"))
+        """Set one control through its setter, named in :attr:`CONTROL_SETTERS` or else the shared map."""
+        name = self.CONTROL_SETTERS.get(control.name) or _SETTER_NAMES.get(
+            control.name, f"set_{control.name}"
+        )
+        setter = getattr(self, name)
         setter(bool(value) if control.kind == "bool" else value)
 
     def frame_geometry(self) -> tuple[int, tuple[int, int]]:
@@ -840,4 +850,7 @@ def simulated_camera_for(
         real_cls, "image_prefix", SimulatedCamera.image_prefix
     )
     _Simulated.CONTROLS = getattr(real_cls, "CONTROLS", SimulatedCamera.CONTROLS)
+    _Simulated.CONTROL_SETTERS = getattr(
+        real_cls, "CONTROL_SETTERS", SimulatedCamera.CONTROL_SETTERS
+    )
     return _Simulated

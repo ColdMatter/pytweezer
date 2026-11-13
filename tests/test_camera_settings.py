@@ -1,3 +1,5 @@
+import contextlib
+
 import pytest
 
 from pytweezer.drivers.camera_catalogue import camera_names
@@ -127,6 +129,9 @@ def test_driver_specific_choices_reach_the_camera(camera, experiment, arguments,
 class RecordingDCAM:
     def __init__(self):
         self.calls = []
+
+    def pausing_acquisition(self, **kwargs):
+        return contextlib.nullcontext()
 
     def __getattr__(self, name):
         def call(*args, **kwargs):
