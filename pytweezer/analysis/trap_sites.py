@@ -1,7 +1,7 @@
 """Place a tweezer array's sites on a camera image by fitting its geometry.
 
 The geometry is each site's ``(x_um, y_um)`` in the focal plane, as the
-rearrangement rig reports it. The camera sees it mirrored in x, so a site lands
+SLM reports it. The camera sees it mirrored in x, so a site lands
 on the sensor at::
 
     x_img = -s * x' + x0

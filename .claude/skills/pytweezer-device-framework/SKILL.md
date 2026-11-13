@@ -85,6 +85,17 @@ references to them. The point is latency: a camera→DAC feedback step through a
 coordinator is an attribute lookup, not an RPC round trip, and no frame is ever
 serialized — only the scalar summary crosses the wire.
 
+**Nothing in config uses a composite or a coordinator at present.** The last
+one, the `Rb Rearrangement Rig` (camera + SLM, coordinator
+`pytweezer/coordinators/rearrangement.py`, plus the unconfigured
+`transport.py`), was removed in
+[PR #62](https://github.com/ColdMatter/pytweezer/pull/62); recover the old code
+from that PR's parent commit. Its logic now lives in
+`pytweezer/helper_scripts/rearrangement.py` (`Rearrangement`, built around an
+SLM and optionally a camera and phasemask generator), which `Rb SLM` builds
+around itself to serve `make_array`/`get_array`. Wrapping that class in a
+`Coordinator` that passes it its roles would make it a coordinator again.
+
 Sub-devices stay first-class. They are addressed exactly like top-level devices
 (`get_device("Rb Feedback Cam")`), and the composite's own name resolves to its
 coordinator. A composite with no coordinator has nothing to serve under its own
@@ -124,9 +135,8 @@ name, so `get_device` on it raises `KeyError` naming its sub-devices.
 Subclass `Coordinator` (`pytweezer/coordinators/base.py`), reach backends through
 `self.require_role(<role>)`, and point the composite's `"coordinator"` key at the
 class. `build_spec` constructs it as `cls(roles, conf)`; override `shutdown()`
-to release the backends before they are torn down.
-`pytweezer/coordinators/rearrangement.py` is the real worked example (the
-`Rb Rearrangement Rig`); `transport.py` is an unconfigured variant of it.
+to release the backends before they are torn down. There is no live example;
+the removed rearrangement coordinator (PR #62, above) was the worked one.
 
 Three constraints, all consequences of how sipyco serves targets:
 
@@ -143,10 +153,10 @@ Three constraints, all consequences of how sipyco serves targets:
 
 Sub-devices stay reachable on their own, so other clients can change the
 hardware behind the coordinator's back. State a coordinator reports about its
-backends should be checked against them, not just remembered: the
-rearrangement rig owns the tweezer array (`make_array`), and `get_array()`
-returns it only while `slm.last_mask` is still the mask it wrote, `None` once
-anything else has written the SLM. Gate GPU-only methods on a CUDA device
+backends should be checked against them, not just remembered: `Rearrangement`
+owns the tweezer array (`make_array`), and `get_array()` returns it only while
+`slm.last_mask` is still the mask it wrote, `None` once anything else has
+written the SLM. Gate GPU-only methods on a CUDA device
 count, not on `import cupy` succeeding — cupy imports on machines with no
 usable driver.
 

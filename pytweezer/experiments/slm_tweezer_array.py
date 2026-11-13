@@ -1,6 +1,6 @@
-"""Put a rectangular tweezer array on the Rb SLM through the rearrangement rig, and show it.
+"""Put a rectangular tweezer array on the Rb SLM, and show it.
 
-The rig computes the mask, writes it to the SLM and remembers the array, so
+The SLM computes the mask, displays it and remembers the array, so
 analyses and later experiments can ask it what is there. Each point broadcasts
 on the image hub, for the SLM Monitor applet: the requested trap intensities
 (``slm_target``), the simulated intensity in the trap plane
@@ -22,7 +22,7 @@ from pytweezer.servers import ImageClient
 
 if TYPE_CHECKING:
     # Imports cupy where it is installed, so only for the annotation.
-    from pytweezer.coordinators.rearrangement import Rearrangement
+    from pytweezer.drivers.slm import SLM
 
 
 def render_target(
@@ -67,7 +67,7 @@ class SlmTweezerArray(Experiment):
     ``generator_settings`` and ``envelope``.
     """
 
-    rig: Rearrangement = Device("Rb Rearrangement Rig")
+    slm: SLM = Device("Rb SLM")
 
     rows = Integer(15, min=1, group="Array")
     columns = Integer(15, min=1, group="Array")
@@ -121,7 +121,7 @@ class SlmTweezerArray(Experiment):
 
     def run_point(self) -> None:
         blaze_um = (self.blaze_x * 1e6, self.blaze_y * 1e6)
-        hologram = self.rig.make_array(
+        hologram = self.slm.make_array(
             rows=self.rows,
             columns=self.columns,
             spacing_um=self.spacing * 1e6,

@@ -1,5 +1,13 @@
 # Rearrangement rig: SLM device + rearrangement coordinator
 
+> **Superseded.** The `Rb Rearrangement Rig` composite and its coordinator were
+> removed in [PR #62](https://github.com/ColdMatter/pytweezer/pull/62); recover the
+> old code from that PR's parent commit. `Rb HamCam` and `Rb SLM` are now
+> separate devices, and `Rearrangement` lives in
+> `pytweezer/helper_scripts/rearrangement.py`, built around an SLM (and optionally a
+> camera and phasemask generator). `Rb SLM` builds one around itself and serves
+> `make_array`/`get_array`. The pipeline and timing notes below still apply.
+
 How the atom-rearrangement system maps onto the composite-device framework
 (`docs/notes/device_framework.md`), and a proposed simplification of the ARM pipeline to
 do later.

@@ -454,7 +454,7 @@ def loading_analysis(monkeypatch, saved, **properties):
     from pytweezer.analysis.tweezer_loading import LoadingStatistics, TweezerLoading
 
     monkeypatch.setattr(tweezer_loading, "get_saved_parameters", lambda: saved)
-    analysis = build(TweezerLoading, {"rig": ""} | properties)
+    analysis = build(TweezerLoading, {"slm": ""} | properties)
     analysis.statistics = LoadingStatistics()
     return analysis
 
@@ -520,7 +520,7 @@ def test_tweezer_loading_restarts_the_window_when_the_frame_size_changes():
     assert len(statistics.frames) == 1
 
 
-class ArrayRig:
+class ArraySLM:
     def __init__(self, array):
         self.array = array
 
@@ -528,17 +528,17 @@ class ArrayRig:
         return self.array
 
 
-def unreachable_rig(name, timeout):
+def unreachable_slm(name, timeout):
     raise ConnectionRefusedError(name)
 
 
 @pytest.mark.parametrize(
-    "get_rig, match",
+    "get_slm, match",
     [
-        (lambda name, timeout: ArrayRig(None), True),
-        (unreachable_rig, True),
+        (lambda name, timeout: ArraySLM(None), True),
+        (unreachable_slm, True),
         (
-            lambda name, timeout: ArrayRig(
+            lambda name, timeout: ArraySLM(
                 {
                     "x_um": saved_sites()["trap_geometry"][:, 0],
                     "y_um": saved_sites()["trap_geometry"][:, 1],
@@ -547,7 +547,7 @@ def unreachable_rig(name, timeout):
             True,
         ),
         (
-            lambda name, timeout: ArrayRig(
+            lambda name, timeout: ArraySLM(
                 {
                     "x_um": saved_sites()["trap_geometry"][:, 0] + 1.0,
                     "y_um": saved_sites()["trap_geometry"][:, 1],
@@ -556,15 +556,15 @@ def unreachable_rig(name, timeout):
             False,
         ),
     ],
-    ids=["rig does not know", "rig unreachable", "same array", "another array"],
+    ids=["SLM does not know", "SLM unreachable", "same array", "another array"],
 )
-def test_tweezer_loading_says_whether_the_sites_fit_the_array_on_the_rig(
-    monkeypatch, get_rig, match
+def test_tweezer_loading_says_whether_the_sites_fit_the_array_on_the_slm(
+    monkeypatch, get_slm, match
 ):
     from pytweezer.analysis import tweezer_loading
 
-    monkeypatch.setattr(tweezer_loading, "get_device", get_rig)
-    analysis = loading_analysis(monkeypatch, saved_sites(), rig="Rb Rearrangement Rig")
+    monkeypatch.setattr(tweezer_loading, "get_device", get_slm)
+    analysis = loading_analysis(monkeypatch, saved_sites(), slm="Rb SLM")
 
     for shot in range(5):
         analysis.process({"index": 0, **ROI_ORIGIN}, patterned_frame(shot))
