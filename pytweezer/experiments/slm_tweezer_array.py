@@ -11,6 +11,7 @@ rows (``slm_top_down``), and the 8-bit mask on the SLM (``slm_phasemask``).
 from __future__ import annotations
 
 import math
+import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -108,6 +109,8 @@ class SlmTweezerArray(Experiment):
         tooltip="spread of the initial trap phases",
     )
 
+    sleep_time = Number(unit="s")
+
     def prepare(self) -> None:
         saved = get_saved_parameters()
         missing = sorted(set(array_hologram.SAVED_KEYS) - set(saved))
@@ -141,6 +144,7 @@ class SlmTweezerArray(Experiment):
         self.record("phasemask", hologram["mask"])
         for name in ("uniformity", "min_max_ratio", "mse"):
             self.record(name, hologram[name])
+        time.sleep(self.sleep_time)
 
     def broadcast(self, hologram: dict, blaze_um: tuple[float, float]) -> None:
         grid_x_um = np.asarray(hologram["grid_x_um"]) + blaze_um[0]
