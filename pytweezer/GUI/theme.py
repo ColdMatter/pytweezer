@@ -812,6 +812,13 @@ QLabel#CameraTemperature[state="alarm"] {
     color: #e74c3c;
     font-weight: 600;
 }
+QFrame#CameraStatusBar {
+    background-color: #141519;
+    border-top: 1px solid #2c2d35;
+}
+QLabel#CameraReadout {
+    font-family: "Cascadia Mono", "DejaVu Sans Mono", monospace;
+}
 
 QScrollBar:horizontal {
     background: #1b1c22;

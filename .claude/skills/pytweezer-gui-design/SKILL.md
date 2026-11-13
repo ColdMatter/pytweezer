@@ -116,6 +116,7 @@ Available hooks:
 | `QGroupBox#EditorGroup`, `QToolButton#ScanToggle` | grouped form sections, checkable toggles |
 | `QToolButton#PipelineChip`, `#SectionToggle` | filter chips (one checked), collapsible section headers |
 | `QFrame#ChannelCell[state="high"/"watching"/"held"]`, `QLabel#CardBanner` | NI Cards channel cells, warning banner |
+| `QFrame#CameraSidebar`, `#CameraSection`, `#CameraPill[state=…]`, `QLabel#CameraTemperature[state="alarm"]`, `QFrame#CameraStatusBar`, `QLabel#CameraReadout` | Camera applet's settings sidebar, status pill, sensor temperature, readout under the image |
 
 Palette (extend with these; don't introduce near-duplicates):
 
