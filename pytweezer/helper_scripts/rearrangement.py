@@ -353,9 +353,17 @@ class Rearrangement:
         detector=None,
         num_images: int = 1,
     ) -> None:
+        """Configure the camera and precompute the initial array.
 
+        A camera left live (by the Camera applet, say) is stopped, because its
+        broadcast thread would read and send the occupancy frame during the timed
+        span, and race the runs' own restarts and reads of the acquisition. Nothing restarts it afterwards;
+        start Live again from the applet once the runs are over.
+        """
         self._require_gpu()
         self._require_camera()
+        if self.camera.is_live():
+            self.camera.stop_live()
         self.camera.timeout = 2
 
         # cp.asarray takes host or device arrays: a no-op for the cupy terms that
@@ -433,6 +441,17 @@ class Rearrangement:
         # else:
         pixel_sums = an.sum_pixel_values(img, grid_positions, window_size=window_size)
         return pixel_sums > threshold
+
+    def _broadcast_occupancy_frame(self, image):
+        """Show the occupancy frame on the camera's stream, once the follow-up acquisition is armed.
+
+        The frame is gone from the camera when that acquisition starts, so this
+        sends it from here; over RPC that ships it back to the camera server.
+        """
+        try:
+            self.camera.broadcast_image(image, {"timestamp": time.time(), "index": 0})
+        except Exception as error:
+            print(f"Occupancy frame not broadcast: {error!r}")
 
     def _play_sequence_pipelined(self, frames):
         """Display each frame on the SLM as it is produced."""
@@ -552,7 +571,8 @@ class Rearrangement:
         # 4. Follow up images image.
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(s["num_images"])
+            self._broadcast_occupancy_frame(img_array0)
+            img_array1 = self.camera.acquire_n_frames(s["num_images"], broadcast=True)
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros((s["num_images"], *img_array0.shape))
@@ -735,7 +755,8 @@ class Rearrangement:
         # 5. Follow up images
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(s["num_images"])
+            self._broadcast_occupancy_frame(img_array0)
+            img_array1 = self.camera.acquire_n_frames(s["num_images"], broadcast=True)
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros((s["num_images"], *img_array0.shape))
@@ -872,7 +893,8 @@ class Rearrangement:
         # 5. Reset image.
         try:
             self.camera.start_acquisition()
-            img_array1 = self.camera.acquire_n_frames(1)[0]
+            self._broadcast_occupancy_frame(img_array0)
+            img_array1 = self.camera.acquire_n_frames(1, broadcast=True)[0]
         except Exception:
             print("Reset-image acquisition failed; returning zeros.")
             img_array1 = np.zeros_like(img_array0)
