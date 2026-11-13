@@ -59,7 +59,7 @@ class _FakeDCAMCamera:
 @pytest.fixture
 def fake_dcam(monkeypatch):
     monkeypatch.setattr(hamamatsu, "DCAMCamera", _FakeDCAMCamera)
-    monkeypatch.setattr(hamamatsu.libctl, "temp_open", contextlib.nullcontext)
+    monkeypatch.setattr(hamamatsu, "_dcam_session", contextlib.nullcontext)
     monkeypatch.setattr(hamamatsu, "_probe_dcam_library", lambda: None)
 
 
@@ -83,6 +83,6 @@ def test_open_reports_a_crashing_dcam_library_instead_of_dying(monkeypatch):
             args, -1073740286, stdout="", stderr=""
         ),
     )
-    monkeypatch.setattr(hamamatsu.libctl, "temp_open", pytest.fail)
+    monkeypatch.setattr(hamamatsu, "_dcam_session", pytest.fail)
     with pytest.raises(RuntimeError, match="0xc0000602"):
         hamamatsu.open_dcam_camera("000407", "C9100")
