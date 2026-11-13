@@ -3,6 +3,7 @@ from pytweezer.drivers.camera_base import (
     simulated_camera_for,
 )
 from pytweezer.drivers.hamamatsu import open_dcam_camera, set_dcam_exposure_mode
+from pytweezer.drivers.temperature_monitor import TemperatureMonitor
 
 
 class ORCACamera(Camera):
@@ -19,6 +20,9 @@ class ORCACamera(Camera):
         external_exposure: Start in :meth:`set_external_exposure_mode`; otherwise
             the camera keeps DCAM's own trigger mode (internal after power-up).
         object_pixel_m: Metres per unbinned sensor pixel at the atoms.
+        temperature_measurement: Database measurement the sensor temperature is
+            written to every ``temperature_interval_s``; None to not monitor it.
+        max_temperature_c: Sensor temperature above which the monitor warns.
     """
 
     image_prefix = "ORCA"
@@ -32,8 +36,12 @@ class ORCACamera(Camera):
         serial_number: str | None = None,
         external_exposure: bool = False,
         object_pixel_m: float | None = None,
+        temperature_measurement: str | None = None,
+        temperature_interval_s: float = 30.0,
+        max_temperature_c: float | None = None,
     ):
         self.serial_number = serial_number
+        self._temperature_monitor = None
         super().__init__(
             image_dir=image_dir,
             timeout=timeout,
@@ -42,6 +50,13 @@ class ORCACamera(Camera):
         )
         if external_exposure:
             self.set_external_exposure_mode()
+        if temperature_measurement is not None:
+            self._temperature_monitor = TemperatureMonitor(
+                self.get_temperature,
+                temperature_measurement,
+                temperature_interval_s,
+                max_temperature_c,
+            )
 
     # ------------------------------------------------------------------ #
     # Camera hooks
@@ -56,6 +71,8 @@ class ORCACamera(Camera):
         self._backend = camera
 
     def _disconnect(self) -> None:
+        if self._temperature_monitor is not None:
+            self._temperature_monitor.stop()
         if self._backend is not None:
             self._backend.close()
 
@@ -118,6 +135,11 @@ class ORCACamera(Camera):
 
     def set_external_exposure_mode(self):
         self.set_exposure_mode("level")
+
+    def get_temperature(self) -> float:
+        """Sensor temperature in °C."""
+        with self._lock:
+            return float(self._backend.get_attribute_value("sensor_temperature"))
 
     def trigger(self):
         """Send a software trigger to the camera."""
