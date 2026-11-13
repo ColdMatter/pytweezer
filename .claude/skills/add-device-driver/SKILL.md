@@ -97,9 +97,12 @@ not `set_<name>` is named in `CONTROL_SETTERS`; do not override
 `_apply_control`, which the simulated twin would not inherit. A driver that can
 read each frame's camera-clock time overrides `_read_range_timed`; the live
 broadcast then adds it as `camera_timestamp`. `snap()` takes one frame from a
-stopped camera.
+stopped camera. A driver that watches the sensor temperature sets
+`self._temperature_monitor` to a `TemperatureMonitor`; `sensor_temperature()`
+then serves its last reading without touching the hardware or taking `_lock`.
 
-The Hamamatsu DCAM cameras (ImagEM X2, ORCA) subclass `HamamatsuCamera`
+The Thorlabs cameras are `thorcam.ThorCam`; `tweezermonitorcam.ThorCam` is it with
+another default serial number. The Hamamatsu DCAM cameras (ImagEM X2, ORCA) subclass `HamamatsuCamera`
 (`hamamatsu.py`), which holds everything they share: connecting, the common
 setters, the ROI and trigger controls, timestamps and the temperature monitor.
 A new one sets `model_prefix`, `image_prefix`, `default_timeout` and `CONTROLS`,

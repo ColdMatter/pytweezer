@@ -9,7 +9,7 @@ import numpy as np
 from pylablib.devices.DCAM import dcamapi4_lib
 from pylablib.devices.DCAM.DCAM import DCAMCamera, lib, libctl
 
-from pytweezer.drivers.camera_base import Camera, Control
+from pytweezer.drivers.camera_base import Camera, Control, roi_controls
 from pytweezer.drivers.temperature_monitor import TemperatureMonitor
 
 PROBE_TIMEOUT_S = 60
@@ -102,24 +102,12 @@ def dcam_trigger_controls(camera: DCAMCamera) -> dict:
     }
 
 
-def dcam_roi_controls(roi: tuple) -> dict:
-    """The ROI controls (and binning) for a pylablib ROI ``(hstart, hend, vstart, vend, hbin, vbin)``."""
-    hstart, hend, vstart, vend, hbin, _ = roi
-    return {
-        "roi_x0": int(hstart),
-        "roi_width": int(hend - hstart),
-        "roi_y0": int(vstart),
-        "roi_height": int(vend - vstart),
-        "binning": int(hbin),
-    }
-
-
 def read_dcam_controls(camera: DCAMCamera) -> dict:
     """Every control the ImagEM and the ORCA share, read from ``camera``."""
     return {
         "exposure": float(camera.get_exposure()),
         **dcam_trigger_controls(camera),
-        **dcam_roi_controls(camera.get_roi()),
+        **roi_controls(camera.get_roi()),
     }
 
 
@@ -278,7 +266,6 @@ class HamamatsuCamera(Camera):
         max_temperature_c: float | None = None,
     ):
         self.serial_number = serial_number
-        self._temperature_monitor = None
         super().__init__(
             image_dir=image_dir,
             timeout=self.default_timeout if timeout is None else timeout,
@@ -344,14 +331,6 @@ class HamamatsuCamera(Camera):
                 hstart, hend, vstart, vend, int(binning), int(binning)
             )
             self._keep_roi(roi)
-
-    def _keep_roi(self, roi: tuple) -> tuple[int, int]:
-        """Keep the ROI pylablib returned and the origin and binning frames are read with."""
-        controls = dcam_roi_controls(roi)
-        self.roi_origin = (controls["roi_x0"], controls["roi_y0"])
-        self.binning = controls["binning"]
-        self._keep(**controls)
-        return self.roi_origin
 
     def set_trigger_source(self, source: str):
         with self._lock:

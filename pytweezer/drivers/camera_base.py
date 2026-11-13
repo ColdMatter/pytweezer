@@ -182,6 +182,18 @@ def gain(
     )
 
 
+def roi_controls(roi: tuple) -> dict:
+    """The ROI controls (and binning) for a pylablib ROI ``(hstart, hend, vstart, vend, hbin, vbin)``."""
+    hstart, hend, vstart, vend, hbin, _ = roi
+    return {
+        "roi_x0": int(hstart),
+        "roi_width": int(hend - hstart),
+        "roi_y0": int(vstart),
+        "roi_height": int(vend - vstart),
+        "binning": int(hbin),
+    }
+
+
 _SETTER_NAMES = {
     "exposure": "set_exposure_time",
     "trigger_source": "set_trigger_source",
@@ -213,6 +225,9 @@ class Camera(ABC):
     #: Setter method for a control whose setter is not the shared ``set_<name>``
     #: (see :data:`_SETTER_NAMES`), by control name; a driver adds only its own.
     CONTROL_SETTERS: ClassVar[dict[str, str]] = {}
+    #: The :class:`~pytweezer.drivers.temperature_monitor.TemperatureMonitor` a driver
+    #: starts, if it watches the sensor temperature; :meth:`sensor_temperature` serves it.
+    _temperature_monitor = None
 
     #: Filename prefix used by :meth:`save_tiff`; override per driver.
     image_prefix: str = "image"
@@ -573,6 +588,14 @@ class Camera(ABC):
         """Record the values the camera took, in SI units, for :meth:`controls`."""
         self._kept.update(values)
 
+    def _keep_roi(self, roi: tuple) -> tuple[int, int]:
+        """Keep the pylablib ROI a setter got back, with the origin and binning frames are read with."""
+        controls = roi_controls(roi)
+        self.roi_origin = (controls["roi_x0"], controls["roi_y0"])
+        self.binning = controls["binning"]
+        self._keep(**controls)
+        return self.roi_origin
+
     def _read_control_values(self) -> dict[str, Any]:
         """Every control's value as the camera has it now, keyed by control name.
 
@@ -587,6 +610,21 @@ class Camera(ABC):
         )
         setter = getattr(self, name)
         setter(bool(value) if control.kind == "bool" else value)
+
+    def sensor_temperature(self) -> dict | None:
+        """The sensor temperature the camera's monitor last read, without touching the hardware.
+
+        Returns:
+            ``{"celsius": ..., "time": ..., "max_celsius": ...}``, ``time`` being when it
+            was read (unix seconds) and ``max_celsius`` the monitor's limit (``None`` if
+            it has none); ``None`` if the camera has no monitor or it has not read yet.
+        """
+        monitor = self._temperature_monitor
+        reading = None if monitor is None else monitor.last_reading()
+        if reading is None:
+            return None
+        celsius, read_at = reading
+        return {"celsius": celsius, "time": read_at, "max_celsius": monitor.max_c}
 
     def frame_geometry(self) -> tuple[int, tuple[int, int]]:
         """``(binning, (x0, y0))`` the camera reads frames with now: :attr:`binning` and :attr:`roi_origin`."""
