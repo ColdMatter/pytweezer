@@ -10,28 +10,25 @@ from pytweezer.experiments import camera_settings as cs
 
 
 class RecordingCamera:
-    def __init__(self, live=False):
-        self.live = live
-        self.calls = []
+    def __init__(self):
+        self.applied = []
 
     def close_rpc(self):
         pass
 
-    def is_live(self):
-        return self.live
-
-    def set_roi(self, *roi):
-        self.calls.append(("set_roi", *roi))
-        return roi[0] + 2, roi[2]
+    def apply_controls(self, values):
+        self.applied.append(values)
+        origin = {
+            "roi_x0": values.get("roi_x0", 0) + 2,
+            "roi_y0": values.get("roi_y0", 0),
+        }
+        return [
+            {"name": name, "value": origin.get(name, value)}
+            for name, value in values.items()
+        ] + [{"name": name, "value": value} for name, value in origin.items()]
 
     def settings(self):
         return {"exposure_s": 0.01}
-
-    def __getattr__(self, name):
-        def call(*args):
-            self.calls.append((name, *args))
-
-        return call
 
 
 @pytest.fixture
@@ -41,6 +38,16 @@ def camera(monkeypatch):
         "pytweezer.experiment.experiment._get_device", lambda name, timeout: camera
     )
     return camera
+
+
+@pytest.fixture
+def stored(monkeypatch):
+    stored = []
+    monkeypatch.setattr(
+        "pytweezer.experiment.camera_settings.store_camera_settings",
+        lambda *call: stored.append(call),
+    )
+    return stored
 
 
 def run(experiment, **arguments):
@@ -55,15 +62,14 @@ def test_every_settings_experiment_names_a_configured_camera():
     assert set(cameras) <= set(camera_names())
 
 
-def test_a_form_left_alone_changes_nothing(camera):
+def test_a_form_left_alone_changes_nothing(camera, stored):
     measurement = run(cs.RbHamCamSettings)
-    assert camera.calls == [("stop_live",)]
+    assert camera.applied == [{}]
+    assert stored == []
     assert measurement.results["camera_settings"][0] == {"exposure_s": 0.01}
 
 
-@pytest.mark.parametrize("live", [True, False])
-def test_ticked_settings_are_sent_in_order_while_stopped(camera, live):
-    camera.live = live
+def test_ticked_settings_are_sent_together_and_stored(camera, stored):
     measurement = run(
         cs.RbThorCamSettings,
         set_exposure=True,
@@ -77,33 +83,34 @@ def test_ticked_settings_are_sent_in_order_while_stopped(camera, live):
         roi_width=64,
         roi_y0=4,
         roi_height=32,
-        trigger_mode="bulb",
+        trigger_source="bulb",
     )
-    assert camera.calls == [
-        ("stop_live",),
-        # binning can reset the ROI, so it goes first
-        ("set_binning", 4),
-        ("set_roi", 8, 64, 4, 32),
-        ("set_exposure_time", 2e-3),
-        ("set_trigger_source", "bulb"),
-        ("set_gain", 6.0),
-        *([("start_live",)] if live else []),
-    ]
+    sent = {
+        "binning": 4,
+        "roi_x0": 8,
+        "roi_width": 64,
+        "roi_y0": 4,
+        "roi_height": 32,
+        "exposure": 2e-3,
+        "trigger_source": "bulb",
+        "gain": 6.0,
+    }
+    assert camera.applied == [sent]
     assert list(measurement.results["roi_origin"][0]) == [10, 4]
+    [(name, values, reason)] = stored
+    assert name == "Rb ThorCam"
+    assert values == {**sent, "roi_x0": 10}
+    assert reason.startswith("RbThorCamSettings, rid ")
 
 
 @pytest.mark.parametrize(
-    ("experiment", "arguments", "calls"),
+    ("experiment", "arguments", "values"),
     [
-        (
-            cs.RbHamCamSettings,
-            {"exposure_mode": "edge"},
-            [("set_exposure_mode", "edge")],
-        ),
+        (cs.RbHamCamSettings, {"exposure_mode": "edge"}, {"exposure_mode": "edge"}),
         (
             cs.RbHamCamSettings,
             {"em_gain": "on", "direct_em_gain": "off"},
-            [("enable_em_gain", True), ("enable_direct_em_gain", False)],
+            {"em_gain": True, "direct_em_gain": False},
         ),
         (
             cs.CaFOrcaSettings,
@@ -112,18 +119,20 @@ def test_ticked_settings_are_sent_in_order_while_stopped(camera, live):
                 "set_readout_speed": True,
                 "readout_speed": 2,
             },
-            [("set_exposure_mode", "internal"), ("set_readout_speed", 2)],
+            {"exposure_mode": "internal", "readout_speed": 2},
         ),
         (
             cs.CaFThorCamSettings,
             {"trigger_polarity": "fall"},
-            [("set_trigger_polarity", "fall")],
+            {"trigger_polarity": "fall"},
         ),
     ],
 )
-def test_driver_specific_choices_reach_the_camera(camera, experiment, arguments, calls):
+def test_driver_specific_choices_reach_the_camera(
+    camera, stored, experiment, arguments, values
+):
     run(experiment, **arguments)
-    assert camera.calls == [("stop_live",), *calls]
+    assert camera.applied == [values]
 
 
 class RecordingDCAM:

@@ -90,10 +90,11 @@ Rules that matter:
 - An experiment that chooses its own points overrides
   `planned_points(scan)`, raising `ValueError` for a scan it can't honour.
 - Each camera has a settings experiment (`experiments/camera_settings.py`,
-  bases `CameraSettings`/`ImagEMSettings`/`ORCASettings`/`ThorCamSettings`
-  in `experiment/camera_settings.py`) that sends only the settings ticked in
-  the form and leaves them; a new camera in CONFIG needs one
-  (`tests/test_camera_settings.py` checks).
+  base `CameraSettings` in `experiment/camera_settings.py`) that sends only
+  the settings ticked in the form and leaves them, then saves them as saved
+  parameters (`<camera>_<control>`, via `store_camera_settings`). Its form is
+  built from the declared camera's driver `CONTROLS`; `control_defaults`
+  overrides a default. Add one per camera that needs it.
 
 ## MOTMaster sequences
 
