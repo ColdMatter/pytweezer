@@ -368,9 +368,10 @@ what was built or why.
   axes; the example to copy for multiple linked plots in one window.
 - `viewers/camera_applet.py` — the Image Monitor with a camera's settings
   (`viewers/camera_sidebar.py`) inserted left of the image through
-  `ImageDisplay.panel_layout`; it calls the camera over RPC on one worker
-  thread (`CameraLink`) and follows `ExperimentFeed` to go read-only while a
-  task holds the camera.
+  `ImageDisplay.panel_layout`, and a readout under the image through
+  `image_layout`; it calls the camera over RPC on one worker thread
+  (`CameraLink`) and follows `ExperimentFeed` to go read-only while a task
+  holds the camera, or may (until the manager's state has arrived).
 
 `viewers/archive/` holds retired viewers — do not use them as models, though
 `zmq_ROI` is still imported from there by the image viewers.

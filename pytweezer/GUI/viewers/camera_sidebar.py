@@ -35,7 +35,8 @@ from PyQt6.QtWidgets import (
 from pytweezer.GUI.components import set_state
 from pytweezer.GUI.theme import state_style
 
-STATES = ("idle", "live", "held", "unknown_hold", "unavailable")
+STATES = ("idle", "live", "held", "checking", "unknown_hold", "unavailable")
+LOCKED_STATES = ("held", "checking", "unavailable")
 
 # The controls every camera driver may share. A section holding any other control
 # is driver-specific and carries the camera's model.
@@ -302,7 +303,7 @@ class _Section(QFrame):
 class CameraSidebar(QFrame):
     """Camera picker, live/snap buttons, status and the camera's settings.
 
-    Snap is enabled when the camera is not live, held or unavailable and its
+    Snap is enabled when the camera is not live, held, checking or unavailable and its
     ``trigger_source`` control reads ``"int"``; a camera with no such control
     keeps Snap enabled. Full sensor is enabled only when the ``roi_width`` and
     ``roi_height`` controls give a ``maximum``.
@@ -673,8 +674,9 @@ class CameraSidebar(QFrame):
 
         Args:
             state: ``"idle"``, ``"live"``, ``"held"`` (a task has the camera: every
-                control and Live/Snap are disabled), ``"unknown_hold"`` (cannot tell
-                whether a task has it) or ``"unavailable"``.
+                control and Live/Snap are disabled), ``"checking"`` (not yet known
+                whether a task has it: locked as for ``"held"``), ``"unknown_hold"``
+                (cannot tell whether a task has it; editable) or ``"unavailable"``.
             detail: A second line in the status pill; for ``"held"`` it is instead
                 the experiment's name in the pill's title.
         """
@@ -700,6 +702,8 @@ class CameraSidebar(QFrame):
         elif state == "held":
             title = f"Held by {detail}" if detail else "Held by an experiment"
             second = "Settings are read-only until it finishes"
+        elif state == "checking":
+            title = "Checking for running experiments"
         elif state == "unknown_hold":
             title = "Hold unknown"
             second = detail or "Cannot tell whether an experiment is using the camera"
@@ -715,7 +719,7 @@ class CameraSidebar(QFrame):
         set_state(self.live_button, state)
 
     def _refresh_enabled(self) -> None:
-        locked = self._state in ("held", "unavailable")
+        locked = self._state in LOCKED_STATES
         for name, field in self._fields.items():
             field.set_enabled(not locked and name not in self._busy, name in self._busy)
         for widget in self._roi_widgets:
@@ -752,6 +756,8 @@ class CameraSidebar(QFrame):
     def _snap_blocked_reason(self) -> str:
         if self._state == "held":
             return "An experiment has the camera"
+        if self._state == "checking":
+            return "Checking whether an experiment has the camera"
         if self._state == "unavailable":
             return "The camera is unavailable"
         if self._state == "live":
