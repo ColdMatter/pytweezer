@@ -40,20 +40,31 @@ UNCHANGED = "unchanged"
 _ROI_NAMES = {control.name for control in ROI}
 
 
+def _tick_name(control: Control) -> str:
+    """The name of the Bool that says ``control`` is to be sent; the four ROI controls share one."""
+    return "set_roi" if control.name in _ROI_NAMES else f"set_{control.name}"
+
+
 def _form_entries(control: Control, default: Any) -> dict[str, Argument]:
     """The arguments that set ``control``: a tick box and a value, or one choice."""
     if control.kind == "choice":
         chosen = UNCHANGED if default is None else default
         return {
             control.name: Choice(
-                [UNCHANGED, *control.choices], chosen, group=control.section
+                [UNCHANGED, *control.choices],
+                chosen,
+                group=control.section,
+                tooltip=control.label,
             )
         }
     if control.kind == "bool":
         chosen = UNCHANGED if default is None else ("on" if default else "off")
         return {
             control.name: Choice(
-                [UNCHANGED, "on", "off"], chosen, group=control.section
+                [UNCHANGED, "on", "off"],
+                chosen,
+                group=control.section,
+                tooltip=control.label,
             )
         }
     limits = {"min": control.minimum, "max": control.maximum}
@@ -64,14 +75,19 @@ def _form_entries(control: Control, default: Any) -> dict[str, Argument]:
             int(value),
             unit=control.unit,
             group=group,
+            tooltip=control.label,
             **{k: None if v is None else int(v) for k, v in limits.items()},
         )
     else:
         argument = Number(
-            value, unit=control.unit, scale=control.scale, group=group, **limits
+            value,
+            unit=control.unit,
+            scale=control.scale,
+            group=group,
+            tooltip=control.label,
+            **limits,
         )
-    tick = "set_roi" if control.name in _ROI_NAMES else f"set_{control.name}"
-    return {tick: Bool(False, group=group), control.name: argument}
+    return {_tick_name(control): Bool(False, group=group), control.name: argument}
 
 
 class CameraSettings(Experiment):
@@ -97,7 +113,16 @@ class CameraSettings(Experiment):
         device = vars(cls).get("camera")
         if not isinstance(device, Device):
             return
-        cls.camera_controls = camera_driver(device.device_name).CONTROLS
+        try:
+            cls.camera_controls = camera_driver(device.device_name).CONTROLS
+        except Exception:
+            logger.warning(
+                "%s has no form: cannot load the driver of %r",
+                cls.__name__,
+                device.device_name,
+                exc_info=True,
+            )
+            return
         for control in cls.camera_controls:
             entries = _form_entries(control, cls.control_defaults.get(control.name))
             for name, argument in entries.items():
@@ -117,8 +142,7 @@ class CameraSettings(Experiment):
                 chosen = getattr(self, name) != UNCHANGED
                 value = getattr(self, name) == "on"
             else:
-                tick = "set_roi" if name in _ROI_NAMES else f"set_{name}"
-                chosen = getattr(self, tick)
+                chosen = getattr(self, _tick_name(control))
                 value = getattr(self, name)
             if chosen:
                 values[name] = value
