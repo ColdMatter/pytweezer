@@ -536,18 +536,25 @@ class CameraSidebar(QFrame):
         return field
 
     def _field_edited(self, name: str, value: Any) -> None:
-        if name in ROI_CONTROLS and self._preset_picker is not None:
+        if name in ROI_CONTROLS:
+            self._deselect_preset()
+        self.apply_requested.emit({name: value})
+
+    def _deselect_preset(self) -> None:
+        """Forget the chosen saved ROI once the ROI is changed some other way."""
+        if self._preset_picker is not None:
             self._preset_picker.setCurrentIndex(-1)
             self._refresh_enabled()
-        self.apply_requested.emit({name: value})
 
     # ---- ROI tools and presets ----------------------------------------
 
     def _add_roi_tools(self, section: _Section) -> None:
         from_drawn = QPushButton("From drawn ROI")
         from_drawn.setToolTip("Use the ROI drawn on the image as the camera's ROI")
+        from_drawn.clicked.connect(self._deselect_preset)
         from_drawn.clicked.connect(self.roi_from_drawn_requested)
         full = QPushButton("Full sensor")
+        full.clicked.connect(self._deselect_preset)
         full.clicked.connect(self.full_sensor_requested)
         row = section.grid.rowCount()
         buttons = QHBoxLayout()
