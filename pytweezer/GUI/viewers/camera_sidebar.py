@@ -9,6 +9,7 @@ unit.
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -214,7 +215,10 @@ class _Field(QObject):
             display = float(text)
         except ValueError:
             display = None
-        if display is None or (integer and not display.is_integer()):
+        if display is None or not math.isfinite(display):
+            self.show_error("Enter a whole number." if integer else "Enter a number.")
+            return
+        if integer and not display.is_integer():
             self.show_error("Enter a whole number." if integer else "Enter a number.")
             return
         value = float(f"{display * self.scale:.12g}")
@@ -298,6 +302,10 @@ class _Section(QFrame):
 class CameraSidebar(QFrame):
     """Camera picker, live/snap buttons, status and the camera's settings.
 
+    Snap is enabled when the camera is not live, held or unavailable and its
+    ``trigger_source`` control reads ``"int"``; a camera with no such control
+    keeps Snap enabled.
+
     Signals:
         camera_chosen(str): the user picked a camera.
         apply_requested(dict): the user committed an edit; ``{control name: SI value}``.
@@ -306,7 +314,7 @@ class CameraSidebar(QFrame):
         roi_from_drawn_requested(): the user asked for the ROI drawn on the image.
         full_sensor_requested(): the user asked for the whole sensor.
         preset_chosen(str): the user picked a saved ROI; apply it.
-        preset_save_requested(str): the user named the current ROI to save.
+        preset_save_requested(str): the user named the camera's current ROI to save.
         preset_delete_requested(str): the user confirmed deleting a saved ROI.
     """
 
@@ -330,7 +338,7 @@ class CameraSidebar(QFrame):
         self._busy: set[str] = set()
         self._fields: dict[str, _Field] = {}
         self._collapsed: set[str] = set()
-        self._presets: list[str] = []
+        self._presets: dict[str, dict[str, int]] = {}
         self._temperature: dict | None = None
         self._unavailable: dict[str, str] = {}
         self._roi_widgets: list[QWidget] = []
@@ -409,27 +417,36 @@ class CameraSidebar(QFrame):
         chosen = self.current_camera()
         self._unavailable = dict(unavailable)
         self.picker.clear()
-        grey = QBrush(QColor(state_style("stopped")[0]))
         for name in names:
-            reason = unavailable.get(name)
-            self.picker.addItem(
-                name if reason is None else f"{name} (unavailable)", name
-            )
-            if reason is not None:
-                index = self.picker.count() - 1
-                self.picker.setItemData(index, reason, Qt.ItemDataRole.ToolTipRole)
-                self.picker.setItemData(index, grey, Qt.ItemDataRole.ForegroundRole)
+            self._add_camera(name, unavailable.get(name))
         if not names:
             self.picker.setPlaceholderText("No cameras")
         self.set_current_camera(chosen)
 
     def set_current_camera(self, name: str | None) -> None:
-        """Show ``name`` as the chosen camera, without emitting."""
-        index = self.picker.findData(name) if name is not None else -1
-        if index >= 0:
-            self.picker.setCurrentIndex(index)
-        elif self.picker.count():
-            self.picker.setCurrentIndex(0)
+        """Show ``name`` as the chosen camera, without emitting.
+
+        A camera that is not listed is added, marked unavailable, rather than
+        replaced by another one whose settings are not on screen.
+        """
+        if name is None:
+            if self.picker.count():
+                self.picker.setCurrentIndex(0)
+            return
+        if self.picker.findData(name) < 0:
+            self._add_camera(name, "It is not in the list of cameras")
+        self.picker.setCurrentIndex(self.picker.findData(name))
+
+    def _add_camera(self, name: str, unavailable_reason: str | None) -> None:
+        text = name if unavailable_reason is None else f"{name} (unavailable)"
+        self.picker.addItem(text, name)
+        if unavailable_reason is not None:
+            index = self.picker.count() - 1
+            grey = QBrush(QColor(state_style("stopped")[0]))
+            self.picker.setItemData(
+                index, unavailable_reason, Qt.ItemDataRole.ToolTipRole
+            )
+            self.picker.setItemData(index, grey, Qt.ItemDataRole.ForegroundRole)
 
     def current_camera(self) -> str | None:
         """The name of the camera shown in the picker, or ``None`` if there is none."""
@@ -477,8 +494,7 @@ class CameraSidebar(QFrame):
             empty.setProperty("role", "regionHint")
             self.content_layout.addWidget(empty)
         self.content_layout.addStretch(1)
-        self._sync_presets()
-        self._refresh_enabled()
+        self.set_presets(self._presets)
 
     def show_values(self, controls: list[dict]) -> None:
         """Update the fields from a control list without rebuilding.
@@ -489,13 +505,14 @@ class CameraSidebar(QFrame):
             field = self._fields.get(control["name"])
             if field is not None:
                 field.update_value(control["value"])
-        self._refresh_enabled()
+        self._sync_preset_selection()
 
     def show_error(self, name: str, message: str) -> None:
         """Mark ``name`` as refused: its field returns to the last accepted value and says why."""
         field = self._fields.get(name)
         if field is not None:
             field.show_error(message)
+        self._sync_preset_selection()
 
     def set_busy(self, names: set[str]) -> None:
         """Mark the controls with a call in flight; they cannot be edited meanwhile."""
@@ -509,7 +526,6 @@ class CameraSidebar(QFrame):
         names = {c["name"] for c in controls}
         paired = all(name in names for name in ROI_CONTROLS)
         by_name = {c["name"]: c for c in controls}
-        has_roi = any(name in names for name in ROI_CONTROLS)
         roi_done = False
         for control in controls:
             name = control["name"]
@@ -526,7 +542,7 @@ class CameraSidebar(QFrame):
                 continue
             field = self._make_field(control)
             section.add_row(field.label, [field], field.unit)
-        if has_roi:
+        if paired:
             self._add_roi_tools(section)
 
     def _make_field(self, control: dict, width: int | None = None) -> _Field:
@@ -536,25 +552,15 @@ class CameraSidebar(QFrame):
         return field
 
     def _field_edited(self, name: str, value: Any) -> None:
-        if name in ROI_CONTROLS:
-            self._deselect_preset()
         self.apply_requested.emit({name: value})
-
-    def _deselect_preset(self) -> None:
-        """Forget the chosen saved ROI once the ROI is changed some other way."""
-        if self._preset_picker is not None:
-            self._preset_picker.setCurrentIndex(-1)
-            self._refresh_enabled()
 
     # ---- ROI tools and presets ----------------------------------------
 
     def _add_roi_tools(self, section: _Section) -> None:
         from_drawn = QPushButton("From drawn ROI")
         from_drawn.setToolTip("Use the ROI drawn on the image as the camera's ROI")
-        from_drawn.clicked.connect(self._deselect_preset)
         from_drawn.clicked.connect(self.roi_from_drawn_requested)
         full = QPushButton("Full sensor")
-        full.clicked.connect(self._deselect_preset)
         full.clicked.connect(self.full_sensor_requested)
         row = section.grid.rowCount()
         buttons = QHBoxLayout()
@@ -587,22 +593,36 @@ class CameraSidebar(QFrame):
             delete,
         )
 
-    def set_presets(self, names: list[str]) -> None:
-        """List the saved ROIs; the one chosen stays chosen if it is still listed."""
-        self._presets = list(names)
-        self._sync_presets()
+    def set_presets(self, presets: dict[str, dict[str, int]]) -> None:
+        """List the saved ROIs, each as its ``roi_x0``, ``roi_width``, ``roi_y0``, ``roi_height``.
 
-    def _sync_presets(self) -> None:
+        The picker shows the saved ROI equal to the camera's current ROI, or its
+        placeholder if there is none.
+        """
+        self._presets = {name: dict(values) for name, values in presets.items()}
         picker = self._preset_picker
-        if picker is None:
-            return
-        chosen = picker.currentText()
-        picker.clear()
-        picker.addItems(self._presets)
-        picker.setPlaceholderText("Saved ROIs" if self._presets else "No saved ROIs")
-        picker.setCurrentIndex(
-            picker.findText(chosen) if chosen in self._presets else -1
-        )
+        if picker is not None:
+            picker.clear()
+            picker.addItems(list(self._presets))
+            picker.setPlaceholderText(
+                "Saved ROIs" if self._presets else "No saved ROIs"
+            )
+        self._sync_preset_selection()
+
+    def _matching_preset(self) -> str:
+        """The saved ROI equal to the camera's ROI as last shown, or ``""``."""
+        if not all(name in self._fields for name in ROI_CONTROLS):
+            return ""
+        current = {name: self._fields[name].value for name in ROI_CONTROLS}
+        for name, values in self._presets.items():
+            if all(values.get(key) == current[key] for key in ROI_CONTROLS):
+                return name
+        return ""
+
+    def _sync_preset_selection(self) -> None:
+        picker = self._preset_picker
+        if picker is not None and not picker.view().isVisible():
+            picker.setCurrentIndex(picker.findText(self._matching_preset()))
         self._refresh_enabled()
 
     def _preset_activated(self, index: int) -> None:
@@ -614,7 +634,7 @@ class CameraSidebar(QFrame):
             self,
             "Save ROI as",
             "Name for the camera's current ROI:",
-            text=self._preset_picker.currentText(),
+            text=self._matching_preset(),
         )
         name = name.strip()
         if not accepted or not name:
@@ -751,7 +771,7 @@ class CameraSidebar(QFrame):
         too_warm = limit is not None and celsius > limit
         text = f"Sensor {celsius_text(celsius)}"
         if too_warm:
-            text += f", above {celsius_text(limit)} limit"
+            text += f", over {celsius_text(limit)}"
         self.temperature_label.setText(f"{text} · {age}")
         limit_text = (
             f"Limit {celsius_text(limit)}" if limit is not None else "No limit set"
