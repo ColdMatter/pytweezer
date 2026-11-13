@@ -325,12 +325,7 @@ class HamamatsuCamera(Camera):
     def set_binning(self, binning: int):
         # Through set_roi: DCAM rejects a bare BINNING write while the frame
         # buffer is attached (DCAMERR_NOTSTABLE), and pylablib's set_roi frees it.
-        with self._lock:
-            hstart, hend, vstart, vend, *_ = self._backend.get_roi()
-            roi = self._backend.set_roi(
-                hstart, hend, vstart, vend, int(binning), int(binning)
-            )
-            self._keep_roi(roi)
+        self._rebin_keeping_roi(binning)
 
     def set_trigger_source(self, source: str):
         with self._lock:

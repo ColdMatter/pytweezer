@@ -56,7 +56,7 @@ class ThorCam(Camera):
                 pulse sets each exposure); ``None`` leaves the camera's own.
             trigger_polarity: ``"rise"`` (active high) or ``"fall"``; applied only
                 with a ``trigger_mode``.
-            binning: Square binning over the full sensor.
+            binning: Square binning, keeping the camera's ROI.
             gain_db: Analogue gain in dB.
             object_pixel_m: Metres per unbinned sensor pixel at the atoms.
         """
@@ -110,8 +110,8 @@ class ThorCam(Camera):
         self.binning = values["binning"]
         return values
 
-    # pylablib pauses the acquisition itself for the trigger, ROI and binning
-    # settings; the SDK takes exposure and gain while it runs.
+    # pylablib itself pauses the acquisition for the trigger, ROI and binning
+    # settings.
 
     def set_roi(self, x0: int, width: int, y0: int, height: int):
         with self._lock:
@@ -129,17 +129,19 @@ class ThorCam(Camera):
             self._keep(trigger_polarity=self._backend.setup_ext_trigger(polarity))
 
     def set_exposure_time(self, exposure: float):
+        # pylablib does not pause the acquisition for this.
         with self._lock:
             self._keep(exposure=float(self._backend.set_exposure(exposure)))
 
     def set_binning(self, binning: int):
-        """Bin ``binning`` x ``binning`` pixels together; the ROI goes back to the full sensor."""
-        with self._lock:
-            roi = self._backend.set_roi(hbin=int(binning), vbin=int(binning))
-            self._keep_roi(roi)
+        """Bin ``binning`` x ``binning`` pixels together, keeping the ROI."""
+        self._rebin_keeping_roi(binning)
 
     def set_gain(self, gain: float):
-        """Set the analogue gain in dB, truncated to the range the camera allows."""
+        """Set the analogue gain in dB, truncated to the range the camera allows.
+
+        pylablib does not pause the acquisition for this.
+        """
         with self._lock:
             self._keep(gain=float(self._backend.set_gain(float(gain))))
 
@@ -173,9 +175,13 @@ class ThorCam(Camera):
         return images
 
     def _read_range_timed(self, start: int, stop: int):
-        images, infos = self._backend.read_multiple_images(
-            (start, stop), peek=True, return_info=True
-        )
+        try:
+            images, infos = self._backend.read_multiple_images(
+                (start, stop), peek=True, return_info=True
+            )
+        except TypeError:
+            # pylablib cannot unpack the metadata of a frame that came with none.
+            return self._read_range(start, stop), None
         if images is None:
             return np.asarray([]), []
         clock_hz = self._timestamp_clock_hz
