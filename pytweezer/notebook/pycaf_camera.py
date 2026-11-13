@@ -14,11 +14,13 @@ exposure and live mode, and every MOTMaster ``Go`` that ``expt`` makes from then
 during the run are read and paired with the zip MOTMaster saved for it.
 :meth:`PycafCamera.store_images` writes each run's frames to a zip beside
 MOTMaster's (``Rb{ddMMMyy}{batch}_{nnn}.zip`` for the default ``key``) and
-returns them, one stack per run, then starts afresh for the next scan.
+returns them, one stack per run, then starts afresh for the next scan. Their run
+numbers are then in ``hamcam.last_zips`` and their paths in ``hamcam.last_zip_paths``.
 """
 
 import json
 import re
+import threading
 import warnings
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -42,10 +44,65 @@ def _motmaster_file_config(name: str) -> dict[str, Any]:
         return json.load(file)
 
 
+def _run_number(path: Path) -> int:
+    """MOTMaster's run number of a zip: ``12`` for ``CaF06Nov2650_012.zip``."""
+    return int(re.search(r"_(\d+)\.zip$", Path(path).name)[1])
+
+
 @dataclass
 class _Run:
     frames: np.ndarray
     zip: Path | None
+
+
+class CameraSaturatedError(RuntimeError):
+    """A camera frame reached full scale during a pycaf run, which was stopped."""
+
+
+class _SaturationWatch:
+    """Polls the camera for saturated frames while a ``Go`` runs, stopping
+    MOTMaster at the first. MOTMaster finishes the shot under way and fires no more.
+    """
+
+    def __init__(self, owner: "PycafCamera", mark: int) -> None:
+        self.owner = owner
+        self.mark = mark
+        self._done = threading.Event()
+        self._thread = threading.Thread(
+            target=self._watch, name=f"{owner.key}-saturation-watch", daemon=True
+        )
+        self._thread.start()
+
+    def _watch(self) -> None:
+        last_error = None
+        while not self._done.wait(self.owner.frame_poll_s):
+            try:
+                saturated = self.owner.camera.saturated_frames_since(self.mark)
+            except Exception as error:
+                if repr(error) != last_error:
+                    logger.warning("Could not check for saturation: %r", error)
+                    last_error = repr(error)
+                continue
+            if saturated:
+                self._stop_motmaster(*saturated[0])
+                return
+
+    def _stop_motmaster(self, index: int, peak: int) -> None:
+        logger.warning(
+            "%s camera saturated (frame %d, peak %d): stopping MOTMaster",
+            self.owner.key,
+            index,
+            peak,
+        )
+        try:
+            self.owner.expt.motmaster.Stop()
+        except Exception:
+            logger.exception("Could not stop MOTMaster")
+
+    def stop(self) -> None:
+        """End the watch, waiting for it so the camera client is free again."""
+        self._done.set()
+        self._thread.join()
 
 
 class PycafCamera:
@@ -101,12 +158,17 @@ class PycafCamera:
         self.frame_settle_s = frame_settle_s
         self.frame_timeout_s = frame_timeout_s
         self.frame_poll_s = frame_poll_s
-        self.last_zips: list[Path | None] = []
+        #: Run number of each zip :meth:`store_images` last wrote, as
+        #: ``readFromZip(n)`` takes it (``None`` for a run with no zip).
+        self.last_zips: list[int | None] = []
+        #: Those zips' paths, likewise.
+        self.last_zip_paths: list[Path | None] = []
         self._camera_name = camera if isinstance(camera, str) else None
         self._owns_camera = isinstance(camera, str)
         self.camera = self._connect() if isinstance(camera, str) else camera
         self._runs: list[_Run] = []
         self._original_go = None
+        self._watch_saturation = self._camera_reports_saturation()
 
         if external_exposure:
             # DCAM refuses trigger settings while acquiring (DCAMERR_BUSY).
@@ -160,7 +222,12 @@ class PycafCamera:
         except BaseException as error:
             self._reconnect_if_interrupted(error)
             raise
-        result = self._original_go(*args, **kwargs)
+        watch = _SaturationWatch(self, mark) if self._watch_saturation else None
+        try:
+            result = self._original_go(*args, **kwargs)
+        finally:
+            if watch is not None:
+                watch.stop()
         try:
             settle_frame_counts(
                 {self.key: self.camera},
@@ -174,12 +241,39 @@ class PycafCamera:
                     "its frames are lost"
                 )
             frames = np.asarray(self.camera.read_frames_from(mark), dtype=float)
+            # Once the count has settled, live mode has checked the last shot too.
+            saturated = (
+                self.camera.saturated_frames_since(mark)
+                if self._watch_saturation
+                else []
+            )
         except BaseException as error:
             self._reconnect_if_interrupted(error)
             raise
         new = sorted(zips.snapshot(folders, self.element) - before)
         self._runs.append(_Run(frames, new[0] if len(new) == 1 else None))
+        if saturated:
+            index, peak = saturated[0]
+            raise CameraSaturatedError(
+                f"{self.key} camera saturated: frame {index - mark} of the run "
+                f"reached {peak}, so MOTMaster fired no more shots and the scan "
+                "ends here. "
+                "The run's frames are kept for store_images()"
+            )
         return result
+
+    def _camera_reports_saturation(self) -> bool:
+        try:
+            self.camera.saturated_frames_since(self.camera.frames_acquired())
+        except Exception:
+            warnings.warn(
+                f"{self.key} camera is not watched for saturation: its server "
+                "predates saturated_frames_since; restart it to have saturation "
+                "stop MOTMaster",
+                stacklevel=3,
+            )
+            return False
+        return True
 
     def _day_folders(self) -> list[Path]:
         today = date.today()
@@ -200,8 +294,9 @@ class PycafCamera:
 
         Returns:
             One float ``(n, H, W)`` stack per MOTMaster run, in run order, as
-            ``readFromZip`` gives them. The zips written are in :attr:`last_zips`
-            (``None`` for a run MOTMaster did not save).
+            ``readFromZip`` gives them. The zips' run numbers are in
+            :attr:`last_zips` and their paths in :attr:`last_zip_paths` (``None``
+            for a run MOTMaster did not save).
         """
         runs, self._runs = self._runs, []
         if not runs:
@@ -209,7 +304,7 @@ class PycafCamera:
                 f"No MOTMaster runs since the last store_images(); nothing from {self.key}",
                 stacklevel=2,
             )
-            self.last_zips = []
+            self.last_zips, self.last_zip_paths = [], []
             return []
         counts = sorted({len(run.frames) for run in runs})
         if len(counts) > 1:
@@ -227,7 +322,8 @@ class PycafCamera:
                     run.zip, self.element, self.key, run.frames, settings
                 )
             )
-        self.last_zips = saved
+        self.last_zip_paths = saved
+        self.last_zips = [None if path is None else _run_number(path) for path in saved]
         if save:
             self._report(saved, counts)
         return [run.frames for run in runs]
@@ -237,13 +333,10 @@ class PycafCamera:
         unsaved = len(saved) - len(written)
         frames = "/".join(str(count) for count in counts)
         if written:
-            numbers = [
-                int(re.search(r"_(\d+)\.zip$", path.name)[1]) for path in written
-            ]
             span = (
                 f"{written[0].name}"
                 if len(written) == 1
-                else f"{written[0].name} ... _{numbers[-1]:03d}"
+                else f"{written[0].name} ... _{_run_number(written[-1]):03d}"
             )
             print(
                 f"{self.key}: saved {len(written)} runs ({frames} frames each) to {span}"

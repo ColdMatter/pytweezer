@@ -1,5 +1,6 @@
 import time
 
+import numpy as np
 import pytest
 
 from pytweezer.drivers import camera_base
@@ -100,6 +101,32 @@ def test_broadcast_frames_say_their_binning(camera, clock):
     camera.acquire_n_frames(2, broadcast=True)
 
     assert [h["binning"] for h in recorder.headers] == [2, 2]
+
+
+def _live_frames_with_peaks(camera, clock, peaks):
+    """Go live and let frames arrive whose maxima are ``peaks``, one per frame."""
+    recorder = Recorder()
+    camera.image_client = recorder
+    values = iter(peaks)
+    camera._generate_frame = lambda: np.full((4, 5), next(values), dtype=np.uint16)
+    camera.start_live(poll_s=0.01)
+    clock.now += (len(peaks) + 0.5) / camera.sim_frame_rate
+    deadline = time.perf_counter() + 5
+    while len(recorder.indices) < len(peaks) and time.perf_counter() < deadline:
+        time.sleep(0.01)
+    camera.stop_live()
+
+
+def test_live_frames_at_full_scale_are_reported_as_saturated(camera, clock):
+    camera.saturation_level = 65535
+    _live_frames_with_peaks(camera, clock, [100, 65535, 200, 65535])
+    assert camera.saturated_frames_since(0) == [(1, 65535), (3, 65535)]
+    assert camera.saturated_frames_since(2) == [(3, 65535)]
+
+
+def test_saturation_is_not_watched_without_a_level(camera, clock):
+    _live_frames_with_peaks(camera, clock, [100, 65535])
+    assert camera.saturated_frames_since(0) == []
 
 
 def test_live_mode_can_be_left_and_entered_again(camera):

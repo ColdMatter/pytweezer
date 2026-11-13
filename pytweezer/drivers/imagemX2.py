@@ -23,6 +23,8 @@ class ImagEMX2Camera(HamamatsuCamera):
     image_prefix = "HamTweezer"
     model_prefix = "C9100"
     default_timeout = 20.0
+    #: Full scale of the 16-bit ADC: an EMCCD should never be driven there.
+    saturation_level = 65535
 
     CONTROLS = (
         EXPOSURE,
