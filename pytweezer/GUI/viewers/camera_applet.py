@@ -11,8 +11,10 @@ read-only and refreshed every few seconds from the values the driver keeps,
 without touching the hardware. The same holds after start-up until the
 manager's state has arrived (a few seconds at most), since a task may already
 have the camera. A notebook using the camera is not noticed.
-When the manager cannot be reached the settings stay editable, and the sidebar
-says it cannot tell whether a task holds the camera.
+If the manager stops responding while a task holds the camera, the settings
+stay read-only until it reports back. If it cannot be reached and no task was
+known to hold the camera, the settings stay editable, and the sidebar says it
+cannot tell whether a task holds the camera.
 
 Saved ROIs are shared with everyone through Properties, under
 ``/Camera ROI presets/<camera>/<name>``.
@@ -67,6 +69,7 @@ CONNECTION_ERRORS = (OSError, EOFError)
 PRESETS_ROOT = "Camera ROI presets"
 ROI_NAMES = ("roi_x0", "roi_width", "roi_y0", "roi_height")
 UNKNOWN_HOLD = "Can't tell whether a task holds the camera"
+STALE_HOLD = "Manager not responding; read-only until it reports back"
 EXTERNAL_TRIGGER = "waiting for external trigger"
 
 
@@ -448,14 +451,15 @@ class CameraApplet(ImageDisplay):
         return None
 
     def _held(self) -> bool:
-        return self._feed_connected and self._holder is not None
+        """Whether a task holds the camera, as last heard: a hold outlasts a silent manager."""
+        return self._holder is not None
 
     def _hold_locks(self) -> bool:
         """Whether the camera must be left alone: a task holds it, or may and the manager has not said yet."""
         return self._checking or self._held()
 
     def _hold_unknown(self) -> bool:
-        return not self._feed_connected and not self._checking
+        return not self._feed_connected and not self._checking and not self._held()
 
     def _queue_changed(self, snapshot: dict) -> None:
         was_held = self._held()
@@ -469,8 +473,12 @@ class CameraApplet(ImageDisplay):
     def _feed_connection(self, connected: bool) -> None:
         self._feed_connected = connected
         if connected:
+            was_held = self._held()
             self._holder = self._holder_in(self.feed.snapshot())
-            self._end_check()
+            if self._checking:
+                self._end_check()
+            elif was_held and not self._held():
+                self._released()
         self._render_state()
 
     def _end_check(self) -> None:
@@ -515,7 +523,10 @@ class CameraApplet(ImageDisplay):
             sidebar.set_state("unavailable", self._unavailable)
         elif self._held():
             class_name, rid = self._holder
-            sidebar.set_state("held", f"{class_name} (rid {rid})")
+            detail = f"{class_name} (rid {rid})"
+            if not self._feed_connected:
+                detail += f"\n{STALE_HOLD}"
+            sidebar.set_state("held", detail)
         elif self._checking:
             sidebar.set_state("checking")
         elif self._live:
@@ -580,7 +591,8 @@ class CameraApplet(ImageDisplay):
             return
         if isinstance(outcome, Exception):
             self.camera_sidebar.show_error(next(iter(values)), error_text(outcome))
-            self._request(None, "read_controls", callback=self._reread)
+            if not self._hold_locks():
+                self._request(None, "read_controls", callback=self._reread)
             return
         controls, stored, store_error = outcome
         self._show(controls)
