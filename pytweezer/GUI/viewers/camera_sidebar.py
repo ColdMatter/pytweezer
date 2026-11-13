@@ -304,7 +304,8 @@ class CameraSidebar(QFrame):
 
     Snap is enabled when the camera is not live, held or unavailable and its
     ``trigger_source`` control reads ``"int"``; a camera with no such control
-    keeps Snap enabled.
+    keeps Snap enabled. Full sensor is enabled only when the ``roi_width`` and
+    ``roi_height`` controls give a ``maximum``.
 
     Signals:
         camera_chosen(str): the user picked a camera.
@@ -342,6 +343,7 @@ class CameraSidebar(QFrame):
         self._temperature: dict | None = None
         self._unavailable: dict[str, str] = {}
         self._roi_widgets: list[QWidget] = []
+        self._full_sensor: QPushButton | None = None
         self._preset_picker: QComboBox | None = None
         self._preset_save: QPushButton | None = None
         self._preset_delete: QPushButton | None = None
@@ -475,6 +477,7 @@ class CameraSidebar(QFrame):
                 item.widget().deleteLater()
         self._fields = {}
         self._roi_widgets = []
+        self._full_sensor = None
         self._preset_picker = self._preset_save = self._preset_delete = None
 
         by_section: dict[str, list[dict]] = {}
@@ -586,7 +589,8 @@ class CameraSidebar(QFrame):
         presets.addSpacing(6)
         presets.addWidget(delete)
         section.grid.addLayout(presets, row + 1, 0, 1, 3)
-        self._roi_widgets = [from_drawn, full]
+        self._roi_widgets = [from_drawn]
+        self._full_sensor = full
         self._preset_picker, self._preset_save, self._preset_delete = (
             picker,
             save,
@@ -716,6 +720,14 @@ class CameraSidebar(QFrame):
             field.set_enabled(not locked and name not in self._busy, name in self._busy)
         for widget in self._roi_widgets:
             widget.setEnabled(not locked)
+        if self._full_sensor is not None:
+            sized = self._sensor_size_known()
+            self._full_sensor.setEnabled(not locked and sized)
+            self._full_sensor.setToolTip(
+                "Read the whole sensor"
+                if sized
+                else "The camera does not say how large its sensor is"
+            )
         picker, save, delete = (
             self._preset_picker,
             self._preset_save,
@@ -729,6 +741,13 @@ class CameraSidebar(QFrame):
         reason = self._snap_blocked_reason()
         self.snap_button.setEnabled(not reason)
         self.snap_button.setToolTip(reason or "Take one frame")
+
+    def _sensor_size_known(self) -> bool:
+        return all(
+            name in self._fields
+            and self._fields[name].control.get("maximum") is not None
+            for name in ("roi_width", "roi_height")
+        )
 
     def _snap_blocked_reason(self) -> str:
         if self._state == "held":

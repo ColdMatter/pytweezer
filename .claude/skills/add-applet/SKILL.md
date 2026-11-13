@@ -120,7 +120,8 @@ Header keys are all optional — use `head.get(...)`. A camera frame
 `index` (the frame's number as read: its place in the shot when an experiment
 reads a shot, counting up from the acquisition start when broadcast live),
 `roi_x0`/`roi_y0` (the sensor pixel of the frame's corner), `binning` (sensor
-pixels per frame pixel, per side), and `rid` when the
+pixels per frame pixel, per side), `camera_timestamp` (the camera's own clock,
+in seconds, on live frames from a driver that gives one), and `rid` when the
 experiment that read it passes one (`LoadTweezers` does). The pair `_offset`/`_imgresolution` (pixel origin and metres
 per pixel) is set by some publishers (`roi_slice.py`, `experiments/slm_tweezer_array.py`)
 and not others.
@@ -365,6 +366,11 @@ what was built or why.
 - `viewers/image_plot_monitor.py` — the Image Monitor plus the x and y sums
   (`projectionstreams`) in plots above and left of the image, linked to its
   axes; the example to copy for multiple linked plots in one window.
+- `viewers/camera_applet.py` — the Image Monitor with a camera's settings
+  (`viewers/camera_sidebar.py`) inserted left of the image through
+  `ImageDisplay.panel_layout`; it calls the camera over RPC on one worker
+  thread (`CameraLink`) and follows `ExperimentFeed` to go read-only while a
+  task holds the camera.
 
 `viewers/archive/` holds retired viewers — do not use them as models, though
 `zmq_ROI` is still imported from there by the image viewers.
