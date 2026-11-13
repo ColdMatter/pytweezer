@@ -22,6 +22,7 @@ from pytweezer.drivers.hamamatsu import (
     set_dcam_exposure_mode,
     set_dcam_trigger_polarity,
 )
+from pytweezer.drivers.temperature_monitor import TemperatureMonitor
 
 
 class ImagEMX2Camera(Camera):
@@ -35,6 +36,9 @@ class ImagEMX2Camera(Camera):
         external_exposure: Start in :meth:`set_external_exposure_mode`; otherwise
             the camera keeps DCAM's own trigger mode (internal after power-up).
         object_pixel_m: Metres per unbinned sensor pixel at the atoms.
+        temperature_measurement: Database measurement the sensor temperature is
+            written to every ``temperature_interval_s``; None to not monitor it.
+        max_temperature_c: Sensor temperature above which the monitor warns.
     """
 
     image_prefix = "HamTweezer"
@@ -71,8 +75,12 @@ class ImagEMX2Camera(Camera):
         serial_number: str | None = None,
         external_exposure: bool = False,
         object_pixel_m: float | None = None,
+        temperature_measurement: str | None = None,
+        temperature_interval_s: float = 30.0,
+        max_temperature_c: float | None = None,
     ):
         self.serial_number = serial_number
+        self._temperature_monitor = None
         super().__init__(
             image_dir=image_dir,
             timeout=timeout,
@@ -82,6 +90,13 @@ class ImagEMX2Camera(Camera):
         if external_exposure:
             self.set_external_exposure_mode()
         self.read_controls()
+        if temperature_measurement is not None:
+            self._temperature_monitor = TemperatureMonitor(
+                self.get_temperature,
+                temperature_measurement,
+                temperature_interval_s,
+                max_temperature_c,
+            )
 
     # ------------------------------------------------------------------ #
     # Camera hooks
@@ -96,6 +111,8 @@ class ImagEMX2Camera(Camera):
         self._backend = camera
 
     def _disconnect(self) -> None:
+        if self._temperature_monitor is not None:
+            self._temperature_monitor.stop()
         if self._backend is not None:
             self._backend.close()
 
@@ -222,6 +239,11 @@ class ImagEMX2Camera(Camera):
         """Every readable DCAM attribute's current value, enums as their text labels."""
         values = self._backend.get_all_attribute_values(enum_as_str=True)
         return values.as_dict(style="flat")
+
+    def get_temperature(self) -> float:
+        """Sensor temperature in °C."""
+        with self._lock:
+            return float(self._backend.get_attribute_value("sensor_temperature"))
 
     def trigger(self):
         """Send a software trigger to the camera."""
