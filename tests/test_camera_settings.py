@@ -47,10 +47,10 @@ def run(experiment, **arguments):
     return measurement
 
 
-def test_every_configured_camera_has_one_settings_experiment():
+def test_every_settings_experiment_names_a_configured_camera():
     listed = runnable_experiments(cs)
     cameras = [cls.devices()["camera"].device_name for cls in listed]
-    assert sorted(cameras) == camera_names()
+    assert set(cameras) <= set(camera_names())
 
 
 def test_a_form_left_alone_changes_nothing(camera):

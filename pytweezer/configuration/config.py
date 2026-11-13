@@ -177,7 +177,7 @@ CONFIG = {
             "active": False,
             "class": "pytweezer.drivers.thorcam:ThorCam",
             "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
-            "host": SERVER_HOST,
+            "host": HOSTS["PH-BEAST"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "rb_thorcam",
@@ -189,7 +189,7 @@ CONFIG = {
             "active": False,
             "class": "pytweezer.drivers.tweezermonitorcam:ThorCam",
             "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorLabsCamera",
-            "host": SERVER_HOST,
+            "host": HOSTS["PH-BEAST"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "rb_thorcam2",
@@ -203,7 +203,7 @@ CONFIG = {
         # addressable on its own as get_device("Rb SLM").
         "Rb Rearrangement Rig": {
             "active": True,
-            "host": SERVER_HOST,
+            "host": HOSTS["PH-BEAST"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "devices": {
@@ -235,7 +235,7 @@ CONFIG = {
             "sim_class": "pytweezer.drivers.ids1054b:SimulatedIDS1054B",
             "teardown": "close",
             "address": "TCPIP::10.59.3.50::3000::SOCKET",
-            "host": SERVER_HOST,
+            "host": HOSTS["PH-BEAST"],
             "port": get_next_port(),
             "simulate": SIMULATING,
         },
@@ -256,6 +256,22 @@ CONFIG = {
             "object_pixel_m": None,
             "timeout": 5.0,
             "image_dir": "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/ThorCamImages",
+        },
+        # ORCA-Fusion BT (C15440-20UP); the ORCA-R2 driver runs it unchanged.
+        "CaFMOT Cam": {
+            "active": True,
+            "class": "pytweezer.drivers.orca:ORCACamera",
+            "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
+            "teardown": "close",
+            "host": HOSTS["PH-BEAST"],
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            "serial_number": "503326",
+            "stream_name": "cafmot_cam",
+            "object_pixel_m": None,
+            "external_exposure": True,
+            "timeout": 5.0,
+            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         # The NI Cards tab: channels by MOTMaster alias, from each PC's hardware file.
         "CaF NI Cards": {
