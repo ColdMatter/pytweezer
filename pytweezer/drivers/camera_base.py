@@ -588,6 +588,16 @@ class Camera(ABC):
         """Record the values the camera took, in SI units, for :meth:`controls`."""
         self._kept.update(values)
 
+    def _rebin_keeping_roi(self, binning: int) -> None:
+        """Set the binning of a pylablib camera through its ``set_roi``, passing the current
+        ROI back with it, and keep what the camera took."""
+        with self._lock:
+            hstart, hend, vstart, vend, *_ = self._backend.get_roi()
+            roi = self._backend.set_roi(
+                hstart, hend, vstart, vend, int(binning), int(binning)
+            )
+            self._keep_roi(roi)
+
     def _keep_roi(self, roi: tuple) -> tuple[int, int]:
         """Keep the pylablib ROI a setter got back, with the origin and binning frames are read with."""
         controls = roi_controls(roi)
