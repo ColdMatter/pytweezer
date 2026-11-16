@@ -274,6 +274,9 @@ class Camera(ABC):
         self._live_args: tuple[int, float] = (1000, 0.05)
         # (frame number, peak value) of the saturated live frames of this acquisition.
         self._saturated: deque[tuple[int, int]] = deque(maxlen=1000)
+        # (mark, header) of each shot whose frames live mode may not have sent yet,
+        # in order; a None header ends tagging. See start_shot().
+        self._shot_tags: list[tuple[int, dict | None]] = []
         self._backend = None
         self._kept: dict[str, Any] = {}
         self._connect()
@@ -466,8 +469,74 @@ class Camera(ABC):
         with self._lock:
             if self._acquisition_in_progress():
                 return
+            self._shot_tags.clear()
             self.setup_acquisition(int(buffer_frames))
             self.start_acquisition()
+
+    def start_shot(self, header: dict) -> int:
+        """Start a shot: live frames from now on carry ``header`` and their index within the shot.
+
+        Each live frame from the returned mark on is broadcast with ``header``
+        added and ``index`` set to its frame number minus the mark (0, 1, ...),
+        until the next :meth:`start_shot` or :meth:`end_shots`. Frames taken
+        before the mark keep the tag they had.
+
+        Returns:
+            The mark: the frame number the shot's first frame will have, for
+            :meth:`wait_frames`.
+
+        Raises:
+            RuntimeError: if the camera is not acquiring; start live first.
+        """
+        with self._lock:
+            if not self._acquisition_in_progress():
+                raise RuntimeError(
+                    f"{type(self).__name__} is not acquiring; start live first"
+                )
+            mark = self._count_frames()
+            self._shot_tags.append((mark, dict(header)))
+        return mark
+
+    def end_shots(self) -> None:
+        """Live frames from now on are broadcast untagged, numbered from the acquisition's start."""
+        with self._lock:
+            if self._acquisition_in_progress():
+                self._shot_tags.append((self._count_frames(), None))
+            else:
+                self._shot_tags.clear()
+
+    def wait_frames(
+        self, mark: int, n: int, timeout: float | None = None
+    ) -> np.ndarray:
+        """Frames ``mark`` to ``mark + n - 1`` of the current acquisition, once they exist.
+
+        Args:
+            mark: The first frame's number, as :meth:`start_shot` returned it.
+            n: How many frames.
+            timeout: Longest wait in seconds; the camera's :attr:`timeout` if None.
+
+        Returns:
+            ``(n, H, W)``.
+
+        Raises:
+            TimeoutError: if the frames have not all arrived in time.
+            RuntimeError: if the acquisition restarted since the mark.
+        """
+        mark, n = int(mark), int(n)
+        deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
+        while (acquired := self.frames_acquired()) < mark + n:
+            if acquired < mark:
+                raise RuntimeError(
+                    f"{type(self).__name__}'s acquisition restarted; frames from "
+                    f"{mark} on are lost"
+                )
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"{type(self).__name__}: {acquired - mark} of {n} frames "
+                    "arrived; was the camera triggered?"
+                )
+            time.sleep(0.005)
+        return self.read_frames_from(mark)[:n]
 
     def frames_acquired(self) -> int:
         """Frames acquired since the current acquisition started."""
@@ -708,6 +777,8 @@ class Camera(ABC):
         """Stop broadcasting and stop the acquisition."""
         self._stop_live_thread()
         self.stop_acquisition()
+        with self._lock:
+            self._shot_tags.clear()
 
     def is_live(self) -> bool:
         return self._live_thread is not None and self._live_thread.is_alive()
@@ -746,10 +817,30 @@ class Camera(ABC):
             for i, frame in enumerate(frames):
                 self._check_saturation(sent, frame)
                 info = {"timestamp": time.time(), "index": sent}
+                mark, header = self._shot_tag(sent)
+                if header is not None:
+                    info.update(header, index=sent - mark)
                 if times is not None:
                     info["camera_timestamp"] = times[i]
                 self.broadcast_image(frame, info)
                 sent += 1
+            self._forget_shot_tags_before(sent)
+
+    def _shot_tag(self, frame: int) -> tuple[int, dict | None]:
+        """``(mark, header)`` of the shot that ``frame`` belongs to; ``(0, None)`` if none."""
+        with self._lock:
+            tag = (0, None)
+            for entry in self._shot_tags:
+                if entry[0] > frame:
+                    break
+                tag = entry
+            return tag
+
+    def _forget_shot_tags_before(self, frame: int) -> None:
+        """Drop the tags of shots that ended before ``frame``, which live mode has sent."""
+        with self._lock:
+            while len(self._shot_tags) > 1 and self._shot_tags[1][0] <= frame:
+                del self._shot_tags[0]
 
     def _check_saturation(self, index: int, frame: np.ndarray) -> None:
         if self.saturation_level is None or frame.size == 0:
