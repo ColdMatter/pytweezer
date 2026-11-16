@@ -216,6 +216,8 @@ CONFIG = {
                     "object_pixel_m": None,
                     "external_exposure": True,
                     "timeout": 20.0,
+                    "temperature_measurement": "rb_hamcam_temperature",
+                    "temperature_interval_s": 30.0,
                     "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
                 },
                 "Rb SLM": {
@@ -271,6 +273,10 @@ CONFIG = {
             "object_pixel_m": None,
             "external_exposure": True,
             "timeout": 5.0,
+            "temperature_measurement": "cafmot_cam_temperature",
+            "temperature_interval_s": 30.0,
+            # Air-cooled to -8 °C; blocked fans took it past 60 °C.
+            "max_temperature_c": 0.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         # The NI Cards tab: channels by MOTMaster alias, from each PC's hardware file.

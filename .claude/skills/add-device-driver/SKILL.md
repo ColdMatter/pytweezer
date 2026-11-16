@@ -152,7 +152,7 @@ Add to `CONFIG["Devices"]` in `pytweezer/configuration/config.py`:
     "class": "pytweezer.drivers.orca:ORCACamera",
     "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
     "teardown": "close",
-    "host": SERVER_HOST,
+    "host": HOSTS["ph-bonesaw"],
     "port": get_next_port(),
     "simulate": SIMULATING,
     "serial_number": "280187",
@@ -162,7 +162,9 @@ Add to `CONFIG["Devices"]` in `pytweezer/configuration/config.py`:
 ```
 
 - **`host`** decides which PC actually runs the server, independent of where the
-  GUI was launched. Use a `HOSTS[...]` entry or `SERVER_HOST`.
+  GUI was launched. Name the PC the hardware is plugged into with its `HOSTS[...]`
+  entry, even the server PC: never `SERVER_HOST`, which only happens to be
+  the same machine (and becomes localhost when simulating).
 - **`port`** is always `get_next_port()`, never a literal. Ports come from a
   sequential iterator consumed in file order, so **adding an entry renumbers
   every entry after it**. Put it where it belongs, then update and restart
