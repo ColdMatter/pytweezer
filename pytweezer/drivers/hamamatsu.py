@@ -40,6 +40,9 @@ EXPOSURE_MODE = Control(
 )
 
 #: DCAM ``trigger_active`` for each external exposure mode.
+#: DCAM attribute of the internal trigger's frame period, in seconds.
+FRAME_INTERVAL = "internal_frame_interval"
+
 _TRIGGER_ACTIVE = {"edge": 1, "level": 2}
 
 
@@ -314,6 +317,11 @@ class HamamatsuCamera(Camera):
         values = read_dcam_controls(self._backend)
         self.roi_origin = (values["roi_x0"], values["roi_y0"])
         self.binning = values["binning"]
+        interval = self._backend.get_attribute_value(
+            FRAME_INTERVAL, error_on_missing=False
+        )
+        if interval:
+            values["frame_rate"] = 1.0 / float(interval)
         return values
 
     def set_roi(self, x0: int, width: int, y0: int, height: int):
@@ -327,11 +335,29 @@ class HamamatsuCamera(Camera):
         # buffer is attached (DCAMERR_NOTSTABLE), and pylablib's set_roi frees it.
         self._rebin_keeping_roi(binning)
 
-    def _binning_limits(self) -> dict[str, Any]:
+    def _control_limits(self) -> dict[str, dict[str, Any] | None]:
+        limits: dict[str, dict[str, Any] | None] = {}
         # pylablib probes the BINNING property for these when it opens the camera,
         # and set_roi rounds any other bin factor down to one of them.
         valid = getattr(self._backend, "_valid_binnings", None)
-        return {"choices": [int(b) for b in valid]} if valid else {}
+        if valid:
+            limits["binning"] = {"choices": [int(b) for b in valid]}
+        interval = self._backend.get_attribute(FRAME_INTERVAL, error_on_missing=False)
+        if interval is None or not interval.writable or interval.min <= 0:
+            limits["frame_rate"] = None
+        else:
+            limits["frame_rate"] = {
+                "minimum": 1.0 / float(interval.max),
+                "maximum": 1.0 / float(interval.min),
+            }
+        return limits
+
+    def set_frame_rate(self, rate: float):
+        """Set the internal trigger's frame rate, as DCAM's internal frame interval."""
+        with self._lock, self._backend.pausing_acquisition(clear=True):
+            self._backend.set_attribute_value(FRAME_INTERVAL, 1.0 / float(rate))
+            interval = self._read_attribute(FRAME_INTERVAL)
+            self._keep(frame_rate=1.0 / float(interval))
 
     def set_trigger_source(self, source: str):
         with self._lock:

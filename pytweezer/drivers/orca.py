@@ -1,6 +1,7 @@
 from pytweezer.drivers.camera_base import (
     BINNING,
     EXPOSURE,
+    FRAME_RATE,
     ROI,
     TRIGGER_POLARITY,
     Control,
@@ -26,6 +27,7 @@ class ORCACamera(HamamatsuCamera):
 
     CONTROLS = (
         EXPOSURE,
+        FRAME_RATE,
         EXPOSURE_MODE,
         trigger_source(("int", "ext", "software")),
         TRIGGER_POLARITY,

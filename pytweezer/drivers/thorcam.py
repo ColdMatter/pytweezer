@@ -1,10 +1,14 @@
+from typing import Any
+
 import numpy as np
 import pylablib as pll
 import pylablib.devices.Thorlabs as thorcam
+from pylablib.devices.Thorlabs.TLCamera import lib as tl_lib
 
 from pytweezer.drivers.camera_base import (
     BINNING,
     EXPOSURE,
+    FRAME_RATE,
     ROI,
     TRIGGER_POLARITY,
     Camera,
@@ -26,6 +30,7 @@ class ThorCam(Camera):
 
     CONTROLS = (
         EXPOSURE,
+        FRAME_RATE,
         trigger_source(("int", "ext", "bulb")),
         TRIGGER_POLARITY,
         gain("Gain", "number", unit="dB", minimum=0),
@@ -104,6 +109,7 @@ class ThorCam(Camera):
             "trigger_source": backend.get_trigger_mode(),
             "trigger_polarity": backend.get_ext_trigger_parameters(),
             "gain": float(backend.get_gain()),
+            "frame_rate": self._frame_rate(),
             **roi_controls(backend.get_roi()),
         }
         self.roi_origin = (values["roi_x0"], values["roi_y0"])
@@ -137,10 +143,26 @@ class ThorCam(Camera):
         """Bin ``binning`` x ``binning`` pixels together, keeping the ROI."""
         self._rebin_keeping_roi(binning)
 
-    def _binning_limits(self) -> dict[str, int]:
+    def _control_limits(self) -> dict[str, dict[str, Any] | None]:
         with self._lock:
             horizontal, _ = self._backend.get_roi_limits()
-        return {"maximum": int(horizontal.maxbin)}
+            slowest, fastest = tl_lib.tl_camera_get_frame_rate_control_value_range(
+                self._backend.handle
+            )
+        return {
+            "binning": {"maximum": int(horizontal.maxbin)},
+            "frame_rate": {"minimum": float(slowest), "maximum": float(fastest)},
+        }
+
+    def _frame_rate(self) -> float:
+        """The internal trigger's frame rate, from the camera's frame period."""
+        return 1.0 / float(self._backend.get_frame_timings().frame_period)
+
+    def set_frame_rate(self, rate: float):
+        """Set the internal trigger's frame rate, clamped to what the camera allows."""
+        with self._lock:
+            self._backend.set_frame_period(1.0 / float(rate))
+            self._keep(frame_rate=self._frame_rate())
 
     def set_gain(self, gain: float):
         """Set the analogue gain in dB, truncated to the range the camera allows.
