@@ -460,7 +460,7 @@ class Rearrangement(Coordinator):
         """Show the occupancy frame on the camera's stream, once the follow-up acquisition is armed.
 
         The frame is gone from the camera when that acquisition starts, so this
-        sends it from here; over RPC that ships it back to the camera server.
+        sends it from here, a local call since the camera shares the rig's process.
         """
         try:
             self.camera.broadcast_image(image, {"timestamp": time.time(), "index": 0})
