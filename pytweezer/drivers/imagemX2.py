@@ -26,6 +26,8 @@ class ImagEMX2Camera(Camera):
 
     image_prefix = "HamTweezer"
     model_prefix = "C9100"
+    #: Full scale of the 16-bit ADC: an EMCCD should never be driven there.
+    saturation_level = 65535
 
     def __init__(
         self,

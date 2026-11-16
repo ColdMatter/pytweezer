@@ -29,6 +29,7 @@ import os
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections import deque
 from typing import Any
 
 import numpy as np
@@ -61,6 +62,9 @@ class Camera(ABC):
     binning: int = 1
     #: Metres per unbinned sensor pixel at the atoms (sensor pitch over magnification); ``None`` if unknown.
     object_pixel_m: float | None = None
+    #: Pixel value at which a live frame counts as saturated (see
+    #: :meth:`saturated_frames_since`); ``None`` leaves saturation unwatched.
+    saturation_level: int | None = None
 
     def __init__(
         self,
@@ -89,6 +93,8 @@ class Camera(ABC):
         self._lock = threading.RLock()
         self._live_thread: threading.Thread | None = None
         self._live_stop = threading.Event()
+        # (frame number, peak value) of the saturated live frames of this acquisition.
+        self._saturated: deque[tuple[int, int]] = deque(maxlen=1000)
         self._backend = None
         self._connect()
 
@@ -304,6 +310,15 @@ class Camera(ABC):
             self._live_thread.join(timeout=2.0)
             self._live_thread = None
 
+    def saturated_frames_since(self, start: int) -> list[tuple[int, int]]:
+        """``(frame number, peak value)`` of each live frame from number ``start``
+        on that reached :attr:`saturation_level`, numbered as :meth:`frames_acquired`
+        counts them. Frames are checked as live mode reads them, so a frame just
+        acquired may not be checked yet.
+        """
+        with self._lock:
+            return [entry for entry in self._saturated if entry[0] >= int(start)]
+
     def _broadcast_live(self, poll_s: float) -> None:
         sent = 0
         last_error = None
@@ -311,6 +326,8 @@ class Camera(ABC):
             try:
                 if self.frames_acquired() < sent:  # acquisition restarted
                     sent = 0
+                    with self._lock:
+                        self._saturated.clear()
                 frames = self.read_frames_from(sent)
             except Exception as error:
                 if repr(error) != last_error:
@@ -319,8 +336,26 @@ class Camera(ABC):
                 continue
             last_error = None
             for frame in frames:
+                self._check_saturation(sent, frame)
                 self.broadcast_image(frame, {"timestamp": time.time(), "index": sent})
                 sent += 1
+
+    def _check_saturation(self, index: int, frame: np.ndarray) -> None:
+        if self.saturation_level is None or frame.size == 0:
+            return
+        peak = int(frame.max())
+        if peak < self.saturation_level:
+            return
+        with self._lock:
+            # Log the first of a run of saturated frames, not every one.
+            if not self._saturated or self._saturated[-1][0] != index - 1:
+                LOGGER.warning(
+                    "Frame %d saturated: peak %d >= %d",
+                    index,
+                    peak,
+                    self.saturation_level,
+                )
+            self._saturated.append((index, peak))
 
     def broadcast_image(
         self, image: np.ndarray, info, stream: str | None = None
