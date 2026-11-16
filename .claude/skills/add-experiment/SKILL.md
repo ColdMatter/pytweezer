@@ -115,16 +115,20 @@ class Tof(MotMasterExperiment):
 
     def prepare(self):
         super().prepare()  # sets the sequencer up; must come first
+        self.camera.stop_live()  # DCAM refuses trigger settings while capturing
         self.camera.set_trigger_source("ext")
-        self.camera.setup_acquisition(1, mode="snap")
+        self.camera.start_live()
 
     def run_point(self):
-        self.camera.start_acquisition()
+        mark = self.camera.start_shot({"rid": self.rid})
+        self.run_sequences()  # blocks until Go() returns
+        self.record("image", self.camera.wait_frames(mark, 1)[0])
+
+    def finish(self):
         try:
-            self.run_sequences()  # blocks until Go() returns
-            self.record("image", self.camera.acquire_n_frames(1)[0])
+            self.camera.end_shots()
         finally:
-            self.camera.stop_acquisition()
+            super().finish()
 ```
 
 An experiment declares **one** `MotMaster`; a second is a `TypeError` at class
@@ -178,14 +182,15 @@ a `Device`, sets it up in `prepare()` (after `super().prepare()`) and reads it i
 its own shot, in plain calls. `LoadTweezers` (`experiments/load_tweezers.py`)
 is the example to copy:
 
-- `prepare()` remembers whether the camera was live and stops live mode, then
-  sets binning, ROI (`set_roi` returns the origin the camera actually used;
-  keep it), trigger source, any driver-specific options, gain, and
-  `setup_acquisition(n, mode="snap")`. `finish()` puts a camera that was live
-  back in live mode, in a `try`/`finally` around `super().finish()`.
-- The shot starts acquisition, calls `run_sequences(**overrides)`, reads with
-  `acquire_n_frames(n, broadcast=True, header={"rid": self.rid})`, and stops
-  acquisition in a `finally`.
+- Cameras stay live, experiments included. `prepare()` stops live mode, sets
+  binning, ROI (`set_roi` returns the origin the camera actually used; keep
+  it), trigger source, any driver-specific options and gain, then starts live
+  again. `finish()` calls `end_shots()` in a `try`/`finally` around
+  `super().finish()` and leaves the camera live.
+- The shot calls `mark = camera.start_shot({"rid": self.rid})`, then
+  `run_sequences(**overrides)`, then `camera.wait_frames(mark, n)`. The live
+  thread broadcasts the frames, tagged with the `rid` and their `index` in the
+  shot; the experiment does not broadcast them itself.
 - Camera settings are ordinary arguments named for the camera
   (`hamcam_gain`, `hamcam_roi_x0`...). A scannable one is re-sent before a shot
   whose value differs from the last sent; one that cannot change mid-task (it
@@ -436,7 +441,7 @@ The Rb tweezer experiments, in the order a session uses them:
    `hamcam_images`, `(shots, 2, H, W)` per point. They declare no analyses; `LoadTweezers`
    itself keeps one shot per point, which the default analyses expect.
 
-Shots broadcast their HamCam frames with `header={"rid": self.rid}`; the live
+Shots tag their HamCam frames with `start_shot({"rid": self.rid})`; the live
 tweezer loading analysis (`analysis/tweezer_loading.py`) starts afresh whenever
 the rid changes and places the saved sites by each frame's
 `roi_x0`/`roi_y0` header.

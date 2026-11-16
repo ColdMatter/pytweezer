@@ -114,8 +114,12 @@ class FakeHamCam(RecordingCamera):
         atoms = np.tensordot(occupied, self.spots, axes=1)
         return self.rng.poisson(100 + atoms).astype(np.uint16)
 
-    def acquire_n_frames(self, n, broadcast=False, header=None):
+    def start_shot(self, header):
+        self.calls.append(("start_shot", (header,)))
         self.headers.append(header)
+        return 0
+
+    def wait_frames(self, mark, n):
         loaded = self.rng.random(len(SITES)) < LOADING
         if self.sequencer.goes[-1].get("tTweezerSetVVA0") == 0.0:
             kept = np.zeros(len(SITES), dtype=bool)
@@ -139,8 +143,12 @@ class FakeORCA(RecordingCamera):
     def frame_geometry(self):
         return 1, (0, 0)
 
-    def acquire_n_frames(self, n, broadcast=False, header=None):
+    def start_shot(self, header):
+        self.calls.append(("start_shot", (header,)))
         self.headers.append(header)
+        return 0
+
+    def wait_frames(self, mark, n):
         return np.stack([self.frame] * n)
 
 
@@ -295,7 +303,7 @@ def test_a_measurement_refuses_a_site_whose_window_leaves_the_roi(rig):
     assert "[5]" in measurement.attrs["error"]
 
 
-def test_every_shot_broadcasts_its_frames_tagged_with_the_task(rig):
+def test_every_shot_tags_its_frames_with_the_task(rig):
     run_local(ArrayBatch, **FAST)
     assert rig.camera.headers
     assert all(header == {"rid": -1} for header in rig.camera.headers)
@@ -658,7 +666,7 @@ def test_load_tweezers_sets_the_hamcam_up_for_two_triggered_frames(rig):
         ("enable_em_gain", (True,)),
         ("enable_direct_em_gain", (True,)),
         ("set_gain", (600,)),
-        ("setup_acquisition", (2, "snap")),
+        ("start_live", ()),
     ]
 
 
@@ -682,15 +690,16 @@ def test_the_roi_cannot_be_scanned(rig, argument):
 
 
 @pytest.mark.parametrize("cls", [LoadTweezers, LoadTweezersMOTImage])
-def test_a_failed_shot_stops_the_cameras_and_puts_live_ones_back_in_live(rig, cls):
-    rig.camera.live = rig.orca.live = True
+def test_a_failed_shot_ends_the_cameras_shots_and_leaves_them_live(rig, cls):
     rig.fail = True
     measurement = run_local(cls)
     assert measurement.status == "failed"
     cameras = [rig.camera, rig.orca] if cls is LoadTweezersMOTImage else [rig.camera]
     for camera in cameras:
         names = [name for name, _ in camera.calls]
-        assert names[-2:] == ["stop_acquisition", "start_live"]
+        assert names[-1] == "end_shots"
+        last_stop = max(i for i, name in enumerate(names) if name == "stop_live")
+        assert "start_live" in names[last_stop:]
 
 
 def test_mot_image_variant_records_the_rb_mass(rig):
