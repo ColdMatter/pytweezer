@@ -298,7 +298,6 @@ class LoadTweezers(MotMasterExperiment):
                 self.record("second_counts", second, unit="counts")
 
 
-
 class LoadTweezersNImages(LoadTweezers):
     """Load the tweezers and image them ``n_images`` times per point."""
 
@@ -321,7 +320,10 @@ class LoadTweezersNImages(LoadTweezers):
             self.run_sequences(**sequence)
             return np.asarray(
                 self.hamcam.acquire_n_frames(
-                    10, broadcast=True, header={"rid": self.rid}, stream="hamcam_n_images"
+                    10,
+                    broadcast=True,
+                    header={"rid": self.rid},
+                    stream="hamcam_n_images",
                 )
             )
         finally:
@@ -329,8 +331,6 @@ class LoadTweezersNImages(LoadTweezers):
 
     def run_point(self) -> None:
         self.take_shot()
-    
-
 
 
 class LoadTweezersMOTImage(LoadTweezers):
