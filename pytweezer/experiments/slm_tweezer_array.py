@@ -109,7 +109,7 @@ class SlmTweezerArray(Experiment):
         tooltip="spread of the initial trap phases",
     )
 
-    sleep_time = Number(unit="s")
+    sleep_time = Number(1, unit="s")
 
     def prepare(self) -> None:
         saved = get_saved_parameters()
