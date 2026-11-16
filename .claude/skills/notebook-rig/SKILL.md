@@ -49,7 +49,7 @@ A pylablib-backed driver gets it for free; others implement
 since the mark; give `PycafCamera(buffer_frames=...)` more. `set_roi` returns the
 `(x0, y0)` the camera actually used (kept as `roi_origin`), and every broadcast
 frame's header carries it as `roi_x0`/`roi_y0`. Queued tweezer shots also tag
-theirs with the task's `rid` (`acquire_n_frames(..., header=...)`); frames
+theirs with the task's `rid` (`start_shot({"rid": ...})`); frames
 broadcast live during notebook runs carry none, so the live tweezer loading
 analysis counts all of them as one run of their own.
 

@@ -34,7 +34,8 @@ class LoadingCurve(Experiment):
 
     def run_point(self):
         # self.load_time holds this point's value (SI), self.point its index
-        frames = self.camera.acquire_n_frames(self.shots)
+        mark = self.camera.start_shot({"rid": self.rid})  # camera is live
+        frames = self.camera.wait_frames(mark, self.shots)
         self.record("image", frames[0])
         self.record("atom_number", float(frames.sum()), unit="counts")
 
@@ -85,8 +86,8 @@ Rules that matter:
   overrides `run_point`, so intermediate base classes stay hidden; a base that
   inherits a concrete `run_point` hides with `run_point = Experiment.run_point`
   (`TweezerArrayMeasurement`).
-- `self.rid` is the task's run id (-1 under `run_local`), e.g. to tag broadcast
-  frames (`acquire_n_frames(..., broadcast=True, header={"rid": self.rid})`).
+- `self.rid` is the task's run id (-1 under `run_local`), e.g. to tag a shot's
+  live frames (`camera.start_shot({"rid": self.rid})`).
 - An experiment that chooses its own points overrides
   `planned_points(scan)`, raising `ValueError` for a scan it can't honour.
 - Each camera has a settings experiment (`experiments/camera_settings.py`,

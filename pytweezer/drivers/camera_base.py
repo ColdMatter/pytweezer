@@ -799,32 +799,38 @@ class Camera(ABC):
             return [entry for entry in self._saturated if entry[0] >= int(start)]
 
     def _broadcast_live(self, poll_s: float) -> None:
-        sent = 0
-        last_error = None
+        sent, last_error = 0, None
         while not self._live_stop.wait(poll_s):
-            try:
-                if self.frames_acquired() < sent:  # acquisition restarted
-                    sent = 0
-                    with self._lock:
-                        self._saturated.clear()
-                frames, times = self._read_frames_timed_from(sent)
-            except Exception as error:
-                if repr(error) != last_error:
-                    LOGGER.warning("Live broadcast failed: %r", error)
-                    last_error = repr(error)
-                continue
-            last_error = None
-            for i, frame in enumerate(frames):
-                self._check_saturation(sent, frame)
-                info = {"timestamp": time.time(), "index": sent}
-                mark, header = self._shot_tag(sent)
-                if header is not None:
-                    info.update(header, index=sent - mark)
-                if times is not None:
-                    info["camera_timestamp"] = times[i]
-                self.broadcast_image(frame, info)
-                sent += 1
-            self._forget_shot_tags_before(sent)
+            sent, last_error = self._send_new_frames(sent, last_error)
+        # Frames since the last poll would otherwise never be broadcast.
+        self._send_new_frames(sent, last_error)
+
+    def _send_new_frames(
+        self, sent: int, last_error: str | None
+    ) -> tuple[int, str | None]:
+        """Broadcast every frame from number ``sent`` on; the next frame to send and the last error."""
+        try:
+            if self.frames_acquired() < sent:  # acquisition restarted
+                sent = 0
+                with self._lock:
+                    self._saturated.clear()
+            frames, times = self._read_frames_timed_from(sent)
+        except Exception as error:
+            if repr(error) != last_error:
+                LOGGER.warning("Live broadcast failed: %r", error)
+            return sent, repr(error)
+        for i, frame in enumerate(frames):
+            self._check_saturation(sent, frame)
+            info = {"timestamp": time.time(), "index": sent}
+            mark, header = self._shot_tag(sent)
+            if header is not None:
+                info.update(header, index=sent - mark)
+            if times is not None:
+                info["camera_timestamp"] = times[i]
+            self.broadcast_image(frame, info)
+            sent += 1
+        self._forget_shot_tags_before(sent)
+        return sent, None
 
     def _shot_tag(self, frame: int) -> tuple[int, dict | None]:
         """``(mark, header)`` of the shot that ``frame`` belongs to; ``(0, None)`` if none."""

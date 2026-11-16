@@ -105,6 +105,7 @@ class RbMotMasterRunner(MotMasterExperiment):
     def finish(self) -> None:
         try:
             for camera in getattr(self, "cameras", {}).values():
+                camera.start_live(self.buffer_frames)  # in case a failure stopped it
                 camera.end_shots()
         finally:
             super().finish()

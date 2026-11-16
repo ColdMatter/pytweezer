@@ -172,6 +172,7 @@ class LoadTweezers(MotMasterExperiment):
 
     def finish(self) -> None:
         try:
+            self.hamcam.start_live()  # does nothing unless a failure left it stopped
             self.hamcam.end_shots()
         finally:
             super().finish()
@@ -344,6 +345,7 @@ class LoadTweezersMOTImage(LoadTweezers):
 
     def finish(self) -> None:
         try:
+            self.orca.start_live()  # does nothing unless a failure left it stopped
             self.orca.end_shots()
         finally:
             super().finish()
