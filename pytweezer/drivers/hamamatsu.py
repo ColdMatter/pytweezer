@@ -327,6 +327,12 @@ class HamamatsuCamera(Camera):
         # buffer is attached (DCAMERR_NOTSTABLE), and pylablib's set_roi frees it.
         self._rebin_keeping_roi(binning)
 
+    def _binning_limits(self) -> dict[str, Any]:
+        # pylablib probes the BINNING property for these when it opens the camera,
+        # and set_roi rounds any other bin factor down to one of them.
+        valid = getattr(self._backend, "_valid_binnings", None)
+        return {"choices": [int(b) for b in valid]} if valid else {}
+
     def set_trigger_source(self, source: str):
         with self._lock:
             self._backend.set_trigger_mode(source)

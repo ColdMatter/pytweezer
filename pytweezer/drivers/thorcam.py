@@ -137,6 +137,11 @@ class ThorCam(Camera):
         """Bin ``binning`` x ``binning`` pixels together, keeping the ROI."""
         self._rebin_keeping_roi(binning)
 
+    def _binning_limits(self) -> dict[str, int]:
+        with self._lock:
+            horizontal, _ = self._backend.get_roi_limits()
+        return {"maximum": int(horizontal.maxbin)}
+
     def set_gain(self, gain: float):
         """Set the analogue gain in dB, truncated to the range the camera allows.
 

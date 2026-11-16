@@ -98,7 +98,11 @@ not `set_<name>` is named in `CONTROL_SETTERS`; do not override
 gives the ROI controls the sensor size as their `maximum`, read once connected
 (and on each `read_controls()`) by `_sensor_shape()`, which calls the
 backend's `get_detector_size()` (pylablib cameras have it); a backend without
-one overrides `_sensor_shape()`. A driver that can
+one overrides `_sensor_shape()`. Likewise `binning` gets what
+`_binning_limits()` returns: `{"choices": [1, 2, 4]}` for a camera that takes
+only those bin factors (the DCAM drivers, from pylablib's probe; the Camera
+applet shows a drop-down), `{"maximum": n}` for one that takes any up to `n`
+(ThorCam). A driver that can
 read each frame's camera-clock time overrides `_read_range_timed`; the live
 broadcast then adds it as `camera_timestamp`. `snap()` takes one frame from a
 stopped camera. A driver that watches the sensor temperature sets

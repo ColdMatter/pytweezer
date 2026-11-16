@@ -240,6 +240,9 @@ class Camera(ABC):
     object_pixel_m: float | None = None
     #: Sensor ``(width, height)`` in pixels, as :meth:`_sensor_shape` last read it; ``None`` if unknown.
     _sensor_size: tuple[int, int] | None = None
+    #: What the camera allows for ``binning`` (``{"choices": [...]}`` or
+    #: ``{"maximum": ...}``), as :meth:`_binning_limits` last read it; ``None`` if unknown.
+    _binning_allowed: dict[str, Any] | None = None
     #: Pixel value at which a live frame counts as saturated (see
     #: :meth:`saturated_frames_since`); ``None`` leaves saturation unwatched.
     saturation_level: int | None = None
@@ -277,7 +280,7 @@ class Camera(ABC):
         self._backend = None
         self._kept: dict[str, Any] = {}
         self._connect()
-        self._keep_sensor_size()
+        self._keep_hardware_limits()
 
     # ------------------------------------------------------------------ #
     # Hardware-specific hooks -- implemented by each concrete shim.
@@ -516,9 +519,11 @@ class Camera(ABC):
 
         Values are those last kept or read back (the control's default before
         either); the hardware is not touched. Once the sensor size is known, the
-        ROI controls' ``maximum`` is the sensor's.
+        ROI controls' ``maximum`` is the sensor's; once the camera has said which
+        binnings it allows, ``binning`` carries them as ``choices`` (the bin
+        factors, as integers) or a ``maximum``.
         """
-        limits = self._roi_limits()
+        limits = self._hardware_limits()
         return [
             {
                 **control.describe(),
@@ -532,7 +537,7 @@ class Camera(ABC):
         """Read every control's value back from the camera, then return :meth:`controls`."""
         with self._lock:
             self._kept.update(self._read_control_values())
-            self._keep_sensor_size()
+            self._keep_hardware_limits()
         return self.controls()
 
     def _sensor_shape(self) -> tuple[int, int] | None:
@@ -544,28 +549,49 @@ class Camera(ABC):
         detector_size = getattr(self._backend, "get_detector_size", None)
         return None if detector_size is None else detector_size()
 
-    def _keep_sensor_size(self) -> None:
+    def _binning_limits(self) -> dict[str, Any]:
+        """What the camera allows for ``binning``, read from the hardware.
+
+        ``{"choices": [1, 2, 4]}`` for a camera that takes only those bin
+        factors, ``{"maximum": 16}`` for one that takes any up to a limit, or
+        ``{}`` if unknown. Drivers override this.
+        """
+        return {}
+
+    def _keep_hardware_limits(self) -> None:
+        """Read the sensor size and allowed binnings, keeping the last good reading of each."""
         try:
             shape = self._sensor_shape()
         except Exception:
             LOGGER.warning(
                 "%s could not read its sensor size", type(self).__name__, exc_info=True
             )
-            return
-        if shape is not None:
-            self._sensor_size = (int(shape[0]), int(shape[1]))
+        else:
+            if shape is not None:
+                self._sensor_size = (int(shape[0]), int(shape[1]))
+        try:
+            self._binning_allowed = self._binning_limits()
+        except Exception:
+            LOGGER.warning(
+                "%s could not read its allowed binnings",
+                type(self).__name__,
+                exc_info=True,
+            )
 
-    def _roi_limits(self) -> dict[str, dict[str, int]]:
-        """The ROI controls' maxima from the sensor size, by control name."""
-        if self._sensor_size is None:
-            return {}
-        width, height = self._sensor_size
-        return {
-            "roi_x0": {"maximum": width - 1},
-            "roi_width": {"maximum": width},
-            "roi_y0": {"maximum": height - 1},
-            "roi_height": {"maximum": height},
-        }
+    def _hardware_limits(self) -> dict[str, dict[str, Any]]:
+        """The hardware's limits on the controls, by control name: ROI maxima and allowed binnings."""
+        limits: dict[str, dict[str, Any]] = {}
+        if self._binning_allowed:
+            limits["binning"] = dict(self._binning_allowed)
+        if self._sensor_size is not None:
+            width, height = self._sensor_size
+            limits |= {
+                "roi_x0": {"maximum": width - 1},
+                "roi_width": {"maximum": width},
+                "roi_y0": {"maximum": height - 1},
+                "roi_height": {"maximum": height},
+            }
+        return limits
 
     def apply_controls(self, values: dict[str, Any]) -> list[dict]:
         """Set the controls named in ``values`` (SI units), then read them all back.
@@ -853,6 +879,9 @@ class SimulatedCamera(Camera):
 
     def _sensor_shape(self) -> tuple[int, int]:
         return self.sim_sensor_size
+
+    def _binning_limits(self) -> dict[str, Any]:
+        return {"choices": [1, 2, 4]}
 
     def _remember(self, **values: Any) -> None:
         """Keep ``values`` and hold them as what the simulated hardware reports."""
