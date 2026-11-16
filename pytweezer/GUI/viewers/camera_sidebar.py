@@ -130,7 +130,8 @@ class _Field(QObject):
         if kind == "bool":
             self.editor: QWidget = QCheckBox()
             self.editor.clicked.connect(self._ticked)
-        elif kind == "choice":
+        elif kind == "choice" or control.get("choices"):
+            # An integer control with choices (allowed bin factors) is a drop-down too.
             self.editor = QComboBox()
             for choice in control["choices"]:
                 self.editor.addItem(choice_text(choice), choice)

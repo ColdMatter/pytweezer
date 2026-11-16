@@ -105,6 +105,18 @@ TRIGGER_POLARITY = Control(
     choices=("rise", "fall"),
 )
 BINNING = Control("binning", "Binning", "Binning & ROI", "integer", 1, minimum=1)
+#: Frames per second in internal trigger, so short exposures do not flood the
+#: ring buffer and the stream; external triggers ignore it.
+FRAME_RATE = Control(
+    "frame_rate",
+    "Frame rate (int.)",
+    "Exposure & trigger",
+    "number",
+    10.0,
+    unit="fps",
+    si_unit="Hz",
+    minimum=0.0,
+)
 ROI = (
     Control(
         "roi_x0",
@@ -240,6 +252,8 @@ class Camera(ABC):
     object_pixel_m: float | None = None
     #: Sensor ``(width, height)`` in pixels, as :meth:`_sensor_shape` last read it; ``None`` if unknown.
     _sensor_size: tuple[int, int] | None = None
+    #: The hardware's limits on the controls, as :meth:`_control_limits` last read them.
+    _read_limits: dict[str, dict[str, Any] | None] | None = None
     #: Pixel value at which a live frame counts as saturated (see
     #: :meth:`saturated_frames_since`); ``None`` leaves saturation unwatched.
     saturation_level: int | None = None
@@ -280,7 +294,7 @@ class Camera(ABC):
         self._backend = None
         self._kept: dict[str, Any] = {}
         self._connect()
-        self._keep_sensor_size()
+        self._keep_hardware_limits()
 
     # ------------------------------------------------------------------ #
     # Hardware-specific hooks -- implemented by each concrete shim.
@@ -585,9 +599,12 @@ class Camera(ABC):
 
         Values are those last kept or read back (the control's default before
         either); the hardware is not touched. Once the sensor size is known, the
-        ROI controls' ``maximum`` is the sensor's.
+        ROI controls' ``maximum`` is the sensor's; once the camera has been read,
+        each control carries the limits :meth:`_control_limits` gave it (``binning``
+        its allowed bin factors as integer ``choices``), and a control the camera
+        lacks is left out.
         """
-        limits = self._roi_limits()
+        limits = self._hardware_limits()
         return [
             {
                 **control.describe(),
@@ -595,13 +612,20 @@ class Camera(ABC):
                 "value": self._kept.get(control.name, control.default),
             }
             for control in self.CONTROLS
+            if control.name not in self._absent_controls()
         ]
+
+    def _absent_controls(self) -> set[str]:
+        """Names of the :attr:`CONTROLS` this camera's hardware turned out to lack."""
+        return {
+            name for name, limit in (self._read_limits or {}).items() if limit is None
+        }
 
     def read_controls(self) -> list[dict]:
         """Read every control's value back from the camera, then return :meth:`controls`."""
         with self._lock:
             self._kept.update(self._read_control_values())
-            self._keep_sensor_size()
+            self._keep_hardware_limits()
         return self.controls()
 
     def _sensor_shape(self) -> tuple[int, int] | None:
@@ -613,28 +637,53 @@ class Camera(ABC):
         detector_size = getattr(self._backend, "get_detector_size", None)
         return None if detector_size is None else detector_size()
 
-    def _keep_sensor_size(self) -> None:
+    def _control_limits(self) -> dict[str, dict[str, Any] | None]:
+        """The hardware's limits on the controls, by control name, read from the camera.
+
+        Each value overrides keys of the control's description: ``{"choices":
+        [1, 2, 4]}`` for a ``binning`` that takes only those bin factors,
+        ``{"minimum": ..., "maximum": ...}`` for a range. ``None`` means the camera
+        lacks the control, which is then neither shown nor applied. Drivers
+        override this.
+        """
+        return {}
+
+    def _keep_hardware_limits(self) -> None:
+        """Read the sensor size and allowed binnings, keeping the last good reading of each."""
         try:
             shape = self._sensor_shape()
         except Exception:
             LOGGER.warning(
                 "%s could not read its sensor size", type(self).__name__, exc_info=True
             )
-            return
-        if shape is not None:
-            self._sensor_size = (int(shape[0]), int(shape[1]))
+        else:
+            if shape is not None:
+                self._sensor_size = (int(shape[0]), int(shape[1]))
+        try:
+            self._read_limits = self._control_limits()
+        except Exception:
+            LOGGER.warning(
+                "%s could not read its control limits",
+                type(self).__name__,
+                exc_info=True,
+            )
 
-    def _roi_limits(self) -> dict[str, dict[str, int]]:
-        """The ROI controls' maxima from the sensor size, by control name."""
-        if self._sensor_size is None:
-            return {}
-        width, height = self._sensor_size
-        return {
-            "roi_x0": {"maximum": width - 1},
-            "roi_width": {"maximum": width},
-            "roi_y0": {"maximum": height - 1},
-            "roi_height": {"maximum": height},
+    def _hardware_limits(self) -> dict[str, dict[str, Any]]:
+        """The hardware's limits on the controls present, by control name: :meth:`_control_limits` and the ROI maxima."""
+        limits = {
+            name: dict(limit)
+            for name, limit in (self._read_limits or {}).items()
+            if limit is not None
         }
+        if self._sensor_size is not None:
+            width, height = self._sensor_size
+            limits |= {
+                "roi_x0": {"maximum": width - 1},
+                "roi_width": {"maximum": width},
+                "roi_y0": {"maximum": height - 1},
+                "roi_height": {"maximum": height},
+            }
+        return limits
 
     def apply_controls(self, values: dict[str, Any]) -> list[dict]:
         """Set the controls named in ``values`` (SI units), then read them all back.
@@ -648,7 +697,11 @@ class Camera(ABC):
         Raises:
             KeyError: if a name is not one of this camera's controls.
         """
-        by_name = {control.name: control for control in self.CONTROLS}
+        by_name = {
+            control.name: control
+            for control in self.CONTROLS
+            if control.name not in self._absent_controls()
+        }
         unknown = sorted(set(values) - set(by_name))
         if unknown:
             raise KeyError(
@@ -929,7 +982,11 @@ class SimulatedCamera(Camera):
         object_pixel_m: float | None = None,
     ):
         self._shape = (256, 256)
-        self._sim_values: dict[str, Any] = {"roi_height": 256, "roi_width": 256}
+        self._sim_values: dict[str, Any] = {
+            "roi_height": 256,
+            "roi_width": 256,
+            "frame_rate": self.sim_frame_rate,
+        }
         self._nframes = 1
         self._running = False
         self._started = 0.0
@@ -950,6 +1007,18 @@ class SimulatedCamera(Camera):
 
     def _sensor_shape(self) -> tuple[int, int]:
         return self.sim_sensor_size
+
+    def _control_limits(self) -> dict[str, dict[str, Any] | None]:
+        return {
+            "binning": {"choices": [1, 2, 4]},
+            "frame_rate": {"minimum": 0.1, "maximum": 100.0},
+        }
+
+    def set_frame_rate(self, rate: float) -> None:
+        """Frames per second while acquiring, as an internal trigger would give them."""
+        with self._lock:
+            self.sim_frame_rate = float(rate)
+            self._remember(frame_rate=self.sim_frame_rate)
 
     def _remember(self, **values: Any) -> None:
         """Keep ``values`` and hold them as what the simulated hardware reports."""
