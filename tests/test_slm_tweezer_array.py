@@ -279,3 +279,43 @@ def test_a_missing_saved_optics_parameter_fails_the_run(rig_and_streams):
 
     assert measurement.status == "failed"
     assert "slm_envelope_sigma" in measurement.attrs["error"]
+
+
+def test_the_first_move_frame_matches_the_mask_the_array_was_shown_with(generator):
+    optics = {
+        "blaze_um": (30.0, -12.0),
+        "fresnel_focal_length_mm": 1125.0,
+        "zernike": True,
+    }
+    hologram = array_hologram.array_hologram(
+        generator,
+        rows=2,
+        columns=2,
+        spacing_um=5.0,
+        angle_deg=0.0,
+        envelope=None,
+        pupil_radius_um=8000.0,
+        pupil_dump_um=(100.0, 0.0),
+        iterations=20,
+        damping=0.5,
+        phase_randomness=1.0,
+        **optics,
+    )
+    terms = [hologram[k] for k in ("optimised_weights", "phases", "x_um", "y_um")]
+    nudged = [terms[0], terms[1], terms[2] + 1e-6, terms[3]]
+    plan = generator.plan_rearrangement(
+        terms,
+        nudged,
+        np.ones(4, bool),
+        d0=1.0,
+        background=array_hologram.background_phase(generator, **optics),
+    )
+    frames = list(
+        generator.iter_planned_sequence(
+            plan,
+            to_host=True,
+            pupil=array_hologram.pupil_arrays(generator, 8000.0, 100.0, 0.0),
+        )
+    )
+    assert len(frames) == 1
+    assert np.mean(frames[0] != hologram["mask"]) < 0.01

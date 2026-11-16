@@ -751,10 +751,12 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         n_steps = int(cp.ceil(1.875 * max_dist / d0))
 
         # 3. INITIALIZE VRAM STATE MACHINE
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
 
         # Pre-calculate the minimum jerk step multipliers on the GPU
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
@@ -952,14 +954,20 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             yield frame.get() if to_host else frame
 
     def plan_rearrangement(
-        self, terms1, terms2, occ_mask, d0=0.5, profile="minimum_jerk"
+        self,
+        terms1,
+        terms2,
+        occ_mask,
+        d0=0.5,
+        profile="minimum_jerk",
+        background=None,
     ):
         if profile not in ("minimum_jerk", "linear"):
             raise ValueError(
                 f"profile must be 'minimum_jerk' or 'linear', got {profile!r}"
             )
-        w1, phi1, x1, y1 = terms1
-        w2, phi2, x2, y2 = terms2
+        w1, phi1, x1, y1 = (cp.asarray(v) for v in terms1)
+        w2, phi2, x2, y2 = (cp.asarray(v) for v in terms2)
         occ_mask = cp.asarray(occ_mask)
 
         pos1 = cp.stack((x1, y1), axis=-1)
@@ -983,10 +991,12 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         steps_scale = 1.0 if profile == "linear" else 1.875
         n_steps = int(cp.ceil(steps_scale * max_dist / d0))
 
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
 
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
         if profile == "linear":
@@ -1015,7 +1025,11 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         dw[off_mask] = 0.0
         curr_w[off_mask] = 0.0
 
-        static_background = self.superimpose([self.fresnel, self.blaze, self.zernike])
+        static_background = (
+            self.superimpose([self.fresnel, self.blaze, self.zernike])
+            if background is None
+            else background
+        )
 
         # The trailing fancy-index writes and the background superposition are
         # async launches. Without this sync their GPU tail would land on frame 0
@@ -1049,6 +1063,35 @@ class OptimisationBasedPhasemaskGeneratorGPU:
             "pos_final": pos_final,
             "n_targets": int(pos2.shape[0]),
         }
+
+    def iter_planned_sequence(self, plan, *, to_host=False, pupil=None):
+        """Yield one uint8 frame per step of ``plan``.
+
+        ``pupil=(inside, dump)`` keeps each composite phase inside the pupil
+        and replaces the rest with the dump grating.
+        """
+        dw, dphi = plan["dw"], plan["dphi"]
+        total_dx, total_dy = plan["total_dx"], plan["total_dy"]
+        curr_w, curr_phi = plan["curr_w"], plan["curr_phi"]
+        curr_x, curr_y = plan["curr_x"], plan["curr_y"]
+        for ds in plan["ds_profile_cpu"][: plan["n_steps"]]:
+            update_state_kernel_linear(
+                dw,
+                dphi,
+                total_dx,
+                total_dy,
+                float(ds),
+                curr_w,
+                curr_phi,
+                curr_x,
+                curr_y,
+            )
+            pm_slm = self.generate_phasemask((curr_w, curr_phi, curr_x, curr_y))
+            composite = self.superimpose([pm_slm, plan["static_background"]])
+            if pupil is not None:
+                composite = cp.where(pupil[0], composite, pupil[1])
+            frame = self.transform_phase_8bit(composite)
+            yield frame.get() if to_host else frame
 
     def iter_rearrangement_sequence_timings(self, plan, to_host=False):
         dw, dphi = plan["dw"], plan["dphi"]
@@ -1955,11 +1998,13 @@ class OptimisationBasedPhasemaskGeneratorGPU3D:
         n_steps = int(cp.ceil(1.875 * max_dist / d0))
 
         # 3. INITIALIZE VRAM STATE MACHINE
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
-        curr_z = cp.asarray(z1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
+        curr_z = cp.asarray(z1, dtype=cp.float32).copy()
 
         # Pre-calculate the minimum jerk step multipliers on the GPU
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
@@ -2899,10 +2944,12 @@ class OptimisationBasedPhasemaskGeneratorGPUSeidel:
         n_steps = int(cp.ceil(1.875 * max_dist / d0))
 
         # 3. INITIALIZE VRAM STATE MACHINE
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
 
         # Pre-calculate the minimum jerk step multipliers on the GPU
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
@@ -3131,10 +3178,12 @@ class OptimisationBasedPhasemaskGeneratorGPUSeidel:
         steps_scale = 1.0 if profile == "linear" else 1.875
         n_steps = int(cp.ceil(steps_scale * max_dist / d0))
 
-        curr_w = cp.asarray(w1, dtype=cp.float32)
-        curr_phi = cp.asarray(phi1, dtype=cp.float32)
-        curr_x = cp.asarray(x1, dtype=cp.float32)
-        curr_y = cp.asarray(y1, dtype=cp.float32)
+        # The update kernel works in place: without the copies, float32 terms1 would
+        # be walked to the targets and the next rearrangement would start wrong.
+        curr_w = cp.asarray(w1, dtype=cp.float32).copy()
+        curr_phi = cp.asarray(phi1, dtype=cp.float32).copy()
+        curr_x = cp.asarray(x1, dtype=cp.float32).copy()
+        curr_y = cp.asarray(y1, dtype=cp.float32).copy()
 
         tau = cp.linspace(0, 1, n_steps + 1, dtype=cp.float32)
         if profile == "linear":

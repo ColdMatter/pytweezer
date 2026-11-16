@@ -35,6 +35,26 @@ def photons_at_sites(
     return an.convert_counts_to_photons(counts).astype(np.float64)
 
 
+def occupied_sites(
+    frame: np.ndarray,
+    sites: np.ndarray,
+    *,
+    window_size: int,
+    feature_size: int,
+    threshold: float,
+) -> np.ndarray:
+    """Whether each of ``sites`` (``(N, 2)`` ``(y, x)`` pixels) holds an atom in ``frame``.
+
+    A site is occupied when its photons in the top-hat filtered frame exceed
+    ``threshold``, as :func:`photons_at_sites` counts them.
+    """
+    filtered = an.morphological_tophat_high_pass(
+        np.asarray(frame, dtype=float), feature_size=feature_size
+    )
+    site_pixels = {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}
+    return photons_at_sites([filtered], site_pixels, window_size)[0] > threshold
+
+
 def loading_statistics(
     photons: np.ndarray, sites: dict[int, tuple[int, int]], fallback_threshold: float
 ) -> dict:
