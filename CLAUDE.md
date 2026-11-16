@@ -151,6 +151,10 @@ run `uv run ruff check .` and `uv run ruff format --check .` before pushing.
 
 - Use `get_logger(name)` from `pytweezer/logging_utils.py`, never bare
   `logging.getLogger` - it adds structured JSONL output under `logs/`
+- `logs/` holds only this PC's records. Every host's records go live over the
+  Message hub's `Logs` topic (the GUI's Streams > Logs tab); to read them, run
+  `uv run python tools/tail_logs.py` in the background before reproducing the
+  problem.
 
 ### Notebooks
 
