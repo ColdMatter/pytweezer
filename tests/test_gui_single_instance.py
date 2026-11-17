@@ -58,3 +58,23 @@ def test_a_port_held_by_another_program_refuses_without_guessing(qapp, port):
             claim_gui("server", port=port)
     assert refusal.value.owner is None
     assert f"port {port}" in str(refusal.value)
+
+
+def test_a_quit_request_asks_the_gui_to_close(qapp, port):
+    running = claim_gui("client", port=port)
+    quits = []
+    running.quit_requested.connect(lambda: quits.append(True))
+    raised = []
+    running.raise_requested.connect(lambda: raised.append(True))
+
+    def send_quit():
+        with socket.create_connection(("127.0.0.1", port)) as s:
+            s.makefile().readline()
+            s.sendall(b"quit\n")
+
+    thread = threading.Thread(target=send_quit)
+    thread.start()
+    assert until(lambda: quits, qapp=qapp)
+    assert not raised
+    thread.join()
+    running.close()

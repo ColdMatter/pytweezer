@@ -274,6 +274,12 @@ def _run(build, role):
     lock.raise_requested.connect(lambda: _bring_to_front(win))
     win.show()
 
+    def close_gui():
+        win.close()
+        app.quit()
+
+    lock.quit_requested.connect(close_gui)
+
     def on_exit(signo, _frame):
         # Registering SIGINT here too matters: without it, Python's default
         # handler raises a bare KeyboardInterrupt wherever the interpreter next
@@ -281,8 +287,7 @@ def _run(build, role):
         # blocking zmq poll() call), which just gets dumped as a traceback by
         # Qt's default unhandled-exception hook instead of closing the window.
         logger.info("Received %s, closing GUI", signal.Signals(signo).name)
-        win.close()
-        app.quit()
+        close_gui()
 
     signal.signal(signal.SIGTERM, on_exit)
     signal.signal(signal.SIGINT, on_exit)

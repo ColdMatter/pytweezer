@@ -5,7 +5,8 @@ shared servers), so a second launch is refused before it builds anything. The
 running GUI listens on :data:`GUI_LOCK_PORT` on localhost: the OS frees the
 port however the GUI exits, and the port is the same for every user and every
 clone of the repository on the machine. A second launch connects to it, learns
-which GUI is running, and asks it to bring its window to the front.
+which GUI is running, and asks it to bring its window to the front. A client
+may instead write ``quit`` to have the GUI close as if its window were closed.
 """
 
 import getpass
@@ -33,6 +34,7 @@ class GuiLock(QtCore.QObject):
     """This PC's GUI lock, held while the GUI runs; tells later launches who holds it."""
 
     raise_requested = QtCore.pyqtSignal()
+    quit_requested = QtCore.pyqtSignal()
 
     def __init__(self, server: QtNetwork.QTcpServer, owner: dict):
         super().__init__()
@@ -48,8 +50,11 @@ class GuiLock(QtCore.QObject):
 
     def _read(self, connection):
         while connection.canReadLine():
-            if bytes(connection.readLine()).strip() == b"raise":
-                self.raise_requested.emit()
+            match bytes(connection.readLine()).strip():
+                case b"raise":
+                    self.raise_requested.emit()
+                case b"quit":
+                    self.quit_requested.emit()
 
     def close(self):
         self._server.close()
