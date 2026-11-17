@@ -21,8 +21,11 @@ logger = get_logger("machine_lines")
 
 POLL_INTERVAL_S = 15.0
 
-#: How long "Starting…"/"Stopping…" holds against polls that disagree.
+#: How long after a Start/Stop has reported "Starting…"/"Stopping…" holds against polls that disagree.
 _PENDING_TIMEOUT_S = 60.0
+
+#: Widest a failure's reason gets on the line before it is elided (in full in its tooltip).
+_STATE_TEXT_MAX_PX = 420
 
 #: (``STATE_STYLE`` key for the colour, text) for an SSH check that did not get through.
 _NOT_REACHED = {
@@ -110,8 +113,12 @@ class MachineLine(QFrame):
         self.name = machine.name
         self._simulating = simulating
         self._state = None
-        self._pending = None  # "start"/"stop" until a poll agrees or it times out
-        self._pending_since = 0.0
+        # "start"/"stop" from the click until the action has reported and a poll
+        # agrees: a stop's cleanup runs on after the lock is free, and starting a
+        # GUI then would have its devices killed.
+        self._pending = None
+        self._acting = False  # the action has not reported yet
+        self._reported_at = 0.0
         self._requested = None  # the last action asked for
         self._failure = None  # (action, detail) until the next poll
 
@@ -158,15 +165,21 @@ class MachineLine(QFrame):
         """Show a polled ``machines.GuiState``."""
         self._state = state
         self._failure = None
-        if self._pending is not None and (
-            self._poll_agrees(state)
-            or time.monotonic() - self._pending_since > _PENDING_TIMEOUT_S
+        if (
+            self._pending is not None
+            and not self._acting
+            and (
+                self._poll_agrees(state)
+                or time.monotonic() - self._reported_at > _PENDING_TIMEOUT_S
+            )
         ):
             self._pending = None
         self._render()
 
     def action_finished(self, result):
-        """Show a Start/Stop that failed; a successful one waits for the poll to agree."""
+        """Take a Start/Stop's report: a failure shows at once, a success waits for a poll to agree."""
+        self._acting = False
+        self._reported_at = time.monotonic()
         if result.ok:
             return
         logger.warning(
@@ -198,7 +211,7 @@ class MachineLine(QFrame):
             if answer != QMessageBox.StandardButton.Yes:
                 return
         self._pending = self._requested = action
-        self._pending_since = time.monotonic()
+        self._acting = True
         self._failure = None
         self._render()
         self.requested.emit(action)
@@ -209,7 +222,7 @@ class MachineLine(QFrame):
             style, text = _PENDING[self._pending]
         elif self._failure is not None:
             action, tooltip = self._failure
-            style, text = "failed", f"{action} failed"
+            style, text = "failed", f"{action} failed: {tooltip}"
         elif self._state is None:
             style, text = "unknown", "checking…"
         elif self._state.reach != "ok":
@@ -224,6 +237,13 @@ class MachineLine(QFrame):
             style, text = "stopped", "not running"
         apply_dot_style(self.dot, style)
         apply_label_style(self.stateLabel, style, text)
+        if self._failure is not None:
+            self.stateLabel.ensurePolished()
+            self.stateLabel.setText(
+                self.stateLabel.fontMetrics().elidedText(
+                    text, QtCore.Qt.TextElideMode.ElideRight, _STATE_TEXT_MAX_PX
+                )
+            )
         self.stateLabel.setToolTip(tooltip)
         self._render_button()
 

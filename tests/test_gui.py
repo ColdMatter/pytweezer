@@ -482,5 +482,64 @@ def test_a_failed_stop_says_why_on_its_line(lab_panel, monkeypatch, qapp):
 
     line.button.click()
 
-    assert until(lambda: line.stateLabel.text() == "stop failed", qapp=qapp)
+    # The reason is elided to fit the line, so only its start is certain.
+    assert until(
+        lambda: line.stateLabel.text().startswith("stop failed: did not"), qapp=qapp
+    )
     assert line.stateLabel.toolTip() == "did not close within 30 s"
+    assert (line.button.text(), line.button.isEnabled()) == ("Stop", True)
+
+
+_STOPPED = ("poll", "ok", None)
+_STILL_RUNNING = ("poll", "ok", _RUNNING)
+
+
+@pytest.mark.parametrize(
+    "steps, shown",
+    [
+        ([_STILL_RUNNING], "Stopping…"),
+        ([_STOPPED], "Stopping…"),
+        ([("wait", 120), _STILL_RUNNING], "Stopping…"),
+        ([("reported",), _STOPPED], "not running"),
+        (
+            [("reported",), ("wait", 61), _STILL_RUNNING],
+            "client · cafmot since 09:12 on 17 Nov",
+        ),
+    ],
+    ids=[
+        "poll disagrees",
+        "poll agrees while stop still runs",
+        "stop still running after 120 s",
+        "stop reported then poll agrees",
+        "gives up 60 s after the stop reported",
+    ],
+)
+def test_stopping_holds_until_the_stop_has_reported_and_a_poll_agrees(
+    lab_panel, monkeypatch, steps, shown
+):
+    # A stop runs kill_stale after the GUI has closed; starting a GUI before it
+    # finishes would have the new GUI's devices killed.
+    from PyQt6.QtWidgets import QMessageBox
+
+    from bin import machine_lines
+    from pytweezer.machines import GuiState, Result
+
+    now = [1000.0]
+    monkeypatch.setattr(machine_lines.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes
+    )
+    line, _stopped = _running_bonesaw(lab_panel, monkeypatch)
+    line.requested.disconnect()  # the stop is reported by hand below
+    line.button.click()
+
+    for step in steps:
+        if step[0] == "poll":
+            line.apply(GuiState(step[1], step[2]))
+        elif step[0] == "wait":
+            now[0] += step[1]
+        else:
+            line.action_finished(Result("ph-bonesaw", True, "stopped"))
+
+    assert line.stateLabel.text() == shown
+    assert line.button.isEnabled() == (shown != "Stopping…")

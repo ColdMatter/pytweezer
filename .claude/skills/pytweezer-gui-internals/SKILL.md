@@ -163,8 +163,10 @@ by `pytweezer.machines.gui_state`, plus a Start/Stop button:
   lock, which closes that GUI as if its window were closed.
 - `MachineWorker` (a `QThread`) polls every line over SSH every 15 s and right
   after a Start/Stop, and runs each Start/Stop on a thread of its own (a stop
-  takes 30 s or more). "Starting…"/"Stopping…" holds until a poll agrees or
-  60 s pass; a failed action shows its reason on the line until the next poll.
+  takes 30 s or more). "Starting…"/"Stopping…", with the button disabled,
+  holds until the action has reported and a poll then agrees, or 60 s after it
+  reported: a stop's cleanup runs on after the GUI has closed. A failed action
+  shows `stop failed: <reason>` on the line until the next poll.
 - The PC the GUI runs on has no button. It is disabled in a simulated session,
   when this PC's SSH key is not accepted (`pytweezer-machines setup <name>`),
   when the host key changed, when the PC or its GUI does not answer, and on Linux or for a
