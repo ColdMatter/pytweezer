@@ -570,6 +570,18 @@ QPushButton#ToggleButton[kind="stop"]:hover {
     border-color: #e74c3c;
 }
 
+QPushButton#ToggleButton:disabled {
+    color: #5c5d66;
+    background-color: #1f2026;
+    border-color: #2a2b32;
+}
+
+/* A group of process rows' heading, e.g. a Devices-tab machine line: a rule
+   under it rather than a tile, so it reads as the title of the rows below. */
+QFrame#GroupHeader {
+    border-bottom: 1px solid #44454f;
+}
+
 QTableWidget, QTreeWidget, QListWidget, QTableView, QTreeView, QListView {
     background-color: #24252c;
     alternate-background-color: #26272f;

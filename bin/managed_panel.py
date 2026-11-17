@@ -35,6 +35,9 @@ from PyQt6 import QtCore
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
+from bin.machine_lines import MachineLine, MachineWorker
+from pytweezer import machines
+from pytweezer.configuration import config
 from pytweezer.configuration.config import get_config, machine_name, this_pc_address
 from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT
 from pytweezer.GUI.pytweezerQt import BWidget
@@ -555,6 +558,11 @@ class DevicesPanel(BWidget):
     host, and this panel in turn carries out the requests addressed to its own
     devices.
 
+    Rows are grouped under a :class:`~bin.machine_lines.MachineLine` for each
+    machine in ``MACHINES`` that hosts a device, in ``MACHINES`` order, which
+    shows and starts or stops pytweezer on that PC; devices on no machine follow
+    under "Other".
+
     A composite device gets a row for the rig itself plus an indented row per
     sub-device, because a rig comes up serving only the devices that opened
     successfully and each one's state has to be readable on its own. The rig row
@@ -591,54 +599,54 @@ class DevicesPanel(BWidget):
         columns = [("Device", 150), ("Address", 170), ("Last seen", 80)]
         outer.addLayout(_header_row(columns, controllable=True))
 
-        conf = get_config()
-        devices = conf.get("Devices", {})
-        for pname, params in sorted(devices.items()):
-            local = self.check_host(params.get("host"))
-            remote_request = None
-            if not local and self._control is not None:
-                remote_request = lambda action, device=pname: self._control.request(
-                    action, device
-                )
-            row = ManagedRow(
-                pname,
-                script=(
-                    tweezerpath + "/bin/" + DEVICE_SERVER_SCRIPT if local else None
-                ),
-                run_at_startup=params.get("run_at_startup", False) if local else False,
-                tooltip=params.get("tooltip"),
-                controllable=local,
-                show_last_seen=True,
-                reserve_control=True,
-                remote_request=remote_request,
-                stop_orphan=_stop_orphan,
+        devices = get_config().get("Devices", {})
+        lab_machines = machines.machines()
+        by_address = {m.address.strip().lower(): m.name for m in lab_machines}
+        hosted = {m.name: [] for m in lab_machines}
+        elsewhere = []
+        for pname in sorted(devices):
+            host = (devices[pname].get("host") or "").strip().lower()
+            if host in by_address:
+                hosted[by_address[host]].append(pname)
+            else:
+                elsewhere.append(pname)
+
+        self._machine_lines = {}
+        for machine in lab_machines:
+            if not hosted[machine.name]:
+                continue
+            line = MachineLine(
+                machine,
+                own_pc=self.check_host(machine.address),
+                simulating=config.SIMULATING,
+                control_width=_CONTROL_WIDTH,
             )
-            if remote_request is not None:
-                host = params.get("host")
-                row.toggleButton.setToolTip(
-                    f"Ask the GUI on {machine_name(host) or host} to start or stop "
-                    "this device. Nothing happens unless a pytweezer GUI is "
-                    "running there."
-                )
-            self._rows[pname] = row
-            outer.addWidget(row)
-            for sub_name in sorted(params.get("devices") or {}):
-                sub_row = ManagedRow(
-                    sub_name,
-                    tooltip=f"Served by {pname}",
-                    controllable=False,
-                    show_last_seen=True,
-                    indent=_SUB_DEVICE_INDENT,
-                    reserve_control=True,
-                    remote_request=_rig_request(sub_name),
-                )
-                sub_row.toggleButton.setToolTip(
-                    f"Stop or start this device alone; {pname} and its other "
-                    "devices keep running"
-                )
-                self._rows[sub_name] = sub_row
-                outer.addWidget(sub_row)
+            self._machine_lines[machine.name] = line
+            outer.addWidget(line)
+            for pname in hosted[machine.name]:
+                self._add_device_rows(outer, pname, devices[pname])
+        if elsewhere:
+            other = QLabel("Other")
+            other.setObjectName("GroupHeader")
+            other.setProperty("role", "regionTitle")
+            other.setContentsMargins(10, 14, 10, 4)
+            outer.addWidget(other)
+            for pname in elsewhere:
+                self._add_device_rows(outer, pname, devices[pname])
         outer.addStretch(1)
+
+        self._machine_worker = None
+        if self._machine_lines:
+            self._machine_worker = MachineWorker(
+                line.machine for line in self._machine_lines.values()
+            )
+            self._machine_worker.states_ready.connect(self._apply_machine_states)
+            self._machine_worker.action_done.connect(self._machine_action_done)
+            for line in self._machine_lines.values():
+                line.requested.connect(
+                    lambda action, m=line.machine: self._machine_worker.act(action, m)
+                )
+            self._machine_worker.start()
 
         self._client = None
         try:
@@ -646,6 +654,50 @@ class DevicesPanel(BWidget):
             self._client.status_received.connect(self._apply_snapshot)
         except Exception:
             logger.exception("Could not start device-status subscriber")
+
+    def _add_device_rows(self, outer, pname, params):
+        local = self.check_host(params.get("host"))
+        remote_request = None
+        if not local and self._control is not None:
+            remote_request = lambda action, device=pname: self._control.request(
+                action, device
+            )
+        row = ManagedRow(
+            pname,
+            script=(tweezerpath + "/bin/" + DEVICE_SERVER_SCRIPT if local else None),
+            run_at_startup=params.get("run_at_startup", False) if local else False,
+            tooltip=params.get("tooltip"),
+            controllable=local,
+            show_last_seen=True,
+            reserve_control=True,
+            remote_request=remote_request,
+            stop_orphan=_stop_orphan,
+        )
+        if remote_request is not None:
+            host = params.get("host")
+            row.toggleButton.setToolTip(
+                f"Ask the GUI on {machine_name(host) or host} to start or stop "
+                "this device. Nothing happens unless a pytweezer GUI is "
+                "running there."
+            )
+        self._rows[pname] = row
+        outer.addWidget(row)
+        for sub_name in sorted(params.get("devices") or {}):
+            sub_row = ManagedRow(
+                sub_name,
+                tooltip=f"Served by {pname}",
+                controllable=False,
+                show_last_seen=True,
+                indent=_SUB_DEVICE_INDENT,
+                reserve_control=True,
+                remote_request=_rig_request(sub_name),
+            )
+            sub_row.toggleButton.setToolTip(
+                f"Stop or start this device alone; {pname} and its other "
+                "devices keep running"
+            )
+            self._rows[sub_name] = sub_row
+            outer.addWidget(sub_row)
 
     def check_host(self, host_addr):
         """Whitespace-/case-insensitive match against this machine's host."""
@@ -678,7 +730,21 @@ class DevicesPanel(BWidget):
             age = f"{now - last_seen:.0f}s ago" if last_seen else "—"
             row.apply_status(state, address=address, last_seen=age)
 
+    def _apply_machine_states(self, states):
+        for name, state in states.items():
+            line = self._machine_lines.get(name)
+            if line is not None:
+                line.apply(state)
+
+    def _machine_action_done(self, result):
+        line = self._machine_lines.get(result.machine)
+        if line is not None:
+            line.action_finished(result)
+
     def closeEvent(self, event):
+        if self._machine_worker is not None:
+            self._machine_worker.stop()
+            self._machine_worker.wait(1500)
         try:
             if self._client is not None:
                 self._client.close()

@@ -107,8 +107,10 @@ class _FakeControl:
 
 @pytest.fixture
 def devices_panel(qapp, monkeypatch):
-    """Build a DevicesPanel from ``config`` without binding any ZMQ socket."""
-    from bin import managed_panel
+    """Build a DevicesPanel from ``config`` without binding any ZMQ socket or running SSH."""
+    from bin import machine_lines, managed_panel
+    from pytweezer import machines
+    from pytweezer.configuration import config as pytweezer_config
 
     control = _FakeControl()
     # Skip the cross-PC status feed rather than bind a ZMQ socket.
@@ -118,6 +120,13 @@ def devices_panel(qapp, monkeypatch):
         lambda *a, **k: (_ for _ in ()).throw(OSError),
     )
     monkeypatch.setattr(managed_panel, "DeviceControlChannel", lambda: control)
+    monkeypatch.setattr(managed_panel, "this_pc_address", lambda: None)
+    monkeypatch.setattr(pytweezer_config, "SIMULATING", False)
+    monkeypatch.setattr(machine_lines.MachineWorker, "start", lambda self: None)
+    for action in ("gui_state", "start", "stop"):
+        monkeypatch.setattr(
+            machines, action, lambda *a, **k: pytest.fail("SSH run in a test")
+        )
 
     def make(config):
         monkeypatch.setattr(managed_panel, "get_config", lambda: config)
@@ -305,3 +314,173 @@ def test_stopping_an_unowned_device_hands_it_to_stop_orphan(make_row):
     other.apply_status("up")
     other.terminateProcess()
     assert orphans == ["Row"]
+
+
+_LAB = {
+    "PH-BEAST": {
+        "address": "10.59.3.1",
+        "user": "tweez",
+        "repo": r"C:\pytweezer",
+        "os": "windows",
+        "launcher": "server",
+    },
+    "IC-IDLE": {  # hosts no device, so gets no line
+        "address": "10.59.3.3",
+        "user": "cafmot",
+        "repo": r"C:\pytweezer",
+        "os": "windows",
+        "launcher": "client",
+    },
+    "ph-bonesaw": {
+        "address": "10.59.3.5",
+        "user": "cafmot",
+        "repo": r"C:\pytweezer",
+        "os": "windows",
+        "launcher": "client",
+    },
+}
+
+_LAB_DEVICES = {
+    "Devices": {
+        "Stray Cam": {"host": "10.0.0.9", "port": 3},
+        "Bonesaw SLM": {"host": "10.59.3.5", "port": 2},
+        "Beast Cam": {"host": "10.59.3.1", "port": 1},
+        "Bonesaw Cam": {"host": "10.59.3.5", "port": 4},
+    }
+}
+
+_RUNNING = {"role": "client", "user": "cafmot", "pid": 42, "since": "09:12 on 17 Nov"}
+
+
+@pytest.fixture
+def lab_panel(devices_panel, monkeypatch):
+    """A DevicesPanel over ``_LAB_DEVICES``, with ``_LAB`` as the machines."""
+    from pytweezer.configuration import config as pytweezer_config
+
+    monkeypatch.setattr(pytweezer_config, "MACHINES", _LAB)
+
+    def make():
+        panel, _control = devices_panel(_LAB_DEVICES)
+        return panel
+
+    return make
+
+
+def _what_the_tab_lists(panel):
+    from bin.machine_lines import MachineLine
+
+    listed = []
+    for i in range(panel.layout().count()):
+        widget = panel.layout().itemAt(i).widget()
+        if isinstance(widget, MachineLine):
+            listed.append(("machine", widget.name))
+        elif isinstance(widget, ManagedRow):
+            listed.append(widget.name)
+        elif widget is not None:
+            listed.append(("heading", widget.text()))
+    return listed
+
+
+def test_devices_are_grouped_under_their_machine(lab_panel):
+    panel = lab_panel()
+
+    assert _what_the_tab_lists(panel) == [
+        ("machine", "PH-BEAST"),
+        "Beast Cam",
+        ("machine", "ph-bonesaw"),
+        "Bonesaw Cam",
+        "Bonesaw SLM",
+        ("heading", "Other"),
+        "Stray Cam",
+    ]
+
+
+@pytest.mark.parametrize(
+    "this_pc, simulating, reach, owner, expected",
+    [
+        ("10.59.3.5", False, "ok", None, None),
+        ("10.59.3.1", True, "ok", None, ("Start", False)),
+        ("10.59.3.1", False, "no key", None, ("Start", False)),
+        ("10.59.3.1", False, "host key changed", None, ("Start", False)),
+        ("10.59.3.1", False, "ok", _RUNNING, ("Stop", True)),
+    ],
+    ids=["own PC", "simulating", "no key", "host key changed", "running"],
+)
+def test_machine_line_buttons(
+    lab_panel, monkeypatch, this_pc, simulating, reach, owner, expected
+):
+    from bin import managed_panel
+    from pytweezer.configuration import config as pytweezer_config
+    from pytweezer.machines import GuiState
+
+    monkeypatch.setattr(managed_panel, "this_pc_address", lambda: this_pc)
+    monkeypatch.setattr(pytweezer_config, "SIMULATING", simulating)
+    line = lab_panel()._machine_lines["ph-bonesaw"]
+
+    line.apply(GuiState(reach, owner))
+
+    if expected is None:
+        assert line.button is None
+    else:
+        assert (line.button.text(), line.button.isEnabled()) == expected
+
+
+def _running_bonesaw(lab_panel, monkeypatch, stop_result="stopped"):
+    """ph-bonesaw's line with pytweezer running there, and the calls to ``stop``."""
+    from pytweezer import machines
+
+    stopped = []
+
+    def stop(machine, wait_s=30):
+        stopped.append(machine.name)
+        return machines.Result(machine.name, stop_result == "stopped", stop_result)
+
+    monkeypatch.setattr(machines, "stop", stop)
+    line = lab_panel()._machine_lines["ph-bonesaw"]
+    line.apply(machines.GuiState("ok", _RUNNING))
+    return line, stopped
+
+
+@pytest.mark.parametrize("answer", ["No", "Yes"])
+def test_stop_asks_before_stopping(lab_panel, monkeypatch, qapp, answer):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from tests.helpers import until
+
+    asked = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda parent, title, text, *a: (
+            asked.append(text),
+            getattr(QMessageBox.StandardButton, answer),
+        )[1],
+    )
+    line, stopped = _running_bonesaw(lab_panel, monkeypatch)
+
+    line.button.click()
+
+    assert asked == ["Stop pytweezer on ph-bonesaw? Its GUI and devices will close."]
+    if answer == "Yes":
+        assert until(lambda: stopped, qapp=qapp) == ["ph-bonesaw"]
+    else:
+        until(lambda: stopped, timeout=0.3, qapp=qapp)
+        assert stopped == []
+
+
+def test_a_failed_stop_says_why_on_its_line(lab_panel, monkeypatch, qapp):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from tests.helpers import until
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes
+    )
+    line, _stopped = _running_bonesaw(
+        lab_panel, monkeypatch, stop_result="did not close within 30 s"
+    )
+
+    line.button.click()
+
+    assert until(lambda: line.stateLabel.text() == "stop failed", qapp=qapp)
+    assert line.stateLabel.toolTip() == "did not close within 30 s"

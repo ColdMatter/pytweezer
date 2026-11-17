@@ -150,6 +150,26 @@ subprocess. Consequences:
   (`process_cleanup.kill_device_process`). Closing a panel never does that, and
   never sends remote stops.
 
+## Machine lines: pytweezer on each PC
+
+`DevicesPanel` groups its rows under a `MachineLine` (`bin/machine_lines.py`)
+per `MACHINES` entry that hosts at least one device, in `MACHINES` order;
+devices on no machine go under "Other". A line shows the machine's name,
+address and pytweezer's state there (`server · tweez since 09:12 on 17 Nov`,
+`not running`, `unreachable`, `no SSH key`, ...), read from that PC's GUI lock
+by `pytweezer.machines.gui_state`, plus a Start/Stop button:
+
+- Start runs the PC's launch task; Stop asks once, then sends `quit` to its GUI
+  lock, which closes that GUI as if its window were closed.
+- `MachineWorker` (a `QThread`) polls every line over SSH every 15 s and right
+  after a Start/Stop, and runs each Start/Stop on a thread of its own (a stop
+  takes 30 s or more). "Starting…"/"Stopping…" holds until a poll agrees or
+  60 s pass; a failed action shows its reason on the line until the next poll.
+- The PC the GUI runs on has no button. It is disabled in a simulated session,
+  when this PC's SSH key is not accepted (`pytweezer-machines setup <name>`),
+  when the host key changed, when the PC or its GUI does not answer, and on Linux or for a
+  machine with no launcher.
+
 ## Keep the GUI thread free
 
 Every panel shares one GUI thread, so one slow call lags every tab.

@@ -113,6 +113,7 @@ Available hooks:
 | `QLabel#StatusLabel[state=…]`, `QLabel#SimulationBanner` | status line, simulation tag |
 | `QPushButton#PrimaryButton`, `#DangerButton`, `#ToggleButton[kind="start"/"stop"]` | actions |
 | `QFrame#ProcessTile[state=…]` | process rows (managed_panel) |
+| `QFrame#GroupHeader` | a group of process rows' heading, ruled underneath (Devices-tab machine lines, "Other") |
 | `QGroupBox#EditorGroup`, `QToolButton#ScanToggle` | grouped form sections, checkable toggles |
 | `QToolButton#PipelineChip`, `#SectionToggle` | filter chips (one checked), collapsible section headers |
 | `QFrame#ChannelCell[state="high"/"watching"/"held"]`, `QLabel#CardBanner` | NI Cards channel cells, warning banner |
