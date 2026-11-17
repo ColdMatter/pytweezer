@@ -14,7 +14,7 @@ whichever PC the hardware is attached to.
 
 | File | Role |
 |------|------|
-| `pytweezer/configuration/config.py` | `CONFIG["Devices"]` — one entry per device: `"class"`/`"sim_class"`/`host`/`port`/`active`/... |
+| `pytweezer/configuration/config.py` | `CONFIG["Devices"]` — one entry per device: `"class"`/`"sim_class"`/`host`/`port`/`run_at_startup`/... |
 | `pytweezer/servers/device_server.py` | Generic server launcher: `build_spec` (imports the config's `"class"`/`"sim_class"` and constructs it), `_make_composite`, `device_index`, `resolve_address`, `resolve_device`, `run_device_server`, `main`. |
 | `pytweezer/servers/device_client.py` | Generic client factory: `get_device`, `get_device_async`, `get_device_config`. |
 | `pytweezer/servers/simulated_device.py` | Generic simulated-backend mechanism: `simulate` class decorator (MRO-aware), `public_methods`, `default_simulated` (auto-generated stand-in when a device has no `sim_class`). |
@@ -34,11 +34,11 @@ whichever PC the hardware is attached to.
 ### Config shape
 
 Each entry in `CONFIG["Devices"]` names its backend class with `"class"` (a
-`"module.path:ClassName"` string), alongside the usual `host`/`port`/`active`:
+`"module.path:ClassName"` string), alongside the usual `host`/`port`/`run_at_startup`:
 
 ```python
 "Rb HamCam": {
-    "active": True,
+    "run_at_startup": True,
     "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
     "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
     "host": SERVER_HOST,
@@ -347,7 +347,7 @@ are named and reached exactly like any other device.
 
 ```python
 "Rb Feedback Rig": {
-    "active": False,
+    "run_at_startup": False,
     "host": SERVER_HOST,
     "port": get_next_port(),
     "simulate": SIMULATING,

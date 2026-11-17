@@ -78,8 +78,7 @@ class Experiment:
         """Sorted canonical names of every CONFIG device this experiment occupies.
 
         Raises:
-            ReservationError: If a declared device is unknown, inactive or
-                mis-configured.
+            ReservationError: If a declared device is unknown or mis-configured.
         """
         reserved: set[str] = set()
         for device in cls.devices().values():

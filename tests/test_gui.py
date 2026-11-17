@@ -40,9 +40,9 @@ def make_row(qapp):
 
 
 def test_managed_row_toggle_reflects_controllability_and_state(make_row):
-    inactive = make_row(active=False)
-    assert inactive.toggleButton.text() == "Start"
-    assert inactive.process is None
+    not_started = make_row(run_at_startup=False)
+    assert not_started.toggleButton.text() == "Start"
+    assert not_started.process is None
 
     assert make_row(controllable=False).toggleButton is None
 

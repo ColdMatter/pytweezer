@@ -9,7 +9,7 @@ interval, and writes the voltages to the database.
 Config entry shape (``CONFIG["Loggers"][name]``)::
 
     {
-        "active": True,
+        "run_at_startup": True,
         "script": "../pytweezer/servers/logger_server.py",
         "logger": "ni_adc",
         "host": SERVER_HOST,
