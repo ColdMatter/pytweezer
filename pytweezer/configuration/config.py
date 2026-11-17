@@ -201,6 +201,10 @@ CONFIG = {
         # frames straight to slm.update_mask() (no socket). Needs cupy/lap + a CUDA
         # GPU on this host to arm; status()/test() work without them. The SLM is
         # addressable on its own as get_device("Rb SLM").
+        # CaFMOT Cam is here only because DCAM works from one process at a time on
+        # this PC: while one process has it initialised, every other process's
+        # dcamapi_init fails with NOCAMERA. FIXME: move it out once a shared
+        # device process exists (docs/superpowers/specs/2026-11-16-shared-device-process-design.md).
         "Rb Rearrangement Rig": {
             "active": True,
             "host": HOSTS["PH-BEAST"],
@@ -227,6 +231,22 @@ CONFIG = {
                     "role": "slm",
                     # sdk_dll / lut_file / board_number default to the lab's Blink Plus
                     # install (see pytweezer/drivers/slm.py); override here if needed.
+                },
+                # ORCA-Fusion BT (C15440-20UP); the ORCA-R2 driver runs it unchanged.
+                "CaFMOT Cam": {
+                    "class": "pytweezer.drivers.orca:ORCACamera",
+                    "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
+                    "teardown": "close",
+                    "serial_number": "503326",
+                    "stream_name": "cafmot_cam",
+                    "object_pixel_m": None,
+                    "external_exposure": True,
+                    "timeout": 5.0,
+                    "temperature_measurement": "cafmot_cam_temperature",
+                    "temperature_interval_s": 30.0,
+                    # Air-cooled to -8 °C; blocked fans took it past 60 °C.
+                    "max_temperature_c": 0.0,
+                    "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
                 },
             },
             "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
@@ -258,26 +278,6 @@ CONFIG = {
             "object_pixel_m": None,
             "timeout": 5.0,
             "image_dir": "C:/Users/CaFMOT/OneDrive - Imperial College London/caftweezers/ThorCamImages",
-        },
-        # ORCA-Fusion BT (C15440-20UP); the ORCA-R2 driver runs it unchanged.
-        "CaFMOT Cam": {
-            "active": True,
-            "class": "pytweezer.drivers.orca:ORCACamera",
-            "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
-            "teardown": "close",
-            "host": HOSTS["PH-BEAST"],
-            "port": get_next_port(),
-            "simulate": SIMULATING,
-            "serial_number": "503326",
-            "stream_name": "cafmot_cam",
-            "object_pixel_m": None,
-            "external_exposure": True,
-            "timeout": 5.0,
-            "temperature_measurement": "cafmot_cam_temperature",
-            "temperature_interval_s": 30.0,
-            # Air-cooled to -8 °C; blocked fans took it past 60 °C.
-            "max_temperature_c": 0.0,
-            "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         # The NI Cards tab: channels by MOTMaster alias, from each PC's hardware file.
         "CaF NI Cards": {
