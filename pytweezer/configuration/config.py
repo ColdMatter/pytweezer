@@ -55,6 +55,9 @@ def machine_name(address):
 #: The PC that runs the shared servers (hubs, managers) for real.
 SERVER_PC = "PH-BEAST"
 
+#: Just below the range ``get_next_port()`` hands out, so no CONFIG port takes it.
+GUI_LOCK_PORT = 7277
+
 port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 

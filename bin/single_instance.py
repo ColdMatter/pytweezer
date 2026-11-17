@@ -17,8 +17,8 @@ import time
 
 from PyQt6 import QtCore, QtNetwork
 
-#: Just below the range ``get_next_port()`` hands out, so no CONFIG port takes it.
-GUI_LOCK_PORT = 7277
+from pytweezer.configuration.config import GUI_LOCK_PORT
+
 _REPLY_TIMEOUT_MS = 2000
 
 

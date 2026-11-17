@@ -85,6 +85,11 @@ def test_ssh_failures_are_classified(fake_run, stderr, reach):
     assert machines.gui_state(LAB_PC) == GuiState(reach, None)
 
 
+def test_a_lock_check_without_a_valid_answer_is_no_answer(fake_run):
+    fake_run(("", completed(0, stdout="")))
+    assert machines.gui_state(LAB_PC) == GuiState("no answer", None)
+
+
 def test_this_pc_runs_locally_not_over_ssh(monkeypatch):
     calls = []
 
@@ -160,3 +165,12 @@ def test_repo_path_is_quoted_for_cmd(fake_run):
     fake = fake_run(("--abbrev-ref", completed(stdout="main\nc351ace\n")))
     machines.update(LAB_PC)
     assert fake.ran(r'cd /d "C:\Box\Working folder\pytweezer"')
+
+
+def test_stop_reports_a_uv_failure_as_failed_cleanup(fake_run, monkeypatch):
+    states = iter([GuiState("ok", RUNNING), GuiState("ok", None)])
+    monkeypatch.setattr(machines, "gui_state", lambda machine: next(states))
+    fake_run(("bin.kill_stale", completed(2, stderr="error: Failed to spawn\n")))
+    result = machines.stop(LAB_PC, wait_s=0.1)
+    assert not result.ok
+    assert result.detail.startswith("cleanup failed")

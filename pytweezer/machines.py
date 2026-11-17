@@ -19,9 +19,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from bin.single_instance import GUI_LOCK_PORT
 from pytweezer.configuration import config
-from pytweezer.configuration.config import this_pc_address
+from pytweezer.configuration.config import GUI_LOCK_PORT, this_pc_address
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("machines")
@@ -61,7 +60,9 @@ class Machine:
 class GuiState:
     """Whether a PC answered, and the lock's description of its GUI (``None`` if none runs).
 
-    ``reach`` is ``"ok"``, ``"no key"``, ``"unreachable"`` or ``"host key changed"``.
+    ``reach`` is ``"ok"``, ``"no key"``, ``"unreachable"``, ``"host key changed"``, or
+    ``"no answer"`` when SSH got through but the lock check gave neither ``none``
+    nor an owner (something holds the port without replying, such as a hung GUI).
     """
 
     reach: str
@@ -170,7 +171,7 @@ def gui_state(machine: Machine) -> GuiState:
             machine.name,
             _last_line(result.stderr) or answer or "no answer",
         )
-        return GuiState("unreachable", None)
+        return GuiState("no answer", None)
     return GuiState("ok", owner)
 
 
@@ -303,13 +304,16 @@ def stop(machine: Machine, wait_s: float = 30) -> Result:
     cleanup = run(
         machine, _in_repo(machine, [f"{_uv(machine)} run python -m bin.kill_stale"])
     )
-    if cleanup.returncode == 2:
+    # uv also exits 2 on its own errors, so the exit code alone is not kill_stale's refusal.
+    if cleanup.returncode == 2 and "Could not list processes" in cleanup.stdout:
         return Result(
             machine.name, True, "stopped; cleanup skipped (cannot list processes)"
         )
     if cleanup.returncode != 0:
         return Result(
-            machine.name, False, f"stopped; cleanup failed: {_failure_line(cleanup)}"
+            machine.name,
+            False,
+            f"cleanup failed after the GUI closed: {_failure_line(cleanup)}",
         )
     return Result(machine.name, True, f"stopped; {_last_line(cleanup.stdout)}")
 
