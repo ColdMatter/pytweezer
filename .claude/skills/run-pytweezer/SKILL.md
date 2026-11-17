@@ -98,22 +98,27 @@ to quit. Use the driver instead when you need a screenshot.
 
 ### Restarting a GUI on another lab PC over SSH
 
-Never start the GUI straight from an SSH command: it lands in session 0 with
-no window (and so do the MOTMasters it launches, with their dialogs), and dies
-when SSH disconnects. Each PC instead has on-demand scheduled tasks,
-registered once by a person with `register_launch_tasks.ps1`, that run the
-`.bat` launchers on the logged-on desktop:
+Use `pytweezer-machines` (the PCs are the `MACHINES` table in
+`pytweezer/configuration/config.py`; no names means all of them):
 
 ```bash
-ssh 10.59.3.1 "taskkill /pid <gui pid> /t /f"                    # stop (whole tree)
-ssh 10.59.3.1 "cd /d C:\Users\tweez\ColdMatter\pytweezer && git checkout <branch> && git pull --ff-only"
-ssh 10.59.3.1 "schtasks /run /tn pytweezer-server"               # start on the desktop
+uv run pytweezer-machines status                    # reach, branch, commit, behind/ahead, dirty, whether the GUI runs
+uv run pytweezer-machines stop PH-BEAST             # close the GUI as if its window were closed, then kill stale processes
+uv run pytweezer-machines update PH-BEAST --branch <branch>   # fetch, fast-forward, uv sync
+uv run pytweezer-machines start PH-BEAST            # start on the desktop
 ```
 
-`pytweezer-client` is the client-PC equivalent. Do not create scheduled tasks
-yourself; if `schtasks /run` says the task does not exist, ask the user to run
-the registration script on that PC. SSH hosts: `10.59.3.1` (PH-BEAST, user
-`tweez`), `rb-mm-pc` (10.59.3.2); see `~/.ssh/config`.
+`update` skips a clone that is on another branch unless `--branch` is given.
+Exit code is 0 only if every machine succeeded. A new PC needs
+`uv run pytweezer-machines setup MACHINE` once, from a terminal: it installs
+this PC's SSH key (asking for the password) and registers the launch tasks.
+
+Never start the GUI straight from an SSH command: it lands in session 0 with
+no window (and so do the MOTMasters it launches, with their dialogs), and dies
+when SSH disconnects. `start` instead runs the on-demand scheduled task
+(`pytweezer-server` or `pytweezer-client`) that `register_launch_tasks.ps1`
+registers, which runs the `.bat` launcher on the logged-on desktop. Do not
+create scheduled tasks yourself; `setup` does it.
 
 ## Test
 

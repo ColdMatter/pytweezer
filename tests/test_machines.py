@@ -1,11 +1,14 @@
 """The SSH layer that updates, starts and stops pytweezer on the lab PCs."""
 
+import io
 import subprocess
 
 import pytest
 
+from bin import machines as machines_command
 from pytweezer import machines
-from pytweezer.machines import GuiState, Machine
+from pytweezer.configuration import config
+from pytweezer.machines import GitState, GuiState, Machine, Result
 
 LAB_PC = Machine(
     name="lab-pc",
@@ -174,3 +177,125 @@ def test_stop_reports_a_uv_failure_as_failed_cleanup(fake_run, monkeypatch):
     result = machines.stop(LAB_PC, wait_s=0.1)
     assert not result.ok
     assert result.detail.startswith("cleanup failed")
+
+
+LAB = {
+    "zeta": {"address": "10.0.0.1", "user": "u", "repo": "C:/z", "os": "windows"},
+    "alpha": {"address": "10.0.0.2", "user": "u", "repo": "C:/a", "os": "windows"},
+    "gamma": {"address": "10.0.0.3", "user": "u", "repo": None, "os": "windows"},
+}
+LAB = {name: {**entry, "launcher": "client"} for name, entry in LAB.items()}
+
+
+@pytest.fixture
+def lab(monkeypatch):
+    monkeypatch.setattr(config, "MACHINES", LAB)
+
+
+def test_status_prints_one_row_per_machine_in_config_order(lab, monkeypatch, capsys):
+    states = {
+        "zeta": GuiState("ok", RUNNING),
+        "alpha": GuiState("no key", None),
+        "gamma": GuiState("ok", None),
+    }
+    monkeypatch.setattr(machines, "gui_state", lambda machine: states[machine.name])
+    monkeypatch.setattr(
+        machines,
+        "git_state",
+        lambda machine: GitState("main", "c351ace", 2, 0, False),
+    )
+    exit_code = machines_command.main(["status"])
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()]
+    assert [row[0] for row in rows] == ["machine", "zeta", "alpha", "gamma"]
+    assert rows[1][1:] == [
+        "ok",
+        "main",
+        "c351ace",
+        "2",
+        "0",
+        "no",
+        "client",
+        "(lab,",
+        "since",
+        "09:12",
+        "on",
+        "17",
+        "Nov)",
+    ]
+    assert rows[2] == ["alpha", "no", "key", "-"]
+    assert rows[3][-2:] == ["not", "running"]
+    assert exit_code == 1
+
+
+def test_update_exit_code_is_one_when_any_machine_fails(lab, monkeypatch, capsys):
+    monkeypatch.setattr(
+        machines,
+        "update",
+        lambda machine, branch=None: Result(
+            machine.name, machine.name != "alpha", "c351ace → d058350"
+        ),
+    )
+    assert machines_command.main(["update", "zeta"]) == 0
+    capsys.readouterr()
+    assert machines_command.main(["update", "ZETA", "alpha"]) == 1
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()]
+    assert [row[:2] for row in rows[1:]] == [["zeta", "ok"], ["alpha", "failed"]]
+
+
+def test_update_passes_the_branch_to_every_machine(lab, monkeypatch, capsys):
+    branches = []
+    monkeypatch.setattr(
+        machines,
+        "update",
+        lambda machine, branch=None: (
+            branches.append(branch) or Result(machine.name, True, "")
+        ),
+    )
+    machines_command.main(["update", "--branch", "feature"])
+    assert branches == ["feature"] * 3
+
+
+@pytest.mark.parametrize("command", ["start", "stop"])
+def test_start_and_stop_without_machine_names_are_an_error(lab, monkeypatch, command):
+    monkeypatch.setattr(machines, command, pytest.fail)
+    with pytest.raises(SystemExit) as exit_info:
+        machines_command.main([command])
+    assert exit_info.value.code == 2
+
+
+def test_output_survives_a_console_that_cannot_print_arrows(lab, monkeypatch, capsys):
+    monkeypatch.setattr(
+        machines,
+        "update",
+        lambda machine, branch=None: Result(machine.name, True, "a → b"),
+    )
+    monkeypatch.setattr("sys.stdout", io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
+    assert machines_command.main(["update", "zeta"]) == 0
+
+
+def test_setup_installs_the_key_then_registers_tasks_and_lists_clones_when_repo_unknown(
+    lab, monkeypatch, capsys, fake_run
+):
+    calls = []
+    monkeypatch.setattr(
+        machines,
+        "install_key",
+        lambda m: calls.append("key") or Result(m.name, True, "added"),
+    )
+    monkeypatch.setattr(
+        machines,
+        "register_launch_tasks",
+        lambda m: (
+            calls.append("tasks")
+            or Result(m.name, False, "clone path unknown; add it to MACHINES")
+        ),
+    )
+    clone = r"C:\Users\u\pytweezer"
+    fake = fake_run(("pytweezer", completed(stdout=clone + "\n")))
+    assert machines_command.main(["setup", "gamma"]) == 1
+    assert calls == ["key", "tasks"]
+    assert clone in capsys.readouterr().out
+
+    fake.commands.clear()
+    machines_command.main(["setup", "zeta"])
+    assert fake.commands == []
