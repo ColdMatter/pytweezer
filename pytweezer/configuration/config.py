@@ -86,34 +86,34 @@ RB_SLM = {
 CONFIG = {
     "Servers": {
         "Analysis Manager": {
-            "active": True,
+            "run_at_startup": True,
             "script": "../pytweezer/servers/analysis_manager.py",
             "host": SERVER_HOST,
             "port": get_next_port(),
         },
         "Device Status": {
-            "active": True,
+            "run_at_startup": True,
             "script": "../pytweezer/servers/device_status.py",
             "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "poll_interval": 2.0,
         },
         "Imagehub": {
-            "active": True,
+            "run_at_startup": True,
             "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Commandhub": {
-            "active": True,
+            "run_at_startup": True,
             "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Datahub": {
-            "active": True,
+            "run_at_startup": True,
             "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
@@ -121,14 +121,14 @@ CONFIG = {
         },
         # The shared properties tree: "port" publishes it, "rpc_port" takes edits.
         "Properties": {
-            "active": True,
+            "run_at_startup": True,
             "script": "../pytweezer/servers/property_server.py",
             "host": SERVER_HOST,
             "port": get_next_port(),
             "rpc_port": get_next_port(),
         },
         "Messagehub": {
-            "active": True,
+            "run_at_startup": True,
             "host": SERVER_HOST,
             "pub_port": get_next_port(),
             "sub_port": get_next_port(),
@@ -136,17 +136,17 @@ CONFIG = {
             "script": "../pytweezer/servers/xsub_xpub.py",
         },
         "Datalogger": {
-            "active": True,
+            "run_at_startup": True,
             "script": "../pytweezer/servers/datalogger.py",
             "host": SERVER_HOST,
         },
         "Imagelogger": {
-            "active": True,
+            "run_at_startup": True,
             "script": "../pytweezer/servers/imagelogger.py",
             "host": SERVER_HOST,
         },
         "Experiment Manager": {
-            "active": True,
+            "run_at_startup": True,
             "script": "../pytweezer/servers/experiment_manager.py",
             "host": SERVER_HOST,
             "port": get_next_port(),
@@ -179,7 +179,7 @@ CONFIG = {
     # addresses them all by name.
     "Devices": {
         "Rb MotMaster": {
-            "active": True,
+            "run_at_startup": True,
             "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
@@ -189,7 +189,7 @@ CONFIG = {
             "simulate": SIMULATING,
         },
         "CaF MotMaster": {
-            "active": True,
+            "run_at_startup": True,
             "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
@@ -200,7 +200,7 @@ CONFIG = {
             "simulate": SIMULATING,
         },
         "ORCA": {
-            "active": False,
+            "run_at_startup": False,
             "class": "pytweezer.drivers.orca:ORCACamera",
             "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
             "host": HOSTS["ph-bonesaw"],
@@ -214,7 +214,7 @@ CONFIG = {
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Rb ThorCam": {
-            "active": False,
+            "run_at_startup": False,
             "class": "pytweezer.drivers.thorcam:ThorCam",
             "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
             "host": HOSTS["PH-BEAST"],
@@ -226,7 +226,7 @@ CONFIG = {
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Tweezer Monitor ThorCam": {
-            "active": False,
+            "run_at_startup": False,
             "class": "pytweezer.drivers.tweezermonitorcam:ThorCam",
             "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorLabsCamera",
             "host": HOSTS["PH-BEAST"],
@@ -242,7 +242,7 @@ CONFIG = {
         # FIXME: give them separate processes once a shared device process exists
         # (docs/superpowers/specs/2026-11-16-shared-device-process-design.md).
         "PH-BEAST DCAM Cameras": {
-            "active": True,
+            "run_at_startup": True,
             "host": HOSTS["PH-BEAST"],
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -251,14 +251,14 @@ CONFIG = {
         # Also serves the tweezer array on it (make_array/get_array), which needs
         # cupy/lap + a CUDA GPU on this host.
         "Rb SLM": {
-            "active": True,
+            "run_at_startup": True,
             "host": HOSTS["PH-BEAST"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             **RB_SLM,
         },
         "IDS-1054B Scope": {
-            "active": False,
+            "run_at_startup": False,
             "class": "pytweezer.drivers.ids1054b:IDS1054B",
             "sim_class": "pytweezer.drivers.ids1054b:SimulatedIDS1054B",
             "teardown": "close",
@@ -268,7 +268,7 @@ CONFIG = {
             "simulate": SIMULATING,
         },
         "CaF ThorCam": {
-            "active": True,
+            "run_at_startup": True,
             "class": "pytweezer.drivers.thorcam:ThorCam",
             "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
             "teardown": "close",
@@ -287,7 +287,7 @@ CONFIG = {
         },
         # The NI Cards tab: channels by MOTMaster alias, from each PC's hardware file.
         "CaF NI Cards": {
-            "active": False,
+            "run_at_startup": False,
             "class": "pytweezer.drivers.ni_cards:NICards",
             "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
             "host": HOSTS["ph-bonesaw"],
@@ -313,7 +313,7 @@ CONFIG = {
             "teardown": "close",
         },
         "Rb NI Cards": {
-            "active": False,
+            "run_at_startup": False,
             "class": "pytweezer.drivers.ni_cards:NICards",
             "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
             "host": HOSTS["IC-CZC221CCHS"],
@@ -333,7 +333,7 @@ CONFIG = {
     # DBWriter/log() call) writes it.
     "Loggers": {
         "NI ADC Logger": {
-            "active": False,
+            "run_at_startup": False,
             "script": "../pytweezer/servers/logger_server.py",
             "logger": "ni_adc",
             "host": SERVER_HOST,
@@ -346,31 +346,31 @@ CONFIG = {
     },
     "GUI": {
         # "Browser": {
-        #     "active": True,
+        #     "run_at_startup": True,
         #     "script": "../pytweezer/GUI/tweezer_browser.py"
         # },
         "StreamMonitor": {
-            "active": True,
+            "run_at_startup": True,
             "script": "../pytweezer/GUI/streammonitor.py",
         },
         "Applet Launcher": {
-            "active": True,
+            "run_at_startup": True,
             "script": "../pytweezer/GUI/applet_launcher.py",
         },
         # "H5 Manager": {
-        #     "active": False,
+        #     "run_at_startup": False,
         #     "script": "../pytweezer/GUI/h5storage.py"
         # },
         "Property_Editor": {
-            "active": False,
+            "run_at_startup": False,
             "script": "../pytweezer/GUI/property_editor.py",
         },
         # "Live Plot": {
-        #     "active": False,
+        #     "run_at_startup": False,
         #     "script": "../pytweezer/GUI/viewers/live_plot.py"
         # },
         "Analysis Manager UI": {
-            "active": True,
+            "run_at_startup": True,
             "script": "../pytweezer/GUI/analysismanager.py",
         },
     },
@@ -394,7 +394,7 @@ CONFIG = {
 # ---------------------------------------------------------------------------- #
 NOT_IN_USE = {
     "Rb Rearrangement Rig": {
-        "active": True,
+        "run_at_startup": True,
         "host": HOSTS["PH-BEAST"],
         "simulate": SIMULATING,
         "devices": {

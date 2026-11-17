@@ -34,11 +34,11 @@ _KINDS = [
 
 
 def ni_card_devices(devices_config: dict) -> list[str]:
-    """The active ``NICards`` entries of ``CONFIG["Devices"]``, in config order."""
+    """The ``NICards`` entries of ``CONFIG["Devices"]``, in config order."""
     return [
         name
         for name, entry in devices_config.items()
-        if entry.get("class") == NI_CARDS_CLASS and entry.get("active", True)
+        if entry.get("class") == NI_CARDS_CLASS
     ]
 
 

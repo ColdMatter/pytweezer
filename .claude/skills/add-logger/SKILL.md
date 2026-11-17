@@ -125,7 +125,7 @@ Then the config entry under `CONFIG["Loggers"]`:
 
 ```python
 "Chamber Pressure Logger": {
-    "active": False,
+    "run_at_startup": False,
     "script": "../pytweezer/servers/logger_server.py",
     "logger": "chamber_pressure",
     "host": SERVER_HOST,
@@ -144,7 +144,7 @@ Then the config entry under `CONFIG["Loggers"]`:
   run next to the database); **`simulate`** is the `SIMULATING` flag, not a literal.
 - **No `port`** — a logger binds nothing; its row is statused by polling the
   subprocess, not by probing a socket.
-- `active: True` auto-starts it with the server GUI; leave it `False` until the
+- `run_at_startup: True` auto-starts it with the server GUI; leave it `False` until the
   hardware is there. Remaining keys are yours, read through `self.conf`.
 - **`limits`** (optional), e.g. `{"pressure": [None, 1e-8]}`: per-field
   `[low, high]`, either bound `None`. The base class validates it at startup and

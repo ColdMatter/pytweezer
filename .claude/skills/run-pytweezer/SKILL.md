@@ -39,7 +39,7 @@ uv run python .claude/skills/run-pytweezer/driver.py client
 ```
 
 The client spawns no servers or loggers, but its Devices tab starts every
-`"active"` device whose `host` is this PC, as the real client does. On a dev
+`"run_at_startup"` device whose `host` is this PC, as the real client does. On a dev
 machine (host not in config) that is nothing; on a lab client PC it starts that
 PC's devices, so don't run it there while that PC's GUI is up.
 
@@ -48,7 +48,7 @@ Output (13 PNGs) lands in `.claude/skills/run-pytweezer/shots/`:
 - `client_full.png` — whole window, active tab raised
 - `client_tab_<Label>.png` — one per tab: Servers, Devices, Loggers, Streams,
   Applets, Analysis, Experiments, Results, Saved_parameters, Optimisers,
-  NI_Cards (only while an `NICards` device is active), Properties
+  NI_Cards (only while CONFIG has an `NICards` device), Properties
 
 Pass a second arg to redirect the output dir:
 

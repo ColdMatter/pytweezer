@@ -250,22 +250,13 @@ class CameraApplet(ImageDisplay):
             timer.start(interval)
             self._timers.append(timer)
 
-        names = camera_names()
-        sidebar.set_cameras(names, self._inactive(names))
+        sidebar.set_cameras(camera_names())
         sidebar.set_current_camera(self._camera or None)
         if (chosen := sidebar.current_camera()) is not None:
             self._choose(chosen)
 
     def sizeHint(self):
         return QtCore.QSize(1120, 720)
-
-    @staticmethod
-    def _inactive(names: list[str]) -> dict[str, str]:
-        return {
-            name: "Inactive in CONFIG"
-            for name in names
-            if not camera_conf(name).get("active", True)
-        }
 
     # ---- choosing a camera ---------------------------------------------
 
@@ -306,9 +297,6 @@ class CameraApplet(ImageDisplay):
         self.camera_sidebar.set_controls([], self._model)
         self._show_presets()
         self._holder = self._holder_in(self.feed.snapshot())
-        if not conf.get("active", True):
-            self._set_unavailable("inactive in CONFIG")
-            return
         self._unavailable = ""
         self._link = CameraLink(self._camera_name)
         self._load()

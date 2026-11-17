@@ -187,7 +187,7 @@ def run_local(
 
     Raises:
         ReservationError: Before anything is created, if a declared device is
-            unknown or inactive in ``CONFIG["Devices"]``.
+            unknown in ``CONFIG["Devices"]``.
         KeyError: Before anything is created, if a saved parameter an unset
             argument needs does not exist.
     """

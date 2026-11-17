@@ -128,7 +128,7 @@ class ManagedRow(QFrame):
         self,
         name,
         script=None,
-        active=False,
+        run_at_startup=False,
         tooltip=None,
         controllable=True,
         show_last_seen=False,
@@ -217,7 +217,7 @@ class ManagedRow(QFrame):
         self.setLayout(layout)
         self._set_state("stopped" if controllable else "unknown")
 
-        if controllable and active:
+        if controllable and run_at_startup:
             self.startProcess()
 
     def enable_self_polling(self):
@@ -456,7 +456,7 @@ class ControlPanel(BWidget):
             row = ManagedRow(
                 pname,
                 script=tweezerpath + "/bin/" + params["script"],
-                active=params.get("active", False),
+                run_at_startup=params.get("run_at_startup", False),
                 tooltip=params.get("tooltip"),
                 controllable=controllable,
                 show_last_seen=False,
@@ -598,7 +598,7 @@ class DevicesPanel(BWidget):
                 script=(
                     tweezerpath + "/bin/" + DEVICE_SERVER_SCRIPT if local else None
                 ),
-                active=params.get("active", False) if local else False,
+                run_at_startup=params.get("run_at_startup", False) if local else False,
                 tooltip=params.get("tooltip"),
                 controllable=local,
                 show_last_seen=True,

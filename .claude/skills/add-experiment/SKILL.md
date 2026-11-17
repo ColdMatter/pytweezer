@@ -70,8 +70,8 @@ Rules that matter:
   imaging one usually a subclass), not one class with an option or a device
   used only when it happens to be available. Each declares exactly the devices
   it uses.
-- **Never design around a device's `active` flag.** Which CONFIG entries are
-  active is lab state that anyone switches at any time; the value checked in
+- **Never design around a device's `run_at_startup` flag.** Which devices the
+  GUI starts at launch is lab state that anyone switches at any time; the value checked in
   says nothing about how the device will be used. An experiment declares what
   it needs and fails plainly if that device isn't running.
 - `record(name, value, unit="")`: in `run_point` it stores into
