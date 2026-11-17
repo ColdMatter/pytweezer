@@ -65,3 +65,7 @@ docs/api/
 *.pdf
 !pytweezer/GUI/icons/*.png
 pytweezer.egg-info/
+
+# per-PC Properties tree saved by the Properties server; seeded from properties.default.json
+configuration/properties/properties.json
+configuration/properties/properties.json.tmp

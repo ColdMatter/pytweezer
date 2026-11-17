@@ -5,40 +5,7 @@
             "logginginterval[s]": 1
         },
         "ImageStream": {
-            "active": {
-                "imagemx2": {
-                    "timestamp": 1775063539.78219,
-                    "parts": 3
-                },
-                "first_image_": {
-                    "timestamp": 1775062793.827092,
-                    "parts": 3
-                },
-                "second_image_": {
-                    "timestamp": 1775062793.8260915,
-                    "parts": 3
-                },
-                "rb_hamcam": {
-                    "timestamp": 1793381362.2613106,
-                    "parts": 3
-                },
-                "caf_hamcam": {
-                    "timestamp": 1783597733.521804,
-                    "parts": 3
-                },
-                "rb_thorcam": {
-                    "timestamp": 1785501794.345277,
-                    "parts": 3
-                },
-                "slm_target": {
-                    "timestamp": 1793376218.19853,
-                    "parts": 3
-                },
-                "slm_phasemask": {
-                    "timestamp": 1793376218.1995342,
-                    "parts": 3
-                }
-            }
+            "active": {}
         },
         "roilist": [
             "/Viewer/TweezerViewer/Viewer/ROI/slice",

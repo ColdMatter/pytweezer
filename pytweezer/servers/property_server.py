@@ -5,7 +5,8 @@ Holds the tree in a :class:`~sipyco.sync_struct.Notifier` published as
 client keeps a live mirror of it, and accepts edits over ``pc_rpc`` (target
 ``"properties"``). The tree is loaded from, and saved back to,
 ``configuration/properties/properties.json``: shortly after each burst of
-edits, and on shutdown. Saving writes a temporary file and renames it over the
+edits, and on shutdown. That file is per-PC and untracked; until a PC has one,
+the tree starts from the committed ``properties.default.json``. Saving writes a temporary file and renames it over the
 old one, so a kill mid-save cannot truncate the file.
 """
 
@@ -19,7 +20,11 @@ import time
 from sipyco.sync_struct import Notifier
 
 from pytweezer.configuration.config import get_config
-from pytweezer.configuration.paths import propertyfilename
+from pytweezer.configuration.paths import (
+    propertydefaultsfilename,
+    propertyfilename,
+    read_json_tree,
+)
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers.property_tree import apply_ops, plan_delete, plan_set
 from pytweezer.servers.sync import SyncServer
@@ -70,11 +75,19 @@ class PropertyServer:
         port: Port for the published tree.
         rpc_port: Port for edits.
         path: The JSON file the tree is loaded from and saved to.
+        default_path: The tree to start from while ``path`` is missing or empty.
     """
 
-    def __init__(self, host: str, port: int, rpc_port: int, path: str):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        rpc_port: int,
+        path: str,
+        default_path: str = propertydefaultsfilename,
+    ):
         self.path = path
-        self.notifier = Notifier(_load(path))
+        self.notifier = Notifier(_load(path, default_path))
         self._changed = threading.Event()
         self._save_lock = threading.Lock()
         self._last_change = 0.0
@@ -138,15 +151,17 @@ class PropertyServer:
         self.sync.close()
 
 
-def _load(path: str) -> dict:
-    try:
-        with open(path) as inputfile:
-            tree = json.load(inputfile)
-    except (OSError, ValueError):
-        tree = {}
-    if not tree and os.path.exists(path):
-        logger.warning("%s is unreadable or empty; starting from an empty tree", path)
-    return tree
+def _load(path: str, default_path: str) -> dict:
+    tree = read_json_tree(path)
+    if tree:
+        return tree
+    if os.path.exists(path):
+        logger.warning(
+            "%s is unreadable or empty; starting from %s", path, default_path
+        )
+    else:
+        logger.info("No %s yet; starting from %s", path, default_path)
+    return read_json_tree(default_path)
 
 
 def _terminate_stale_instances(grace_s: float = 1.0) -> None:

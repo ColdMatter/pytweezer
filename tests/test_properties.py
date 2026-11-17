@@ -99,6 +99,24 @@ def test_edits_are_saved_to_the_file_and_non_json_refused(lab):
     assert lab.served("bad") is None
 
 
+def test_a_pc_without_its_own_file_starts_from_the_defaults_and_saves_its_own(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(property_server, "SAVE_QUIET_S", 0.05)
+    own = tmp_path / "properties.json"
+    defaults = tmp_path / "properties.default.json"
+    defaults.write_text(json.dumps({"Default": {"x": 1}}))
+    server = PropertyServer(HOST, 0, 0, str(own), str(defaults))
+    try:
+        assert server.notifier.raw_view == {"Default": {"x": 1}}
+        server.store.set(["Default", "x"], 2)
+        assert until(lambda: own.exists() and json.loads(own.read_text()) != {})
+    finally:
+        server.close()
+    assert json.loads(own.read_text()) == {"Default": {"x": 2}}
+    assert json.loads(defaults.read_text()) == {"Default": {"x": 1}}
+
+
 def test_clients_resync_after_a_server_restart(lab):
     a = lab.process("A")
     a.set("/kept", 1)

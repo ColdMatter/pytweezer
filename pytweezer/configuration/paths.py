@@ -20,7 +20,10 @@ tweezerpath = os.path.realpath(_here + "/../..")
 configpath = os.path.realpath(_here + "/../../configuration/")
 
 icon_path = tweezerpath + "/pytweezer/GUI/icons/"
+#: This PC's Properties tree, saved by the Properties server; not tracked by git.
 propertyfilename = configpath + "/properties/properties.json"
+#: The committed tree a PC starts from until it has saved its own.
+propertydefaultsfilename = configpath + "/properties/properties.default.json"
 
 #: Device config entries omit ``"script"``: they all run device_server.py,
 #: differentiated by their ``"class"`` key. This is the one launcher not named
@@ -29,10 +32,17 @@ propertyfilename = configpath + "/properties/properties.json"
 DEVICE_SERVER_SCRIPT = "../pytweezer/servers/device_server.py"
 
 
-def load_properties():
-    """Return the Properties startup dict, or ``{}`` if the file is missing or unreadable."""
+def read_json_tree(path: str) -> dict:
+    """Return the JSON object in ``path``, or ``{}`` if it is missing or unreadable."""
     try:
-        with open(propertyfilename) as inputfile:
+        with open(path) as inputfile:
             return json.load(inputfile)
     except (OSError, ValueError):
         return {}
+
+
+def load_properties(
+    path: str = propertyfilename, default_path: str = propertydefaultsfilename
+) -> dict:
+    """Return the Properties tree saved in ``path``, else the one in ``default_path``."""
+    return read_json_tree(path) or read_json_tree(default_path)

@@ -79,12 +79,13 @@ call it at use time rather than binding `CONFIG` at import time.
 
 Filesystem layout lives separately in `pytweezer/configuration/paths.py`
 (`tweezerpath`, `configpath`, `icon_path`, `propertyfilename`,
-`DEVICE_SERVER_SCRIPT`, `load_properties()`); `tweezerpath`/`icon_path` are also
+`propertydefaultsfilename`, `DEVICE_SERVER_SCRIPT`, `load_properties()`); `tweezerpath`/`icon_path` are also
 re-exported from `pytweezer.servers`.
 
 **Two different things called "configuration".** The **root** `configuration/`
 directory holds JSON data files (`properties/properties.json`, the Properties
-startup state) — not the Python `CONFIG` dict.
+startup state: per-PC and gitignored, seeded from the committed
+`properties/properties.default.json`) — not the Python `CONFIG` dict.
 
 ## Launch protocol: `python <script> <name>`
 
@@ -144,7 +145,8 @@ thread, so they work from threaded and Qt code; mutate a notifier only through
 
 - **Properties** — `pytweezer/servers/property_server.py` owns the tree
   (notifier `"properties"` on `port`, edits over `pc_rpc` on `rpc_port`) and
-  saves `configuration/properties/properties.json` atomically. Every
+  saves `configuration/properties/properties.json` atomically, starting from
+  `properties.default.json` on a PC that has none yet. Every
   `Properties` in a process shares one mirror; reads are local, writes apply
   locally then go to the server. While the server is unreachable, writes stay
   local and are dropped, and the server's tree replaces them on reconnect. The
