@@ -321,10 +321,10 @@ class HamamatsuCamera(Camera):
         values = read_dcam_controls(self._backend)
         self.roi_origin = (values["roi_x0"], values["roi_y0"])
         self.binning = values["binning"]
-        interval = self._backend.get_attribute_value(
-            FRAME_INTERVAL, error_on_missing=False
-        )
-        values["frame_rate"] = 1.0 / float(interval) if interval else self._paced_rate
+        if self._hardware_interval():
+            values["frame_rate"] = 1.0 / float(self._read_attribute(FRAME_INTERVAL))
+        else:
+            values["frame_rate"] = self._paced_rate
         return values
 
     def set_roi(self, x0: int, width: int, y0: int, height: int):
