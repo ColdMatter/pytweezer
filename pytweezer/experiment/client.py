@@ -23,6 +23,7 @@ import zmq
 
 from pytweezer.configuration.config import get_config
 from pytweezer.experiment.arguments import coerce_arguments
+from pytweezer.experiment.layouts import Layout
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.saved_parameters import (
     SavedParameter,
@@ -194,6 +195,19 @@ class ExperimentManagerClient:
         self.call(
             "delete_recipe", experiment=experiment, class_name=class_name, name=name
         )
+
+    def layouts(self) -> list[Layout]:
+        return [
+            Layout.model_validate(layout) for layout in self.call("layouts")["layouts"]
+        ]
+
+    def save_layout(self, layout: Layout, overwrite: bool = False) -> None:
+        self.call(
+            "save_layout", layout=layout.model_dump(mode="json"), overwrite=overwrite
+        )
+
+    def delete_layout(self, name: str) -> None:
+        self.call("delete_layout", name=name)
 
     def submit_recipe(
         self,
@@ -444,6 +458,48 @@ def delete_recipe(
     """Delete recipe ``name`` of ``experiment`` for every PC."""
     module, class_name = _resolve(experiment)
     (client or ExperimentManagerClient()).delete_recipe(module, class_name, name)
+
+
+def layouts(*, client: ExperimentManagerClient | None = None) -> list[Layout]:
+    """Every saved tweezer layout, by name."""
+    return (client or ExperimentManagerClient()).layouts()
+
+
+def get_layout(
+    name: str, /, *, client: ExperimentManagerClient | None = None
+) -> Layout:
+    """Saved tweezer layout ``name``.
+
+    Raises:
+        KeyError: no such layout; the message names up to three close matches.
+    """
+    name = name.strip()
+    by_name = {layout.name: layout for layout in layouts(client=client)}
+    try:
+        return by_name[name]
+    except KeyError:
+        close = difflib.get_close_matches(name, by_name, n=3)
+        hint = f"; did you mean {', '.join(map(repr, close))}?" if close else ""
+        raise KeyError(f"no layout {name!r}{hint}") from None
+
+
+def save_layout(
+    layout: Layout,
+    /,
+    *,
+    overwrite: bool = False,
+    client: ExperimentManagerClient | None = None,
+) -> None:
+    """Save ``layout`` for every PC, as yours; a name in use needs ``overwrite``."""
+    layout = layout.model_copy(update={"submitter": submitter_name()})
+    (client or ExperimentManagerClient()).save_layout(layout, overwrite=overwrite)
+
+
+def delete_layout(
+    name: str, /, *, client: ExperimentManagerClient | None = None
+) -> None:
+    """Delete tweezer layout ``name`` for every PC."""
+    (client or ExperimentManagerClient()).delete_layout(name)
 
 
 def get_saved_parameters(

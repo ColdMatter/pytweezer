@@ -59,6 +59,11 @@ DEFAULT_APPLETS = [
         "description": "Tweezer camera image with the accepted trap sites drawn on it",
     },
     {
+        "name": "Tweezer Layout",
+        "script": "pytweezer/GUI/viewers/tweezer_layout.py",
+        "description": "Draw a tweezer array and save it as a named layout",
+    },
+    {
         "name": "SLM Monitor",
         "script": "pytweezer/GUI/viewers/slm_monitor.py",
         "description": "Target tweezer array, its simulated light and the SLM phase mask",

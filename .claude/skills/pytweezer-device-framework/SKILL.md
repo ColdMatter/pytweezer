@@ -144,7 +144,7 @@ Three constraints, all consequences of how sipyco serves targets:
 Sub-devices stay reachable on their own, so other clients can change the
 hardware behind the coordinator's back. State a coordinator reports about its
 backends should be checked against them, not just remembered: the
-rearrangement rig owns the tweezer array (`make_array`), and `get_array()`
+rearrangement rig owns the tweezer array (`make_array`/`make_layout`), and `get_array()`
 returns it only while `slm.last_mask` is still the mask it wrote, `None` once
 anything else has written the SLM. Gate GPU-only methods on a CUDA device
 count, not on `import cupy` succeeding — cupy imports on machines with no

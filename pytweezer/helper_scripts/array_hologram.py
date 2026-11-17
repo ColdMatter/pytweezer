@@ -1,7 +1,8 @@
-"""Phase masks for rectangular tweezer arrays on the Rb SLM.
+"""Phase masks for tweezer layouts on the Rb SLM.
 
-The traps sit on a grid of ``spacing_um``, rotated by ``angle_deg``, centred on
-the blaze offset. The mask is the weighted-superposition optimum for that grid,
+The traps sit at given positions about the blaze offset (a rectangle comes from
+:func:`pytweezer.experiment.layouts.rectangle`). The mask is the
+weighted-superposition optimum for those traps,
 plus a Fresnel lens, the blaze and optionally the Zernike correction, inside a
 circular pupil; light outside the pupil is steered off by the dump grating.
 
@@ -14,12 +15,16 @@ imports anywhere.
 import math
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 #: Simulated-image pixels per focal-plane pixel of the generator, along x and y.
 OVERSAMPLING = 4
 #: The top-down view spans this many depths of focus either side of the
 #: trap plane, in planes a quarter of one apart.
 DEPTHS_OF_FOCUS = 6
+#: Cap on the trap spacing the simulated image's margin is made from, so sparse
+#: hand-drawn layouts don't blow up the simulation grid.
+MAX_MARGIN_SPACING_UM = 10.0
 
 #: Saved parameter (SI) -> generator keyword, and the factor to the generator's unit.
 GENERATOR_PARAMETERS = {
@@ -152,13 +157,42 @@ def simulate(
     )
 
 
-def array_hologram(
+def focal_margin_um(x_um: np.ndarray, y_um: np.ndarray, focal_pixel_um: float) -> float:
+    """Margin of the simulated image around the traps.
+
+    Two trap spacings (the median nearest-neighbour distance, at most
+    :data:`MAX_MARGIN_SPACING_UM`) plus three focal-plane pixels.
+    """
+    spacing_um = 0.0
+    if len(x_um) > 1:
+        xy = np.column_stack([x_um, y_um])
+        nearest, _ = cKDTree(xy).query(xy, k=[2])
+        spacing_um = float(np.median(nearest))
+    return 2 * min(spacing_um, MAX_MARGIN_SPACING_UM) + 3 * focal_pixel_um
+
+
+def reachable_field_um(saved: dict) -> tuple[float, float, float, float]:
+    """The focal-plane square the SLM can steer light into, relative to the blaze spot.
+
+    Its side is ``wavelength * focal_length / pixel_pitch``, centred on the
+    zeroth order. Returns ``(x0, y0, width, height)`` in µm.
+    """
+    side_um = (
+        float(saved["slm_wavelength"])
+        * float(saved["slm_focal_length"])
+        / float(saved["slm_pixel_pitch"])
+        * 1e6
+    )
+    zeroth_x_um = -float(saved["slm_blaze_x"]) * 1e6
+    zeroth_y_um = -float(saved["slm_blaze_y"]) * 1e6
+    return (zeroth_x_um - side_um / 2, zeroth_y_um - side_um / 2, side_um, side_um)
+
+
+def layout_hologram(
     generator,
+    x_um: np.ndarray,
+    y_um: np.ndarray,
     *,
-    rows: int,
-    columns: int,
-    spacing_um: float,
-    angle_deg: float,
     envelope: dict | None,
     blaze_um: tuple[float, float],
     fresnel_focal_length_mm: float,
@@ -169,7 +203,7 @@ def array_hologram(
     damping: float,
     phase_randomness: float,
 ) -> dict:
-    """The 8-bit mask for a ``rows`` x ``columns`` array, its traps and how well it converged.
+    """The 8-bit mask for traps at ``x_um``/``y_um``, and how well it converged.
 
     With an ``envelope`` (see :func:`envelope`) the traps are weighted by it.
     Also simulates the light the mask makes (see :func:`simulate`), on a grid
@@ -177,14 +211,13 @@ def array_hologram(
     ``grid_z_um`` either side of them: ``simulated_trap_plane`` (row index
     along y) and ``simulated_top_down`` (row index along z).
     """
-    weights, phases, x_um, y_um = generator.generate_weighted_array(
-        np.ones((rows, columns)),
-        spacing_um,
-        init_phase_randomness=phase_randomness,
-        angle_deg=angle_deg,
-    )
-    if envelope is not None:
+    x_um = np.asarray(x_um, dtype=float)
+    y_um = np.asarray(y_um, dtype=float)
+    if envelope is None:
+        weights = np.ones(len(x_um))
+    else:
         weights = envelope_weights(envelope, x_um + blaze_um[0], y_um + blaze_um[1])
+    phases = np.random.rand(len(x_um)) * phase_randomness * 2 * np.pi
 
     array_phase, _, (uniformity, min_max, mse, _) = (
         generator.superposition_optimization(
@@ -205,13 +238,11 @@ def array_hologram(
         generator, generator.superimpose(layers), pupil_radius_um, *pupil_dump_um
     )
 
-    x_um = np.asarray(x_um, dtype=float)
-    y_um = np.asarray(y_um, dtype=float)
     grid_x_um, grid_y_um = focal_grid(
         x_um,
         y_um,
         generator.dx_f / OVERSAMPLING,
-        margin_um=2 * spacing_um + 3 * generator.dx_f,
+        margin_um=focal_margin_um(x_um, y_um, generator.dx_f),
     )
     planes_per_side = 4 * DEPTHS_OF_FOCUS
     plane_spacing_um = depth_of_focus_um(generator, pupil_radius_um) / 4
