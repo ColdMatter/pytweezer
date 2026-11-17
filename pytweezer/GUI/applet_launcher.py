@@ -24,6 +24,11 @@ DEFAULT_APPLETS = [
         "description": "Display image streams",
     },
     {
+        "name": "Camera",
+        "script": "pytweezer/GUI/viewers/camera_applet.py",
+        "description": "Live camera image with its settings",
+    },
+    {
         "name": "Live Plot",
         "script": "pytweezer/GUI/viewers/live_plot.py",
         "description": "Grid of live plots of data streams, header fields and experiment results",

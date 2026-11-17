@@ -145,6 +145,24 @@ def _bound_port(server) -> int:
     return server.server.sockets[0].getsockname()[1]
 
 
+def _already_deleted(data: Any, mod: dict) -> bool:
+    """Whether ``mod`` deletes a dict key that ``data`` no longer has.
+
+    A writer that edits its own mirror before sending the edit (as
+    :class:`~pytweezer.servers.properties.Properties` does) receives its own
+    delete back after applying it.
+    """
+    if mod["action"] != "delitem":
+        return False
+    target = data
+    try:
+        for step in mod["path"]:
+            target = target[step]
+    except (KeyError, IndexError, TypeError):
+        return False
+    return isinstance(target, dict) and mod["key"] not in target
+
+
 class SyncMirror:
     """A live, thread-safe copy of a notifier served by a :class:`SyncServer`.
 
@@ -269,7 +287,7 @@ class SyncMirror:
         with self._lock:
             if mod["action"] == "init":
                 self._data = mod["struct"]
-            else:
+            elif not _already_deleted(self._data, mod):
                 process_mod(self._data, mod)
             if self._keep_mods:
                 self._mods.append(mod)
