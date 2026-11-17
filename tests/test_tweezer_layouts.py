@@ -119,3 +119,18 @@ def test_store_round_trip(tmp_path):
     store = LayoutStore(tmp_path / "layouts.json")
     store.save(state)
     assert store.load() == state
+
+
+def test_close_pairs_of_a_large_array_use_little_memory():
+    import tracemalloc
+
+    sites = rectangle(45, 45, 5.0)
+    sites[1] = Site(x_um=sites[0].x_um + 1.0, y_um=sites[0].y_um)
+
+    tracemalloc.start()
+    pairs = close_pairs(sites, 3.0)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert pairs == [(0, 1)]
+    assert peak < 5e6, "an all-pairs distance matrix would take ~65 MB here"

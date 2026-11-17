@@ -589,9 +589,20 @@ class TweezerLayoutApplet(Applet):
                 }
         return {}
 
+    def _differs_from_saved(self) -> bool:
+        """Whether the experiment would find something other than what is shown."""
+        if self.editor.dirty or self.editor.name is None:
+            return True
+        self.refresh_layouts()
+        saved = self.saved_layouts.get(self.editor.name)
+        return saved is None or saved.sites != self.editor.sites
+
     def put_on_slm(self):
-        if (self.editor.dirty or self.editor.name is None) and not (
-            self.confirm("Save the layout before putting it on the SLM?")
+        if self._differs_from_saved() and not (
+            self.confirm(
+                "The experiment reads the saved layout, and this one differs from "
+                "it. Save it first?"
+            )
             and self.save()
         ):
             return

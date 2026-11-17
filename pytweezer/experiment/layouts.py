@@ -16,6 +16,7 @@ from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
+from scipy.spatial import cKDTree
 
 from pytweezer.experiment.queue import ModelStore, now
 
@@ -176,9 +177,10 @@ def close_pairs(sites: list[Site], min_spacing_um: float) -> list[tuple[int, int
     if len(sites) < 2:
         return []
     xy = np.array([[site.x_um, site.y_um] for site in sites])
-    distances = np.linalg.norm(xy[:, None] - xy[None], axis=-1)
-    i, j = np.nonzero(np.triu(distances < min_spacing_um, k=1))
-    return [(int(a), int(b)) for a, b in zip(i, j)]
+    pairs = cKDTree(xy).query_pairs(min_spacing_um, output_type="ndarray")
+    # query_pairs includes pairs exactly min_spacing_um apart.
+    near = np.hypot(*(xy[pairs[:, 0]] - xy[pairs[:, 1]]).T) < min_spacing_um
+    return sorted((int(i), int(j)) for i, j in pairs[near])
 
 
 class LayoutState(BaseModel):

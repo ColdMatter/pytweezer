@@ -216,3 +216,17 @@ def test_the_canvas_is_turned_180_degrees_to_match_the_tweezer_camera(manager):
 
     state = window.plot.getViewBox().state
     assert state["xInverted"] and state["yInverted"]
+
+
+def test_put_on_slm_asks_to_save_when_another_pc_changed_the_open_layout(
+    manager, monkeypatch
+):
+    window = TweezerLayoutApplet("Tweezer Layout")
+    window.editor.load(RING)
+    manager["layouts"] = [Layout(name="ring", sites=[Site(x_um=9, y_um=9)])]
+    questions = []
+    monkeypatch.setattr(window, "confirm", lambda q: questions.append(q) or False)
+
+    window.put_on_slm()
+
+    assert questions and manager["submitted"] == []

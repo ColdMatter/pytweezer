@@ -15,6 +15,7 @@ imports anywhere.
 import math
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 #: Simulated-image pixels per focal-plane pixel of the generator, along x and y.
 OVERSAMPLING = 4
@@ -165,9 +166,8 @@ def focal_margin_um(x_um: np.ndarray, y_um: np.ndarray, focal_pixel_um: float) -
     spacing_um = 0.0
     if len(x_um) > 1:
         xy = np.column_stack([x_um, y_um])
-        distances = np.linalg.norm(xy[:, None] - xy[None], axis=-1)
-        np.fill_diagonal(distances, np.inf)
-        spacing_um = float(np.median(distances.min(axis=1)))
+        nearest, _ = cKDTree(xy).query(xy, k=[2])
+        spacing_um = float(np.median(nearest))
     return 2 * min(spacing_um, MAX_MARGIN_SPACING_UM) + 3 * focal_pixel_um
 
 

@@ -141,6 +141,20 @@ def test_focal_margin_is_unchanged_for_a_rectangle_and_capped_for_sparse_sites()
     assert margin(np.array([1.0]), np.array([1.0]), 0.9) == pytest.approx(2.7)
 
 
+def test_focal_margin_of_a_large_array_uses_little_memory():
+    import tracemalloc
+
+    x, y = np.meshgrid(np.arange(45) * 5.0, np.arange(45) * 5.0)
+
+    tracemalloc.start()
+    margin = array_hologram.focal_margin_um(x.ravel(), y.ravel(), 0.9)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert margin == pytest.approx(12.7)
+    assert peak < 5e6, "an all-pairs distance matrix would take ~65 MB here"
+
+
 def test_reachable_field_is_lambda_f_over_pitch_centred_on_the_zeroth_order():
     saved = {
         "slm_wavelength": 0.852e-6,
