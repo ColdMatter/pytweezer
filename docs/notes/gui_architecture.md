@@ -223,7 +223,7 @@ calls the same factory.
 | `pytweezer/GUI/streammonitor.py` | `make_stream_monitor()` factory + `StreamMonitor`/`LogMonitor`. |
 | `pytweezer/servers/device_status.py` | `DeviceStatusServer` (poll + PUB) + `DeviceStatusClient` (SUB). |
 | `pytweezer/servers/reachability.py` | `is_reachable()` — shared TCP liveness probe. |
-| `pytweezer/configuration/config.py` | `CONFIG["Servers"]` (incl. `Device Status`) / `CONFIG["Devices"]`, `HOSTS`. |
+| `pytweezer/configuration/config.py` | `CONFIG["Servers"]` (incl. `Device Status`) / `CONFIG["Devices"]`, `MACHINES`. |
 | `start_servers.bat` / `start_client.bat` | Launchers → `pytweezer-server` / `pytweezer-client`. |
 
 **Retired:** `bin/dashboard.py`, `start_device_manager.bat`, `start_dashboard.bat`,

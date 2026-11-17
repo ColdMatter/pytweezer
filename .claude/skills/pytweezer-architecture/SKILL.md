@@ -100,9 +100,11 @@ Control blocks uv's unsigned `.exe` launchers, while the signed `python.exe`
 runs the same entry points.
 
 One GUI, server or client, runs per PC: before building anything it takes
-localhost port 7277 (`bin/single_instance.py`, just below the range
-`get_next_port()` hands out), and a second launch is refused and raises the
-running window instead.
+localhost port `config.GUI_LOCK_PORT` (7277, just below the range
+`get_next_port()` hands out; the lock is `bin/single_instance.py`), and a
+second launch is refused and asks the running window to come to the front with
+a `raise` request. A client may instead send `quit`, which closes that GUI as
+if its window were closed (`pytweezer-machines stop` does this).
 
 `bin/managed_panel.py`'s `ManagedRow` starts every managed process the same way:
 `subprocess.Popen([sys.executable, script, name])`, where `name` is the CONFIG

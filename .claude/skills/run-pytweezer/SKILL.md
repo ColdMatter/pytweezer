@@ -117,8 +117,10 @@ Never start the GUI straight from an SSH command: it lands in session 0 with
 no window (and so do the MOTMasters it launches, with their dialogs), and dies
 when SSH disconnects. `start` instead runs the on-demand scheduled task
 (`pytweezer-server` or `pytweezer-client`) that `register_launch_tasks.ps1`
-registers, which runs the `.bat` launcher on the logged-on desktop. Do not
-create scheduled tasks yourself; `setup` does it.
+registers, which runs the `.bat` launcher on the logged-on desktop. Never
+create scheduled tasks or run `setup` yourself: ask the user to run
+`uv run pytweezer-machines setup <name>`, which prompts for the PC's password
+and writes sshd's key files there.
 
 ## Test
 
