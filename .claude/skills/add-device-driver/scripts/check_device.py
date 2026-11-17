@@ -32,7 +32,7 @@ from pytweezer.servers import device_server
 # Keys the framework consumes itself; they are expected not to match a
 # constructor parameter, so they are never reported as unused.
 FRAMEWORK_KEYS = {
-    "connect_at_startup",
+    "active",
     "class",
     "sim_class",
     "simulate",

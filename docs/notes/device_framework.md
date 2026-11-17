@@ -34,11 +34,11 @@ whichever PC the hardware is attached to.
 ### Config shape
 
 Each entry in `CONFIG["Devices"]` names its backend class with `"class"` (a
-`"module.path:ClassName"` string), alongside the usual `host`/`port`/`connect_at_startup`:
+`"module.path:ClassName"` string), alongside the usual `host`/`port`/`active`:
 
 ```python
 "Rb HamCam": {
-    "connect_at_startup": True,
+    "active": True,
     "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
     "sim_class": "pytweezer.drivers.imagemX2:SimulatedImagEMX2Camera",
     "host": SERVER_HOST,
@@ -347,7 +347,7 @@ are named and reached exactly like any other device.
 
 ```python
 "Rb Feedback Rig": {
-    "connect_at_startup": False,
+    "active": False,
     "host": SERVER_HOST,
     "port": get_next_port(),
     "simulate": SIMULATING,

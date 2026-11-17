@@ -7,8 +7,8 @@ which panels they expose:
 * ``pytweezer-server`` (:func:`server_main`) runs on the server PC and gives full
   start/stop control of the server processes: Servers | Devices | Loggers |
   Streams | Applets | Analysis | Experiments | Results | Saved parameters |
-  Optimisers | NI Cards | Properties. NI Cards appears only when
-  ``CONFIG["Devices"]`` has an ``NICards`` device.
+  Optimisers | NI Cards | Properties. NI Cards appears only while an
+  ``NICards`` device in ``CONFIG["Devices"]`` is active.
 * ``pytweezer-client`` (:func:`client_main`) runs on client PCs with the same
   tabs, except that the Servers and Loggers tabs are view-only because those
   processes run on the server PC.

@@ -71,8 +71,7 @@ what lets a user drag a panel out into its own floating window. Two rules follow
 `bin/managed_panel.py`'s `ManagedRow` is one row = one process. It spawns
 `<sys.executable> <script> <name>` (see the `pytweezer-architecture` skill for that launch
 protocol) and owns the Start/Stop toggle and status LED. Rows for entries marked
-`"active": True` (`"connect_at_startup": True` for devices) auto-start when the
-panel opens, on the PC that controls them.
+`"active": True` auto-start when the panel opens, on the PC that controls them.
 
 A process a row spawned that exits without being asked is logged once, with its
 exit code (the only record of a driver dying in native code), and the row stays
@@ -111,6 +110,7 @@ every ~2 s and PUBs a snapshot on a dedicated socket (not through a hub);
 - The snapshot is flat (`{name: {"state", "host", "port", "last_seen"}}`), with a
   composite adding `"children"` and each sub-device carrying `"parent"` — flat
   works precisely because device names are unique across the category.
+- `active=False` reads as `"disabled"` rather than down.
 
 **Composites need a second probe.** A composite serves several sub-devices from
 one port and comes up with only the ones that opened, so a TCP probe of that port

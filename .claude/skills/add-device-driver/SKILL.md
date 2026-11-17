@@ -171,7 +171,7 @@ Add to `CONFIG["Devices"]` in `pytweezer/configuration/config.py`:
 
 ```python
 "ORCA": {
-    "connect_at_startup": True,
+    "active": True,
     "class": "pytweezer.drivers.orca:ORCACamera",
     "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
     "teardown": "close",

@@ -598,7 +598,7 @@ class DevicesPanel(BWidget):
                 script=(
                     tweezerpath + "/bin/" + DEVICE_SERVER_SCRIPT if local else None
                 ),
-                active=params.get("connect_at_startup", False) if local else False,
+                active=params.get("active", False) if local else False,
                 tooltip=params.get("tooltip"),
                 controllable=local,
                 show_last_seen=True,

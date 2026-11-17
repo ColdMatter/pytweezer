@@ -72,7 +72,7 @@ matches a parameter, and silently ignored if it doesn't.
 | `"allow_parallel"` | Drop sipyco's per-call lock; inert for plain `def` methods (see "What blocks what"). |
 | `"devices"`, `"coordinator"`, `"coordinator_target_name"`, `"role"` | Composite wiring, below. |
 
-`"connect_at_startup"` only says whether the GUI starts the device at launch; one started
+`"active"` only says whether the GUI starts the device at launch; one started
 by hand is used, reserved and shown like any other. **Adding an entry renumbers
 every port after it** (`get_next_port()` hands them out in declaration order),
 so every PC is updated and restarted together; see `pytweezer-architecture`.

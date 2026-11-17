@@ -139,7 +139,7 @@ CONFIG = {
     # addresses them all by name.
     "Devices": {
         "Rb MotMaster": {
-            "connect_at_startup": True,
+            "active": True,
             "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
@@ -149,7 +149,7 @@ CONFIG = {
             "simulate": SIMULATING,
         },
         "CaF MotMaster": {
-            "connect_at_startup": True,
+            "active": True,
             "class": "pytweezer.drivers.motmaster:MotMasterInterface",
             "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
@@ -160,7 +160,7 @@ CONFIG = {
             "simulate": SIMULATING,
         },
         "ORCA": {
-            "connect_at_startup": False,
+            "active": False,
             "class": "pytweezer.drivers.orca:ORCACamera",
             "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
             "host": HOSTS["ph-bonesaw"],
@@ -174,7 +174,7 @@ CONFIG = {
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Rb ThorCam": {
-            "connect_at_startup": False,
+            "active": False,
             "class": "pytweezer.drivers.thorcam:ThorCam",
             "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
             "host": HOSTS["PH-BEAST"],
@@ -186,7 +186,7 @@ CONFIG = {
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
         "Tweezer Monitor ThorCam": {
-            "connect_at_startup": False,
+            "active": False,
             "class": "pytweezer.drivers.tweezermonitorcam:ThorCam",
             "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorLabsCamera",
             "host": HOSTS["PH-BEAST"],
@@ -206,7 +206,7 @@ CONFIG = {
         # dcamapi_init fails with NOCAMERA. FIXME: move it out once a shared
         # device process exists (docs/superpowers/specs/2026-11-16-shared-device-process-design.md).
         "Rb Rearrangement Rig": {
-            "connect_at_startup": True,
+            "active": True,
             "host": HOSTS["PH-BEAST"],
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -253,7 +253,7 @@ CONFIG = {
             "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
         },
         "IDS-1054B Scope": {
-            "connect_at_startup": False,
+            "active": False,
             "class": "pytweezer.drivers.ids1054b:IDS1054B",
             "sim_class": "pytweezer.drivers.ids1054b:SimulatedIDS1054B",
             "teardown": "close",
@@ -263,7 +263,7 @@ CONFIG = {
             "simulate": SIMULATING,
         },
         "CaF ThorCam": {
-            "connect_at_startup": True,
+            "active": True,
             "class": "pytweezer.drivers.thorcam:ThorCam",
             "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
             "teardown": "close",
@@ -282,7 +282,7 @@ CONFIG = {
         },
         # The NI Cards tab: channels by MOTMaster alias, from each PC's hardware file.
         "CaF NI Cards": {
-            "connect_at_startup": False,
+            "active": False,
             "class": "pytweezer.drivers.ni_cards:NICards",
             "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
             "host": HOSTS["ph-bonesaw"],
@@ -308,7 +308,7 @@ CONFIG = {
             "teardown": "close",
         },
         "Rb NI Cards": {
-            "connect_at_startup": False,
+            "active": False,
             "class": "pytweezer.drivers.ni_cards:NICards",
             "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
             "host": HOSTS["IC-CZC221CCHS"],
