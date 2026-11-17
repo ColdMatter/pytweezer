@@ -214,6 +214,7 @@ CONFIG = {
                 "Rb HamCam": {
                     "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
                     "sim_class": "pytweezer.drivers.imagemX2:SimulatedTweezerArrayCamera",
+                    "teardown": "close",
                     "role": "camera",
                     "serial_number": "000407",
                     "stream_name": "rb_hamcam",
