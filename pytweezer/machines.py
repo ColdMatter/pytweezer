@@ -13,7 +13,9 @@ accounts may not read over SSH.
 
 import base64
 import json
+import re
 import shlex
+import socket
 import subprocess
 import time
 from dataclasses import dataclass
@@ -41,6 +43,8 @@ _UNREACHABLE = (
     "Could not resolve",
 )
 _NO_REPO = "clone path unknown; run setup"
+# Each name reaches cmd unquoted: no leading "-" (a git option), spaces or shell characters.
+_BRANCH_NAME = re.compile(r"[A-Za-z0-9._/][A-Za-z0-9._/-]*")
 _NOT_SUPPORTED = "not supported"
 
 
@@ -130,6 +134,7 @@ def run(
     else:
         args = [
             "ssh",
+            "-n",
             "-o",
             "BatchMode=yes",
             *_SSH_OPTIONS,
@@ -153,23 +158,31 @@ def run(
 
 
 def gui_state(machine: Machine) -> GuiState:
-    """Ask ``machine``'s GUI lock who holds it, without disturbing the GUI."""
-    result = run(machine, _lock_command(machine), timeout_s=20)
-    reach = _reach(result)
-    if reach != "ok":
-        return GuiState(reach, None)
-    answer = _last_line(result.stdout)
-    if result.returncode == 0 and answer == "none":
+    """Ask ``machine``'s GUI lock who holds it, without disturbing the GUI.
+
+    This PC's lock is read in-process rather than through a shell.
+    """
+    if machine.address == this_pc_address():
+        returncode, answer, error = 0, _read_lock_here(), ""
+    else:
+        result = run(machine, _lock_command(machine), timeout_s=20)
+        reach = _reach(result)
+        if reach != "ok":
+            return GuiState(reach, None)
+        returncode = result.returncode
+        answer = _last_line(result.stdout)
+        error = _last_line(result.stderr)
+    if returncode == 0 and answer == "none":
         return GuiState("ok", None)
     try:
         owner = json.loads(answer)
     except ValueError:
         owner = None
-    if result.returncode != 0 or not isinstance(owner, dict):
+    if returncode != 0 or not isinstance(owner, dict):
         logger.warning(
             "Could not read the GUI lock on %s: %s",
             machine.name,
-            _last_line(result.stderr) or answer or "no answer",
+            error or answer or "no answer",
         )
         return GuiState("no answer", None)
     return GuiState("ok", owner)
@@ -209,6 +222,15 @@ def git_state(machine: Machine) -> GitState | Result:
     )
 
 
+def valid_branch(name: str) -> bool:
+    """Whether ``name`` is a branch name safe to put in a ``git checkout`` command line."""
+    return (
+        _BRANCH_NAME.fullmatch(name) is not None
+        and ".." not in name
+        and not name.endswith(("/", ".lock"))
+    )
+
+
 def update_steps(current: str, requested: str | None) -> list[str] | str:
     """The git commands that bring a clone on ``current`` up to date, or why to skip it.
 
@@ -226,6 +248,8 @@ def update_steps(current: str, requested: str | None) -> list[str] | str:
 
 def update(machine: Machine, branch: str | None = None) -> Result:
     """Fetch, fast-forward (switching to ``branch`` if given) and ``uv sync``."""
+    if branch is not None and not valid_branch(branch):
+        return Result(machine.name, False, "invalid branch name")
     if machine.repo is None:
         return Result(machine.name, False, _NO_REPO)
     head = run(
@@ -302,7 +326,8 @@ def stop(machine: Machine, wait_s: float = 30) -> Result:
             return Result(machine.name, False, f"did not close within {wait_s:g} s")
 
     cleanup = run(
-        machine, _in_repo(machine, [f"{_uv(machine)} run python -m bin.kill_stale"])
+        machine,
+        _in_repo(machine, [f"{_uv(machine)} run --no-sync python -m bin.kill_stale"]),
     )
     # uv also exits 2 on its own errors, so the exit code alone is not kill_stale's refusal.
     if cleanup.returncode == 2 and "Could not list processes" in cleanup.stdout:
@@ -421,6 +446,7 @@ def _lock_command(machine: Machine, request: str | None = None) -> str:
 def _add_key_windows(key: str) -> str:
     quoted_key = key.replace("'", "''")
     return _powershell(
+        "$ErrorActionPreference = 'Stop'\n"
         f"$key = '{quoted_key}'\n"
         "$admin = [bool]((whoami /groups) -match 'S-1-5-32-544')\n"
         'if ($admin) { $file = "$env:ProgramData\\ssh\\administrators_authorized_keys" }\n'
@@ -435,6 +461,19 @@ def _add_key_windows(key: str) -> str:
         ' if ($LASTEXITCODE) { "icacls failed on $file"; exit 1 } }\n'
         '"added to $file"\n'
     )
+
+
+def _read_lock_here() -> str:
+    """This PC's GUI lock line, ``none`` if nothing holds the port, ``""`` if no line comes."""
+    try:
+        connection = socket.create_connection(("127.0.0.1", GUI_LOCK_PORT), timeout=2)
+    except OSError:
+        return "none"
+    with connection, connection.makefile(encoding="utf-8", errors="replace") as lines:
+        try:
+            return lines.readline().strip()
+        except OSError:
+            return ""
 
 
 def _add_key_linux(key: str) -> str:

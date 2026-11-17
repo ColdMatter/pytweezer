@@ -11,6 +11,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 from pytweezer import machines
 
+#: Reaches where SSH itself got through, so the clone can still be read.
+_SSH_GOT_THROUGH = ("ok", "no answer")
+
 
 def main(argv: list[str] | None = None) -> int:
     """Run one subcommand; the exit code is 0 only if every machine's result was ok."""
@@ -48,11 +51,17 @@ def _parser() -> argparse.ArgumentParser:
         "update",
         "Fast-forward each clone and uv sync (a clone on another branch is skipped)",
         "*",
-    ).add_argument("--branch", help="switch to this branch and update it")
+    ).add_argument("--branch", type=_branch, help="switch to this branch and update it")
     add("start", "Start the GUI on each PC's desktop", "+")
     add("stop", "Close the GUI on each PC, then clear leftover processes", "+")
     add("setup", "Install this PC's SSH key on a PC and register its launch tasks", 1)
     return parser
+
+
+def _branch(name: str) -> str:
+    if not machines.valid_branch(name):
+        raise argparse.ArgumentTypeError(f"invalid branch name: {name!r}")
+    return name
 
 
 def _map(action, selected: list[machines.Machine]) -> list:
@@ -78,6 +87,7 @@ def _status(selected: list[machines.Machine]) -> int:
     for machine, (gui, git) in zip(selected, _map(_inspect, selected)):
         if gui.reach != "ok":
             all_ok = False
+        if gui.reach not in _SSH_GOT_THROUGH:
             rows.append([machine.name, gui.reach, "-"])
         elif isinstance(git, machines.GitState):
             rows.append(
@@ -101,10 +111,13 @@ def _status(selected: list[machines.Machine]) -> int:
 
 def _inspect(machine: machines.Machine):
     gui = machines.gui_state(machine)
-    return gui, (machines.git_state(machine) if gui.reach == "ok" else None)
+    git_readable = gui.reach in _SSH_GOT_THROUGH
+    return gui, (machines.git_state(machine) if git_readable else None)
 
 
 def _pytweezer(machine: machines.Machine, gui: machines.GuiState) -> str:
+    if gui.reach != "ok":
+        return "unknown"
     if gui.owner is None:
         return "not running" if machine.os == "windows" else "-"
     owner = gui.owner

@@ -1,7 +1,11 @@
 """The SSH layer that updates, starts and stops pytweezer on the lab PCs."""
 
 import io
+import itertools
+import json
+import socket
 import subprocess
+import threading
 
 import pytest
 
@@ -108,6 +112,56 @@ def test_this_pc_runs_locally_not_over_ssh(monkeypatch):
     assert not command_line.startswith("ssh")
 
 
+def test_only_install_key_lets_ssh_prompt(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_subprocess_run(args, **kwargs):
+        calls.append(args)
+        return completed()
+
+    (tmp_path / ".ssh").mkdir()
+    (tmp_path / ".ssh" / "id_ed25519.pub").write_text("ssh-ed25519 AAAA lab@pc")
+    monkeypatch.setattr(machines.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(machines, "this_pc_address", lambda: None)
+    monkeypatch.setattr(machines.subprocess, "run", fake_subprocess_run)
+    machines.run(LAB_PC, "git status")
+    machines.install_key(LAB_PC)
+
+    batch, interactive = calls
+    batch_options = list(itertools.pairwise(batch))
+    assert ("-o", "BatchMode=yes") in batch_options
+    assert "-n" in batch
+    assert "BatchMode=yes" not in interactive
+
+
+def test_this_pcs_gui_lock_is_read_in_process(monkeypatch):
+    # The GUI polls its own PC's lock every 15 s; that must not spawn a shell.
+    with socket.create_server(("127.0.0.1", 0)) as lock:
+
+        def answer():
+            connection, _ = lock.accept()
+            with connection:
+                connection.sendall(json.dumps(RUNNING).encode() + b"\n")
+
+        threading.Thread(target=answer, daemon=True).start()
+        monkeypatch.setattr(machines, "GUI_LOCK_PORT", lock.getsockname()[1])
+        monkeypatch.setattr(machines, "this_pc_address", lambda: LAB_PC.address)
+        monkeypatch.setattr(machines, "run", lambda *a, **k: pytest.fail("ran"))
+
+        assert machines.gui_state(LAB_PC) == GuiState("ok", RUNNING)
+
+
+@pytest.mark.parametrize(
+    "branch", ["-f", "x .", "a&del x", "a..b", "feature/", "x.lock"]
+)
+def test_an_invalid_branch_is_refused_before_ssh(fake_run, branch):
+    fake = fake_run()
+    assert machines.update(LAB_PC, branch) == Result(
+        "lab-pc", False, "invalid branch name"
+    )
+    assert fake.commands == []
+
+
 def test_update_skips_a_machine_on_another_branch_without_running_git_pull(fake_run):
     fake = fake_run(
         ("--abbrev-ref", completed(stdout="experiments-use-live-mode\nc00ce0e\n"))
@@ -155,7 +209,8 @@ def test_stop_reports_skipped_cleanup(fake_run, monkeypatch):
     monkeypatch.setattr(machines, "gui_state", lambda machine: next(states))
     fake_run(
         (
-            "bin.kill_stale",
+            # --no-sync: stopping a PC must not change its venv.
+            "run --no-sync python -m bin.kill_stale",
             completed(2, stdout="Could not list processes: Access denied\n"),
         )
     )
@@ -227,6 +282,20 @@ def test_status_prints_one_row_per_machine_in_config_order(lab, monkeypatch, cap
     assert exit_code == 1
 
 
+def test_status_shows_the_clone_of_a_pc_whose_gui_does_not_answer(
+    lab, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        machines, "gui_state", lambda machine: GuiState("no answer", None)
+    )
+    monkeypatch.setattr(
+        machines, "git_state", lambda machine: GitState("main", "c351ace", 0, 0, False)
+    )
+    assert machines_command.main(["status", "zeta"]) == 1
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()]
+    assert rows[1][:6] == ["zeta", "no", "answer", "main", "c351ace", "0"]
+
+
 def test_update_exit_code_is_one_when_any_machine_fails(lab, monkeypatch, capsys):
     monkeypatch.setattr(
         machines,
@@ -253,6 +322,16 @@ def test_update_passes_the_branch_to_every_machine(lab, monkeypatch, capsys):
     )
     machines_command.main(["update", "--branch", "feature"])
     assert branches == ["feature"] * 3
+
+
+def test_update_refuses_an_invalid_branch_before_any_machine_is_touched(
+    lab, monkeypatch, capsys
+):
+    monkeypatch.setattr(machines, "update", lambda *a: pytest.fail("updated"))
+    with pytest.raises(SystemExit) as exit_info:
+        machines_command.main(["update", "--branch=x&del ."])
+    assert exit_info.value.code == 2
+    assert "invalid branch name" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("command", ["start", "stop"])
