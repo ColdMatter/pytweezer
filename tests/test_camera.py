@@ -152,6 +152,7 @@ def _driver(cls):
     driver._backend, driver.timeout = FakeVendorCamera(), 1.0
     driver._lock = threading.RLock()
     driver._kept = {}
+    driver._shot_tags = []
     return driver
 
 

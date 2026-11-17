@@ -49,7 +49,7 @@ A pylablib-backed driver gets it for free; others implement
 since the mark; give `PycafCamera(buffer_frames=...)` more. `set_roi` returns the
 `(x0, y0)` the camera actually used (kept as `roi_origin`), and every broadcast
 frame's header carries it as `roi_x0`/`roi_y0`. Queued tweezer shots also tag
-theirs with the task's `rid` (`acquire_n_frames(..., header=...)`); frames
+theirs with the task's `rid` (`start_shot({"rid": ...})`); frames
 broadcast live during notebook runs carry none, so the live tweezer loading
 analysis counts all of them as one run of their own.
 
@@ -76,9 +76,9 @@ notebook (MOTMaster's own window) get no frames.
   camera, so pycaf's `ThorlabsGrabber` cannot run alongside it.
 - **Rb HamCam** (PH-BEAST, inside `Rb Rearrangement Rig`): starts in external
   exposure mode (`external_exposure` in CONFIG, as do the ORCAs), but keeps
-  whatever the Rb side or a `ContinuousAcquisition` task (internal trigger) last
-  set. Set ROI, EM gain and exposure mode with an `RbHamCamSettings` task or raw
-  calls; DCAM refuses trigger changes while acquiring, so `stop_live()` first
+  whatever the Rb side, the Camera applet or a settings task last set. Set ROI,
+  EM gain and exposure mode from the Camera applet, an `RbHamCamSettings` task
+  or raw calls; DCAM refuses trigger changes while acquiring, so `stop_live()` first
   (`get_device("Rb HamCam").set_exposure_mode("level")`, or `"edge"`/`"internal"`). Addressed directly,
   like any composite sub-device; a rearrangement-coordinator shot stalls its
   calls until it ends and leaves the camera out of live mode; `PycafCamera`

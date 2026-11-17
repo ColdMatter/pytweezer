@@ -73,7 +73,9 @@ class LoadTweezers(MotMasterExperiment):
     its saved value, and the values used are recorded as ``saved_sequence``.
 
     Each shot takes two frames on ``hamcam``, exposed by the trigger pulse,
-    with EM gain on and ``hamcam_gain`` as its sensitivity. Binning is fixed at
+    with EM gain on and ``hamcam_gain`` as its sensitivity. The HamCam stays
+    live, during the task and after it: its live mode broadcasts each shot's
+    frames, tagged with the task's ``rid`` and their ``index`` in the shot. Binning is fixed at
     1, because the trap sites are saved in sensor pixels; the ROI cannot be
     scanned, because the sites are placed in the ROI set at :meth:`prepare`.
 
@@ -132,7 +134,6 @@ class LoadTweezers(MotMasterExperiment):
 
     def prepare(self) -> None:
         super().prepare()
-        self.hamcam_was_live = self.hamcam.is_live()
         self.hamcam.stop_live()
         self.hamcam.set_binning(1)
         self.roi_origin = tuple(
@@ -149,7 +150,7 @@ class LoadTweezers(MotMasterExperiment):
         self.hamcam.enable_direct_em_gain(True)
         self.hamcam.set_gain(self.hamcam_gain)
         self.sent_gain = self.hamcam_gain
-        self.hamcam.setup_acquisition(2, mode="snap")
+        self.hamcam.start_live()
 
         self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(
             self.saved_parameters
@@ -171,8 +172,8 @@ class LoadTweezers(MotMasterExperiment):
 
     def finish(self) -> None:
         try:
-            if getattr(self, "hamcam_was_live", False):
-                self.hamcam.start_live()
+            self.hamcam.start_live()  # does nothing unless a failure left it stopped
+            self.hamcam.end_shots()
         finally:
             super().finish()
 
@@ -225,23 +226,20 @@ class LoadTweezers(MotMasterExperiment):
         return {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}, ""
 
     def take_shot(self, **sequence: Any) -> np.ndarray:
-        """Run the sequence once with script parameters ``sequence``; the HamCam's two frames.
+        """Run the sequence once with script parameters ``sequence``; the HamCam's two frames."""
+        return self.take_frames(2, **sequence)
 
-        The frames are broadcast on the camera's stream as this task's.
-        """
+    def take_frames(self, n: int, **sequence: Any) -> np.ndarray:
+        """Run the sequence once with script parameters ``sequence``; the HamCam's first ``n`` frames of it."""
         if self.hamcam_gain != self.sent_gain:
+            # DCAM refuses some settings while capturing.
+            self.hamcam.stop_live()
             self.hamcam.set_gain(self.hamcam_gain)
+            self.hamcam.start_live()
             self.sent_gain = self.hamcam_gain
-        self.hamcam.start_acquisition()
-        try:
-            self.run_sequences(**sequence)
-            return np.asarray(
-                self.hamcam.acquire_n_frames(
-                    2, broadcast=True, header={"rid": self.rid}
-                )
-            )
-        finally:
-            self.hamcam.stop_acquisition()
+        mark = self.hamcam.start_shot({"rid": self.rid})
+        self.run_sequences(**sequence)
+        return np.asarray(self.hamcam.wait_frames(mark, n))
 
     @staticmethod
     def top_hat(frames, feature_size: int) -> list[np.ndarray]:
@@ -307,27 +305,8 @@ class LoadTweezersNImages(LoadTweezers):
     )
 
     def take_shot(self, **sequence: Any) -> np.ndarray:
-        """Run the sequence once with script parameters ``sequence``; the HamCam's two frames.
-
-        The frames are broadcast on the camera's stream as this task's.
-        """
-        if self.hamcam_gain != self.sent_gain:
-            self.hamcam.set_gain(self.hamcam_gain)
-            self.sent_gain = self.hamcam_gain
-        self.hamcam.start_acquisition()
-        self.rb: MotMaster
-        try:
-            self.run_sequences(**sequence)
-            return np.asarray(
-                self.hamcam.acquire_n_frames(
-                    10,
-                    broadcast=True,
-                    header={"rid": self.rid},
-                    stream="hamcam_n_images",
-                )
-            )
-        finally:
-            self.hamcam.stop_acquisition()
+        """Run the sequence once with script parameters ``sequence``; the HamCam's ten frames."""
+        return self.take_frames(10, **sequence)
 
     def run_point(self) -> None:
         self.take_shot()
@@ -359,28 +338,22 @@ class LoadTweezersMOTImage(LoadTweezers):
 
     def prepare(self) -> None:
         super().prepare()
-        self.orca_was_live = self.orca.is_live()
         self.orca.stop_live()
         self.orca.set_trigger_source("ext")
-        self.orca.setup_acquisition(1, mode="snap")
+        self.orca.start_live()
         self.record("cloud_mass_amu", SPECIES_MASS_AMU["Rb"], unit="u")
 
     def finish(self) -> None:
         try:
-            if getattr(self, "orca_was_live", False):
-                self.orca.start_live()
+            self.orca.start_live()  # does nothing unless a failure left it stopped
+            self.orca.end_shots()
         finally:
             super().finish()
 
     def run_point(self) -> None:
-        self.orca.start_acquisition()
-        try:
-            hamcam_frames = self.take_shot()
-            orca_frames = np.asarray(
-                self.orca.acquire_n_frames(1, broadcast=True, header={"rid": self.rid})
-            )
-        finally:
-            self.orca.stop_acquisition()
+        orca_mark = self.orca.start_shot({"rid": self.rid})
+        hamcam_frames = self.take_shot()
+        orca_frames = np.asarray(self.orca.wait_frames(orca_mark, 1))
         self.record_tweezers(hamcam_frames)
         self.record_cloud_fit(orca_frames)
 

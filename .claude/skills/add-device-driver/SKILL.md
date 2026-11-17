@@ -66,9 +66,11 @@ ring-buffer acquisition, `frames_acquired()` counts frames since it started,
 saved beside frames in zips. Live mode is something a camera is put in and
 taken out of at run time, never a constructor option: `start_live(buffer_frames)`
 arms it and broadcasts every new frame, `stop_live()` stops the broadcast and
-the acquisition, `is_live()` says which. An experiment using a camera takes a
-live one out of live mode in `prepare` and puts it back in `finish` (see
-`LoadTweezers`). The defaults assume
+the acquisition, `is_live()` says which. Live is a camera's standard mode,
+experiments included: `start_shot(header)` returns a mark and tags the live
+frames from it with `header` (e.g. `{"rid": ...}`) and their `index` within
+the shot, `wait_frames(mark, n)` returns the shot's frames once they exist,
+and `end_shots()` stops tagging (see `LoadTweezers`). The defaults assume
 a pylablib backend; otherwise implement `_acquisition_in_progress`,
 `_count_frames` and `_read_range`. Take `self._lock` around backend calls the
 live thread could race. Paths such as `image_dir` come from the CONFIG entry;

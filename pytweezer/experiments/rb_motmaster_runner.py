@@ -17,8 +17,9 @@ class RbMotMasterRunner(MotMasterExperiment):
     """Run a script from the Rb script folder once per point, recording each camera's frames.
 
     Each ticked camera is put in external exposure and live mode, so every frame
-    goes out on its own image stream as it arrives, and is left that way when
-    the task ends. The frames that arrive during a run are recorded per point
+    goes out on its own image stream as it arrives, tagged with the task's
+    ``rid`` and its ``index`` in the run, and is left that way when the task
+    ends. The frames that arrive during a run are recorded per point
     as ``<camera>_images``, ``(frames, H, W)``; the frame count must be the same
     at every point. ROI, binning and gain are left as the camera has them.
     """
@@ -80,7 +81,8 @@ class RbMotMasterRunner(MotMasterExperiment):
 
     def run_point(self) -> None:
         marks = {
-            name: camera.frames_acquired() for name, camera in self.cameras.items()
+            name: camera.start_shot({"rid": self.rid})
+            for name, camera in self.cameras.items()
         }
         self.run_sequences()
         settle_frame_counts(self.cameras, self.frame_settle, self.frame_timeout, 0.05)
@@ -99,3 +101,11 @@ class RbMotMasterRunner(MotMasterExperiment):
                     "during the first; every run must trigger it the same number of times"
                 )
             self.record(f"{name}_images", frames)
+
+    def finish(self) -> None:
+        try:
+            for camera in getattr(self, "cameras", {}).values():
+                camera.start_live(self.buffer_frames)  # in case a failure stopped it
+                camera.end_shots()
+        finally:
+            super().finish()
