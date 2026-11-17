@@ -2,10 +2,10 @@
 
 Wraps the Blink C-wrapper SDK (a ctypes DLL) as a single-target device backend,
 so a Spatial Light Modulator is a first-class device: ``get_device("Rb SLM")``.
-This replaces the old standalone ZMQ ``SLMServer.py`` — the point of making it a
-device is that a coordinator sharing its process (e.g. rearrangement) can call
-``slm.update_mask(frame)`` directly, with no socket between the GPU-computed
-phasemask and the hardware.
+It also serves the tweezer array on it (``make_array``/``get_array``), through a
+:class:`~pytweezer.coordinators.rearrangement.Rearrangement` built around the SLM
+in the same process, so a GPU-computed phasemask reaches the hardware with no
+socket in between.
 
 The Blink DLL and LUT paths are Windows-only and specific to the SLM PC; they are
 loaded lazily in :meth:`_connect`, so importing this module never requires the SDK
@@ -53,7 +53,32 @@ def _load_blink_sdk(sdk_dll: str):
     return lib
 
 
-class SLM:
+class _TweezerArray:
+    """The tweezer-array calls every SLM serves, delegated to its own rearrangement."""
+
+    def _start_tweezer_array(self) -> None:
+        # Imported here: the rearrangement module imports this one.
+        from pytweezer.coordinators.rearrangement import Rearrangement
+
+        self._rearrangement = Rearrangement({Rearrangement.slm_role: self}, {})
+
+    def make_array(self, rows, columns, spacing_um, angle_deg, **hologram) -> dict:
+        """Put a ``rows`` x ``columns`` tweezer array on the SLM and remember it.
+
+        See :meth:`Rearrangement.make_array
+        <pytweezer.coordinators.rearrangement.Rearrangement.make_array>` for the
+        keyword arguments and the result.
+        """
+        return self._rearrangement.make_array(
+            rows, columns, spacing_um, angle_deg, **hologram
+        )
+
+    def get_array(self) -> dict | None:
+        """The array on the SLM, or ``None`` if :meth:`make_array` did not put its mask there."""
+        return self._rearrangement.get_array()
+
+
+class SLM(_TweezerArray):
     """Blink Plus SLM over its ctypes C-wrapper SDK.
 
     The live hardware handle (the loaded DLL) lives on :attr:`_lib`; ``None`` means
@@ -89,6 +114,7 @@ class SLM:
         self.height = None
         self.depth = None
         self.last_mask = None
+        self._start_tweezer_array()
         self._connect()
 
     # ------------------------------------------------------------------ #
@@ -328,7 +354,7 @@ class SLM:
         return {"width": self.width, "height": self.height, "depth": self.depth}
 
 
-class SimulatedSLM:
+class SimulatedSLM(_TweezerArray):
     """Synthetic SLM: remembers the last mask written and counts frames.
 
     Interface-complete with :class:`SLM` via :func:`simulate`, so anything the
@@ -349,6 +375,7 @@ class SimulatedSLM:
         self.wait_for_trigger = False
         self._temp = 35.0
         self._closed = False
+        self._start_tweezer_array()
 
     def is_connected(self) -> bool:
         return not self._closed

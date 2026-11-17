@@ -125,8 +125,10 @@ Subclass `Coordinator` (`pytweezer/coordinators/base.py`), reach backends throug
 `self.require_role(<role>)`, and point the composite's `"coordinator"` key at the
 class. `build_spec` constructs it as `cls(roles, conf)`; override `shutdown()`
 to release the backends before they are torn down.
-`pytweezer/coordinators/rearrangement.py` is the real worked example (the
-`Rb Rearrangement Rig`); `transport.py` is an unconfigured variant of it.
+`pytweezer/coordinators/rearrangement.py` is the worked example (the
+`Rb Rearrangement Rig`, **not in use**: parked in `NOT_IN_USE` in `config.py`,
+which says how to re-enable it); `transport.py` is an unconfigured variant of
+it. No configured composite has a coordinator at present.
 
 Three constraints, all consequences of how sipyco serves targets:
 
@@ -143,9 +145,10 @@ Three constraints, all consequences of how sipyco serves targets:
 
 Sub-devices stay reachable on their own, so other clients can change the
 hardware behind the coordinator's back. State a coordinator reports about its
-backends should be checked against them, not just remembered: the
-rearrangement rig owns the tweezer array (`make_array`), and `get_array()`
-returns it only while `slm.last_mask` is still the mask it wrote, `None` once
+backends should be checked against them, not just remembered: `Rearrangement`
+owns the tweezer array (`make_array`; every SLM driver builds one around itself
+to serve it as `get_device("Rb SLM").make_array`), and `get_array()` returns it
+only while `slm.last_mask` is still the mask it wrote, `None` once
 anything else has written the SLM. Gate GPU-only methods on a CUDA device
 count, not on `import cupy` succeeding — cupy imports on machines with no
 usable driver.

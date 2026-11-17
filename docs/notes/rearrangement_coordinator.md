@@ -1,5 +1,12 @@
 # Rearrangement rig: SLM device + rearrangement coordinator
 
+> **Not in use.** The `Rb Rearrangement Rig` composite is parked in `NOT_IN_USE`
+> in `pytweezer/configuration/config.py`, which says how to re-enable it; the
+> coordinator code is unchanged. Meanwhile `Rb SLM` is a top-level device that
+> builds a `Rearrangement` around itself (no camera) and serves
+> `make_array`/`get_array`, and `Rb HamCam` shares the `PH-BEAST DCAM Cameras`
+> composite with `CaFMOT Cam`.
+
 How the atom-rearrangement system maps onto the composite-device framework
 (`docs/notes/device_framework.md`), and a proposed simplification of the ARM pipeline to
 do later.
