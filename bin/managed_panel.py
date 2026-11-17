@@ -44,7 +44,10 @@ from pytweezer.servers import tweezerpath
 from pytweezer.servers.device_client import get_rig_control
 from pytweezer.servers.device_control import DeviceControlChannel
 from pytweezer.servers.device_status import DeviceStatusClient
-from pytweezer.servers.process_cleanup import kill_device_process
+from pytweezer.servers.process_cleanup import (
+    ProcessListingRefused,
+    kill_device_process,
+)
 from pytweezer.servers.reachability import is_reachable
 
 logger = get_logger("managed_panel")
@@ -500,8 +503,14 @@ class ControlPanel(BWidget):
 
 
 def _stop_orphan(name):
+    def stop():
+        try:
+            kill_device_process(name)
+        except ProcessListingRefused as refusal:
+            logger.warning("Could not stop %s's server: %s", name, refusal)
+
     # Off the GUI thread: on Windows listing processes takes seconds.
-    threading.Thread(target=kill_device_process, args=(name,), daemon=True).start()
+    threading.Thread(target=stop, daemon=True).start()
 
 
 #: Left inset of a composite sub-device row, in pixels.

@@ -7,8 +7,12 @@ ports, causing the next launch to fail with "Address already in use".
 """
 
 import argparse
+import sys
 
-from pytweezer.servers.process_cleanup import kill_stale_processes
+from pytweezer.servers.process_cleanup import (
+    ProcessListingRefused,
+    kill_stale_processes,
+)
 
 
 def main():
@@ -20,7 +24,11 @@ def main():
     )
     args = parser.parse_args()
 
-    matches = kill_stale_processes(dry_run=args.dry_run)
+    try:
+        matches = kill_stale_processes(dry_run=args.dry_run)
+    except ProcessListingRefused as refusal:
+        print(f"Could not list processes: {refusal}")
+        sys.exit(2)
     if not matches:
         print("No stale pytweezer processes found.")
         return

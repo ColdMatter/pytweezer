@@ -2,6 +2,7 @@
 lookups stubbed and no real RPC."""
 
 import asyncio
+import subprocess
 
 import pytest
 
@@ -417,3 +418,16 @@ def test_find_device_processes_matches_the_device_name_exactly(monkeypatch):
     monkeypatch.setattr(process_cleanup, "_list_processes", lambda: iter(processes))
     assert process_cleanup.find_device_processes("Cam") == [101, 103]
     assert process_cleanup.find_device_processes("Cam 2") == [102]
+
+
+def test_a_refused_process_listing_raises(monkeypatch):
+    from pytweezer.servers import process_cleanup
+
+    refused = subprocess.CompletedProcess(
+        "powershell", 1, "", "Get-CimInstance : Access denied\n"
+    )
+    monkeypatch.setattr(
+        process_cleanup.subprocess, "run", lambda *args, **kwargs: refused
+    )
+    with pytest.raises(process_cleanup.ProcessListingRefused, match="Access denied"):
+        list(process_cleanup._list_processes_windows())

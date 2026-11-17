@@ -30,6 +30,10 @@ from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT, tweezerpath
 MANAGED_CATEGORIES = ("Servers", "Devices", "Loggers")
 
 
+class ProcessListingRefused(OSError):
+    """This account may not list processes (non-administrators over SSH on Windows)."""
+
+
 def _managed_scripts():
     """Return ``{normcased_script_path: [(category, name), ...]}``.
 
@@ -53,7 +57,11 @@ def _managed_scripts():
 
 
 def _list_processes_windows():
-    """Yield ``(pid, commandline)`` for every process, via PowerShell CIM."""
+    """Yield ``(pid, commandline)`` for every process, via PowerShell CIM.
+
+    Raises:
+        ProcessListingRefused: PowerShell could not list the processes.
+    """
     result = subprocess.run(
         [
             "powershell",
@@ -70,7 +78,9 @@ def _list_processes_windows():
         timeout=20,
         check=False,
     )
-    if result.returncode != 0 or not result.stdout.strip():
+    if result.returncode != 0:
+        raise ProcessListingRefused(result.stderr.strip())
+    if not result.stdout.strip():
         return
     data = json.loads(result.stdout)
     if isinstance(data, dict):
