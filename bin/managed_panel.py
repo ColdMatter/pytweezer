@@ -730,11 +730,11 @@ class DevicesPanel(BWidget):
             age = f"{now - last_seen:.0f}s ago" if last_seen else "—"
             row.apply_status(state, address=address, last_seen=age)
 
-    def _apply_machine_states(self, states):
+    def _apply_machine_states(self, states, polled_at):
         for name, state in states.items():
             line = self._machine_lines.get(name)
             if line is not None:
-                line.apply(state)
+                line.apply(state, polled_at)
 
     def _machine_action_done(self, result):
         line = self._machine_lines.get(result.machine)
@@ -742,9 +742,6 @@ class DevicesPanel(BWidget):
             line.action_finished(result)
 
     def closeEvent(self, event):
-        if self._machine_worker is not None:
-            self._machine_worker.stop()
-            self._machine_worker.wait(1500)
         try:
             if self._client is not None:
                 self._client.close()
@@ -758,4 +755,7 @@ class DevicesPanel(BWidget):
         for row in self._rows.values():
             row.terminateProcess()
         logger.info("Terminated all Devices processes.")
+        if self._machine_worker is not None:
+            # Not waited for: a check can hang for 20 s, and the GUI exits hard.
+            self._machine_worker.stop()
         super().closeEvent(event)

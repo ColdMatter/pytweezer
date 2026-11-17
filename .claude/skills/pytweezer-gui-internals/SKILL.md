@@ -159,14 +159,19 @@ address and pytweezer's state there (`server · tweez since 09:12 on 17 Nov`,
 `not running`, `unreachable`, `no SSH key`, ...), read from that PC's GUI lock
 by `pytweezer.machines.gui_state`, plus a Start/Stop button:
 
-- Start runs the PC's launch task; Stop asks once, then sends `quit` to its GUI
-  lock, which closes that GUI as if its window were closed.
-- `MachineWorker` (a `QThread`) polls every line over SSH every 15 s and right
-  after a Start/Stop, and runs each Start/Stop on a thread of its own (a stop
-  takes 30 s or more). "Starting…"/"Stopping…", with the button disabled,
-  holds until the action has reported and a poll then agrees, or 60 s after it
-  reported: a stop's cleanup runs on after the GUI has closed. A failed action
-  shows `stop failed: <reason>` on the line until the next poll.
+- Start runs the PC's launch task; Stop asks once (for the server PC, warning
+  that the shared servers stop too), then sends `quit` to its GUI lock, which
+  closes that GUI as if its window were closed.
+- `MachineWorker` (a `QThread`) polls every line every 15 s and right after a
+  Start/Stop, over SSH except for this PC's own lock, which is read in-process.
+  A PC that refused this PC's key or whose host key changed is checked only
+  every 5 minutes, or at the next Start/Stop clicked. The worker runs each
+  Start/Stop on a thread of its own (a stop takes 30 s or more).
+  "Starting…"/"Stopping…", with the button disabled, holds until the action has
+  reported and a poll then agrees, or 60 s after it reported: a stop's cleanup
+  runs on after the GUI has closed. A failed action shows
+  `stop failed: <reason>` on the line until the next click there, or until a
+  poll started after the failure shows a different state.
 - The PC the GUI runs on has no button. It is disabled in a simulated session,
   when this PC's SSH key is not accepted (`pytweezer-machines setup <name>`),
   when the host key changed, when the PC or its GUI does not answer, and on Linux or for a

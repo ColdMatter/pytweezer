@@ -417,7 +417,7 @@ def test_machine_line_buttons(
     monkeypatch.setattr(pytweezer_config, "SIMULATING", simulating)
     line = lab_panel()._machine_lines["ph-bonesaw"]
 
-    line.apply(GuiState(reach, owner))
+    line.apply(GuiState(reach, owner), polled_at=0.0)
 
     if expected is None:
         assert line.button is None
@@ -437,7 +437,7 @@ def _running_bonesaw(lab_panel, monkeypatch, stop_result="stopped"):
 
     monkeypatch.setattr(machines, "stop", stop)
     line = lab_panel()._machine_lines["ph-bonesaw"]
-    line.apply(machines.GuiState("ok", _RUNNING))
+    line.apply(machines.GuiState("ok", _RUNNING), polled_at=0.0)
     return line, stopped
 
 
@@ -535,7 +535,7 @@ def test_stopping_holds_until_the_stop_has_reported_and_a_poll_agrees(
 
     for step in steps:
         if step[0] == "poll":
-            line.apply(GuiState(step[1], step[2]))
+            line.apply(GuiState(step[1], step[2]), polled_at=now[0])
         elif step[0] == "wait":
             now[0] += step[1]
         else:
@@ -543,3 +543,115 @@ def test_stopping_holds_until_the_stop_has_reported_and_a_poll_agrees(
 
     assert line.stateLabel.text() == shown
     assert line.button.isEnabled() == (shown != "Stopping…")
+
+
+def test_stopping_the_server_pc_warns_that_the_shared_servers_stop(
+    lab_panel, monkeypatch
+):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from pytweezer.configuration import config as pytweezer_config
+
+    server_pc = {**_LAB["ph-bonesaw"], "launcher": "server"}
+    monkeypatch.setattr(pytweezer_config, "MACHINES", {**_LAB, "ph-bonesaw": server_pc})
+    asked = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda parent, title, text, *a: (
+            asked.append(text),
+            QMessageBox.StandardButton.No,
+        )[1],
+    )
+    line, _stopped = _running_bonesaw(lab_panel, monkeypatch)
+
+    line.button.click()
+
+    assert asked == [
+        (
+            "Stop pytweezer on ph-bonesaw? Its GUI and devices will close, and so "
+            "will the shared servers (hubs, loggers, Experiment Manager) that every "
+            "PC relies on."
+        )
+    ]
+
+
+_REPORTED_AT = 1000.0
+
+
+@pytest.mark.parametrize(
+    "after_the_failure, still_shown",
+    [
+        (("poll", _REPORTED_AT - 5, "ok", None), True),
+        (("poll", _REPORTED_AT + 5, "ok", _RUNNING), True),
+        (("poll", _REPORTED_AT + 5, "ok", None), False),
+        (("click",), False),
+    ],
+    ids=[
+        "poll in flight when it failed",
+        "later poll, state unchanged",
+        "later poll, state changed",
+        "click",
+    ],
+)
+def test_a_failed_stop_stays_on_its_line_until_a_click_or_a_change(
+    lab_panel, monkeypatch, after_the_failure, still_shown
+):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from bin import machine_lines
+    from pytweezer.machines import GuiState, Result
+
+    monkeypatch.setattr(machine_lines.time, "monotonic", lambda: _REPORTED_AT)
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes
+    )
+    line, _stopped = _running_bonesaw(lab_panel, monkeypatch)
+    line.requested.disconnect()  # the stop is reported by hand below
+    line.button.click()
+    line.action_finished(Result("ph-bonesaw", False, "did not close within 30 s"))
+
+    if after_the_failure[0] == "poll":
+        _, polled_at, reach, owner = after_the_failure
+        line.apply(GuiState(reach, owner), polled_at=polled_at)
+    else:
+        line.button.click()
+
+    assert line.stateLabel.text().startswith("stop failed") == still_shown
+
+
+def test_a_pc_without_ssh_access_is_checked_every_five_minutes_or_on_a_click(
+    qapp, monkeypatch
+):
+    from bin.machine_lines import MachineWorker
+    from pytweezer import machines
+    from tests.helpers import until
+
+    reach = {"open-pc": "ok", "keyless-pc": "no key"}
+    checked = []
+
+    def gui_state(machine):
+        checked.append(machine.name)
+        return machines.GuiState(reach[machine.name], None)
+
+    monkeypatch.setattr(machines, "gui_state", gui_state)
+    monkeypatch.setattr(machines, "start", lambda m: machines.Result(m.name, False, ""))
+    open_pc, keyless_pc = (
+        machines.Machine(name, "10.0.0.9", "lab", r"C:\pytweezer", "windows", "client")
+        for name in reach
+    )
+    worker = MachineWorker([open_pc, keyless_pc], interval_s=0.01)
+    worker.start()
+    try:
+        assert until(lambda: checked.count("open-pc") >= 5)
+        assert checked.count("keyless-pc") == 1
+
+        worker.act("start", open_pc)
+
+        assert until(lambda: checked.count("keyless-pc") == 2)
+        polls = checked.count("open-pc")
+        assert until(lambda: checked.count("open-pc") >= polls + 5)
+        assert checked.count("keyless-pc") == 2
+    finally:
+        worker.stop()
+        worker.wait(2000)

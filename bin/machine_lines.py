@@ -21,6 +21,10 @@ logger = get_logger("machine_lines")
 
 POLL_INTERVAL_S = 15.0
 
+#: Reaches that only an operator can fix, so the PC is checked this seldom.
+_NO_ACCESS = ("no key", "host key changed")
+_NO_ACCESS_INTERVAL_S = 300.0
+
 #: How long after a Start/Stop has reported "Starting…"/"Stopping…" holds against polls that disagree.
 _PENDING_TIMEOUT_S = 60.0
 
@@ -41,11 +45,15 @@ class MachineWorker(QThread):
     """Polls every machine's GUI lock and runs Start/Stop, all off the GUI thread.
 
     Polls every ``interval_s`` and again right after a Start/Stop is asked for and
-    after one succeeds. A Start/Stop runs on its own thread, since a stop can take
-    over 30 s and must not hold up the polls.
+    after one succeeds. A machine whose SSH key or host key was refused is checked
+    only every five minutes, or at the next Start/Stop asked for on any machine.
+    A Start/Stop runs on its own thread, since a stop can take over 30 s and must
+    not hold up the polls.
     """
 
-    states_ready = pyqtSignal(dict)  # machine name -> GuiState
+    #: The polled machines' states (machine name -> GuiState), and the
+    #: ``time.monotonic()`` at which the poll started.
+    states_ready = pyqtSignal(dict, float)
     action_done = pyqtSignal(object)  # machines.Result
 
     def __init__(self, machine_list, interval_s=POLL_INTERVAL_S, parent=None):
@@ -54,9 +62,11 @@ class MachineWorker(QThread):
         self._interval_s = interval_s
         self._running = True
         self._wake = threading.Event()
+        self._asked_at = float("-inf")  # the latest Start/Stop asked for
 
     def act(self, action, machine):
         """Run ``machines.start`` or ``machines.stop`` on ``machine``."""
+        self._asked_at = time.monotonic()
         self._wake.set()
         threading.Thread(
             target=self._act,
@@ -80,14 +90,33 @@ class MachineWorker(QThread):
         self._wake.set()
 
     def run(self):
+        last_checks = {}  # machine name -> (when the check started, reach)
         with ThreadPoolExecutor(max_workers=max(len(self._machines), 1)) as pool:
             while self._running:
                 self._wake.clear()
-                states = dict(pool.map(self._check, self._machines))
+                polled_at = time.monotonic()
+                due = [
+                    machine
+                    for machine in self._machines
+                    if self._due(last_checks.get(machine.name), polled_at)
+                ]
+                states = dict(pool.map(self._check, due))
                 states.pop(None, None)
-                if self._running:
-                    self.states_ready.emit(states)
+                for name, state in states.items():
+                    last_checks[name] = (polled_at, state.reach)
+                if self._running and states:
+                    self.states_ready.emit(states, polled_at)
                 self._wake.wait(self._interval_s)
+
+    def _due(self, last_check, now):
+        if last_check is None:
+            return True
+        checked_at, reach = last_check
+        return (
+            reach not in _NO_ACCESS
+            or self._asked_at > checked_at
+            or now - checked_at >= _NO_ACCESS_INTERVAL_S
+        )
 
     @staticmethod
     def _check(machine):
@@ -120,7 +149,10 @@ class MachineLine(QFrame):
         self._acting = False  # the action has not reported yet
         self._reported_at = 0.0
         self._requested = None  # the last action asked for
-        self._failure = None  # (action, detail) until the next poll
+        # (action, detail) until the next click, or until a poll started after
+        # the failure was reported shows a state other than ``_state_at_failure``.
+        self._failure = None
+        self._state_at_failure = None
 
         self.setObjectName("GroupHeader")
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground)
@@ -161,10 +193,15 @@ class MachineLine(QFrame):
             layout.addWidget(self.button)
         self._render()
 
-    def apply(self, state):
-        """Show a polled ``machines.GuiState``."""
+    def apply(self, state, polled_at):
+        """Show a polled ``machines.GuiState``, from a poll started at ``polled_at``."""
         self._state = state
-        self._failure = None
+        if (
+            self._failure is not None
+            and polled_at > self._reported_at
+            and state != self._state_at_failure
+        ):
+            self._failure = None
         if (
             self._pending is not None
             and not self._acting
@@ -189,6 +226,7 @@ class MachineLine(QFrame):
             result.detail,
         )
         self._failure = (self._requested, result.detail)
+        self._state_at_failure = self._state
         self._pending = None
         self._render()
 
@@ -203,11 +241,7 @@ class MachineLine(QFrame):
     def _clicked(self):
         action = "stop" if self._running() else "start"
         if action == "stop":
-            answer = QMessageBox.question(
-                self,
-                "Stop pytweezer",
-                f"Stop pytweezer on {self.name}? Its GUI and devices will close.",
-            )
+            answer = QMessageBox.question(self, "Stop pytweezer", self._stop_question())
             if answer != QMessageBox.StandardButton.Yes:
                 return
         self._pending = self._requested = action
@@ -215,6 +249,15 @@ class MachineLine(QFrame):
         self._failure = None
         self._render()
         self.requested.emit(action)
+
+    def _stop_question(self):
+        if self.machine.launcher == "server":
+            return (
+                f"Stop pytweezer on {self.name}? Its GUI and devices will close, "
+                "and so will the shared servers (hubs, loggers, Experiment "
+                "Manager) that every PC relies on."
+            )
+        return f"Stop pytweezer on {self.name}? Its GUI and devices will close."
 
     def _render(self):
         tooltip = ""
