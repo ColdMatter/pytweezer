@@ -308,10 +308,10 @@ def status_server(monkeypatch):
 @pytest.mark.parametrize(
     "params, reachable, state",
     [
-        ({"active": False, "host": "h", "port": 1}, True, "up"),
-        ({"active": True, "host": None, "port": 1}, True, "down"),
-        ({"active": True, "host": "h", "port": 1}, True, "up"),
-        ({"active": True, "host": "h", "port": 1}, False, "down"),
+        ({"connect_at_startup": False, "host": "h", "port": 1}, True, "up"),
+        ({"connect_at_startup": True, "host": None, "port": 1}, True, "down"),
+        ({"connect_at_startup": True, "host": "h", "port": 1}, True, "up"),
+        ({"connect_at_startup": True, "host": "h", "port": 1}, False, "down"),
     ],
 )
 def test_build_snapshot_plain_device(status_server, params, reachable, state):
@@ -322,7 +322,7 @@ def test_build_snapshot_plain_device(status_server, params, reachable, state):
 
 _STATUS_RIG = {
     "Rig": {
-        "active": True,
+        "connect_at_startup": True,
         "host": "h",
         "port": 1,
         "devices": {"Rig Cam": {"class": "pkg:Cam"}, "Rig SLM": {"class": "pkg:Slm"}},

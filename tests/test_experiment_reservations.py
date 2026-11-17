@@ -22,7 +22,7 @@ _DEVICES = {
     "Devices": {
         "Cam": {"class": "pkg:Cam", "host": "1.2.3.4", "port": 5000},
         "Old Cam": {
-            "active": False,
+            "connect_at_startup": False,
             "class": "pkg:Cam",
             "host": "1.2.3.4",
             "port": 5001,
@@ -65,7 +65,7 @@ def test_composite_reserves_its_members_but_a_member_only_itself(fake_config):
     assert device_reservation("Rig Cam") == {"Rig Cam"}
 
 
-def test_unknown_devices_are_refused_but_inactive_ones_reserved(fake_config):
+def test_unknown_devices_are_refused_but_ones_not_started_are_reserved(fake_config):
     with pytest.raises(ReservationError, match="not found"):
         device_reservation("Nope")
     assert device_reservation("Old Cam") == {"Old Cam"}
