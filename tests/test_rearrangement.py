@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from pytweezer.coordinators import rearrangement
+from pytweezer.experiment import layouts
 from pytweezer.helper_scripts import array_hologram
 from pytweezer.servers import device_server
 
@@ -51,20 +52,19 @@ def rig():
 
 @pytest.fixture
 def fake_gpu(monkeypatch):
-    """Stands in for the GPU hologram: a mask filled with the array's row count."""
+    """Stands in for the GPU hologram: a mask filled with the number of traps."""
 
-    def hologram(generator, *, rows, columns, **_):
-        y_um, x_um = np.mgrid[0:rows, 0:columns] * 5.0
+    def hologram(generator, x_um, y_um, **_):
         return {
-            "mask": np.full((1024, 1024), rows, dtype=np.uint8),
-            "x_um": x_um.ravel(),
-            "y_um": y_um.ravel(),
-            "weights": np.ones(rows * columns),
+            "mask": np.full((1024, 1024), len(x_um), dtype=np.uint8),
+            "x_um": np.asarray(x_um, dtype=float),
+            "y_um": np.asarray(y_um, dtype=float),
+            "weights": np.ones(len(x_um)),
         }
 
     monkeypatch.setattr(rearrangement, "_HAS_CUPY", True)
     monkeypatch.setattr(array_hologram, "make_generator", lambda settings: object())
-    monkeypatch.setattr(array_hologram, "array_hologram", hologram)
+    monkeypatch.setattr(array_hologram, "layout_hologram", hologram)
 
 
 ARRAY = {"rows": 3, "columns": 4, "spacing_um": 5.0, "angle_deg": 2.5}
@@ -114,6 +114,46 @@ def test_rig_knows_its_array_again_when_its_mask_is_put_back(rig, fake_gpu):
     rig.slm.update_mask(hologram["mask"].copy())
 
     assert rig.get_array()["sites"] == 12
+
+
+def test_rig_puts_a_named_layout_on_the_slm_and_reports_it(rig, fake_gpu):
+    hologram = rig.make_layout([0.0, 5.0, 0.0], [0.0, 0.0, 5.0], name="ell", **OPTICS)
+
+    np.testing.assert_array_equal(rig.slm.last_mask, hologram["mask"])
+    array = rig.get_array()
+    assert array["sites"] == 3 and array["layout"] == "ell"
+    assert array["x_um"] == [0.0, 5.0, 0.0] and "rows" not in array
+
+
+def test_rig_array_sites_are_the_rectangle_preset_positions(rig, fake_gpu):
+    rig.make_array(**ARRAY, **OPTICS)
+
+    expected = layouts.rectangle(3, 4, 5.0, 2.5)
+    np.testing.assert_allclose(rig.get_array()["x_um"], [s.x_um for s in expected])
+    np.testing.assert_allclose(rig.get_array()["y_um"], [s.y_um for s in expected])
+
+
+def test_focal_margin_is_unchanged_for_a_rectangle_and_capped_for_sparse_sites():
+    x, y = np.meshgrid(np.arange(3) * 5.0, np.arange(3) * 5.0)
+    margin = array_hologram.focal_margin_um
+    assert margin(x.ravel(), y.ravel(), 0.9) == pytest.approx(2 * 5.0 + 2.7)
+    assert margin(np.array([0.0, 300.0]), np.zeros(2), 0.9) == pytest.approx(22.7)
+    assert margin(np.array([1.0]), np.array([1.0]), 0.9) == pytest.approx(2.7)
+
+
+def test_reachable_field_is_lambda_f_over_pitch_centred_on_the_zeroth_order():
+    saved = {
+        "slm_wavelength": 0.852e-6,
+        "slm_focal_length": 17.3e-3,
+        "slm_pixel_pitch": 17e-6,
+        "slm_blaze_x": 48e-6,
+        "slm_blaze_y": 4e-6,
+    }
+    x0, y0, width, height = array_hologram.reachable_field_um(saved)
+
+    side = 0.852 * 17300 / 17
+    assert (width, height) == pytest.approx((side, side))
+    assert (x0 + width / 2, y0 + height / 2) == pytest.approx((-48.0, -4.0))
 
 
 def test_rig_knows_no_array_before_making_one(rig):
