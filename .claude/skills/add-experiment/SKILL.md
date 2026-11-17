@@ -280,8 +280,8 @@ can't be.
 `Scan(repeat="scan")` repeats the whole grid rather than each point.
 `ExperimentManagerClient` has `get/pause/resume/terminate/abort/hold/release/
 delete/set_priority/snapshot/history/last_request/experiments/optimisers/describe_again/
-recipes/save_recipe/delete_recipe/submit_recipe/saved_parameters/
-set_saved_parameters/saved_parameter_history`.
+recipes/save_recipe/delete_recipe/submit_recipe/layouts/save_layout/
+delete_layout/saved_parameters/set_saved_parameters/saved_parameter_history`.
 
 For analysis, `Dataset` (`pytweezer/experiment/dataset.py`) reads a file by
 rid (or path) and passes attribute access through to its `Measurement`:

@@ -44,6 +44,12 @@ from pytweezer.experiment.archive import RPC_TARGET, ArchiveTarget, ResultsArchi
 from pytweezer.experiment.catalogue import Catalogue
 from pytweezer.experiment.client import NOTIFIER_NAME, connect_host
 from pytweezer.experiment.copier import FileCopier
+from pytweezer.experiment.layouts import (
+    Layout,
+    LayoutBook,
+    LayoutError,
+    LayoutStore,
+)
 from pytweezer.experiment.queue import (
     ExperimentQueue,
     QueueError,
@@ -119,6 +125,8 @@ class ExperimentManager:
         self.queue = ExperimentQueue(self.store.load())
         self.recipe_store = RecipeStore(self.root / "recipes.json")
         self.recipes = RecipeBook(self.recipe_store.load())
+        self.layout_store = LayoutStore(self.root / "layouts.json")
+        self.layouts = LayoutBook(self.layout_store.load())
         self.saved_parameter_store = SavedParameterStore(
             self.root / "saved_parameters.json"
         )
@@ -338,6 +346,27 @@ class ExperimentManager:
             request["experiment"], request["class_name"], request["name"]
         )
         self._recipes_changed()
+
+    def _cmd_layouts(self, request):
+        return {
+            "layouts": [
+                layout.model_dump(mode="json") for layout in self.layouts.find()
+            ]
+        }
+
+    def _cmd_save_layout(self, request):
+        layout = Layout.model_validate(request["layout"])
+        if not any(site.on for site in layout.sites):
+            raise LayoutError(
+                f"layout {layout.name!r} needs at least one site on; no site is on"
+            )
+        self.layouts.save(layout, overwrite=bool(request.get("overwrite")))
+        self.layout_store.save(self.layouts.state)
+        logger.info("Saved layout %r from %s", layout.name, layout.submitter)
+
+    def _cmd_delete_layout(self, request):
+        self.layouts.delete(request["name"])
+        self.layout_store.save(self.layouts.state)
 
     def _cmd_saved_parameters(self, request):
         return {
