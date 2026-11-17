@@ -139,7 +139,7 @@ The GUI tests run offscreen through the `qapp` fixture in `tests/conftest.py`.
   That delay is also what lets the reachability probe / device-status feed
   populate, so shorter waits give emptier-looking (but not wrong) panels.
 - **Host not in config is expected.** A dev machine whose hostname isn't in
-  `config.HOSTS` logs `Host <name> not found in config. Defaulting to localhost`
+  `config.MACHINES` logs `Host <name> not found in config. Defaulting to localhost`
   and shows no device Start/Stop toggles (it owns no devices) — harmless.
 - **Unreachable hubs don't abort the window.** Panels that connect to the
   Properties server / Analysis Manager are wrapped in `_safe_panel`; when those are

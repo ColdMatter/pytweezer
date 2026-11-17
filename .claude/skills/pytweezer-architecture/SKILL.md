@@ -16,7 +16,7 @@ processes — the ZMQ hubs, the stream loggers, Analysis Manager, Device Status,
 the Experiment Manager —
 and **arbitrarily many client PCs**, each running whatever devices are plugged
 into it plus its own applets and GUI. Clients are not a fixed pair or a fixed
-list: a new lab PC is just another `HOSTS` entry with devices pointed at it.
+list: a new lab PC is just another `MACHINES` entry with devices pointed at it.
 
 What runs where is decided **per config entry**, not per machine. A device's
 `"host"` is what determines which PC its server runs on — independent of where
@@ -30,7 +30,10 @@ host to do it (see the `pytweezer-gui-internals` skill).
 
 `pytweezer/configuration/config.py`:
 
-- `HOSTS` — hostname → IP; `SERVER_PC` names the server PC. `SERVER_HOST`
+- `MACHINES` — hostname → `{"address", "user", "repo", "os", "launcher"}`, one
+  per lab PC; a `"host"` entry is `MACHINES[name]["address"]`. `machine_name(address)`
+  is the reverse lookup, `this_pc_address()` this PC's address, `LOCALHOST` the
+  loopback. `SERVER_PC` names the server PC. `SERVER_HOST`
   resolves from the `SIMULATING`/`LOCAL` flags at the top of the file (both
   `False` → the real `PH-BEAST`; either `True` binds everything to localhost).
 - **`pytweezer-server` simulates anywhere but `SERVER_PC`.** Its entry point

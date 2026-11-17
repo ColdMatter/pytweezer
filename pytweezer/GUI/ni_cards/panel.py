@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pytweezer.configuration.config import HOSTS, get_config
+from pytweezer.configuration.config import get_config, machine_name
 from pytweezer.GUI.components import Region, set_state
 from pytweezer.GUI.ni_cards.cells import ChannelCell
 from pytweezer.GUI.ni_cards.client import CardsClient
@@ -339,7 +339,7 @@ class DeviceView(QWidget):
 
 def _host_name(device: str) -> str:
     address = get_config()["Devices"].get(device, {}).get("host")
-    return next((name for name, ip in HOSTS.items() if ip == address), address or "?")
+    return machine_name(address) or address or "?"
 
 
 class NICardsPanel(QTabWidget):

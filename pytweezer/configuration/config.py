@@ -1,12 +1,57 @@
 import os
 import socket
 
-HOSTS = {
-    "PH-BEAST": "10.59.3.1",
-    "IC-CZC221CCHS": "10.59.3.2",  # rb pc
-    "ph-bonesaw": "10.59.3.5",
-    "localhost": "127.0.0.1",
+#: The lab's PCs. ``address`` is both the IP that ``"host"`` entries use and the
+#: SSH address; ``repo`` is the pytweezer checkout (None if not managed);
+#: ``launcher`` is the GUI that runs on the PC, if any.
+MACHINES = {
+    "PH-BEAST": {
+        "address": "10.59.3.1",
+        "user": "tweez",
+        "repo": r"C:\Users\tweez\ColdMatter\pytweezer",
+        "os": "windows",
+        "launcher": "server",
+    },
+    "IC-CZC221CCHS": {  # rb pc
+        "address": "10.59.3.2",
+        "user": "cafmot",
+        "repo": r"C:\Users\CaFMOT\ColdMatter\pytweezer",
+        "os": "windows",
+        "launcher": "client",
+    },
+    "IC-CZC4287H3W": {
+        "address": "10.59.3.3",
+        "user": "cafmot",
+        "repo": None,
+        "os": "windows",
+        "launcher": "client",
+    },
+    "ph-bonesaw": {
+        "address": "10.59.3.5",
+        "user": "cafmot",
+        "repo": r"C:\Users\cafmot\pytweezer",
+        "os": "windows",
+        "launcher": "client",
+    },
+    "twalker-laptop": {
+        "address": "100.101.42.103",
+        "user": "twalker",
+        "repo": "/home/twalker/RbCaF/pytweezer",
+        "os": "linux",
+        "launcher": None,
+    },
 }
+LOCALHOST = "127.0.0.1"
+
+
+def machine_name(address):
+    """Return the ``MACHINES`` name with this address, or None if there is none."""
+    return next(
+        (name for name, machine in MACHINES.items() if machine["address"] == address),
+        None,
+    )
+
+
 #: The PC that runs the shared servers (hubs, managers) for real.
 SERVER_PC = "PH-BEAST"
 
@@ -26,7 +71,9 @@ SIMULATION_FORCED = (
     and socket.gethostname().lower() != SERVER_PC.lower()
 )
 SIMULATING = SIMULATING or SIMULATION_FORCED
-SERVER_HOST = HOSTS[SERVER_PC] if (not SIMULATING and not LOCAL) else HOSTS["localhost"]
+SERVER_HOST = (
+    MACHINES[SERVER_PC]["address"] if (not SIMULATING and not LOCAL) else LOCALHOST
+)
 
 # Postgres + TimescaleDB holding monitor readings and experiment runs. Set
 # PYTWEEZER_DB_DSN to keep a real password out of the repository.
@@ -144,7 +191,7 @@ CONFIG = {
             "sim_class": "pytweezer.drivers.motmaster:SimulatedMotMasterInterface",
             "teardown": "disconnect",
             "config_file": "rb_mm_config.json",
-            "host": HOSTS["IC-CZC221CCHS"],
+            "host": MACHINES["IC-CZC221CCHS"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
         },
@@ -155,7 +202,7 @@ CONFIG = {
             "teardown": "disconnect",
             "config_file": "caf_mm_config.json",
             "linked_partner": "Rb MotMaster",
-            "host": HOSTS["ph-bonesaw"],
+            "host": MACHINES["ph-bonesaw"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
         },
@@ -163,7 +210,7 @@ CONFIG = {
             "run_at_startup": False,
             "class": "pytweezer.drivers.orca:ORCACamera",
             "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
-            "host": HOSTS["ph-bonesaw"],
+            "host": MACHINES["ph-bonesaw"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "serial_number": "280187",
@@ -177,7 +224,7 @@ CONFIG = {
             "run_at_startup": False,
             "class": "pytweezer.drivers.thorcam:ThorCam",
             "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
-            "host": HOSTS["PH-BEAST"],
+            "host": MACHINES["PH-BEAST"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "rb_thorcam",
@@ -189,7 +236,7 @@ CONFIG = {
             "run_at_startup": False,
             "class": "pytweezer.drivers.tweezermonitorcam:ThorCam",
             "sim_class": "pytweezer.drivers.tweezermonitorcam:SimulatedThorLabsCamera",
-            "host": HOSTS["PH-BEAST"],
+            "host": MACHINES["PH-BEAST"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "stream_name": "rb_thorcam2",
@@ -207,7 +254,7 @@ CONFIG = {
         # device process exists (docs/superpowers/specs/2026-11-16-shared-device-process-design.md).
         "Rb Rearrangement Rig": {
             "run_at_startup": True,
-            "host": HOSTS["PH-BEAST"],
+            "host": MACHINES["PH-BEAST"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "devices": {
@@ -258,7 +305,7 @@ CONFIG = {
             "sim_class": "pytweezer.drivers.ids1054b:SimulatedIDS1054B",
             "teardown": "close",
             "address": "TCPIP::10.59.3.50::3000::SOCKET",
-            "host": HOSTS["PH-BEAST"],
+            "host": MACHINES["PH-BEAST"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
         },
@@ -267,7 +314,7 @@ CONFIG = {
             "class": "pytweezer.drivers.thorcam:ThorCam",
             "sim_class": "pytweezer.drivers.thorcam:SimulatedThorLabsCamera",
             "teardown": "close",
-            "host": HOSTS["ph-bonesaw"],
+            "host": MACHINES["ph-bonesaw"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "serial_number": None,
@@ -285,7 +332,7 @@ CONFIG = {
             "run_at_startup": False,
             "class": "pytweezer.drivers.ni_cards:NICards",
             "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
-            "host": HOSTS["ph-bonesaw"],
+            "host": MACHINES["ph-bonesaw"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "hardware_file": r"C:\ControlPrograms\EDMSuite\DAQ\MoleculeMOTHardware.cs",
@@ -311,7 +358,7 @@ CONFIG = {
             "run_at_startup": False,
             "class": "pytweezer.drivers.ni_cards:NICards",
             "sim_class": "pytweezer.drivers.ni_cards:SimulatedNICards",
-            "host": HOSTS["IC-CZC221CCHS"],
+            "host": MACHINES["IC-CZC221CCHS"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
             "hardware_file": r"C:\ControlPrograms\EDMSuite\DAQ\RbTweezerHardware.cs",
@@ -382,12 +429,16 @@ def get_config():
 
 
 def this_pc_address():
-    """Return this PC's ``HOSTS`` address, or None if it is not listed.
+    """Return this PC's ``MACHINES`` address, or None if it is not listed.
 
     Windows reports hostnames in whatever case it likes, so the match ignores case.
     """
     hostname = socket.gethostname().lower()
     return next(
-        (address for name, address in HOSTS.items() if name.lower() == hostname),
+        (
+            machine["address"]
+            for name, machine in MACHINES.items()
+            if name.lower() == hostname
+        ),
         None,
     )

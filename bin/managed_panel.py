@@ -35,7 +35,7 @@ from PyQt6 import QtCore
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from pytweezer.configuration.config import HOSTS, get_config, this_pc_address
+from pytweezer.configuration.config import get_config, machine_name, this_pc_address
 from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
@@ -579,8 +579,6 @@ class DevicesPanel(BWidget):
         outer.setSpacing(6)
         self.setLayout(outer)
 
-        host_names = {addr: hostname for hostname, addr in HOSTS.items()}
-
         columns = [("Device", 150), ("Address", 170), ("Last seen", 80)]
         outer.addLayout(_header_row(columns, controllable=True))
 
@@ -609,7 +607,7 @@ class DevicesPanel(BWidget):
             if remote_request is not None:
                 host = params.get("host")
                 row.toggleButton.setToolTip(
-                    f"Ask the GUI on {host_names.get(host, host)} to start or stop "
+                    f"Ask the GUI on {machine_name(host) or host} to start or stop "
                     "this device. Nothing happens unless a pytweezer GUI is "
                     "running there."
                 )
