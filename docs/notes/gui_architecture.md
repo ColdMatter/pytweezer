@@ -122,10 +122,10 @@ they're killed via `SIGTERM`.)
 
 ### Auto-start behavior
 Embedding preserves the panels' existing behavior: `ProcessTile` auto-starts any
-config entry marked `"active": True`. Therefore:
+config entry marked `"run_at_startup": True`. Therefore:
 
-- Opening the **server GUI** brings up all active `CONFIG["Servers"]`.
-- Opening either GUI's **Devices** tab brings up the active `CONFIG["Devices"]`
+- Opening the **server GUI** brings up every `run_at_startup` entry of `CONFIG["Servers"]`.
+- Opening either GUI's **Devices** tab brings up the `run_at_startup` `CONFIG["Devices"]`
   whose `host` matches the local machine (`DeviceManager.check_host`,
   case-insensitive). On a machine that hosts no devices, the tab is empty.
 
@@ -159,7 +159,7 @@ no single machine otherwise has the global picture.
 ```
 Server PC:  DeviceStatusServer            pytweezer/servers/device_status.py
               every ~2 s: for each CONFIG["Devices"] entry,
-                is_reachable(host, port) -> "up" | "down"   (active=False -> "disabled")
+                is_reachable(host, port) -> "up" | "down"
                 composites also: server_targets(host, port) -> per-sub-device state
               PUB-bind tcp://SERVER_HOST:pub_port, send_json full snapshot
                         │

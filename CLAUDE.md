@@ -186,7 +186,10 @@ run the devices plugged into them plus their own applets and GUI.
 `pytweezer/configuration/config.py` says what runs
 where — `CONFIG["Servers"]`/`["Devices"]`/`["Loggers"]`/`["GUI"]`, read through
 `get_config()`. An entry's `host` decides which PC that process runs on,
-independent of where the GUI was launched. Filesystem-layout constants live in
+independent of where the GUI was launched. CONFIG describes startup behaviour,
+not the lab's current state: `run_at_startup` says whether the GUI starts an
+entry when it opens, not whether it is running now (Device Status and the
+Devices tab say that). Filesystem-layout constants live in
 `pytweezer/configuration/paths.py`; the **root** `configuration/` directory is
 unrelated JSON data.
 

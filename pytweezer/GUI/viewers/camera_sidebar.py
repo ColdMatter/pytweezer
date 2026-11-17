@@ -407,21 +407,21 @@ class CameraSidebar(QFrame):
         self._clock.timeout.connect(self._refresh_temperature)
         self._clock.start()
 
-        self.set_cameras([], {})
+        self.set_cameras([])
         self.set_controls([])
         self.set_state("idle")
 
     # ---- camera picker -------------------------------------------------
 
-    def set_cameras(self, names: list[str], unavailable: dict[str, str]) -> None:
-        """List the cameras; those in ``unavailable`` (name to reason) are greyed.
+    def set_cameras(self, names: list[str]) -> None:
+        """List the cameras.
 
         The chosen camera stays chosen if it is still listed. Nothing is emitted.
         """
         chosen = self.current_camera()
         self.picker.clear()
         for name in names:
-            self._add_camera(name, unavailable.get(name))
+            self._add_camera(name, None)
         if not names:
             self.picker.setPlaceholderText("No cameras")
         self.set_current_camera(chosen)

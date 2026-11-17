@@ -37,7 +37,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(pytweezer.__file__))
 
 #: Keys the framework itself consumes; never reported as unread by the class.
 FRAMEWORK_KEYS = {
-    "active",
+    "run_at_startup",
     "script",
     "logger",
     "host",
@@ -256,8 +256,8 @@ def check_logger(name):
     if not check_registry(canonical, conf):
         return
 
-    if not conf.get("active", False):
-        note("'active' is False - the tile will not auto-start with the GUI")
+    if not conf.get("run_at_startup", False):
+        note("'run_at_startup' is False - the tile will not auto-start with the GUI")
 
     # Build in simulation with the database stubbed out: same code path as
     # production, no hardware opened and no points written.
