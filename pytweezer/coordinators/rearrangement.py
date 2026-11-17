@@ -1,5 +1,11 @@
 """Atom-rearrangement coordinator.
 
+**The composite it coordinates, the Rb Rearrangement Rig, is not in use**: its
+config is parked in ``NOT_IN_USE`` in ``pytweezer/configuration/config.py``,
+which says how to re-enable it. Meanwhile every SLM driver builds one of these
+around itself with no camera, to serve :meth:`Rearrangement.make_array` and
+:meth:`Rearrangement.get_array` as ``get_device("Rb SLM").make_array(...)``.
+
 Ports the standalone ``rearrangement_node_server.py`` (a ZMQ REP server that held
 its own camera and talked to the SLM over another socket) into a composite-device
 :class:`~pytweezer.coordinators.base.Coordinator`. The camera and SLM are now

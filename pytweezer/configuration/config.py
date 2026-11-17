@@ -43,6 +43,46 @@ GRAFANA = {
 }
 
 
+# Driver settings of the PH-BEAST devices that NOT_IN_USE["Rb Rearrangement Rig"]
+# shares with the entries now in CONFIG, written once so that both stay current.
+RB_HAMCAM = {
+    "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
+    "sim_class": "pytweezer.drivers.imagemX2:SimulatedTweezerArrayCamera",
+    "teardown": "close",
+    "serial_number": "000407",
+    "stream_name": "rb_hamcam",
+    "object_pixel_m": None,
+    "external_exposure": True,
+    "timeout": 20.0,
+    "temperature_measurement": "rb_hamcam_temperature",
+    "temperature_interval_s": 30.0,
+    "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
+}
+# ORCA-Fusion BT (C15440-20UP); the ORCA-R2 driver runs it unchanged.
+CAFMOT_CAM = {
+    "class": "pytweezer.drivers.orca:ORCACamera",
+    "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
+    "teardown": "close",
+    "serial_number": "503326",
+    "stream_name": "cafmot_cam",
+    "object_pixel_m": None,
+    "external_exposure": True,
+    "timeout": 5.0,
+    "temperature_measurement": "cafmot_cam_temperature",
+    "temperature_interval_s": 30.0,
+    # Air-cooled to -8 °C; blocked fans took it past 60 °C.
+    "max_temperature_c": 0.0,
+    "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
+}
+RB_SLM = {
+    "class": "pytweezer.drivers.slm:SLM",
+    "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
+    "teardown": "close",
+    # sdk_dll / lut_file / board_number default to the lab's Blink Plus
+    # install (see pytweezer/drivers/slm.py); override here if needed.
+}
+
+
 CONFIG = {
     "Servers": {
         "Analysis Manager": {
@@ -196,61 +236,26 @@ CONFIG = {
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
         },
-        # Atom-rearrangement rig: a rearrangement camera and the Blink SLM in one
-        # process, with the rearrangement coordinator streaming GPU-computed phase
-        # frames straight to slm.update_mask() (no socket). Needs cupy/lap + a CUDA
-        # GPU on this host to arm; status()/test() work without them. The SLM is
-        # addressable on its own as get_device("Rb SLM").
-        # CaFMOT Cam is here only because DCAM works from one process at a time on
-        # this PC: while one process has it initialised, every other process's
-        # dcamapi_init fails with NOCAMERA. FIXME: move it out once a shared
-        # device process exists (docs/superpowers/specs/2026-11-16-shared-device-process-design.md).
-        "Rb Rearrangement Rig": {
+        # DCAM works from one process at a time on PH-BEAST: while one process has
+        # it initialised, every other process's dcamapi_init fails with NOCAMERA.
+        # So both of its DCAM cameras run in this one composite, with no coordinator.
+        # FIXME: give them separate processes once a shared device process exists
+        # (docs/superpowers/specs/2026-11-16-shared-device-process-design.md).
+        "PH-BEAST DCAM Cameras": {
             "active": True,
             "host": HOSTS["PH-BEAST"],
             "port": get_next_port(),
             "simulate": SIMULATING,
-            "devices": {
-                "Rb HamCam": {
-                    "class": "pytweezer.drivers.imagemX2:ImagEMX2Camera",
-                    "sim_class": "pytweezer.drivers.imagemX2:SimulatedTweezerArrayCamera",
-                    "teardown": "close",
-                    "role": "camera",
-                    "serial_number": "000407",
-                    "stream_name": "rb_hamcam",
-                    "object_pixel_m": None,
-                    "external_exposure": True,
-                    "timeout": 20.0,
-                    "temperature_measurement": "rb_hamcam_temperature",
-                    "temperature_interval_s": 30.0,
-                    "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
-                },
-                "Rb SLM": {
-                    "class": "pytweezer.drivers.slm:SLM",
-                    "sim_class": "pytweezer.drivers.slm:SimulatedSLM",
-                    "teardown": "close",
-                    "role": "slm",
-                    # sdk_dll / lut_file / board_number default to the lab's Blink Plus
-                    # install (see pytweezer/drivers/slm.py); override here if needed.
-                },
-                # ORCA-Fusion BT (C15440-20UP); the ORCA-R2 driver runs it unchanged.
-                "CaFMOT Cam": {
-                    "class": "pytweezer.drivers.orca:ORCACamera",
-                    "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
-                    "teardown": "close",
-                    "serial_number": "503326",
-                    "stream_name": "cafmot_cam",
-                    "object_pixel_m": None,
-                    "external_exposure": True,
-                    "timeout": 5.0,
-                    "temperature_measurement": "cafmot_cam_temperature",
-                    "temperature_interval_s": 30.0,
-                    # Air-cooled to -8 °C; blocked fans took it past 60 °C.
-                    "max_temperature_c": 0.0,
-                    "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",
-                },
-            },
-            "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
+            "devices": {"Rb HamCam": RB_HAMCAM, "CaFMOT Cam": CAFMOT_CAM},
+        },
+        # Also serves the tweezer array on it (make_array/get_array), which needs
+        # cupy/lap + a CUDA GPU on this host.
+        "Rb SLM": {
+            "active": True,
+            "host": HOSTS["PH-BEAST"],
+            "port": get_next_port(),
+            "simulate": SIMULATING,
+            **RB_SLM,
         },
         "IDS-1054B Scope": {
             "active": False,
@@ -368,6 +373,36 @@ CONFIG = {
             "active": True,
             "script": "../pytweezer/GUI/analysismanager.py",
         },
+    },
+}
+
+# ---------------------------------------------------------------------------- #
+# NOT IN USE. Nothing reads NOT_IN_USE except tests/test_rearrangement.py, which
+# keeps these entries building.
+#
+# "Rb Rearrangement Rig": the HamCam and the SLM in one process, so its
+# coordinator (pytweezer/coordinators/rearrangement.py) streams GPU-computed
+# phase frames from camera images straight to slm.update_mask() with no socket
+# (initialise/arm_rearrangement). CaFMOT Cam rides along because of the DCAM
+# limit above. Parked while the rearrangement work is paused; meanwhile the
+# Rb SLM device serves make_array/get_array itself, and still does inside the
+# rig, so nothing that calls them changes on re-enabling.
+#
+# To re-enable: in CONFIG["Devices"], replace the "PH-BEAST DCAM Cameras" and
+# "Rb SLM" entries with this one (device names must be unique), and give it
+# "port": get_next_port() there.
+# ---------------------------------------------------------------------------- #
+NOT_IN_USE = {
+    "Rb Rearrangement Rig": {
+        "active": True,
+        "host": HOSTS["PH-BEAST"],
+        "simulate": SIMULATING,
+        "devices": {
+            "Rb HamCam": {**RB_HAMCAM, "role": "camera"},
+            "Rb SLM": {**RB_SLM, "role": "slm"},
+            "CaFMOT Cam": CAFMOT_CAM,
+        },
+        "coordinator": "pytweezer.coordinators.rearrangement:Rearrangement",
     },
 }
 

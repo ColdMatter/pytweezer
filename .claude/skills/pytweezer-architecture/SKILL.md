@@ -56,7 +56,9 @@ host to do it (see the `pytweezer-gui-internals` skill).
   (`"motmaster": "CaF MotMaster"` on the NI Cards entries, `"linked_partner"`
   on a linked MotMaster). `"active"` is the lab's current state, switched
   freely from one day to the next; no code or design decision may depend on
-  the value checked in.
+  the value checked in. An entry parked for longer (one whose device names
+  clash with live entries, say) goes in `NOT_IN_USE` after `CONFIG`, with a
+  comment on how to re-enable it, and a test that keeps it building.
 - `CONFIG["Loggers"]` — database loggers (Postgres + TimescaleDB on the server
   PC; connection string in `DATABASE["dsn"]`).
 - `CONFIG["GUI"]` — standalone GUI tools (StreamMonitor, Applet Launcher, …).
