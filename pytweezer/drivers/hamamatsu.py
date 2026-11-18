@@ -45,6 +45,8 @@ EXPOSURE_MODE = Control(
 FRAME_INTERVAL = "internal_frame_interval"
 
 _TRIGGER_ACTIVE = {"edge": 1, "level": 2}
+#: DCAM ``trigger_global_exposure`` value for global reset.
+_GLOBAL_RESET = 5
 
 
 def set_dcam_exposure_mode(camera: DCAMCamera, mode: str) -> None:
@@ -247,6 +249,10 @@ class HamamatsuCamera(Camera):
             connected camera whose model starts with :attr:`model_prefix` is opened.
         external_exposure: Start in :meth:`set_external_exposure_mode`; otherwise
             the camera keeps DCAM's own trigger mode (internal after power-up).
+        global_reset: Put a rolling-shutter sensor (the ORCA-Fusion) in global
+            reset: every row starts exposing together on the trigger, but rows still
+            end in turn as they are read out, so the light must be off by then for
+            an even exposure. A camera without the setting fails to start with it.
         object_pixel_m: Metres per unbinned sensor pixel at the atoms.
         temperature_measurement: Database measurement the sensor temperature is
             written to every ``temperature_interval_s``; None to not monitor it.
@@ -267,6 +273,7 @@ class HamamatsuCamera(Camera):
         stream_name: str | None = None,
         serial_number: str | None = None,
         external_exposure: bool = False,
+        global_reset: bool = False,
         object_pixel_m: float | None = None,
         temperature_measurement: str | None = None,
         temperature_interval_s: float = 30.0,
@@ -281,6 +288,11 @@ class HamamatsuCamera(Camera):
         )
         if external_exposure:
             self.set_external_exposure_mode()
+        if global_reset:
+            with self._lock, self._backend.pausing_acquisition():
+                self._backend.set_attribute_value(
+                    "trigger_global_exposure", _GLOBAL_RESET
+                )
         self.read_controls()
         if temperature_measurement is not None:
             self._temperature_monitor = TemperatureMonitor(
