@@ -306,7 +306,7 @@ class LoadTweezersNImages(LoadTweezers):
 
     def take_shot(self, **sequence: Any) -> np.ndarray:
         """Run the sequence once with script parameters ``sequence``; the HamCam's ten frames."""
-        return self.take_frames(10, **sequence)
+        return self.take_frames(1, **sequence)
 
     def run_point(self) -> None:
         self.take_shot()
