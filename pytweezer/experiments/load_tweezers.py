@@ -12,6 +12,7 @@ from pytweezer.analysis.cloud_fit import SPECIES_MASS_AMU, fit_frames
 from pytweezer.analysis.trap_sites import same_geometry, to_roi
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.experiment.arguments import Bool, Device, Integer, Number
+from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers.device_client import get_device_config
@@ -71,6 +72,8 @@ class LoadTweezers(MotMasterExperiment):
     Every shot runs the sequence at the saved parameters ``rb`` binds
     (``LoadTweezers.rb.saved``); a script parameter set in the form wins over
     its saved value, and the values used are recorded as ``saved_sequence``.
+    With ``use_saved_sequence`` off it sends none of them, so the script's own
+    values run; the trap sites are still the saved ones.
 
     Each shot takes two frames on ``hamcam``, exposed by the trigger pulse,
     with EM gain on and ``hamcam_gain`` as its sensitivity. The HamCam stays
@@ -131,6 +134,15 @@ class LoadTweezers(MotMasterExperiment):
         tooltip="record the sum of the raw pixel values in each site's window, "
         "beside its occupancy",
     )
+    use_saved_sequence = Bool(
+        True,
+        scannable=False,
+        tooltip="run the sequence at the saved parameters bound to it; off, at "
+        "the script's own values (a value set in the form still wins)",
+    )
+
+    def saved_bindings(self) -> dict[str, str]:
+        return super().saved_bindings() if self.use_saved_sequence else {}
 
     def prepare(self) -> None:
         super().prepare()
@@ -152,9 +164,9 @@ class LoadTweezers(MotMasterExperiment):
         self.sent_gain = self.hamcam_gain
         self.hamcam.start_live()
 
-        self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(
-            self.saved_parameters
-        )
+        # Fetched only for sequence bindings, so not with use_saved_sequence off.
+        saved = self.saved_parameters or get_saved_parameters()
+        self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(saved)
         if self.trap_sites is None:
             if not self.no_trap_sites_reason:
                 return

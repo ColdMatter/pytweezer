@@ -286,8 +286,12 @@ class MotMasterExperiment(Experiment):
         self._check_parameters(set_in_form)
         self._bind_saved_parameters(set_in_form)
 
+    def saved_bindings(self) -> dict[str, str]:
+        """``{script parameter: saved key}`` this task sends; by default the ``saved=`` ones."""
+        return self.motmaster()[1].saved
+
     def _bind_saved_parameters(self, set_in_form: dict[str, Any]) -> None:
-        bindings = self.motmaster()[1].saved
+        bindings = self.saved_bindings()
         self.saved_parameters: dict[str, Any] = {}
         self.saved_sequence: dict[str, Any] = {}
         self._saved_values: dict[str, Any] = {}

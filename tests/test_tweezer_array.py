@@ -7,6 +7,7 @@ from pytweezer.analysis.trap_sites import default_geometry, geometry_to_pixels
 from pytweezer.drivers.motmaster import SIMULATED_SCRIPT_PARAMETERS
 from pytweezer.experiment import ListAxis, Scan, motmaster, optimisers, run_local
 from pytweezer.experiment.client import ManagerUnavailable
+from pytweezer.experiments import load_tweezers
 from pytweezer.experiments.load_tweezers import LoadTweezers, LoadTweezersMOTImage
 from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
@@ -209,7 +210,7 @@ def rig(monkeypatch):
     )
     saved = dict(SAVED)
     sequencer.saved = saved
-    for module in (motmaster, optimisers):
+    for module in (motmaster, optimisers, load_tweezers):
         monkeypatch.setattr(module, "get_saved_parameters", lambda: saved)
     return sequencer
 
@@ -321,6 +322,18 @@ def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(
     } | {"tMolCoolVCO1": 7.5}
     for go in rig.goes:
         assert {name: go[name] for name in expected} == expected
+
+
+def test_without_the_saved_sequence_the_scripts_values_run_at_the_saved_sites(rig):
+    measurement = run_local(LoadTweezers, use_saved_sequence=False, tMolCoolVCO1=7.5)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    assert all(
+        go["tMolCoolVCO1"] == 7.5
+        and not set(go) & (set(LoadTweezers.rb.saved) - {"tMolCoolVCO1"})
+        for go in rig.goes
+    )
+    np.testing.assert_array_equal(measurement.constants["trap_sites"], SITES)
 
 
 @pytest.mark.parametrize(
