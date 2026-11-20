@@ -90,11 +90,6 @@ class ImagEMX2Camera(HamamatsuCamera):
             float(self._backend.get_attribute_value("CONVERSION FACTOR OFFSET")),
         )
 
-    def get_all_attribute_values(self) -> dict:
-        """Every readable DCAM attribute's current value, enums as their text labels."""
-        values = self._backend.get_all_attribute_values(enum_as_str=True)
-        return values.as_dict(style="flat")
-
 
 #: One-size-fits-all simulated camera, with the ImagEM's EM-gain/sensitivity
 #: setters auto-stubbed so the simulated surface matches the real driver.

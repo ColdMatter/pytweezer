@@ -1,5 +1,6 @@
 """What the camera drivers do with frames and settings on their way through."""
 
+import contextlib
 import threading
 
 import numpy as np
@@ -9,7 +10,8 @@ import tifffile
 from pytweezer.drivers import thorcam, tweezermonitorcam
 from pytweezer.drivers.camera_base import Camera, SimulatedCamera
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
-from pytweezer.drivers.orca import ORCACamera
+from pytweezer.drivers.orca_fusion import ORCAFusionCamera
+from pytweezer.drivers.orca_r2 import ORCAR2Camera
 
 FRAMES = np.arange(5 * 2 * 3, dtype=np.uint16).reshape(5, 2, 3)
 
@@ -143,8 +145,10 @@ class FakeVendorCamera:
         return (hstart // 4 * 4, hend, vstart, vend, hbin, vbin)
 
 
-DRIVERS = [ImagEMX2Camera, ORCACamera, thorcam.ThorCam, tweezermonitorcam.ThorCam]
-DRIVER_IDS = ["imagemX2", "orca", "thorcam", "tweezermonitorcam"]
+DCAM_DRIVERS = [ImagEMX2Camera, ORCAR2Camera, ORCAFusionCamera]
+DCAM_DRIVER_IDS = ["imagemX2", "orca_r2", "orca_fusion"]
+DRIVERS = [*DCAM_DRIVERS, thorcam.ThorCam, tweezermonitorcam.ThorCam]
+DRIVER_IDS = [*DCAM_DRIVER_IDS, "thorcam", "tweezermonitorcam"]
 
 
 def _driver(cls):
@@ -183,7 +187,7 @@ def _refuse_bare_binning_write(*args, **kwargs):
     raise AssertionError("DCAMERR_NOTSTABLE: frame buffer attached")
 
 
-@pytest.mark.parametrize("cls", [ImagEMX2Camera, ORCACamera], ids=["imagemX2", "orca"])
+@pytest.mark.parametrize("cls", DCAM_DRIVERS, ids=DCAM_DRIVER_IDS)
 def test_dcam_binning_goes_through_set_roi_and_keeps_the_roi(cls):
     # DCAM refuses a bare BINNING write while the frame buffer is attached, which
     # it is whenever the camera has been live; pylablib's set_roi frees it.
@@ -214,7 +218,8 @@ def test_drivers_keep_the_binning_the_camera_reads_with(cls):
 # modes and take only the ring-buffer size.
 SETUPS = {
     ImagEMX2Camera: (("sequence", 7), ("snap", 2)),
-    ORCACamera: (("sequence", 7), ("snap", 2)),
+    ORCAR2Camera: (("sequence", 7), ("snap", 2)),
+    ORCAFusionCamera: (("sequence", 7), ("snap", 2)),
     thorcam.ThorCam: ((7,), (2,)),
     tweezermonitorcam.ThorCam: ((7,), (2,)),
 }
@@ -233,3 +238,35 @@ def test_setup_acquisition_passes_the_mode_only_to_cameras_that_have_one(cls):
     driver = _driver(cls)
     driver.setup_acquisition(2, mode="snap")
     assert driver._backend.calls["setup"] == SETUPS[cls][1]
+
+
+class FakeDCAMAttributes(FakeVendorCamera):
+    """DCAM attributes as values by name, written only while acquisition is paused."""
+
+    def __init__(self, **attributes):
+        super().__init__()
+        self.attributes = attributes
+        self.paused = False
+
+    @contextlib.contextmanager
+    def pausing_acquisition(self, clear=None):
+        self.paused = True
+        yield
+        self.paused = False
+
+    def set_attribute_value(self, name, value):
+        assert self.paused, f"{name} written while acquiring"
+        self.attributes[name] = value
+
+    def get_attribute_value(self, name, **kwargs):
+        return self.attributes[name]
+
+
+# DCAM's TRIGGER GLOBAL EXPOSURE: 3 is DELAYED, 5 is GLOBAL RESET.
+@pytest.mark.parametrize(("enable", "dcam_value"), [(True, 5), (False, 3)])
+def test_fusion_global_reset_reaches_dcam_and_is_kept(enable, dcam_value):
+    driver = _driver(ORCAFusionCamera)
+    driver._backend = FakeDCAMAttributes(trigger_global_exposure=0)
+    driver.set_global_reset(enable)
+    assert driver._backend.attributes["trigger_global_exposure"] == dcam_value
+    assert driver._kept["global_reset"] is enable

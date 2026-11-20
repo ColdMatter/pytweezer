@@ -211,8 +211,8 @@ CONFIG = {
         },
         "ORCA": {
             "run_at_startup": False,
-            "class": "pytweezer.drivers.orca:ORCACamera",
-            "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
+            "class": "pytweezer.drivers.orca_r2:ORCAR2Camera",
+            "sim_class": "pytweezer.drivers.orca_r2:SimulatedORCAR2Camera",
             "host": MACHINES["ph-bonesaw"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
@@ -283,10 +283,10 @@ CONFIG = {
                     # sdk_dll / lut_file / board_number default to the lab's Blink Plus
                     # install (see pytweezer/drivers/slm.py); override here if needed.
                 },
-                # ORCA-Fusion BT (C15440-20UP); the ORCA-R2 driver runs it unchanged.
+                # ORCA-Fusion BT (C15440-20UP).
                 "CaFMOT Cam": {
-                    "class": "pytweezer.drivers.orca:ORCACamera",
-                    "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
+                    "class": "pytweezer.drivers.orca_fusion:ORCAFusionCamera",
+                    "sim_class": "pytweezer.drivers.orca_fusion:SimulatedORCAFusionCamera",
                     "teardown": "close",
                     "serial_number": "503326",
                     "stream_name": "cafmot_cam",
