@@ -36,8 +36,6 @@ MotMaster experiment sequencers) across the lab PCs.
 
 ## important branches
 
-exp-handler is the branch developing a full device server and experiment handler, based on artiq, balic, and sipyco. it is in active development. docs are descriptive, not proscriptive. 
-
 rearrangement-optimisation-RnD is a stripped-down branch for optimisation of tweezer control with an SLM. 
 
 ## Commands
@@ -172,6 +170,7 @@ user which changes are breaking; don't go looking for notebooks they affect.
 - Features, and anything that needs review, go on a feature branch
 - Every feature branch should have an associated merge request
 - Name every branch for what it changes (e.g. `fix-copier-share-chmod`), including branches only Claude works on - never a session ID, date or `wip`/`tmp`
+- If a remote session is told to develop on a pre-assigned branch (e.g. `ccr-…`), you have my explicit permission to create and push a descriptively named branch instead, and to ignore the assigned name
 - A line `Depends on owner/repo#N` (or `#N`) in a PR description holds it until that PR merges or that issue closes
 - Commit and push as you go: after each coherent, tested step (e.g. one tab restyled), not in one batch at the end. Stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
 - `.vscode/settings.json` is shared by everyone who opens the repo. If a commit would include changes to it that the user didn't ask for (often a personal preference saved under the Settings UI's Workspace tab), warn the user and ask before committing them
