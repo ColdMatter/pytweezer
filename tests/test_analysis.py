@@ -688,6 +688,9 @@ def test_tweezer_occupancy_counts_sums_raw_counts_of_occupied_and_empty_sites(
     assert head["mean_empty_counts"] == pytest.approx(
         box_sum(SITE_CENTRES[5:]) / (len(SITE_CENTRES) - 5)
     )
+    assert head["mean_atom_counts"] == pytest.approx(
+        head["mean_occupied_counts"] - head["mean_empty_counts"]
+    )
     assert head["occupancy"] == pytest.approx(5 / len(SITE_CENTRES))
     assert head["rid"] == 4
 
@@ -701,6 +704,7 @@ def test_tweezer_occupancy_counts_mean_of_an_empty_group_is_nan(monkeypatch):
     assert head["occupancy"] == 0.0
     assert head["occupied_counts"] == 0.0
     assert np.isnan(head["mean_occupied_counts"])
+    assert np.isnan(head["mean_atom_counts"])
     assert np.isfinite(head["mean_empty_counts"])
 
 

@@ -15,8 +15,10 @@ Output:
     A data message (no array) per first image (``index`` 0, or no ``index``),
     published on ``<name>``, carrying ``occupied_counts`` and ``empty_counts``,
     their means per site ``mean_occupied_counts`` and ``mean_empty_counts``
-    (NaN when the group is empty), the number of sites in each group,
-    ``occupied_sites`` and ``empty_sites``, the fraction of sites occupied
+    (NaN when the group is empty), their difference ``mean_atom_counts`` (an
+    occupied site's counts less the empty sites' background), the number of
+    sites in each group ``occupied_sites`` and ``empty_sites``, the fraction
+    of sites occupied
     ``occupancy``, ``sites``, and the input's ``index``, ``timestamp`` and
     ``rid`` when it has them. Without usable sites the counts and occupancy
     are NaN and ``error`` says why.
@@ -102,6 +104,7 @@ class TweezerOccupancyCounts(ImageAnalysis):
                         "empty_counts",
                         "mean_occupied_counts",
                         "mean_empty_counts",
+                        "mean_atom_counts",
                         "occupancy",
                     ),
                     np.nan,
@@ -127,13 +130,18 @@ class TweezerOccupancyCounts(ImageAnalysis):
         )
         counts = an.sum_pixel_values(np.asarray(data), sites, window_size=window_size)
         occupied_counts, empty_counts = counts[occupied], counts[~occupied]
+        mean_occupied, mean_empty = (
+            mean_or_nan(occupied_counts),
+            mean_or_nan(empty_counts),
+        )
         self.dataq.send(
             out_head
             | {
                 "occupied_counts": float(occupied_counts.sum()),
                 "empty_counts": float(empty_counts.sum()),
-                "mean_occupied_counts": mean_or_nan(occupied_counts),
-                "mean_empty_counts": mean_or_nan(empty_counts),
+                "mean_occupied_counts": mean_occupied,
+                "mean_empty_counts": mean_empty,
+                "mean_atom_counts": mean_occupied - mean_empty,
                 "occupied_sites": len(occupied_counts),
                 "empty_sites": len(empty_counts),
                 "occupancy": float(occupied.mean()),
