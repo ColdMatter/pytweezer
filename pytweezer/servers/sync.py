@@ -262,6 +262,14 @@ class SyncMirror:
             except asyncio.CancelledError:
                 await subscriber.close()
                 raise
+            except OSError as e:
+                logger.warning(
+                    "Lost %s from %s:%s: %s; reconnecting",
+                    self.notifier_name,
+                    self.host,
+                    self.port,
+                    e,
+                )
             except Exception:
                 logger.warning(
                     "Lost %s from %s:%s",

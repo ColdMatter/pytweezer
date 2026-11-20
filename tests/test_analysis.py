@@ -651,6 +651,80 @@ def test_tweezer_counts_publishes_nan_counts_without_saved_sites(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# tweezer_occupancy_counts
+# --------------------------------------------------------------------------- #
+
+
+def occupancy_counts_analysis(monkeypatch, saved):
+    from pytweezer.analysis import tweezer_occupancy_counts
+    from pytweezer.analysis.tweezer_occupancy_counts import TweezerOccupancyCounts
+
+    monkeypatch.setattr(tweezer_occupancy_counts, "get_saved_parameters", lambda: saved)
+    return build(TweezerOccupancyCounts)
+
+
+def test_tweezer_occupancy_counts_sums_raw_counts_of_occupied_and_empty_sites(
+    monkeypatch,
+):
+    analysis = occupancy_counts_analysis(monkeypatch, saved_sites(trap_window_size=3))
+    occupied = SITE_CENTRES[:5]
+    frame = tweezer_frame(occupied)
+
+    analysis.process({"index": 0, "rid": 4, **ROI_ORIGIN}, frame)
+
+    ((head, data, _),) = analysis.dataq.sent
+
+    def box_sum(centres):
+        return sum(
+            int(frame[row - 1 : row + 2, col - 1 : col + 2].sum())
+            for row, col in centres
+        )
+
+    assert data is None
+    assert (head["occupied_sites"], head["empty_sites"]) == (5, len(SITE_CENTRES) - 5)
+    assert head["occupied_counts"] == box_sum(occupied)
+    assert head["empty_counts"] == box_sum(SITE_CENTRES[5:])
+    assert head["mean_occupied_counts"] == pytest.approx(box_sum(occupied) / 5)
+    assert head["mean_empty_counts"] == pytest.approx(
+        box_sum(SITE_CENTRES[5:]) / (len(SITE_CENTRES) - 5)
+    )
+    assert head["occupancy"] == pytest.approx(5 / len(SITE_CENTRES))
+    assert head["rid"] == 4
+
+
+def test_tweezer_occupancy_counts_mean_of_an_empty_group_is_nan(monkeypatch):
+    analysis = occupancy_counts_analysis(monkeypatch, saved_sites())
+
+    analysis.process({"index": 0, **ROI_ORIGIN}, tweezer_frame([]))
+
+    ((head, _, _),) = analysis.dataq.sent
+    assert head["occupancy"] == 0.0
+    assert head["occupied_counts"] == 0.0
+    assert np.isnan(head["mean_occupied_counts"])
+    assert np.isfinite(head["mean_empty_counts"])
+
+
+def test_tweezer_occupancy_counts_skips_all_but_the_first_image(monkeypatch):
+    analysis = occupancy_counts_analysis(monkeypatch, saved_sites())
+
+    analysis.process({"index": 1, **ROI_ORIGIN}, tweezer_frame(SITE_CENTRES))
+
+    assert analysis.dataq.sent == []
+
+
+def test_tweezer_occupancy_counts_publishes_nan_counts_without_saved_sites(
+    monkeypatch,
+):
+    analysis = occupancy_counts_analysis(monkeypatch, {})
+
+    analysis.process({"rid": 4}, np.ones((40, 40)))
+
+    ((head, _, _),) = analysis.dataq.sent
+    assert np.isnan(head["occupied_counts"]) and np.isnan(head["empty_counts"])
+    assert "FindTrapSites" in head["error"]
+
+
+# --------------------------------------------------------------------------- #
 # cloud_fit
 # --------------------------------------------------------------------------- #
 
