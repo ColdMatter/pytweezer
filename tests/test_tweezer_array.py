@@ -324,8 +324,10 @@ def test_every_shot_runs_at_the_saved_parameters_unless_the_form_sets_one(
         assert {name: go[name] for name in expected} == expected
 
 
-def test_without_the_saved_sequence_the_scripts_values_run_at_the_saved_sites(rig):
-    measurement = run_local(LoadTweezers, use_saved_sequence=False, tMolCoolVCO1=7.5)
+def test_without_parameter_overrides_the_scripts_values_run_at_the_saved_sites(rig):
+    measurement = run_local(
+        LoadTweezers, use_motmaster_parameter_overrides=False, tMolCoolVCO1=7.5
+    )
 
     assert measurement.status == "completed", measurement.attrs.get("error")
     assert all(

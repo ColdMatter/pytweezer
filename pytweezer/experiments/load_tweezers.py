@@ -72,8 +72,8 @@ class LoadTweezers(MotMasterExperiment):
     Every shot runs the sequence at the saved parameters ``rb`` binds
     (``LoadTweezers.rb.saved``); a script parameter set in the form wins over
     its saved value, and the values used are recorded as ``saved_sequence``.
-    With ``use_saved_sequence`` off it sends none of them, so the script's own
-    values run; the trap sites are still the saved ones.
+    With ``use_motmaster_parameter_overrides`` off it sends none of them, so the
+    script's own values run; the trap sites are still the saved ones.
 
     Each shot takes two frames on ``hamcam``, exposed by the trigger pulse,
     with EM gain on and ``hamcam_gain`` as its sensitivity. The HamCam stays
@@ -134,15 +134,18 @@ class LoadTweezers(MotMasterExperiment):
         tooltip="record the sum of the raw pixel values in each site's window, "
         "beside its occupancy",
     )
-    use_saved_sequence = Bool(
+    use_motmaster_parameter_overrides = Bool(
         True,
         scannable=False,
-        tooltip="run the sequence at the saved parameters bound to it; off, at "
-        "the script's own values (a value set in the form still wins)",
+        tooltip="send the saved parameters bound to the sequence to MOTMaster as "
+        "parameter overrides; off, the script's own values run (a value set in "
+        "the form still wins)",
     )
 
     def saved_bindings(self) -> dict[str, str]:
-        return super().saved_bindings() if self.use_saved_sequence else {}
+        return (
+            super().saved_bindings() if self.use_motmaster_parameter_overrides else {}
+        )
 
     def prepare(self) -> None:
         super().prepare()
@@ -164,7 +167,7 @@ class LoadTweezers(MotMasterExperiment):
         self.sent_gain = self.hamcam_gain
         self.hamcam.start_live()
 
-        # Fetched only for sequence bindings, so not with use_saved_sequence off.
+        # Fetched only for sequence bindings, so not with the overrides off.
         saved = self.saved_parameters or get_saved_parameters()
         self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(saved)
         if self.trap_sites is None:
