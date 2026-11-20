@@ -193,6 +193,7 @@ class ImageDisplay(Applet):
         self.imDataDict = {}
         self.image_index = -1
         self.image_head = None
+        self._autoscaling_frame = False
 
         self.panel_layout = QHBoxLayout()
         self.panel_layout.setContentsMargins(0, 0, 0, 0)
@@ -286,6 +287,9 @@ class ImageDisplay(Applet):
 
     def _levels_dragged(self):
         """Dragging the histogram's levels is a manual scale: record it and stop autoscaling."""
+        # pyqtgraph also emits sigLevelChangeFinished when setImage moves the levels.
+        if self._autoscaling_frame:
+            return
         self._manual_levels = [float(level) for level in self.lut.getLevels()]
         self.autoscale_action.setChecked(False)
 
@@ -319,7 +323,11 @@ class ImageDisplay(Applet):
             msg, head, imgdata = self.imgstream.recv()
             if self.image_index != -1 and head["index"] != self.image_index:
                 continue
-            self.image_item.setImage(imgdata, autoLevels=bool(self._autoscale))
+            self._autoscaling_frame = True
+            try:
+                self.image_item.setImage(imgdata, autoLevels=bool(self._autoscale))
+            finally:
+                self._autoscaling_frame = False
             self.image_item.resetTransform()
             self.image_item.setRect(frame_rect(head, imgdata.shape))
             self.imgdata = imgdata

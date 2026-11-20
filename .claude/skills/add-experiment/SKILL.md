@@ -415,7 +415,9 @@ The Rb tweezer experiments, in the order a session uses them:
    sequence parameters (`LoadTweezers.rb.saved`, from `saved=` on its
    `MotMaster`: script parameter → saved key; a missing key, or an unreachable manager, fails `prepare()`), a script
    parameter set in the form winning; the values used are the constant
-   `saved_sequence`. It and everything built on it also read the trap sites in
+   `saved_sequence`. `use_saved_sequence=False` sends none of them, so the
+   script's own values run (it overrides `MotMasterExperiment.saved_bindings()`);
+   the trap sites are still read from the saved parameters. It and everything built on it also read the trap sites in
    `prepare()` (`saved_trap_sites(saved)`), moved into the ROI
    (`hamcam_roi_x0`/`_y0`/`_width`/`_height`, unbinned; binning is fixed at 1)
    by the origin `set_roi` returned (`roi_origin`, `(x0, y0)`).

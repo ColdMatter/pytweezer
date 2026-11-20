@@ -292,6 +292,7 @@ CONFIG = {
                     "stream_name": "cafmot_cam",
                     "object_pixel_m": None,
                     "external_exposure": True,
+                    "global_reset": True,
                     "timeout": 5.0,
                     "temperature_measurement": "cafmot_cam_temperature",
                     "temperature_interval_s": 30.0,
