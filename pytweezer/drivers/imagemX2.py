@@ -5,8 +5,8 @@ import numpy as np
 from pytweezer.drivers.camera_base import (
     BINNING,
     EXPOSURE,
-    FRAME_RATE,
     ROI,
+    SOFTWARE_TRIGGER_RATE,
     TRIGGER_POLARITY,
     Control,
     gain,
@@ -29,10 +29,10 @@ class ImagEMX2Camera(HamamatsuCamera):
 
     CONTROLS = (
         EXPOSURE,
-        FRAME_RATE,
         EXPOSURE_MODE,
         trigger_source(("int", "ext", "software")),
         TRIGGER_POLARITY,
+        SOFTWARE_TRIGGER_RATE,
         gain("Sensitivity", "integer", minimum=0),
         Control("em_gain", "EM gain", "Gain", "bool", True),
         Control("direct_em_gain", "Direct EM gain", "Gain", "bool", False),
@@ -89,11 +89,6 @@ class ImagEMX2Camera(HamamatsuCamera):
             float(self._backend.get_attribute_value("CONVERSION FACTOR COEFF")),
             float(self._backend.get_attribute_value("CONVERSION FACTOR OFFSET")),
         )
-
-    def get_all_attribute_values(self) -> dict:
-        """Every readable DCAM attribute's current value, enums as their text labels."""
-        values = self._backend.get_all_attribute_values(enum_as_str=True)
-        return values.as_dict(style="flat")
 
 
 #: One-size-fits-all simulated camera, with the ImagEM's EM-gain/sensitivity

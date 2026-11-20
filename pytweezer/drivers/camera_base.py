@@ -105,17 +105,18 @@ TRIGGER_POLARITY = Control(
     choices=("rise", "fall"),
 )
 BINNING = Control("binning", "Binning", "Binning & ROI", "integer", 1, minimum=1)
-#: Frames per second in internal trigger, so short exposures do not flood the
-#: ring buffer and the stream; external triggers ignore it.
-FRAME_RATE = Control(
-    "frame_rate",
-    "Frame rate (int.)",
+#: Rate live mode sends software triggers at, with the trigger source on
+#: ``"software"``; the camera's own internal trigger runs free.
+SOFTWARE_TRIGGER_RATE = Control(
+    "software_trigger_rate",
+    "Software trigger rate",
     "Exposure & trigger",
     "number",
     10.0,
-    unit="fps",
+    unit="Hz",
     si_unit="Hz",
-    minimum=0.0,
+    minimum=0.01,
+    maximum=1000.0,
 )
 ROI = (
     Control(
@@ -213,6 +214,7 @@ _SETTER_NAMES = {
     "trigger_polarity": "set_trigger_polarity",
     "gain": "set_gain",
     "binning": "set_binning",
+    "software_trigger_rate": "set_software_trigger_rate",
 }
 _ROI_NAMES = tuple(control.name for control in ROI)
 
@@ -284,7 +286,9 @@ class Camera(ABC):
         # The live broadcast thread and RPC calls share the backend.
         self._lock = threading.RLock()
         self._live_thread: threading.Thread | None = None
+        self._pacer_thread: threading.Thread | None = None
         self._live_stop = threading.Event()
+        self._software_trigger_rate = float(SOFTWARE_TRIGGER_RATE.default)
         self._live_args: tuple[int, float] = (1000, 0.05)
         # (frame number, peak value) of the saturated live frames of this acquisition.
         self._saturated: deque[tuple[int, int]] = deque(maxlen=1000)
@@ -351,6 +355,22 @@ class Camera(ABC):
         A driver keeps the polarity the camera took with :meth:`_keep`.
         """
         raise NotImplementedError(f"{type(self).__name__} has no trigger polarity")
+
+    def trigger(self) -> None:
+        """Send the camera one software trigger."""
+        raise NotImplementedError(f"{type(self).__name__} has no software trigger")
+
+    def set_software_trigger_rate(self, rate: float) -> None:
+        """Set how many software triggers per second live mode sends while the
+        trigger source is ``"software"``.
+
+        Raises:
+            ValueError: If ``rate`` is not positive.
+        """
+        if not rate > 0:
+            raise ValueError(f"software trigger rate must be positive, not {rate!r}")
+        self._software_trigger_rate = float(rate)
+        self._keep(software_trigger_rate=self._software_trigger_rate)
 
     @abstractmethod
     def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
@@ -811,7 +831,9 @@ class Camera(ABC):
     def start_live(self, buffer_frames: int = 1000, poll_s: float = 0.05) -> None:
         """Run free (see :meth:`arm`) and broadcast every new frame on the image stream.
 
-        A camera already live stays as it is.
+        While the trigger source is ``"software"``, a software trigger is sent
+        every 1 / ``software_trigger_rate`` seconds. A camera already live stays
+        as it is.
         """
         self.arm(buffer_frames)
         if self.is_live():
@@ -825,6 +847,12 @@ class Camera(ABC):
             daemon=True,
         )
         self._live_thread.start()
+        self._pacer_thread = threading.Thread(
+            target=self._pace_software_triggers,
+            name=f"{type(self).__name__}-pacer",
+            daemon=True,
+        )
+        self._pacer_thread.start()
 
     def stop_live(self) -> None:
         """Stop broadcasting and stop the acquisition."""
@@ -841,6 +869,21 @@ class Camera(ABC):
         if self._live_thread is not None:
             self._live_thread.join(timeout=2.0)
             self._live_thread = None
+        if self._pacer_thread is not None:
+            self._pacer_thread.join(timeout=2.0)
+            self._pacer_thread = None
+
+    def _pace_software_triggers(self) -> None:
+        stop = self._live_stop
+        while not stop.wait(1.0 / self._software_trigger_rate):
+            if self._kept.get("trigger_source") != "software":
+                continue
+            try:
+                self.trigger()
+            except Exception:
+                LOGGER.warning(
+                    "%s: software trigger failed", type(self).__name__, exc_info=True
+                )
 
     def saturated_frames_since(self, start: int) -> list[tuple[int, int]]:
         """``(frame number, peak value)`` of each live frame from number ``start``
@@ -967,7 +1010,8 @@ class SimulatedCamera(Camera):
     methods (beyond the :class:`Camera` interface) are not defined here; use
     :func:`simulated_camera_for` to auto-stub those for a particular driver.
 
-    While acquiring, frames "arrive" at :attr:`sim_frame_rate` per second.
+    While acquiring, frames "arrive" at :attr:`sim_frame_rate` per second, or one
+    per :meth:`trigger` with the trigger source on ``"software"``.
     """
 
     sim_frame_rate: float = 5.0
@@ -982,14 +1026,11 @@ class SimulatedCamera(Camera):
         object_pixel_m: float | None = None,
     ):
         self._shape = (256, 256)
-        self._sim_values: dict[str, Any] = {
-            "roi_height": 256,
-            "roi_width": 256,
-            "frame_rate": self.sim_frame_rate,
-        }
+        self._sim_values: dict[str, Any] = {"roi_height": 256, "roi_width": 256}
         self._nframes = 1
         self._running = False
         self._started = 0.0
+        self._trigger_times: list[float] = []
         self._rng = np.random.default_rng()
         super().__init__(
             image_dir=image_dir,
@@ -1009,16 +1050,18 @@ class SimulatedCamera(Camera):
         return self.sim_sensor_size
 
     def _control_limits(self) -> dict[str, dict[str, Any] | None]:
-        return {
-            "binning": {"choices": [1, 2, 4]},
-            "frame_rate": {"minimum": 0.1, "maximum": 100.0},
-        }
+        return {"binning": {"choices": [1, 2, 4]}}
 
-    def set_frame_rate(self, rate: float) -> None:
-        """Frames per second while acquiring, as an internal trigger would give them."""
-        with self._lock:
-            self.sim_frame_rate = float(rate)
-            self._remember(frame_rate=self.sim_frame_rate)
+    def set_software_trigger_rate(self, rate: float) -> None:
+        super().set_software_trigger_rate(rate)
+        self._sim_values["software_trigger_rate"] = self._software_trigger_rate
+
+    def trigger(self) -> None:
+        if self._running:
+            self._trigger_times.append(time.monotonic())
+
+    def _software_triggered(self) -> bool:
+        return self._kept.get("trigger_source") == "software"
 
     def _remember(self, **values: Any) -> None:
         """Keep ``values`` and hold them as what the simulated hardware reports."""
@@ -1078,6 +1121,7 @@ class SimulatedCamera(Camera):
     def start_acquisition(self) -> None:
         self._running = True
         self._started = time.monotonic()
+        self._trigger_times = []
 
     def stop_acquisition(self) -> None:
         self._running = False
@@ -1088,6 +1132,8 @@ class SimulatedCamera(Camera):
     def _count_frames(self) -> int:
         if not self._running:
             return 0
+        if self._software_triggered():
+            return len(self._trigger_times)
         return int((time.monotonic() - self._started) * self.sim_frame_rate)
 
     def _read_range(self, start: int, stop: int) -> np.ndarray:
@@ -1096,7 +1142,12 @@ class SimulatedCamera(Camera):
     def _read_range_timed(
         self, start: int, stop: int
     ) -> tuple[np.ndarray, list[float]]:
-        times = [self._started + i / self.sim_frame_rate for i in range(start, stop)]
+        if self._software_triggered():
+            times = self._trigger_times[start:stop]
+        else:
+            times = [
+                self._started + i / self.sim_frame_rate for i in range(start, stop)
+            ]
         return self._read_range(start, stop), times
 
     def settings(self) -> dict:
