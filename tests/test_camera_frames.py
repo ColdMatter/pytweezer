@@ -137,3 +137,20 @@ def test_live_mode_can_be_left_and_entered_again(camera):
     camera.start_live()
     assert camera.is_live()
     assert camera._acquisition_in_progress()
+
+
+@pytest.mark.parametrize(("source", "triggered"), [("software", True), ("int", False)])
+def test_live_mode_sends_software_triggers_only_on_the_software_source(
+    camera, monkeypatch, source, triggered
+):
+    triggers = []
+    monkeypatch.setattr(camera, "trigger", lambda: triggers.append(1))
+    camera.set_trigger_source(source)
+    camera.set_software_trigger_rate(200.0)
+    camera.start_live()
+    for _ in range(100):
+        if len(triggers) >= 3:
+            break
+        time.sleep(0.01)
+    camera.stop_live()
+    assert (len(triggers) >= 3) is triggered

@@ -1,15 +1,15 @@
+import contextlib
 from typing import Any
 
 import numpy as np
 import pylablib as pll
 import pylablib.devices.Thorlabs as thorcam
-from pylablib.devices.Thorlabs.TLCamera import lib as tl_lib
 
 from pytweezer.drivers.camera_base import (
     BINNING,
     EXPOSURE,
-    FRAME_RATE,
     ROI,
+    SOFTWARE_TRIGGER_RATE,
     TRIGGER_POLARITY,
     Camera,
     gain,
@@ -30,9 +30,9 @@ class ThorCam(Camera):
 
     CONTROLS = (
         EXPOSURE,
-        FRAME_RATE,
-        trigger_source(("int", "ext", "bulb")),
+        trigger_source(("int", "ext", "bulb", "software")),
         TRIGGER_POLARITY,
+        SOFTWARE_TRIGGER_RATE,
         gain("Gain", "number", unit="dB", minimum=0),
         BINNING,
         *ROI,
@@ -40,6 +40,9 @@ class ThorCam(Camera):
 
     #: Frequency of the camera's frame timestamp clock in Hz; ``None`` if it reports none.
     _timestamp_clock_hz: float | None = None
+    #: The SDK has no software trigger mode: ``"software"`` is its internal
+    #: trigger taking one frame per software trigger.
+    _software_triggered: bool = False
 
     def __init__(
         self,
@@ -58,7 +61,8 @@ class ThorCam(Camera):
         Args:
             serial_number: Camera to open; ``None`` opens the first one found.
             trigger_mode: pylablib's ``"int"``, ``"ext"`` or ``"bulb"`` (the trigger
-                pulse sets each exposure); ``None`` leaves the camera's own.
+                pulse sets each exposure), or ``"software"`` (see :meth:`trigger`);
+                ``None`` leaves the camera's own.
             trigger_polarity: ``"rise"`` (active high) or ``"fall"``; applied only
                 with a ``trigger_mode``.
             binning: Square binning, keeping the camera's ROI.
@@ -106,33 +110,53 @@ class ThorCam(Camera):
         backend = self._backend
         values = {
             "exposure": float(backend.get_exposure()),
-            "trigger_source": backend.get_trigger_mode(),
+            "trigger_source": self._trigger_mode(),
             "trigger_polarity": backend.get_ext_trigger_parameters(),
             "gain": float(backend.get_gain()),
-            "frame_rate": self._frame_rate(),
             **roi_controls(backend.get_roi()),
         }
         self.roi_origin = (values["roi_x0"], values["roi_y0"])
         self.binning = values["binning"]
         return values
 
-    # pylablib itself pauses the acquisition for the trigger, ROI and binning
-    # settings.
+    @contextlib.contextmanager
+    def _acquisition_paused(self):
+        """Stop a running acquisition for the block, then restart it as
+        :meth:`start_acquisition` would. pylablib pauses for the trigger, ROI and
+        binning settings itself, but restarts free-running, which would end
+        software triggering."""
+        running = self._backend.acquisition_in_progress()
+        with self._backend.pausing_acquisition(start_after=False):
+            yield
+        if running:
+            self.start_acquisition()
+
+    def _trigger_mode(self) -> str:
+        mode = self._backend.get_trigger_mode()
+        return "software" if self._software_triggered and mode == "int" else mode
 
     def set_roi(self, x0: int, width: int, y0: int, height: int):
-        with self._lock:
+        with self._lock, self._acquisition_paused():
             *_, hbin, vbin = self._backend.get_roi()
             roi = self._backend.set_roi(x0, x0 + width, y0, y0 + height, hbin, vbin)
             return self._keep_roi(roi)
 
     def set_trigger_source(self, source: str):
-        with self._lock:
-            self._keep(trigger_source=self._backend.set_trigger_mode(source))
+        """pylablib's ``"int"``, ``"ext"`` or ``"bulb"``, or ``"software"``."""
+        with self._lock, self._acquisition_paused():
+            self._software_triggered = source == "software"
+            self._backend.set_trigger_mode(
+                "int" if self._software_triggered else source
+            )
+            self._keep(trigger_source=self._trigger_mode())
 
     def set_trigger_polarity(self, polarity: str):
         """``"rise"`` (active high) or ``"fall"`` (active low)."""
-        with self._lock:
+        with self._lock, self._acquisition_paused():
             self._keep(trigger_polarity=self._backend.setup_ext_trigger(polarity))
+
+    def trigger(self):
+        self._backend.send_software_trigger()
 
     def set_exposure_time(self, exposure: float):
         # pylablib does not pause the acquisition for this.
@@ -141,28 +165,13 @@ class ThorCam(Camera):
 
     def set_binning(self, binning: int):
         """Bin ``binning`` x ``binning`` pixels together, keeping the ROI."""
-        self._rebin_keeping_roi(binning)
+        with self._lock, self._acquisition_paused():
+            self._rebin_keeping_roi(binning)
 
     def _control_limits(self) -> dict[str, dict[str, Any] | None]:
         with self._lock:
             horizontal, _ = self._backend.get_roi_limits()
-            slowest, fastest = tl_lib.tl_camera_get_frame_rate_control_value_range(
-                self._backend.handle
-            )
-        return {
-            "binning": {"maximum": int(horizontal.maxbin)},
-            "frame_rate": {"minimum": float(slowest), "maximum": float(fastest)},
-        }
-
-    def _frame_rate(self) -> float:
-        """The internal trigger's frame rate, from the camera's frame period."""
-        return 1.0 / float(self._backend.get_frame_timings().frame_period)
-
-    def set_frame_rate(self, rate: float):
-        """Set the internal trigger's frame rate, clamped to what the camera allows."""
-        with self._lock:
-            self._backend.set_frame_period(1.0 / float(rate))
-            self._keep(frame_rate=self._frame_rate())
+        return {"binning": {"maximum": int(horizontal.maxbin)}}
 
     def set_gain(self, gain: float):
         """Set the analogue gain in dB, truncated to the range the camera allows.
@@ -176,7 +185,10 @@ class ThorCam(Camera):
         self._backend.setup_acquisition(int(nframes))
 
     def start_acquisition(self):
-        self._backend.start_acquisition()
+        if self._software_triggered:
+            self._backend.start_acquisition(frames_per_trigger=1, auto_start=False)
+        else:
+            self._backend.start_acquisition()
 
     def stop_acquisition(self):
         self._backend.stop_acquisition()
@@ -186,7 +198,7 @@ class ThorCam(Camera):
         with self._lock:
             return {
                 "serial_number": self.serial_number,
-                "trigger_mode": backend.get_trigger_mode(),
+                "trigger_mode": self._trigger_mode(),
                 "trigger_polarity": backend.get_ext_trigger_parameters(),
                 "binning": list(backend.get_roi()[4:6]),
                 "gain_db": backend.get_gain(),

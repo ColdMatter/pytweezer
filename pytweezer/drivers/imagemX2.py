@@ -5,8 +5,8 @@ import numpy as np
 from pytweezer.drivers.camera_base import (
     BINNING,
     EXPOSURE,
-    FRAME_RATE,
     ROI,
+    SOFTWARE_TRIGGER_RATE,
     TRIGGER_POLARITY,
     Control,
     gain,
@@ -29,10 +29,10 @@ class ImagEMX2Camera(HamamatsuCamera):
 
     CONTROLS = (
         EXPOSURE,
-        FRAME_RATE,
         EXPOSURE_MODE,
         trigger_source(("int", "ext", "software")),
         TRIGGER_POLARITY,
+        SOFTWARE_TRIGGER_RATE,
         gain("Sensitivity", "integer", minimum=0),
         Control("em_gain", "EM gain", "Gain", "bool", True),
         Control("direct_em_gain", "Direct EM gain", "Gain", "bool", False),

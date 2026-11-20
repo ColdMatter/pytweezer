@@ -104,11 +104,18 @@ one overrides `_sensor_shape()`. Limits only the hardware knows come from
 `_control_limits()`, by control name, read with the sensor size: `binning`
 gets `{"choices": [1, 2, 4]}` for a camera that takes only those bin factors
 (the DCAM drivers, from pylablib's probe; the Camera applet shows a
-drop-down) or `{"maximum": n}` (ThorCam); `frame_rate` (`FRAME_RATE`, the
-internal trigger's rate) gets its range. `None` marks a control the camera
-lacks (a DCAM model without `internal_frame_interval`): `controls()` leaves it
-out and `apply_controls()` refuses it. A driver that can
-read each frame's camera-clock time overrides `_read_range_timed`; the live
+drop-down) or `{"maximum": n}` (ThorCam). `None` marks a control the camera
+lacks (the ORCA-Fusion without `defect_correct_mode`): `controls()` leaves it
+out and `apply_controls()` refuses it.
+
+No camera has a frame-rate control: the internal trigger runs free. Every
+camera offers a `"software"` trigger source and `SOFTWARE_TRIGGER_RATE`; while
+live on that source the base sends `trigger()` every 1/rate seconds from a
+sleeping thread, so a driver implements only `trigger()` (one software
+trigger). A camera whose SDK has no software trigger mode builds it from
+its internal trigger taking one frame per trigger, as the ThorCam does.
+
+A driver that can read each frame's camera-clock time overrides `_read_range_timed`; the live
 broadcast then adds it as `camera_timestamp`. `snap()` takes one frame from a
 stopped camera. A driver that watches the sensor temperature sets
 `self._temperature_monitor` to a `TemperatureMonitor`; `sensor_temperature()`

@@ -128,11 +128,23 @@ class FakeVendorCamera:
     def setup_acquisition(self, *args):
         self.calls["setup"] = args
 
-    def start_acquisition(self):
-        self.calls["started"] = True
+    def start_acquisition(self, **kwargs):
+        self.calls["started"] = kwargs or True
+
+    def set_trigger_mode(self, mode):
+        self.trigger_mode = mode
+
+    def get_trigger_mode(self):
+        return self.trigger_mode
 
     def acquisition_in_progress(self):
         return "started" in self.calls
+
+    @contextlib.contextmanager
+    def pausing_acquisition(self, clear=None, start_after=True):
+        self.paused = True
+        yield
+        self.paused = False
 
     def get_roi(self):
         return (0, 1024, 0, 1024, *self.binning)
@@ -248,12 +260,6 @@ class FakeDCAMAttributes(FakeVendorCamera):
         self.attributes = attributes
         self.paused = False
 
-    @contextlib.contextmanager
-    def pausing_acquisition(self, clear=None):
-        self.paused = True
-        yield
-        self.paused = False
-
     def set_attribute_value(self, name, value):
         assert self.paused, f"{name} written while acquiring"
         self.attributes[name] = value
@@ -270,3 +276,16 @@ def test_fusion_global_reset_reaches_dcam_and_is_kept(enable, dcam_value):
     driver.set_global_reset(enable)
     assert driver._backend.attributes["trigger_global_exposure"] == dcam_value
     assert driver._kept["global_reset"] is enable
+
+
+def test_a_software_triggered_thorcam_restarts_one_frame_per_trigger():
+    # pylablib would restart a paused acquisition free-running on its internal trigger.
+    driver = _driver(thorcam.ThorCam)
+    driver._backend.calls["started"] = True
+    driver.set_trigger_source("software")
+    assert driver._backend.trigger_mode == "int"
+    assert driver._backend.calls["started"] == {
+        "frames_per_trigger": 1,
+        "auto_start": False,
+    }
+    assert driver._kept["trigger_source"] == "software"

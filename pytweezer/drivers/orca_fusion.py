@@ -3,8 +3,8 @@ from typing import Any
 from pytweezer.drivers.camera_base import (
     BINNING,
     EXPOSURE,
-    FRAME_RATE,
     ROI,
+    SOFTWARE_TRIGGER_RATE,
     TRIGGER_POLARITY,
     Control,
     simulated_camera_for,
@@ -36,10 +36,10 @@ class ORCAFusionCamera(HamamatsuCamera):
 
     CONTROLS = (
         EXPOSURE,
-        FRAME_RATE,
         EXPOSURE_MODE,
         trigger_source(("int", "ext", "software")),
         TRIGGER_POLARITY,
+        SOFTWARE_TRIGGER_RATE,
         Control("global_reset", "Global reset", "Exposure & trigger", "bool", True),
         Control(
             "readout_speed",

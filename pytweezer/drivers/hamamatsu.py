@@ -3,14 +3,13 @@
 import ctypes
 import subprocess
 import sys
-import threading
 from typing import Any
 
 import numpy as np
 from pylablib.devices.DCAM import dcamapi4_lib
 from pylablib.devices.DCAM.DCAM import DCAMCamera, lib, libctl
 
-from pytweezer.drivers.camera_base import LOGGER, Camera, Control, roi_controls
+from pytweezer.drivers.camera_base import Camera, Control, roi_controls
 from pytweezer.drivers.temperature_monitor import TemperatureMonitor
 
 PROBE_TIMEOUT_S = 60
@@ -39,9 +38,6 @@ EXPOSURE_MODE = Control(
     "internal",
     choices=("internal", "edge", "level"),
 )
-
-#: DCAM attribute of the internal trigger's frame period, in seconds.
-FRAME_INTERVAL = "internal_frame_interval"
 
 #: DCAM ``trigger_active`` for each external exposure mode.
 _TRIGGER_ACTIVE = {"edge": 1, "level": 2}
@@ -256,9 +252,6 @@ class HamamatsuCamera(Camera):
 
     model_prefix: str
     default_timeout: float
-    #: Frame rate live mode fires software triggers at, on a camera without
-    #: DCAM's internal frame interval (the ORCA-R2).
-    _paced_rate: float = 10.0
 
     def __init__(
         self,
@@ -321,10 +314,6 @@ class HamamatsuCamera(Camera):
         values = read_dcam_controls(self._backend)
         self.roi_origin = (values["roi_x0"], values["roi_y0"])
         self.binning = values["binning"]
-        if self._hardware_interval():
-            values["frame_rate"] = 1.0 / float(self._read_attribute(FRAME_INTERVAL))
-        else:
-            values["frame_rate"] = self._paced_rate
         return values
 
     def set_roi(self, x0: int, width: int, y0: int, height: int):
@@ -345,32 +334,7 @@ class HamamatsuCamera(Camera):
         valid = getattr(self._backend, "_valid_binnings", None)
         if valid:
             limits["binning"] = {"choices": [int(b) for b in valid]}
-        interval = self._backend.get_attribute(FRAME_INTERVAL, error_on_missing=False)
-        if interval is None or not interval.writable or interval.min <= 0:
-            limits["frame_rate"] = {"minimum": 0.01, "maximum": 1000.0}
-        else:
-            limits["frame_rate"] = {
-                "minimum": 1.0 / float(interval.max),
-                "maximum": 1.0 / float(interval.min),
-            }
         return limits
-
-    def _hardware_interval(self) -> bool:
-        interval = self._backend.get_attribute(FRAME_INTERVAL, error_on_missing=False)
-        return interval is not None and interval.writable and interval.min > 0
-
-    def set_frame_rate(self, rate: float):
-        """Set the frame rate: DCAM's internal frame interval where the camera has
-        one, otherwise the rate live mode sends software triggers at (with the
-        trigger source on ``"software"``)."""
-        if not self._hardware_interval():
-            self._paced_rate = float(rate)
-            self._keep(frame_rate=self._paced_rate)
-            return
-        with self._lock, self._backend.pausing_acquisition(clear=True):
-            self._backend.set_attribute_value(FRAME_INTERVAL, 1.0 / float(rate))
-            interval = self._read_attribute(FRAME_INTERVAL)
-            self._keep(frame_rate=1.0 / float(interval))
 
     def set_trigger_source(self, source: str):
         with self._lock:
@@ -420,30 +384,7 @@ class HamamatsuCamera(Camera):
         with self._lock:
             return float(self._read_attribute("sensor_temperature"))
 
-    def start_live(self, buffer_frames: int = 1000, poll_s: float = 0.05) -> None:
-        was_live = self.is_live()
-        super().start_live(buffer_frames, poll_s)
-        if not was_live and not self._hardware_interval():
-            threading.Thread(
-                target=self._pace_software_triggers,
-                name=f"{type(self).__name__}-pacer",
-                daemon=True,
-            ).start()
-
-    def _pace_software_triggers(self) -> None:
-        stop = self._live_stop
-        while not stop.wait(1.0 / self._paced_rate):
-            if self._kept.get("trigger_source") != "software":
-                continue
-            try:
-                self._backend.send_software_trigger()
-            except Exception:
-                LOGGER.warning(
-                    "%s: software trigger failed", type(self).__name__, exc_info=True
-                )
-
     def trigger(self):
-        """Send a software trigger to the camera."""
         self._backend.send_software_trigger()
 
     def get_all_attribute_values(self) -> dict:

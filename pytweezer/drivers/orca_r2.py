@@ -1,8 +1,8 @@
 from pytweezer.drivers.camera_base import (
     BINNING,
     EXPOSURE,
-    FRAME_RATE,
     ROI,
+    SOFTWARE_TRIGGER_RATE,
     TRIGGER_POLARITY,
     Control,
     gain,
@@ -25,10 +25,10 @@ class ORCAR2Camera(HamamatsuCamera):
 
     CONTROLS = (
         EXPOSURE,
-        FRAME_RATE,
         EXPOSURE_MODE,
         trigger_source(("int", "ext", "software")),
         TRIGGER_POLARITY,
+        SOFTWARE_TRIGGER_RATE,
         gain("Contrast gain", "integer", minimum=0),
         Control("readout_speed", "Readout speed", "Readout", "integer", 1, minimum=1),
         BINNING,
