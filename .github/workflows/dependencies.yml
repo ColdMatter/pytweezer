@@ -4,13 +4,16 @@ name: Dependencies
 # "Depends on owner/repo#N" (or "Blocked by ...") line in its description
 # names a PR that is not merged or an issue that is not closed. A bare "#N"
 # means this repo. Branch protection requires the status, so such a PR cannot
-# merge. Another repo's PR merging triggers nothing here, hence the schedule.
+# merge. A PR or issue here closing or reopening re-checks every open PR; one
+# in another repo triggers nothing here, hence the schedule.
 
 on:
   pull_request:
-    types: [opened, edited, reopened, synchronize]
+    types: [opened, edited, reopened, synchronize, closed]
+  issues:
+    types: [closed, reopened]
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -22,8 +25,9 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v8
         with:
+          retries: 3
           script: |
             const { owner, repo } = context.repo;
             const LINE = /^\s*(?:depends on|blocked by)\b[:\s]*(.*)$/gim;
@@ -57,7 +61,7 @@ jobs:
             }
 
             // GitHub keeps at most 1000 statuses per SHA and context, and the
-            // schedule would otherwise post one every 15 minutes.
+            // schedule would otherwise post one every hour.
             async function unchanged(sha, state, description) {
               const { data } = await github.rest.repos.getCombinedStatusForRef({
                 owner, repo, ref: sha, per_page: 100,
@@ -83,7 +87,9 @@ jobs:
               core.info(`#${pr.number}: ${description}`);
             }
 
-            const prs = context.eventName === "pull_request"
+            const recheckOne = context.eventName === "pull_request"
+              && context.payload.action !== "closed";
+            const prs = recheckOne
               ? [context.payload.pull_request]
               : await github.paginate(github.rest.pulls.list, {
                   owner, repo, state: "open", per_page: 100,
