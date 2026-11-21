@@ -189,7 +189,16 @@ be accepted or undone.
   `DIAM`, `CONI`, `PARM` for even aspheres) into its own prescription JSON.
 - A starter set of common parts is bundled: Thorlabs Ø1" and Ø2" achromats
   (`AC254-…`, `AC508-…`, -A and -B coatings) and N-BK7 plano-convex singlets
-  (`LA1…`) across the usual focal lengths.
+  (`LA1…`) across the usual focal lengths. Vendor `.zmx` files can't be
+  downloaded from the build environment, so these prescriptions are
+  transcribed from the vendors' published drawings (radii, centre thicknesses,
+  glasses).
+- **Accuracy target (decided by the user):** what must be right is the
+  *difference* in focus between wavelengths, which is insensitive to the
+  rounding on the drawings. Absolute focus positions from a drawing-derived lens
+  are labelled approximate in the readouts; the label goes away once the real
+  `.zmx` for that part is imported. Each lens records its source (`drawing` or
+  `zmx`) so the UI can tell.
 - The user can import any further `.zmx` through a file picker; imported lenses
   are saved into the setup file so it stays self-contained.
 - A lens using a glass that isn't in the bundled data is flagged, and the user
@@ -234,8 +243,9 @@ The engine's tests must include at least:
 - N-BK7 index at 587.6 nm = 1.5168 (and a couple of other glasses at known
   wavelengths).
 - Thin-lens imaging and Gaussian `q` propagation against closed-form results.
-- A Thorlabs achromat's back focal length at its design wavelength and its
-  focal-shift curve against Thorlabs' published values.
+- A Thorlabs achromat's focal-shift curve (focus relative to its design
+  wavelength) against Thorlabs' published curve, to within a few µm across the
+  coating band; its back focal length within the drawing's rounding (≈0.1%).
 - A plano-convex singlet's focal length at two wavelengths against the
   lensmaker's equation with the bundled `n(λ)`.
 - The SLM Fresnel lens focusing at `f0·λ0/λ`.
@@ -245,10 +255,7 @@ The engine's tests must include at least:
 
 - UI framework (none, Preact, Solid, …) and component layout details.
 - Canvas 2D vs SVG for the bench (canvas expected, for drag performance).
-- Exact list of bundled lenses and glasses, and how the `.zmx` files are
-  obtained. If downloading vendor files isn't possible from the build
-  environment, transcribe prescriptions from the vendors' published drawings
-  (radii, centre thicknesses, glasses) into the prescription JSON.
+- Exact list of bundled lenses and glasses.
 - Default ray counts, colours, keyboard shortcuts, snapping.
 - Optimiser choice, provided it respects bounds and finishes in well under a
   second for a few variables.
