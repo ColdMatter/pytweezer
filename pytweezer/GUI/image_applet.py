@@ -49,7 +49,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pytweezer.analysis.cloud_fit import FIELDS, CloudFit, contour_ellipses
+from pytweezer.analysis.cloud_fit import (
+    FIELDS,
+    CloudFit,
+    contour_ellipses,
+)
 from pytweezer.GUI.applet import Applet
 from pytweezer.GUI.viewers.data_sidebar import DataSidebar
 from pytweezer.GUI.views.image import ImageView
@@ -195,9 +199,6 @@ class ImageApplet(Applet):
         # Autoscaling a flat frame gives levels 0-255, and the colour scale's
         # axis would keep the width of those labels once real frames arrive.
         self.view.show_image(imgdata, levels=(1, 2))
-        # show_mask scales a mask by the shape of the one before it, so start
-        # from a blank one, unplaced: show_mask on an empty item would blow it up.
-        self.view.mask_item.setImage(np.zeros(imgdata.shape))
 
         for region in self._roilist:
             roi = CameraROI(self.name + "/ROI/" + region, self.view, invertible=True)

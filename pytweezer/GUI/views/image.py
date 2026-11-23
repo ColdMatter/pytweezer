@@ -211,8 +211,9 @@ class ImageView(QtWidgets.QWidget):
 
     def show_mask(self, mask: np.ndarray, head: dict | None = None) -> None:
         """Draw the 0/1 ``mask`` over the frame, placed by ``head``."""
-        self.mask_item.setRect(frame_rect(head or {}, mask.shape))
         self.mask_item.setImage(mask, autoLevels=False, levels=(0, 1))
+        self.mask_item.resetTransform()
+        self.mask_item.setRect(frame_rect(head or {}, mask.shape))
 
     def show_paths(self, key: str, paths: list[np.ndarray], pen=None) -> None:
         """Replace the curves under ``key`` with one curve per ``[x, y]`` in ``paths``."""

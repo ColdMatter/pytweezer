@@ -1,7 +1,7 @@
 import numpy as np
 import pyqtgraph as pg
 import pytest
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtWidgets
 
 from pytweezer.analyses.live.roi_slice import RoiSlice
 from pytweezer.analysis.cloud_fit import fit_cloud
@@ -340,3 +340,24 @@ def test_an_untrusted_fit_draws_no_fit_curve(projection_monitor):
     data, fit = monitor.projection_curves["cloud_x"]
     assert data.getData()[1] == pytest.approx(trusted)
     assert fit.getData()[0] is None or len(fit.getData()[0]) == 0
+
+
+def test_the_view_follows_the_frames_without_a_mask_stream(qapp, monkeypatch):
+    fake_hubs(monkeypatch)
+
+    class NoRoiProps(FakeProps):
+        def __init__(self, name=""):
+            super().__init__(name)
+            self.values["ROIs"] = []
+
+    monkeypatch.setattr(applet, "Properties", NoRoiProps)
+    monitor = image_monitor.ImageDisplay("Test Monitor")
+    monitor.resize(600, 500)
+    monitor.show()
+    feed_frame(monitor, np.zeros((64, 48)), BINNED)
+    QtWidgets.QApplication.processEvents()
+
+    x_range, y_range = monitor.view.plot.getViewBox().viewRange()
+
+    assert x_range[1] < 1e-3
+    assert y_range[1] < 1e-3

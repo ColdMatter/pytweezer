@@ -125,3 +125,15 @@ def test_the_left_side_plot_follows_the_image_direction(qapp):
     left = view.add_side_plot("left")
 
     assert not left.getViewBox().yInverted()
+
+
+def test_a_mask_is_placed_for_its_own_shape_whatever_was_shown_before(view):
+    view.show_mask(np.zeros((100, 100)))
+    head = {"_imgresolution": (2e-6, 3e-6)}
+    mask = np.ones((6, 8))
+
+    view.show_mask(mask, head)
+
+    assert view.mask_item.mapRectToParent(view.mask_item.boundingRect()) == (
+        frame_rect(head, mask.shape)
+    )
