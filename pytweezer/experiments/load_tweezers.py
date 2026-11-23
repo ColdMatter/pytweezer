@@ -116,7 +116,11 @@ class LoadTweezers(MotMasterExperiment):
     rig: Rearrangement = Device("Rb Rearrangement Rig")
 
     hamcam_gain = Number(
-        600, min=0, group="Camera", tooltip="EM-gain sensitivity of the HamCam"
+        600,
+        min=0,
+        group="Camera",
+        tooltip="EM-gain sensitivity of the HamCam, set once before the first point",
+        scannable=False,
     )
     hamcam_roi_x0 = _roi_argument(110, size=False)
     hamcam_roi_width = _roi_argument(256, size=True)
@@ -164,7 +168,6 @@ class LoadTweezers(MotMasterExperiment):
         self.hamcam.enable_em_gain(True)
         self.hamcam.enable_direct_em_gain(True)
         self.hamcam.set_gain(self.hamcam_gain)
-        self.sent_gain = self.hamcam_gain
         self.hamcam.start_live()
 
         # Fetched only for sequence bindings, so not with the overrides off.
@@ -246,12 +249,6 @@ class LoadTweezers(MotMasterExperiment):
 
     def take_frames(self, n: int, **sequence: Any) -> np.ndarray:
         """Run the sequence once with script parameters ``sequence``; the HamCam's first ``n`` frames of it."""
-        if self.hamcam_gain != self.sent_gain:
-            # DCAM refuses some settings while capturing.
-            self.hamcam.stop_live()
-            self.hamcam.set_gain(self.hamcam_gain)
-            self.hamcam.start_live()
-            self.sent_gain = self.hamcam_gain
         mark = self.hamcam.start_shot({"rid": self.rid})
         self.run_sequences(**sequence)
         return np.asarray(self.hamcam.wait_frames(mark, n))

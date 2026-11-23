@@ -685,19 +685,17 @@ def test_load_tweezers_sets_the_hamcam_up_for_two_triggered_frames(rig):
     ]
 
 
-def test_a_scanned_gain_is_sent_before_each_shot_that_changes_it(rig):
-    scan = Scan(axes=[ListAxis(argument="hamcam_gain", values=[600, 600, 300])])
-    measurement = run_local(LoadTweezers, scan)
-    assert measurement.status == "completed", measurement.attrs.get("error")
-    gains = [args for name, args in rig.camera.calls if name == "set_gain"]
-    assert gains == [(600,), (300,)]
-
-
 @pytest.mark.parametrize(
     "argument",
-    ["hamcam_roi_x0", "hamcam_roi_width", "hamcam_roi_y0", "hamcam_roi_height"],
+    [
+        "hamcam_gain",
+        "hamcam_roi_x0",
+        "hamcam_roi_width",
+        "hamcam_roi_y0",
+        "hamcam_roi_height",
+    ],
 )
-def test_the_roi_cannot_be_scanned(rig, argument):
+def test_the_camera_settings_cannot_be_scanned(rig, argument):
     scan = Scan(axes=[ListAxis(argument=argument, values=[100, 120])])
     with pytest.raises(ValueError, match=f"{argument} cannot be scanned"):
         run_local(LoadTweezers, scan)
