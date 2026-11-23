@@ -4,9 +4,13 @@ Shared by the live ``tweezer_loading`` analysis and the Results tab's
 histogram of a measurement file. The numbers match
 ``analysis.get_array_loading_statistics`` with ``method="box"``, which is the
 reference for how the array is scored.
+
+``TrapSites`` bundles the saved trap sites and scoring settings, and scores raw
+camera frames with them.
 """
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.stats import norm
@@ -25,14 +29,21 @@ def find_sites(image, n_sites, step):
     return None
 
 
+def top_hat_image(image: np.ndarray, feature_size: int) -> np.ndarray:
+    """``image`` top-hat filtered as ``float``, keeping bright features smaller than ``feature_size``."""
+    return an.morphological_tophat_high_pass(
+        np.asarray(image, dtype=float), feature_size=feature_size
+    )
+
+
 def top_hat(frames: Iterable[np.ndarray], feature_size: int) -> list[np.ndarray]:
     """Each of ``frames`` top-hat filtered, keeping bright features smaller than ``feature_size``."""
-    return [
-        an.morphological_tophat_high_pass(
-            np.asarray(frame, dtype=float), feature_size=feature_size
-        )
-        for frame in frames
-    ]
+    return [top_hat_image(frame, feature_size) for frame in frames]
+
+
+def background_subtracted_mean(images, backgrounds) -> np.ndarray:
+    """Mean of ``images`` minus the mean of ``backgrounds``."""
+    return an.tweezer_show_bg_subtracted(images, backgrounds, show=False)
 
 
 def site_counts(
@@ -125,3 +136,82 @@ def imaging_survival(first: np.ndarray, second: np.ndarray, threshold: float) ->
         "survival_error": float(np.sqrt(survival * (1 - survival) / atoms)),
         "survival_atoms": atoms,
     }
+
+
+@dataclass(frozen=True)
+class BatchLoading:
+    """Loading statistics of a batch of shots.
+
+    Attributes:
+        photons: Photons at every site of every shot, ``(shots, sites)``.
+        loading: Mean loading probability over the sites.
+        threshold: Fitted photon threshold between empty and occupied.
+        fidelity: Detection fidelity at that threshold.
+    """
+
+    photons: np.ndarray
+    loading: float
+    threshold: float
+    fidelity: float
+
+
+@dataclass(frozen=True)
+class TrapSites:
+    """The trap sites of an array and the settings that score a camera's frames at them.
+
+    Attributes:
+        positions: ``{index: (row, col)}`` of each site in frame pixels.
+        window_size: Side of the box summed at each site, in pixels.
+        feature_size: Largest bright feature kept by the top-hat filter, in pixels.
+        threshold: Photons above which a site counts as occupied.
+    """
+
+    positions: dict[int, tuple[int, int]]
+    window_size: int
+    feature_size: int
+    threshold: float
+
+    def counts(self, frames: Iterable[np.ndarray]) -> np.ndarray:
+        """Raw pixel sums at every site of every frame, ``(frames, sites)``."""
+        return site_counts(frames, self.positions, self.window_size)
+
+    def photons(self, frames: Iterable[np.ndarray]) -> np.ndarray:
+        """Photons at every site of every frame after the top-hat filter, ``(frames, sites)``."""
+        return photons_at_sites(
+            top_hat(frames, self.feature_size), self.positions, self.window_size
+        )
+
+    def occupied(self, frames: Iterable[np.ndarray]) -> np.ndarray:
+        """Whether each site of each frame holds an atom, bool ``(frames, sites)``."""
+        return self.photons(frames) > self.threshold
+
+    def fit_loading(self, frames: Iterable[np.ndarray]) -> BatchLoading:
+        """Loading statistics of ``frames``, with the threshold fitted to their photon counts."""
+        photons, loading, threshold, fidelity = an.get_array_loading_statistics(
+            top_hat(frames, self.feature_size),
+            self.positions,
+            threshold=self.threshold,
+            window_size=self.window_size,
+            binning=60,
+            show_histogram=False,
+            threshold_detection=True,
+            verbose=False,
+        )
+        return BatchLoading(
+            np.asarray(photons),
+            float(np.mean(loading)),
+            float(threshold),
+            float(fidelity),
+        )
+
+    def survival(
+        self, firsts: Iterable[np.ndarray], seconds: Iterable[np.ndarray]
+    ) -> float:
+        """Fraction of atoms in ``firsts`` still present in ``seconds``."""
+        return an.extract_survival_probability(
+            top_hat(firsts, self.feature_size),
+            top_hat(seconds, self.feature_size),
+            self.positions,
+            threshold=self.threshold,
+            window_size=self.window_size,
+        )
