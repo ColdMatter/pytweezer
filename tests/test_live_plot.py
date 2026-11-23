@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pytweezer.GUI.viewers.live_plot import ResultHistory
+from pytweezer.GUI.live_plot_applet import ResultHistory
 
 LIMIT = 100
 

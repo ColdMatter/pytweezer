@@ -1,6 +1,7 @@
 """Rolling history of a scalar carried in a data stream's header.
 
-Built on :class:`pytweezer.GUI.applet.Applet`.
+Built on :class:`pytweezer.GUI.applet.Applet`, drawing on a
+:class:`~pytweezer.GUI.views.line_plot.LinePlot`.
 
 Where :mod:`pytweezer.GUI.viewers.live_plot` draws a whole array per message,
 this draws *one number* per message against arrival order, so a quantity an
@@ -20,11 +21,11 @@ Properties:
 
 from collections import deque
 
-import pyqtgraph as pg
 from PyQt6 import QtWidgets
 from PyQt6.QtGui import QFont
 
 from pytweezer.GUI.applet import Applet, run_applet
+from pytweezer.GUI.views.line_plot import LinePlot
 from pytweezer.servers import DataClient, PropertyAttribute
 
 
@@ -41,7 +42,6 @@ class ScalarHistory(Applet):
 
     def init_gui(self):
         self.stream = DataClient(self.name)
-        self.curves = {}
         self.points = {}
 
         layout = QtWidgets.QVBoxLayout()
@@ -49,12 +49,8 @@ class ScalarHistory(Applet):
         layout.setSpacing(0)
         self.setLayout(layout)
 
-        win = pg.GraphicsLayoutWidget()
-        layout.addWidget(win)
-        self.plot = win.addPlot()
-        self.plot.showGrid(x=True, y=True, alpha=0.15)
-        self.plot.setLabel("bottom", text="messages received")
-        self.legend = self.plot.addLegend(offset=(-10, 10))
+        self.view = LinePlot(x_label="messages received")
+        layout.addWidget(self.view)
 
         # Latest values, monospaced so the digits hold their columns instead of
         # jittering as the numbers change.
@@ -65,38 +61,33 @@ class ScalarHistory(Applet):
         self.readout.setContentsMargins(10, 6, 10, 8)
         layout.addWidget(self.readout)
 
-        view_box = self.plot.getViewBox()
-        view_box.menu.addAction("subscriptions").triggered.connect(
-            lambda: self.open_subscription_editor()
+        self.view.add_menu_action(
+            "subscriptions", lambda: self.open_subscription_editor()
         )
-        view_box.menu.addAction("configure").triggered.connect(self.open_config_editor)
-        view_box.menu.addAction("clear history").triggered.connect(self.clear)
+        self.view.add_menu_action("configure", self.open_config_editor)
+        self.view.add_menu_action("clear history", self.clear)
 
     def update_subscriptions(self):
         """Re-read ``datastreams`` and rebuild one curve per stream."""
         self.stream.unsubscribe()
-        self.plot.clear()
-        self.legend.clear()
-        self.curves = {}
+        self.view.clear_curves()
         self.points = {}
 
         streams = self._datastreams
         self.stream.subscribe(streams)
-        self.plot.setLabel("left", text=self._field)
+        self.view.set_y_label(self._field)
 
         for index, name in enumerate(streams):
             if name == "--None--":
                 continue
-            pen = pg.mkPen(self.stream_color(name, index), width=1.5)
-            self.curves[name] = self.plot.plot(pen=pen, name=name)
+            self.view.curve(name, self.stream_color(name, index))
             self.points[name] = deque(maxlen=max(2, int(self._history)))
         self._refresh_readout()
 
     def clear(self):
-        for points in self.points.values():
+        for name, points in self.points.items():
             points.clear()
-        for curve in self.curves.values():
-            curve.setData([], [])
+            self.view.set_curve(name, [], [])
         self._refresh_readout()
 
     def poll(self):
@@ -120,7 +111,7 @@ class ScalarHistory(Applet):
 
         if changed:
             for name, points in self.points.items():
-                self.curves[name].setData(range(len(points)), list(points))
+                self.view.set_curve(name, range(len(points)), list(points))
             self._refresh_readout()
 
     def _refresh_readout(self):
