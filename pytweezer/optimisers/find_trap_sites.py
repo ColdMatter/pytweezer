@@ -4,8 +4,11 @@ from typing import ClassVar
 
 import numpy as np
 
-from pytweezer.analysis import analysis as an
-from pytweezer.analysis.array_loading import top_hat
+from pytweezer.analysis.array_loading import (
+    TrapSites,
+    background_subtracted_mean,
+    top_hat_image,
+)
 from pytweezer.analysis.trap_sites import default_geometry, fit_trap_sites
 from pytweezer.experiment.arguments import Bool, Integer, Number
 from pytweezer.experiment.optimisers import SEARCH, Fit
@@ -90,12 +93,13 @@ class FindTrapSites(Fit, LoadTweezers):
 
     def fit(self) -> dict:
         firsts, backgrounds = self.take_calibration_shots()
-        average = an.tweezer_show_bg_subtracted(firsts, backgrounds, show=False)
+        average = background_subtracted_mean(firsts, backgrounds)
         self.record("calibration_image", average)
-        filtered = an.morphological_tophat_high_pass(
-            np.asarray(average, dtype=float), feature_size=self.feature_size
+        found = fit_trap_sites(
+            top_hat_image(average, self.feature_size),
+            self.geometry,
+            window_size=self.window_size,
         )
-        found = fit_trap_sites(filtered, self.geometry, window_size=self.window_size)
         self.record("roi_sites", found.sites, unit="px")
         self.record("scale", found.scale, unit="px/µm")
         self.record("angle", found.angle_deg, unit="deg")
@@ -104,21 +108,15 @@ class FindTrapSites(Fit, LoadTweezers):
         whole_pixels = {
             index: (round(y), round(x)) for index, (y, x) in enumerate(found.sites)
         }
-        _, _, threshold, fidelity = an.get_array_loading_statistics(
-            top_hat(firsts, self.feature_size),
-            whole_pixels,
-            threshold=self.initial_threshold,
-            window_size=self.window_size,
-            binning=60,
-            show_histogram=False,
-            threshold_detection=True,
-            verbose=False,
+        calibration_sites = TrapSites(
+            whole_pixels, self.window_size, self.feature_size, self.initial_threshold
         )
-        self.record("threshold", float(threshold), unit="photons")
-        self.record("calibration_fidelity", float(fidelity))
+        calibration = calibration_sites.fit_loading(firsts)
+        self.record("threshold", calibration.threshold, unit="photons")
+        self.record("calibration_fidelity", calibration.fidelity)
         return {
             "trap_sites": found.sites + self.roi_origin[::-1],
-            "trap_threshold": float(threshold),
+            "trap_threshold": calibration.threshold,
             "trap_window_size": self.window_size,
             "trap_feature_size": self.feature_size,
             "trap_geometry": self.geometry,

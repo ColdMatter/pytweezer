@@ -79,20 +79,26 @@ class RbMotMasterRunner(MotMasterExperiment):
         self.run_motmaster_sequence()
         settle_frame_counts(self.cameras, self.frame_settle, self.frame_timeout, 0.05)
         for name, camera in self.cameras.items():
-            if camera.frames_acquired() < marks[name]:
-                raise RuntimeError(
-                    f"{name}'s acquisition restarted during the run; its frames are lost"
-                )
-            frames = np.asarray(camera.read_frames_from(marks[name]))
-            if not len(frames):
-                raise RuntimeError(f"{name} took no frames during {self.script}")
-            expected = self.frames_per_run.setdefault(name, len(frames))
-            if len(frames) != expected:
-                raise RuntimeError(
-                    f"{name} took {len(frames)} frames during this run but {expected} "
-                    "during the first; every run must trigger it the same number of times"
-                )
-            self.record(f"{name}_images", frames)
+            self.record(
+                f"{name}_images", self.read_run_frames(name, camera, marks[name])
+            )
+
+    def read_run_frames(self, name: str, camera, mark: int) -> np.ndarray:
+        """``camera``'s frames since ``mark``, checked to be the same count as at the first point."""
+        if camera.frames_acquired() < mark:
+            raise RuntimeError(
+                f"{name}'s acquisition restarted during the run; its frames are lost"
+            )
+        frames = np.asarray(camera.read_frames_from(mark))
+        if not len(frames):
+            raise RuntimeError(f"{name} took no frames during {self.script}")
+        expected = self.frames_per_run.setdefault(name, len(frames))
+        if len(frames) != expected:
+            raise RuntimeError(
+                f"{name} took {len(frames)} frames during this run but {expected} "
+                "during the first; every run must trigger it the same number of times"
+            )
+        return frames
 
     def finish(self) -> None:
         try:

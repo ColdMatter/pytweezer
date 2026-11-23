@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pytweezer.analysis.array_loading import photons_at_sites, site_counts, top_hat
+from pytweezer.analysis.array_loading import TrapSites
 from pytweezer.analysis.cloud_fit import SPECIES_MASS_AMU, fit_frames
 from pytweezer.analysis.trap_sites import same_geometry, to_roi
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
@@ -140,6 +140,11 @@ class LoadTweezers(MotMasterExperiment):
 
     def prepare(self) -> None:
         super().prepare()
+        self.set_up_hamcam()
+        self.load_trap_sites()
+
+    def set_up_hamcam(self) -> None:
+        """Put the HamCam in external exposure with EM gain, binning 1 and the chosen ROI, live."""
         self.hamcam.stop_live()
         self.hamcam.set_binning(1)
         self.roi_origin = tuple(
@@ -157,6 +162,8 @@ class LoadTweezers(MotMasterExperiment):
         self.hamcam.set_gain(self.hamcam_gain)
         self.hamcam.start_live()
 
+    def load_trap_sites(self) -> None:
+        """Load the accepted trap sites into ``trap_sites`` and record them, or record why there are none."""
         # Fetched only for sequence bindings, so not with the overrides off.
         saved = self.saved_parameters or get_saved_parameters()
         self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(saved)
@@ -170,10 +177,10 @@ class LoadTweezers(MotMasterExperiment):
                 )
             logger.info("Recording no trap sites: %s", self.no_trap_sites_reason)
             return
-        self.record("trap_sites", np.array(list(self.trap_sites.values())))
-        self.record("trap_window_size", self.trap_window_size, unit="px")
-        self.record("trap_feature_size", self.trap_feature_size, unit="px")
-        self.record("threshold", self.trap_threshold, unit="photons")
+        self.record("trap_sites", np.array(list(self.trap_sites.positions.values())))
+        self.record("trap_window_size", self.trap_sites.window_size, unit="px")
+        self.record("trap_feature_size", self.trap_sites.feature_size, unit="px")
+        self.record("threshold", self.trap_sites.threshold, unit="photons")
 
     def run_point(self) -> None:
         mark = self.hamcam.start_shot({"rid": self.rid})
@@ -202,32 +209,20 @@ class LoadTweezers(MotMasterExperiment):
         if self.trap_sites is None:
             return
 
-        photons = photons_at_sites(
-            top_hat(frames, self.trap_feature_size),
-            self.trap_sites,
-            self.trap_window_size,
-        )
-        first, second = photons > self.trap_threshold
+        first, second = self.trap_sites.occupied(frames)
         self.record("first_occupied", first)
         self.record("second_occupied", second)
         self.record("loading", float(first.mean()))
         self.record("survival", float(second[first].mean()) if first.any() else np.nan)
         if self.save_tweezer_counts:
-            first_counts, second_counts = site_counts(
-                frames, self.trap_sites, self.trap_window_size
-            )
+            first_counts, second_counts = self.trap_sites.counts(frames)
             self.record("first_counts", first_counts, unit="counts")
             self.record("second_counts", second_counts, unit="counts")
 
-    def saved_trap_sites(
-        self, saved: dict
-    ) -> tuple[dict[int, tuple[int, int]] | None, str]:
-        """The accepted trap sites in ``saved`` as whole pixels of this ROI, by index; or ``None`` and why.
+    def saved_trap_sites(self, saved: dict) -> tuple[TrapSites | None, str]:
+        """The accepted trap sites in ``saved``, placed in whole pixels of this ROI; or ``None`` and why.
 
-        An empty reason means the experiment wants none.
-
-        Also sets ``trap_window_size``, ``trap_feature_size`` and
-        ``trap_threshold`` from ``saved``. Sites fitted to another
+        An empty reason means the experiment wants none. Sites fitted to another
         array than the rig has on the SLM are used with a warning; if the rig
         does not know its array, or cannot be reached, they are used unchecked.
         """
@@ -248,14 +243,12 @@ class LoadTweezers(MotMasterExperiment):
                 "has on the SLM; using them anyway. Run FindTrapSites again and "
                 "accept its proposal to fit the current array."
             )
-        self.trap_window_size = int(saved["trap_window_size"])
-        self.trap_feature_size = int(saved["trap_feature_size"])
-        self.trap_threshold = float(saved["trap_threshold"])
+        window_size = int(saved["trap_window_size"])
         # The camera may round the ROI's corner; sites are placed by the one it used.
         roi_x0, roi_y0 = self.roi_origin
         roi_width, roi_height = self.hamcam_roi_width, self.hamcam_roi_height
         sites = np.rint(to_roi(saved["trap_sites"], roi_y0, roi_x0)).astype(int)
-        half = self.trap_window_size // 2
+        half = window_size // 2
         outside = [
             index
             for index, (y, x) in enumerate(sites)
@@ -265,7 +258,13 @@ class LoadTweezers(MotMasterExperiment):
             return None, (
                 f"the summing windows of trap sites {outside} leave the camera's ROI"
             )
-        return {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}, ""
+        positions = {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}
+        return TrapSites(
+            positions,
+            window_size,
+            int(saved["trap_feature_size"]),
+            float(saved["trap_threshold"]),
+        ), ""
 
 
 class LoadTweezersNImages(LoadTweezers):

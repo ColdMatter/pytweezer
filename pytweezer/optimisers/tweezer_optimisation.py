@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from pytweezer.analysis import analysis as an
-from pytweezer.analysis.array_loading import photons_at_sites, site_counts, top_hat
 from pytweezer.experiment.arguments import Bool, Integer
 from pytweezer.experiment.optimisers import BayesianOptimisation
 
@@ -58,46 +56,18 @@ class TweezerOptimisation(BayesianOptimisation):
         """
         firsts, seconds = self.take_batch(**overrides)
         if self.save_tweezer_counts:
-            self.record(
-                "first_counts",
-                site_counts(firsts, self.trap_sites, self.trap_window_size),
-                unit="counts",
-            )
-            self.record(
-                "second_counts",
-                site_counts(seconds, self.trap_sites, self.trap_window_size),
-                unit="counts",
-            )
-        firsts = top_hat(firsts, self.trap_feature_size)
-        seconds = top_hat(seconds, self.trap_feature_size)
+            self.record("first_counts", self.trap_sites.counts(firsts), unit="counts")
+            self.record("second_counts", self.trap_sites.counts(seconds), unit="counts")
         # Loading is judged against a threshold refitted on this batch (the
         # accepted one only if the fit fails), survival against the accepted one.
         # TODO: check loading is judged against a per-batch refit while survival
         # uses the calibration threshold (as on rearrangement-optimisation-RnD)
-        first_photons, loading, _, fidelity = an.get_array_loading_statistics(
-            firsts,
-            self.trap_sites,
-            threshold=self.trap_threshold,
-            window_size=self.trap_window_size,
-            binning=60,
-            show_histogram=False,
-            threshold_detection=True,
-            verbose=False,
-        )
-        survival = an.extract_survival_probability(
-            firsts,
-            seconds,
-            self.trap_sites,
-            threshold=self.trap_threshold,
-            window_size=self.trap_window_size,
-        )
-        second_photons = photons_at_sites(
-            seconds, self.trap_sites, self.trap_window_size
-        )
-        self.record("first_occupied", np.asarray(first_photons) > self.trap_threshold)
-        self.record("second_occupied", second_photons > self.trap_threshold)
+        loading = self.trap_sites.fit_loading(firsts)
+        survival = self.trap_sites.survival(firsts, seconds)
+        self.record("first_occupied", loading.photons > self.trap_sites.threshold)
+        self.record("second_occupied", self.trap_sites.occupied(seconds))
         return {
-            "loading": float(np.mean(loading)),
+            "loading": loading.loading,
             "survival": float(survival),
-            "fidelity": float(fidelity),
+            "fidelity": loading.fidelity,
         }
