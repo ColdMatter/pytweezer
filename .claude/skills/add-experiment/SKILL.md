@@ -84,8 +84,7 @@ Rules that matter:
   file and the queue). Don't catch-and-print.
 - A class only appears in the GUI if it is defined in that module and
   overrides `run_point`, so intermediate base classes stay hidden; a base that
-  inherits a concrete `run_point` hides with `run_point = Experiment.run_point`
-  (`TweezerArrayMeasurement`).
+  inherits a concrete `run_point` hides with `run_point = Experiment.run_point`.
 - `self.rid` is the task's run id (-1 under `run_local`), e.g. to tag a shot's
   live frames (`camera.start_shot({"rid": self.rid})`).
 - An experiment that chooses its own points overrides
@@ -432,13 +431,13 @@ The Rb tweezer experiments, in the order a session uses them:
    `save_tweezer_counts`; frames are recorded as `hamcam_images`
    (`(2, H, W)` per point) only with `save_raw_images`.
    `LoadTweezers` runs without sites only if it records frames;
-   `TweezerArrayMeasurement` always needs them.
+   the optimisers built on `TweezerOptimisation` always need them.
    `LoadTweezersMOTImage` is `LoadTweezers` plus the ORCA's one frame of the Rb
    MOT from the same shot, recorded as an `orca_*` cloud fit;
    `LoadTweezers` itself never touches the ORCA.
 4. The classes whose point is a batch of shots each loop `take_shot()`
-   themselves: `TweezerArrayMeasurement.take_batch(**sequence)` (`score_batch()`,
-   used by the Bayesian optimisers) and `FindTrapSites.take_calibration_shots()`.
+   themselves: `TweezerOptimisation.take_batch(**sequence)` (`score_batch()`,
+   the base of the Bayesian optimisers, in `optimisers/tweezer_optimisation.py`) and `FindTrapSites.take_calibration_shots()`.
    Their `first_occupied`/`second_occupied`/`*_counts` are `(shots, sites)` per
    point, and `save_raw_images` (off by default there) records
    `hamcam_images`, `(shots, 2, H, W)` per point. They declare no analyses; `LoadTweezers`

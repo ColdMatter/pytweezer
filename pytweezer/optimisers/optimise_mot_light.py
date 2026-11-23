@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import ClassVar
 
 from pytweezer.experiment.arguments import Integer
-from pytweezer.experiment.optimisers import SEARCH, BayesianOptimisation, Dimension
-from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
+from pytweezer.experiment.optimisers import SEARCH, Dimension
+from pytweezer.experiments.load_tweezers import LoadTweezers
+from pytweezer.optimisers.tweezer_optimisation import TweezerOptimisation
 
 
-class OptimiseMOTLight(BayesianOptimisation, TweezerArrayMeasurement):
+class OptimiseMOTLight(TweezerOptimisation, LoadTweezers):
     """Find the MOT-loading cooling and repump VCOs and VVAs that load the array best.
 
     Each evaluation images the atoms twice with no drop between, and scores the

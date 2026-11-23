@@ -65,7 +65,7 @@ class CatalogueView(QWidget):
             ]
             if module.get("error"):
                 items.append((file, _broken_item(file, module)))
-            # A module of base classes only, such as TweezerArrayMeasurement, offers nothing.
+            # A module of base classes only offers nothing.
             if items:
                 parent = self._folder(folders, tuple(folder))
                 entries += [(parent, name, item) for name, item in items]

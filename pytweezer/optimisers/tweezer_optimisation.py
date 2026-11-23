@@ -1,4 +1,4 @@
-"""Score the Rb tweezer array over batches of shots, by loading and survival."""
+"""The base of the Bayesian optimisers that score the Rb tweezer array over a batch of shots."""
 
 from __future__ import annotations
 
@@ -6,35 +6,31 @@ import numpy as np
 
 from pytweezer.analysis import analysis as an
 from pytweezer.analysis.array_loading import photons_at_sites, site_counts, top_hat
-from pytweezer.experiment import Experiment
 from pytweezer.experiment.arguments import Bool, Integer
-from pytweezer.experiments.load_tweezers import LoadTweezers
+from pytweezer.experiment.optimisers import BayesianOptimisation
 
 
-class TweezerArrayMeasurement(LoadTweezers):
-    """Score batches of shots at the accepted trap sites, by loading and survival.
+class TweezerOptimisation(BayesianOptimisation):
+    """A Bayesian optimisation whose evaluations score a batch of tweezer shots, mixed with :class:`~pytweezer.experiments.load_tweezers.LoadTweezers`.
 
-    The trap sites, summing window, top-hat size and occupancy threshold are
-    those accepted from :class:`~pytweezer.optimisers.find_trap_sites.FindTrapSites`; a measurement refuses to run
-    without them.
+    An optimiser subclasses ``(TweezerOptimisation, LoadTweezers)`` and its
+    ``measure`` returns :meth:`score_batch` at the settings it is given. The
+    trap sites, summing window, top-hat size and occupancy threshold are
+    those accepted from :class:`~pytweezer.optimisers.find_trap_sites.FindTrapSites`;
+    an optimisation refuses to run without them.
     """
 
-    shots = Integer(20, min=1, group="Analysis", tooltip="shots per point")
+    shots = Integer(20, min=1, group="Analysis", tooltip="shots per evaluation")
     save_raw_images = Bool(
         False,
         group="Camera",
         tooltip="record every shot's camera frames as hamcam_images",
     )
 
-    # Not LoadTweezers' point: each optimiser measures its own, and this keeps
-    # the class out of the Experiments list.
-    run_point = Experiment.run_point
-
     def prepare(self) -> None:
         super().prepare()
         if self.trap_sites is None:
             raise RuntimeError(self.no_trap_sites_reason)
-        self.threshold = self.trap_threshold
 
     def take_batch(self, **sequence) -> tuple[list, list]:
         """``shots`` shots with script parameters ``sequence``; their first and second frames.
@@ -76,7 +72,7 @@ class TweezerArrayMeasurement(LoadTweezers):
         first_photons, loading, _, fidelity = an.get_array_loading_statistics(
             firsts,
             self.trap_sites,
-            threshold=self.threshold,
+            threshold=self.trap_threshold,
             window_size=self.trap_window_size,
             binning=60,
             show_histogram=False,
@@ -87,14 +83,14 @@ class TweezerArrayMeasurement(LoadTweezers):
             firsts,
             seconds,
             self.trap_sites,
-            threshold=self.threshold,
+            threshold=self.trap_threshold,
             window_size=self.trap_window_size,
         )
         second_photons = photons_at_sites(
             seconds, self.trap_sites, self.trap_window_size
         )
-        self.record("first_occupied", np.asarray(first_photons) > self.threshold)
-        self.record("second_occupied", second_photons > self.threshold)
+        self.record("first_occupied", np.asarray(first_photons) > self.trap_threshold)
+        self.record("second_occupied", second_photons > self.trap_threshold)
         return {
             "loading": float(np.mean(loading)),
             "survival": float(survival),

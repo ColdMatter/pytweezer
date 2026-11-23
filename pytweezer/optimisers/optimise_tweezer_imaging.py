@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import ClassVar
 
 from pytweezer.experiment.arguments import Integer, Number
-from pytweezer.experiment.optimisers import SEARCH, BayesianOptimisation, Dimension
-from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
+from pytweezer.experiment.optimisers import SEARCH, Dimension
+from pytweezer.experiments.load_tweezers import LoadTweezers
+from pytweezer.optimisers.tweezer_optimisation import TweezerOptimisation
 
 
-class OptimiseTweezerImaging(BayesianOptimisation, TweezerArrayMeasurement):
+class OptimiseTweezerImaging(TweezerOptimisation, LoadTweezers):
     """Find the imaging cooling-light VCO and VVA that keep the most atoms through imaging.
 
     Each evaluation images the atoms twice with no drop between. The score is

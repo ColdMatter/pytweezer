@@ -125,9 +125,11 @@ fit view draws the results `calibration_image` and `roi_sites`
 
 ## The Rb tweezer optimisers
 
-The measurements they run (`SlmTweezerArray`, `LoadTweezers`,
-`TweezerArrayMeasurement`) are described under "Tweezer array measurements" in
-add-experiment.
+The measurements they run (`SlmTweezerArray`, `LoadTweezers`) are described
+under "Tweezer array measurements" in add-experiment. The Bayesian ones are
+`(TweezerOptimisation, LoadTweezers)`: `TweezerOptimisation`
+(`optimisers/tweezer_optimisation.py`) adds `shots` and `score_batch()`, and
+refuses to run without accepted trap sites.
 
 - `FindTrapSites` (`Fit`) takes `calibration_shots` with the tweezers off
   during the background drop, fits the rig's array geometry (or a
