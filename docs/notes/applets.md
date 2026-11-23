@@ -36,11 +36,25 @@ pytweezer/GUI/applet.py                 (base class + entry-point helper)
 │   └── open_config_editor()                      shared "configure" dialog
 └── run_applet(applet_cls, default_name)   theme + parse <name> argv + Qt loop
 
+pytweezer/GUI/image_applet.py           ImageApplet(Applet)      image (stream_category="Image"); holds self.view
+pytweezer/GUI/live_plot_applet.py       LivePlotApplet(Applet)   data  (stream_category="Data"); grid of PlotPanels
+pytweezer/GUI/zmq_roi.py                zmq_ROI                  ROI persisted to Properties
+pytweezer/GUI/views/                    base drawings, no streams or Properties
+├── image.py           ImageView        image, colour bar, ROIs, side plots, overlay paths
+├── line_plot.py       LinePlot
+├── histogram.py       HistogramPlot
+└── tweezer_loading.py TweezerLoadingPlots
+
 pytweezer/GUI/viewers/                   (the applet scripts themselves)
-├── image_monitor.py       ImageDisplay(Applet)      image  (stream_category="Image")
-├── image_plot_monitor.py  ImageProjectionDisplay(ImageDisplay)  image + linked sum plots
-├── live_plot.py           LivePlot(Applet)          data   (stream_category="Data")
-└── scalar_history.py      ScalarHistory(Applet)     data, one header field vs shot
+├── image_monitor.py       ImageDisplay(ImageApplet)
+├── image_plot_monitor.py  ImageProjectionDisplay(ImageApplet)  image + linked sum plots
+├── camera_applet.py       CameraApplet(ImageApplet)
+├── tweezer_monitor.py     TweezerDisplay(ImageApplet)
+├── live_plot.py           LivePlot(LivePlotApplet)
+├── stacked_plotter.py     StackedPlotter(LivePlotApplet)
+├── scalar_history.py      ScalarHistory(Applet)     data, one header field vs shot
+├── tweezer_loading.py     TweezerLoadingViewer(Applet)
+└── slm_monitor.py         SlmMonitor(Applet)
       (viewers/archive/ holds retired/experimental viewers — ignore them)
 
 pytweezer/GUI/applet_launcher.py         (the manager panel)

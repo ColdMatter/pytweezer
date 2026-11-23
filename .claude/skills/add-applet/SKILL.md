@@ -172,10 +172,17 @@ Not everything worth viewing is a stream:
 
 A **base view** is a general-purpose widget that shows what it is handed and
 knows nothing of streams, Properties, devices or the archive. Base drawings
-belong in `pytweezer/GUI/views/`. Only the histogram plotter exists there so far
-(`histogram.py`, `HistogramPlot`). The image viewer and line plot are added in
-phase 2 of the framework split; until then the applets' drawing still sits in
-`viewers/image_monitor.py` and `viewers/live_plot.py`.
+belong in `pytweezer/GUI/views/`: `HistogramPlot` (`histogram.py`), `ImageView`
+(`image.py`: image, colour bar, ROIs, side plots, overlay paths), `LinePlot`
+(`line_plot.py`) and `TweezerLoadingPlots` (`tweezer_loading.py`).
+
+The framework applet bases wire streams to those views: `ImageApplet`
+(`GUI/image_applet.py`) holds an `ImageView` as `self.view`, and
+`LivePlotApplet` (`GUI/live_plot_applet.py`) is the grid of plots. An image
+applet subclasses `ImageApplet` and draws through `self.view`; a data-plot
+applet subclasses `LivePlotApplet` or builds its own `Applet` around a
+`LinePlot`. No applet inherits from another applet: applets inherit only
+framework classes (`Applet`, `ImageApplet`, `LivePlotApplet`).
 
 A **specialisation** (an image with trap sites marked, a histogram with a fit
 and a threshold) stays in the applet or default-analysis view that uses it, and
@@ -244,20 +251,24 @@ Two pyqtgraph traps worth knowing:
 
 ## Fit overlays and the projections monitor
 
-The Image Monitor draws a fit on top of the image from a *data* stream, with no new viewer code:
+The Image Monitor (`ImageApplet`) draws a fit on top of the image from a *data* stream, with no new viewer code:
 list the fit's stream in `overlaystreams` (the `CloudFitAnalysis` in `analyses/live/cloud_fit.py`
 publishes one; its header carries `cloud_fit.FIELDS`: `x0`, `y0`, `sigma_major`, `sigma_minor`,
 `angle`, ... in the image's plot coordinates) and `n_contours` sets how many ellipses are drawn.
-`overlay_paths(head, n)` in `viewers/image_monitor.py` turns such a header into the ellipses (`[]`
+`overlay_paths(head, n)` in `GUI/image_applet.py` turns such a header into the ellipses (`[]`
 for a failed fit); reuse it for any viewer that shows a fit. Image and fit must share a frame: the
 fit runs on the frame the image shows, so both use the header's `_offset`/`_imgresolution`
 (`cloud_fit.frame_geometry`).
 
 `viewers/image_plot_monitor.py` is the pattern for "image plus something linked to its axes": a
-subclass of `ImageDisplay` that adds a `projectionstreams` category (names of `projections.py`
+subclass of `ImageApplet` that adds a `projectionstreams` category (names of `projections.py`
 analyses; rows 0-1 of each 3xN message are the profile, row 2 its fit curve), draws the sums above
-and left of the image, and links their axes to the image view. Subclass the Image Monitor like
-this rather than copying it; override its hooks, keep its row-major drawing.
+and left of the image (`self.view.add_side_plot("top")` / `("left")`, which link their axes to
+the image). Subclass `ImageApplet` like this rather than copying the Image Monitor: extend
+`init_gui` after calling `super().init_gui()`, keep its row-major drawing. To put a widget beside
+or under the image, insert it through `panel_layout` or `image_layout`. A persisted ROI is a
+`pytweezer.GUI.zmq_roi.zmq_ROI` created by the applet and passed to `self.view.add_roi`; the
+view never touches Properties.
 
 ## Preview it before you call it done
 
@@ -364,33 +375,33 @@ what was built or why.
 
 - `viewers/scalar_history.py` — the smallest complete applet: a header field
   from each data stream, correct drain and unpack handling.
-- `viewers/live_plot.py` — a grid of plots (context menu → *add plot*), each
+- `viewers/live_plot.py` — a `LivePlotApplet`: a grid of plots (context menu → *add plot*), each
   with its own subscriptions under its key in `plots`: a curve per data
   stream's array, a rolling history per chosen header field, and markers per
   experiment result from `ExperimentFeed`.
-- `viewers/stacked_plotter.py` — the Live Plot in one column with x axes
+- `viewers/stacked_plotter.py` — a `LivePlotApplet` in one column with x axes
   linked, by overriding its `arrange` hook; the pattern for another layout of
   the same plots.
-- `viewers/tweezer_loading.py` — a thin applet around a shared plot widget.
-- `viewers/tweezer_monitor.py` — subclasses the Image Monitor to draw the saved
+- `viewers/tweezer_loading.py` — a thin applet around a shared view (`views/tweezer_loading.py`).
+- `viewers/tweezer_monitor.py` — subclasses `ImageApplet` to draw the saved
   trap sites over each frame by its ROI origin.
 - `viewers/slm_monitor.py` — four image streams in a grid, each with its own
   subscription, in metres when the header says so.
-- `viewers/image_monitor.py` — image stream, colormap + histogram LUT, ROIs
+- `viewers/image_monitor.py` — the `ImageApplet` itself (its code lives in
+  `GUI/image_applet.py`): image stream, colormap + histogram LUT, ROIs
   (`CameraROI`: right-click copies one as a sensor-pixel camera ROI), and
   a data panel below the image (`DataSidebar`: the latest message of each
   subscribed data stream, one block per stream; on by default); shows a second
   stream category (masks) on its own `streamkey`, and cloud-fit contour ellipses
   from `overlaystreams` (`overlay_paths`).
-- `viewers/image_plot_monitor.py` — the Image Monitor plus the x and y sums
+- `viewers/image_plot_monitor.py` — an `ImageApplet` plus the x and y sums
   (`projectionstreams`) in plots above and left of the image, linked to its
   axes; the example to copy for multiple linked plots in one window.
-- `viewers/camera_applet.py` — the Image Monitor with a camera's settings
+- `viewers/camera_applet.py` — an `ImageApplet` with a camera's settings
   (`viewers/camera_sidebar.py`) inserted left of the image through
-  `ImageDisplay.panel_layout`, and a readout under the image through
+  `ImageApplet.panel_layout`, and a readout under the image through
   `image_layout`; it calls the camera over RPC on one worker thread
   (`CameraLink`) and follows `ExperimentFeed` to go read-only while a task
   holds the camera, or may (until the manager's state has arrived).
 
-`viewers/archive/` holds retired viewers — do not use them as models, though
-`zmq_ROI` is still imported from there by the image viewers.
+`viewers/archive/` holds retired viewers — do not use them as models.

@@ -28,7 +28,7 @@ from pytweezer.GUI.applet import Applet, run_applet
 from pytweezer.GUI.views.line_plot import LinePlot
 from pytweezer.servers import DataClient, PropertyAttribute
 
-# The frame pyqtgraph's GraphicsLayoutWidget gave this plot when it was drawn on one.
+# Pixels of margin around the plot, between it and the window edge.
 PLOT_MARGIN = 9
 
 
