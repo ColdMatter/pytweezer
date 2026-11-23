@@ -250,6 +250,10 @@ class LoadTweezers(MotMasterExperiment):
 
     def run_point(self) -> None:
         frames = self.take_shot()
+        self.record_data(frames)
+
+    def record_data(self, frames: np.ndarray) -> None:
+        """Record the frames, signal and per-site results of one shot's two HamCam ``frames``."""
         if self.save_raw_images:
             self.record("hamcam_images", frames)
         first_image, second_image = frames
