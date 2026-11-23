@@ -21,7 +21,7 @@ class OptimiseMOTLight(TweezerOptimisation, LoadTweezers):
         Dimension("rep_vco", span=0.5, save_as="tMOTLoadRepVCO", limits=(0, 10)),
         Dimension("rep_vva", span=0.2, save_as="tMOTLoadRepVVA", limits=(0, 10)),
         # FIXME: placeholder limits, in the script's units, to check with the load time
-        Dimension("load_time", save_as=MOT_LOAD_TIME, low=10, high=500),
+        Dimension("load_time", save_as=MOT_LOAD_TIME, low=10, high=500, whole=True),
     ]
     n_calls = Integer(40, min=1, group=SEARCH)
     n_initial = Integer(10, min=1, group=SEARCH)

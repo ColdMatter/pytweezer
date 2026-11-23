@@ -37,7 +37,8 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   `Dimension` `<setting>_low/_high`); declare one of those names yourself to
   override it. `Dimension(..., span=0.5, save_as=...)` instead searches its
   `save_as` value at the start of the run ± `<setting>_span`; every Bayesian run
-  records its `search_bounds`. `Dimension(..., limits=(low, high))` clips
+  records its `search_bounds`. `Dimension(..., whole=True)` asks only whole numbers (for an Int32 script
+  parameter). `Dimension(..., limits=(low, high))` clips
   either kind of range to what the hardware takes (an analog output's ±10 V);
   a range wholly outside them raises `ValueError` at `prepare()`. Duplicate settings or `save_as`, a bad `goal`,
   `low >= high`, neither bounds nor span, a non-positive span, or a span with

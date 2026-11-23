@@ -324,6 +324,21 @@ def test_a_dimension_is_never_searched_beyond_its_limits(monkeypatch):
     assert np.all(m.results["detuning"] <= 2.0)
 
 
+class WholePower(DemoBayesian):
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("detuning", low=0.0, high=2.0, save_as="demo_resonance"),
+        Dimension("power", low=1, high=9, save_as="demo_power", whole=True),
+    ]
+
+
+def test_a_whole_dimension_is_only_ever_asked_at_whole_values():
+    m = run_local(WholePower, n_calls=8, n_initial=4)
+    assert m.status == "completed", m.attrs["error"]
+    assert np.all(m.results["power"] == np.round(m.results["power"]))
+    assert np.all((m.results["power"] >= 1) & (m.results["power"] <= 9))
+    assert float(m.constants["proposed.demo_power"]).is_integer()
+
+
 class LowestCounts(DemoBayesian):
     goal = "min"
 

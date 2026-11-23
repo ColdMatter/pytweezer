@@ -54,8 +54,8 @@ class FakeSequencer:
 
     def get_params(self):
         return dict(SIMULATED_SCRIPT_PARAMETERS["RbTweezerBasic2026_2"]) | {
-            "tMOTLoadTime": 100.0,
-            "tMolassesDuration": 5.0,
+            "tMOTLoadTime": 100,
+            "tMolassesDuration": 5,
         }
 
     def start_motmaster_experiment(self, parameters):

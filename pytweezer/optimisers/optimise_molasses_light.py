@@ -24,7 +24,11 @@ class OptimiseMolassesLight(TweezerOptimisation, LoadTweezers):
     dimensions: ClassVar[list[Dimension]] = [
         Dimension(setting, span=span, save_as=parameter, limits=(0, 10))
         for setting, parameter, span in _MOLASSES_LIGHT
-    ] + [Dimension("molasses_time", save_as="tMolassesDuration", low=1, high=20)]
+    ] + [
+        Dimension(
+            "molasses_time", save_as="tMolassesDuration", low=1, high=20, whole=True
+        )
+    ]
     n_calls = Integer(80, min=1, group=SEARCH)
     n_initial = Integer(16, min=1, group=SEARCH)
     loading_threshold = Number(0.55, min=0, max=1, group=SEARCH)

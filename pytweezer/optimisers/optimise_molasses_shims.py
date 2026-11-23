@@ -27,7 +27,9 @@ class OptimiseMolassesShims(TweezerOptimisation, LoadTweezers):
         Dimension(
             "shim_z", span=0.25, save_as="tMolassesShimZccValue", limits=(-10, 10)
         ),
-        Dimension("molasses_time", save_as="tMolassesDuration", low=1, high=20),
+        Dimension(
+            "molasses_time", save_as="tMolassesDuration", low=1, high=20, whole=True
+        ),
     ]
     n_calls = Integer(50, min=1, group=SEARCH)
     n_initial = Integer(10, min=1, group=SEARCH)

@@ -67,7 +67,8 @@ class Dimension:
     It is searched between ``low`` and ``high`` or, given ``span`` instead,
     within ``span`` of the value ``save_as`` holds when the run starts, never
     outside ``limits`` (the ``(low, high)`` the hardware takes). Its best value
-    is proposed for the saved parameter ``save_as``.
+    is proposed for the saved parameter ``save_as``. With ``whole`` it is
+    only ever asked at whole numbers, for a script parameter that is an integer.
     """
 
     setting: str
@@ -77,6 +78,7 @@ class Dimension:
     high: float | None = None
     span: float | None = None
     limits: tuple[float, float] | None = None
+    whole: bool = False
 
 
 def shortfall(value: float, threshold: float) -> float:
@@ -582,7 +584,7 @@ class BayesianOptimisation(Optimiser):
         self.bounds = bounds = self.search_bounds()
         self.record("search_bounds", {s: list(b) for s, b in bounds.items()})
         self._optimizer = skopt.Optimizer(
-            dimensions=[bounds[dimension.setting] for dimension in self.dimensions],
+            dimensions=[self._space(dimension) for dimension in self.dimensions],
             base_estimator="GP",
             acq_func="EI",
             n_initial_points=self.n_initial,
@@ -591,13 +593,24 @@ class BayesianOptimisation(Optimiser):
         )
         super().prepare()
 
+    def _space(self, dimension: Dimension) -> tuple[float, float] | skopt.space.Integer:
+        low, high = self.bounds[dimension.setting]
+        if not dimension.whole:
+            return (low, high)
+        return skopt.space.Integer(math.ceil(low), math.floor(high))
+
     def _xi(self, index: int) -> float:
         fraction = index / max(self.n_calls - 1, 1)
         return self.xi_start * (self.xi_end / self.xi_start) ** fraction
 
     def run_point(self) -> None:
         xi = self._optimizer.acq_func_kwargs["xi"]
-        values = [float(value) for value in self._optimizer.ask()]
+        values = [
+            int(value) if dimension.whole else float(value)
+            for dimension, value in zip(
+                self.dimensions, self._optimizer.ask(), strict=True
+            )
+        ]
         settings = {
             dimension.setting: value
             for dimension, value in zip(self.dimensions, values, strict=True)
