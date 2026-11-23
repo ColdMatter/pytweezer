@@ -52,9 +52,10 @@ class Applet(QtWidgets.QWidget):
 
     Subclasses typically set :attr:`stream_category`, build their widgets in
     :meth:`init_gui`, subscribe in :meth:`update_subscriptions`, and pull fresh
-    stream data in :meth:`poll`. :meth:`update_subscriptions` makes the first
-    subscription, called once straight after :meth:`init_gui` returns, so
-    :meth:`init_gui` only builds widgets.
+    stream data in :meth:`poll`. The first subscription is made by a call to
+    :meth:`update_subscriptions` straight after :meth:`init_gui` returns, so
+    :meth:`init_gui` need not subscribe (subscribing there too is harmless:
+    it is idempotent).
     """
 
     #: ``"Image"`` or ``"Data"`` — which stream catalog the subscription editor

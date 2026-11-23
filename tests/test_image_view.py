@@ -107,3 +107,21 @@ def test_row_zero_can_sit_at_the_bottom(qapp):
 
     assert not view.plot.getViewBox().yInverted()
     assert view.plot.getAxis("left").labelText == "z"
+
+
+@pytest.mark.parametrize("levels", [None, (0, 5)])
+def test_levels_without_a_colour_bar_are_the_images(qapp, levels):
+    view = ImageView(colour_bar=None)
+    frame = np.arange(16.0).reshape(4, 4)
+
+    view.show_image(frame, levels=levels)
+
+    assert view.levels() == (levels or (frame.min(), frame.max()))
+
+
+def test_the_left_side_plot_follows_the_image_direction(qapp):
+    view = ImageView(row_zero_at_top=False)
+
+    left = view.add_side_plot("left")
+
+    assert not left.getViewBox().yInverted()

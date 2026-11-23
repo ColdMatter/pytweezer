@@ -52,7 +52,8 @@ class ImageView(QtWidgets.QWidget):
 
     Attributes:
         graphics: The graphics layout holding the plot and its colour scale.
-        plot: The image plot, with Y inverted and the aspect locked.
+        plot: The image plot, with the aspect locked and Y inverted when
+            ``row_zero_at_top``.
         image_item: The frame being shown.
         lut: The colour scale (``None`` without one).
         mask_item: The mask drawn over the frame.
@@ -195,7 +196,8 @@ class ImageView(QtWidgets.QWidget):
         elif self.lut is not None:
             low, high = self.lut.levels()
         else:
-            low, high = self.image_item.getLevels() or (0.0, 0.0)
+            levels = self.image_item.getLevels()
+            low, high = (0.0, 0.0) if levels is None else levels
         return float(low), float(high)
 
     def set_bar_ticks(self, ticks: list[tuple[float, str]]) -> None:
@@ -258,7 +260,7 @@ class ImageView(QtWidgets.QWidget):
             side_plot.setYLink(self.plot)
             side_plot.hideAxis("left")
             # A linked view follows the image's range but not its inverted direction.
-            side_plot.getViewBox().invertY(True)
+            side_plot.getViewBox().invertY(self.plot.getViewBox().yInverted())
             for plot in (self.plot, side_plot):
                 plot.getAxis("bottom").setHeight(AXIS_SIZE // 2)
             self.graphics.ci.layout.setColumnStretchFactor(1, 4)

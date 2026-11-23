@@ -57,10 +57,11 @@ class LinePlot(pg.PlotWidget):
         return curve
 
     def set_curve(self, key: str, x, y) -> None:
-        """Draw ``y`` against ``x`` on the curve under ``key``."""
+        """Draw ``y`` against ``x`` on the curve under ``key``, which :meth:`curve` made."""
         self._curves[key].setData(x, y)
 
     def remove_curve(self, key: str) -> None:
+        """Remove the curve under ``key``, which :meth:`curve` made."""
         self.removeItem(self._curves.pop(key))
 
     def clear_curves(self) -> None:

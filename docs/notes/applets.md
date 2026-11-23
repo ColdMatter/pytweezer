@@ -55,7 +55,6 @@ pytweezer/GUI/viewers/                   (the applet scripts themselves)
 ├── scalar_history.py      ScalarHistory(Applet)     data, one header field vs shot
 ├── tweezer_loading.py     TweezerLoadingViewer(Applet)
 └── slm_monitor.py         SlmMonitor(Applet)
-      (viewers/archive/ holds retired/experimental viewers — ignore them)
 
 pytweezer/GUI/applet_launcher.py         (the manager panel)
 └── AppletLauncher(BWidget)   add/start/stop/restart applet subprocesses;

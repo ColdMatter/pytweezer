@@ -113,8 +113,9 @@ while self.stream.has_new_data(timeout_ms=0):
 ```
 
 **`update_subscriptions` must unsubscribe first, then rebuild the view.**
-`Applet` calls it once straight after `init_gui` (so `init_gui` only builds
-widgets and never subscribes), then every time a dialog closes, so leaving old
+`Applet` calls it once straight after `init_gui` (so `init_gui` need not
+subscribe; some applets, e.g. `CameraApplet`, still do, which is harmless as
+subscribing is idempotent), then every time a dialog closes, so leaving old
 subscriptions attached silently accumulates them, and leaving old curves in the
 plot leaves ghosts of streams the user just removed. Unsubscribe, clear,
 re-subscribe, recreate.
@@ -165,8 +166,8 @@ Not everything worth viewing is a stream:
   them in a frame with `analysis/trap_sites.to_roi(sites, head.get("roi_y0", 0),
   head.get("roi_x0", 0))`, or they sit off the atoms whenever the camera reads an
   ROI. The Image Monitor draws frames row-major, row 0 at the top and x along the
-  columns, as the Optimisers tab and the notebooks do, so a subclass gets that
-  for free.
+  columns, as the Optimisers tab and the notebooks do, so a subclass of
+  `ImageApplet` gets that for free.
 
 ## Drawings: `GUI/views/`, specialisations, and who imports whom
 
@@ -227,7 +228,7 @@ What is left to you is the composition:
   on the outer layout. A plot framed in 11 px of background is 11 px of data the
   user did not get.
 - **Wire up `subscriptions` and `configure` in the view-box context menu**
-  (`vb.menu.addAction("subscriptions")`).
+  with the view's `add_menu_action(text, slot)`.
 - **Colour curves with `self.stream_color(stream, index)`.** It cycles the
   shared palette so several streams are distinguishable immediately, while still
   honouring a per-stream colour the user has set. Hardcoding a pen colour means
@@ -244,8 +245,9 @@ Two pyqtgraph traps worth knowing:
 
 - A `HistogramLUTItem` **takes ownership of its image's lookup table**. Calling
   `image_item.setLookupTable(...)` alongside one is silently discarded and the
-  image renders greyscale. Set the colormap on the histogram instead:
-  `lut.gradient.setColorMap(cmap)`.
+  image renders greyscale. `ImageView.set_colour_map(name)`
+  sets it on the histogram for you; use it rather than touching the image's
+  lookup table.
 - `pg.setConfigOptions` is global and already set by `apply_theme`. Re-setting
   `background`/`foreground` in an applet only puts it out of step with the rest.
 
@@ -387,8 +389,8 @@ what was built or why.
   trap sites over each frame by its ROI origin.
 - `viewers/slm_monitor.py` — four image streams in a grid, each with its own
   subscription, in metres when the header says so.
-- `viewers/image_monitor.py` — the `ImageApplet` itself (its code lives in
-  `GUI/image_applet.py`): image stream, colormap + histogram LUT, ROIs
+- `viewers/image_monitor.py` — `ImageDisplay`, a bare `ImageApplet` subclass (the
+  launcher's Image Monitor; `ImageApplet` lives in `GUI/image_applet.py`): image stream, colormap + histogram LUT, ROIs
   (`CameraROI`: right-click copies one as a sensor-pixel camera ROI), and
   a data panel below the image (`DataSidebar`: the latest message of each
   subscribed data stream, one block per stream; on by default); shows a second
@@ -404,4 +406,3 @@ what was built or why.
   (`CameraLink`) and follows `ExperimentFeed` to go read-only while a task
   holds the camera, or may (until the manager's state has arrived).
 
-`viewers/archive/` holds retired viewers — do not use them as models.
