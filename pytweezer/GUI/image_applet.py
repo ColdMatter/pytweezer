@@ -138,9 +138,7 @@ class ImageApplet(Applet):
     """An applet drawing the image streams in ``imagestreams`` live, with masks, fit overlays and ROIs.
 
     A subclass may override :meth:`init_gui`, calling ``super().init_gui()``
-    first; ``self.view`` exists from then on. A subclass that overrides
-    :meth:`update_subscriptions` makes its first subscription itself, at the
-    end of its :meth:`init_gui`.
+    first; ``self.view`` exists from then on.
 
     Attributes:
         view: The image, its colour scale and the ROIs.
@@ -190,9 +188,6 @@ class ImageApplet(Applet):
         self.imgstream = ImageClient("imageviewer")
         self.maskstream = ImageClient("imageviewermask")
         self.overlayclient = DataClient("imageviewer_overlay")
-        # Not self.update_subscriptions(): a subclass's override would run
-        # before its init_gui has built what it subscribes.
-        ImageApplet.update_subscriptions(self)
         if self.imgstream.has_new_data():
             imgdata, head = self.imgstream.recv()
         else:

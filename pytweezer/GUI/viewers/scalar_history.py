@@ -72,8 +72,6 @@ class ScalarHistory(Applet):
         view_box.menu.addAction("configure").triggered.connect(self.open_config_editor)
         view_box.menu.addAction("clear history").triggered.connect(self.clear)
 
-        self.update_subscriptions()
-
     def update_subscriptions(self):
         """Re-read ``datastreams`` and rebuild one curve per stream."""
         self.stream.unsubscribe()

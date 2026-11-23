@@ -321,8 +321,6 @@ class LivePlot(Applet):
         self.feed.point_received.connect(self._experiment_point)
         self.feed.queue_changed.connect(self._take_held_points)
 
-        self.update_subscriptions()
-
     def update_subscriptions(self):
         """Match the panels to ``plots``, lay them out, and re-read each one's subscriptions."""
         keys = self._plots or ["plot0"]

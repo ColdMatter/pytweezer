@@ -52,10 +52,9 @@ class AtomCount(Applet):
 
     def init_gui(self):  # once: build widgets, make stream clients
         ...
-        self.update_subscriptions()
 
-    def update_subscriptions(self):  # after either dialog closes
-        ...
+    def update_subscriptions(self):  # once after init_gui, then after
+        ...  #                          either dialog closes
 
     def poll(self):  # every poll_interval ms
         ...
@@ -113,10 +112,12 @@ while self.stream.has_new_data(timeout_ms=0):
     ...
 ```
 
-**`update_subscriptions` must unsubscribe first, then rebuild the view.** It
-runs every time a dialog closes, so leaving old subscriptions attached silently
-accumulates them, and leaving old curves in the plot leaves ghosts of streams the
-user just removed. Unsubscribe, clear, re-subscribe, recreate.
+**`update_subscriptions` must unsubscribe first, then rebuild the view.**
+`Applet` calls it once straight after `init_gui` (so `init_gui` only builds
+widgets and never subscribes), then every time a dialog closes, so leaving old
+subscriptions attached silently accumulates them, and leaving old curves in the
+plot leaves ghosts of streams the user just removed. Unsubscribe, clear,
+re-subscribe, recreate.
 
 **Skip `"--None--"`.** That is the placeholder an unconfigured stream list
 carries. Subscribing to it is harmless, but creating a curve or a row for it puts

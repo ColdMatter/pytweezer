@@ -75,7 +75,7 @@ A subclass describes only *what* it shows, by overriding a few hooks:
 |---|---|---|
 | `init_gui(self)` | once, after props + title are ready | build widgets, create stream clients, wire menu actions |
 | `poll(self)` | every `poll_interval` ms | pull new stream data (`has_new_data()` / `recv()`) and update the display |
-| `update_subscriptions(self)` | after either dialog closes | unsubscribe + re-subscribe the stream clients from the current property list |
+| `update_subscriptions(self)` | once straight after `init_gui`, then after either dialog closes | unsubscribe + re-subscribe the stream clients from the current property list |
 
 Class attributes tune behavior:
 
@@ -100,7 +100,6 @@ class MyPlot(Applet):
     def init_gui(self):
         self.stream = DataClient(self.name)
         ...  # build widgets; wire menu -> self.open_subscription_editor / self.open_config_editor
-        self.update_subscriptions()
 
     def update_subscriptions(self):
         self.stream.unsubscribe()

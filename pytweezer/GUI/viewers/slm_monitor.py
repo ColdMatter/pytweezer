@@ -77,8 +77,6 @@ class SlmMonitor(Applet):
             )
             panel.add_menu_action("configure", self.open_config_editor)
 
-        self.update_subscriptions()
-
     @staticmethod
     def _panel(title: str, vertical_axis: str = "y") -> ImageView:
         return ImageView(

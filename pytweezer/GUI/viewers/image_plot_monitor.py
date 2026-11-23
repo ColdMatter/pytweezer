@@ -39,16 +39,12 @@ class ImageProjectionDisplay(ImageApplet):
         self.projection_curves: dict[str, tuple[pg.PlotDataItem, pg.PlotDataItem]] = {}
         self.projectionclient = DataClient("imageprojectionviewer")
         self.view.add_menu_action("Projections", self.subscribe_projections)
-        self._subscribe_projections()
 
     def sizeHint(self):
         return QtCore.QSize(820, 760)
 
     def update_subscriptions(self):
         super().update_subscriptions()
-        self._subscribe_projections()
-
-    def _subscribe_projections(self):
         self.projectionclient.unsubscribe()
         self.projectionclient.subscribe(self._projection_channels())
         self._rebuild_projection_curves()
