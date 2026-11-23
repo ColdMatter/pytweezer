@@ -168,8 +168,7 @@ Not everything worth viewing is a stream:
   for free.
 
 A plot that another panel also shows belongs in one widget the applet only
-wraps: `TweezerLoadingPlots`, in the Results tab's
-`analysis/default_analyses/tweezer_histogram.py`, is drawn by both the Tweezer
+wraps: `TweezerLoadingPlots`, in `GUI/views/tweezer_loading.py`, is drawn by both the Tweezer
 Loading applet and that tab's histogram view, so the two cannot drift apart.
 
 ## Properties are the user's knobs
