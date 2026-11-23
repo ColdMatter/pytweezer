@@ -361,3 +361,14 @@ def test_the_view_follows_the_frames_without_a_mask_stream(qapp, monkeypatch):
 
     assert x_range[1] < 1e-3
     assert y_range[1] < 1e-3
+
+
+@pytest.mark.parametrize(
+    ("head", "units"), [(BINNED, "m"), ({"_offset": [10, 20]}, "px"), ({}, "px")]
+)
+def test_axes_are_labelled_in_the_units_the_frame_is_placed_in(monitor, head, units):
+    feed_frame(monitor, np.zeros((64, 48)), BINNED)
+    feed_frame(monitor, np.zeros((64, 48)), head)
+
+    assert monitor.view.plot.getAxis("bottom").labelUnits == units
+    assert monitor.view.plot.getAxis("left").labelUnits == units

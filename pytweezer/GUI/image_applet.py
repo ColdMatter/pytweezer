@@ -53,6 +53,7 @@ from pytweezer.analysis.cloud_fit import (
     FIELDS,
     CloudFit,
     contour_ellipses,
+    frame_geometry,
 )
 from pytweezer.GUI.applet import Applet
 from pytweezer.GUI.viewers.data_sidebar import DataSidebar
@@ -269,6 +270,7 @@ class ImageApplet(Applet):
             if self.image_index != -1 and head["index"] != self.image_index:
                 continue
             levels = None if self._autoscale else self.view.levels()
+            self.view.set_units("px" if frame_geometry(head)[0] is None else "m")
             self.view.show_image(imgdata, head, levels=levels)
         self.update_mask()
         self.update_overlays()
