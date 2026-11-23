@@ -46,6 +46,9 @@ class ImageView(QtWidgets.QWidget):
             values, ``"bar"`` for a plain colour bar, ``None`` for none.
         units: Axis units.
         title: Plot title.
+        row_zero_at_top: Draw row 0 of the frame at the top; ``False`` puts it
+            at the bottom, Y increasing upwards.
+        vertical_axis: Label of the vertical axis.
 
     Attributes:
         graphics: The graphics layout holding the plot and its colour scale.
@@ -70,9 +73,13 @@ class ImageView(QtWidgets.QWidget):
         colour_bar: str | None = "histogram",
         units: str = "m",
         title: str | None = None,
+        row_zero_at_top: bool = True,
+        vertical_axis: str = "y",
     ):
         super().__init__(parent)
         self._invert_colours = invert_colours
+        self._vertical_axis = vertical_axis
+        self._units = None
         self._autoscaling_frame = False
         self._image: np.ndarray | None = None
         self._head: dict | None = None
@@ -86,12 +93,11 @@ class ImageView(QtWidgets.QWidget):
         self.graphics.scene().sigMouseMoved.connect(self.sig_mouse_moved)
 
         self.plot: pg.PlotItem = self.graphics.addPlot(row=1, col=1)
-        self.plot.setLabel("left", text="y", units=units)
-        self.plot.setLabel("bottom", text="x", units=units)
+        self.set_units(units)
         if title is not None:
             self.plot.setTitle(title)
         view_box = self.plot.getViewBox()
-        view_box.invertY(True)
+        view_box.invertY(row_zero_at_top)
         view_box.setAspectLocked(True)
 
         self.image_item = pg.ImageItem(axisOrder="row-major")
@@ -115,6 +121,14 @@ class ImageView(QtWidgets.QWidget):
         self.mask_item = pg.ImageItem(axisOrder="row-major")
         self.mask_item.setLookupTable(MASK_LOOKUP_TABLE)
         self.plot.addItem(self.mask_item)
+
+    def set_units(self, units: str) -> None:
+        """Label both axes in ``units``."""
+        if units == self._units:
+            return
+        self._units = units
+        self.plot.setLabel("left", text=self._vertical_axis, units=units)
+        self.plot.setLabel("bottom", text="x", units=units)
 
     def set_colour_map(self, name: str) -> None:
         """Colour the image with the matplotlib colour map ``name``."""

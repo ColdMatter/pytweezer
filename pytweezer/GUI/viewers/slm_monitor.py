@@ -26,53 +26,12 @@ Properties:
     *   phase_period: (float) pixel value corresponding to 2π.
 """
 
-import pyqtgraph as pg
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtWidgets
 
+from pytweezer.analysis.cloud_fit import frame_geometry
 from pytweezer.GUI.applet import Applet, run_applet
+from pytweezer.GUI.views.image import ImageView
 from pytweezer.servers import ImageClient, PropertyAttribute
-
-
-class ImagePanel:
-    """One plot of a live image with its colour bar."""
-
-    def __init__(self, layout: pg.GraphicsLayoutWidget, title: str, vertical="y"):
-        self.plot: pg.PlotItem = layout.addPlot(title=title)
-        self.plot.getViewBox().setAspectLocked(True)
-        self.image = pg.ImageItem(axisOrder="row-major")
-        self.plot.addItem(self.image)
-        self.bar = pg.ColorBarItem(interactive=False, width=15, colorMapMenu=False)
-        self.bar.setImageItem(self.image, insert_in=self.plot)
-        self.vertical = vertical
-        self.units = None
-        self._set_units("px")
-
-    def _set_units(self, units: str) -> None:
-        if units == self.units:
-            return
-        self.units = units
-        self.plot.setLabel("bottom", "x", units=units)
-        self.plot.setLabel("left", self.vertical, units=units)
-
-    def show(self, image, head: dict, levels: tuple[float, float]) -> None:
-        self.image.setImage(image, autoLevels=False)
-        self.bar.setLevels(levels)
-        resolution = head.get("_imgresolution")
-        offset = head.get("_offset")
-        if resolution is None or offset is None:
-            resolution, offset = (1, 1), (0, 0)
-            self._set_units("px")
-        else:
-            self._set_units("m")
-        ny, nx = image.shape
-        self.image.setRect(
-            QtCore.QRectF(
-                offset[0] * resolution[0],
-                offset[1] * resolution[1],
-                nx * resolution[0],
-                ny * resolution[1],
-            )
-        )
 
 
 class SlmMonitor(Applet):
@@ -91,17 +50,18 @@ class SlmMonitor(Applet):
     _phase_period = PropertyAttribute("phase_period", 256.0)
 
     def init_gui(self):
-        layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.setLayout(layout)
-        graphics = pg.GraphicsLayoutWidget()
-        layout.addWidget(graphics)
+        grid = QtWidgets.QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
 
-        self.target = ImagePanel(graphics, "Target array")
-        self.simulated = ImagePanel(graphics, "Simulated trap plane")
-        graphics.nextRow()
-        self.phase = ImagePanel(graphics, "Phase mask")
-        self.top_down = ImagePanel(graphics, "Simulated top-down", vertical="z")
+        self.target = self._panel("Target array")
+        self.simulated = self._panel("Simulated trap plane")
+        self.phase = self._panel("Phase mask")
+        self.top_down = self._panel("Simulated top-down", vertical_axis="z")
+        for row, panels in enumerate(
+            ((self.target, self.simulated), (self.phase, self.top_down))
+        ):
+            for column, panel in enumerate(panels):
+                grid.addWidget(panel, row, column)
 
         self.panels = {
             "targetstreams": self.target,
@@ -111,13 +71,23 @@ class SlmMonitor(Applet):
         }
         self.streams = {key: ImageClient(f"{self.name}_{key}") for key in self.panels}
         for key, panel in self.panels.items():
-            menu = panel.plot.getViewBox().menu
-            menu.addAction("subscriptions").triggered.connect(
-                lambda _=False, key=key: self.open_subscription_editor(key)
+            panel.add_menu_action(
+                "subscriptions",
+                lambda _=False, key=key: self.open_subscription_editor(key),
             )
-            menu.addAction("configure").triggered.connect(self.open_config_editor)
+            panel.add_menu_action("configure", self.open_config_editor)
 
         self.update_subscriptions()
+
+    @staticmethod
+    def _panel(title: str, vertical_axis: str = "y") -> ImageView:
+        return ImageView(
+            colour_bar="bar",
+            units="px",
+            title=title,
+            row_zero_at_top=False,
+            vertical_axis=vertical_axis,
+        )
 
     def update_subscriptions(self):
         subscriptions = {
@@ -129,17 +99,14 @@ class SlmMonitor(Applet):
         for key, stream in self.streams.items():
             stream.unsubscribe()
             stream.subscribe(subscriptions[key])
-        intensity_cmap = pg.colormap.get(self._target_cmap, source="matplotlib")
         for panel in (self.target, self.simulated, self.top_down):
-            panel.bar.setColorMap(intensity_cmap)
-        self.phase.bar.setColorMap(
-            pg.colormap.get(self._phase_cmap, source="matplotlib")
-        )
+            panel.set_colour_map(self._target_cmap)
+        self.phase.set_colour_map(self._phase_cmap)
         self._relabel_phase_bar()
 
     def _relabel_phase_bar(self):
         period = float(self._phase_period)
-        self.phase.bar.axis.setTicks([[(0, "0"), (period / 2, "π"), (period, "2π")]])
+        self.phase.set_bar_ticks([(0, "0"), (period / 2, "π"), (period, "2π")])
 
     @staticmethod
     def _latest(stream):
@@ -160,7 +127,8 @@ class SlmMonitor(Applet):
                 levels = (0.0, float(self._phase_period))
             else:
                 levels = (0.0, max(float(image.max()), 1e-12))
-            panel.show(image, head, levels)
+            panel.set_units("px" if frame_geometry(head)[0] is None else "m")
+            panel.show_image(image, head, levels=levels)
 
 
 def main(name):

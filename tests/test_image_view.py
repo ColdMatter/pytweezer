@@ -93,3 +93,17 @@ def test_a_side_plot_shares_the_image_axis(view):
     assert top.getViewBox().linkedView(pg.ViewBox.XAxis) is view.plot.getViewBox()
     assert left.getViewBox().linkedView(pg.ViewBox.YAxis) is view.plot.getViewBox()
     assert left.getViewBox().yInverted()
+
+
+def test_units_relabel_both_axes(view):
+    view.set_units("px")
+
+    assert view.plot.getAxis("bottom").labelUnits == "px"
+    assert view.plot.getAxis("left").labelUnits == "px"
+
+
+def test_row_zero_can_sit_at_the_bottom(qapp):
+    view = ImageView(row_zero_at_top=False, vertical_axis="z")
+
+    assert not view.plot.getViewBox().yInverted()
+    assert view.plot.getAxis("left").labelText == "z"
