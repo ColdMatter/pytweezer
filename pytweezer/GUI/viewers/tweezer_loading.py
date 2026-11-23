@@ -19,8 +19,8 @@ Properties:
 
 from PyQt6 import QtWidgets
 
+from pytweezer.analysis.default_analyses.tweezer_histogram import TweezerLoadingPlots
 from pytweezer.GUI.applet import Applet, run_applet
-from pytweezer.GUI.tweezer_loading_plots import TweezerLoadingPlots
 from pytweezer.servers import DataClient, PropertyAttribute
 
 

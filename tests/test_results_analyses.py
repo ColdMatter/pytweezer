@@ -5,20 +5,20 @@ import numpy as np
 import pytest
 
 from pytweezer.analysis.cloud_fit import fit_frames
-from pytweezer.analysis.cloud_results import cloud_sizes
+from pytweezer.analysis.default_analyses import tweezer_histogram as tweezer_analysis
+from pytweezer.analysis.default_analyses.cloud import (
+    CloudFitView,
+    CloudTemperatureView,
+    cloud_sizes,
+    holds_seconds,
+)
+from pytweezer.analysis.default_analyses.tweezer_histogram import (
+    TweezerHistogramView,
+)
 from pytweezer.experiment import ListAxis, Number, Scan, run_local
 from pytweezer.experiment.archive import ArchiveUnavailable, ResultsArchive
 from pytweezer.experiment.motmaster import MotMasterNumber
-from pytweezer.GUI.experiments import analyses
-from pytweezer.GUI.experiments.analyses import (
-    TweezerHistogramView,
-    declared_analyses,
-)
-from pytweezer.GUI.experiments.cloud_views import (
-    CloudFitView,
-    CloudTemperatureView,
-    holds_seconds,
-)
+from pytweezer.GUI.experiments.analyses import declared_analyses
 from tests.helpers import until, write_run
 from tests.test_analysis import SITE_CENTRES
 from tests.test_cloud_results import tof_file
@@ -69,7 +69,7 @@ def test_a_stale_result_is_discarded(qapp, tmp_path, monkeypatch):
         frames_file(tmp_path, 2, "second"),
     )
     release = threading.Event()
-    compute = analyses.tweezer_histogram
+    compute = tweezer_analysis.tweezer_histogram
 
     def held_for_the_first(measurement, settings):
         if measurement.attrs["label"] == "first":
@@ -77,7 +77,7 @@ def test_a_stale_result_is_discarded(qapp, tmp_path, monkeypatch):
             return {"shots": 0, "sites": 0, "error": "from the first file"}, None
         return compute(measurement, settings)
 
-    monkeypatch.setattr(analyses, "tweezer_histogram", held_for_the_first)
+    monkeypatch.setattr(tweezer_analysis, "tweezer_histogram", held_for_the_first)
     view = open_view(archive, first)
     drawn = []
     show_result = view.plots.show_result
@@ -106,7 +106,7 @@ def test_view_shows_the_compute_error_instead_of_raising(
     def fails(measurement, settings):
         raise failure
 
-    monkeypatch.setattr(analyses, "tweezer_histogram", fails)
+    monkeypatch.setattr(tweezer_analysis, "tweezer_histogram", fails)
     view = open_view(ResultsArchive(tmp_path), frames_file(tmp_path))
 
     assert until(lambda: shown in view.message.text(), qapp=qapp)
@@ -126,7 +126,7 @@ def test_only_one_analysis_runs_at_a_time_and_the_latest_request_wins(
     relative = frames_file(tmp_path, scan=Scan(repetitions=6))
     release = threading.Event()
     running, overlaps, groups = [0], [], []
-    compute = analyses.tweezer_histogram
+    compute = tweezer_analysis.tweezer_histogram
 
     def counted(measurement, settings):
         running[0] += 1
@@ -136,7 +136,7 @@ def test_only_one_analysis_runs_at_a_time_and_the_latest_request_wins(
         running[0] -= 1
         return compute(measurement, settings)
 
-    monkeypatch.setattr(analyses, "tweezer_histogram", counted)
+    monkeypatch.setattr(tweezer_analysis, "tweezer_histogram", counted)
     view = open_view(archive, relative)
     for index in range(1, 6):
         view.shots_from.setCurrentIndex(index)
@@ -155,13 +155,13 @@ def test_the_previous_files_histogram_is_cleared_while_the_next_loads(
     view = open_view(archive, first)
     assert until(lambda: "loading" in view.plots.readout.text(), qapp=qapp)
     release = threading.Event()
-    compute = analyses.tweezer_histogram
+    compute = tweezer_analysis.tweezer_histogram
 
     def held(measurement, settings):
         release.wait(5)
         return compute(measurement, settings)
 
-    monkeypatch.setattr(analyses, "tweezer_histogram", held)
+    monkeypatch.setattr(tweezer_analysis, "tweezer_histogram", held)
     view.set_measurement(archive, second, archive.load(second, results=[]))
 
     assert view.plots.readout.text() == ""

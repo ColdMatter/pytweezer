@@ -47,6 +47,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from pytweezer.analysis.default_analyses import ANALYSES
 from pytweezer.experiment.archive import (
     ArchiveUnavailable,
     ResultsArchive,
@@ -56,7 +57,7 @@ from pytweezer.experiment.summary import aggregate, describe, display_value
 from pytweezer.experiment.task import TaskRequest, TaskStatus
 from pytweezer.GUI.background import BackgroundReader
 from pytweezer.GUI.components import Region, status_icon
-from pytweezer.GUI.experiments.analyses import ANALYSES, declared_analyses
+from pytweezer.GUI.experiments.analyses import declared_analyses
 from pytweezer.GUI.grafana import open_in_browser, run_url
 from pytweezer.GUI.theme import (
     PLOT_BACKGROUND,

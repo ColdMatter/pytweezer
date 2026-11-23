@@ -167,10 +167,10 @@ Not everything worth viewing is a stream:
   columns, as the Optimisers tab and the notebooks do, so a subclass gets that
   for free.
 
-A plot that another panel also shows belongs in a widget module under
-`pytweezer/GUI/` that the applet only wraps: `tweezer_loading_plots.py` is drawn
-by both the Tweezer Loading applet and the Results tab's histogram view, so the
-two cannot drift apart.
+A plot that another panel also shows belongs in one widget the applet only
+wraps: `TweezerLoadingPlots`, in the Results tab's
+`analysis/default_analyses/tweezer_histogram.py`, is drawn by both the Tweezer
+Loading applet and that tab's histogram view, so the two cannot drift apart.
 
 ## Properties are the user's knobs
 
