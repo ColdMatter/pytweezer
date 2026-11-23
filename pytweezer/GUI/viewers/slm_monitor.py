@@ -28,7 +28,6 @@ Properties:
 
 from PyQt6 import QtWidgets
 
-from pytweezer.analysis.cloud_fit import frame_geometry
 from pytweezer.GUI.applet import Applet, run_applet
 from pytweezer.GUI.views.image import ImageView
 from pytweezer.servers import ImageClient, PropertyAttribute
@@ -52,6 +51,7 @@ class SlmMonitor(Applet):
     def init_gui(self):
         grid = QtWidgets.QGridLayout(self)
         grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(0)
 
         self.target = self._panel("Target array")
         self.simulated = self._panel("Simulated trap plane")
@@ -109,6 +109,13 @@ class SlmMonitor(Applet):
         self.phase.set_bar_ticks([(0, "0"), (period / 2, "π"), (period, "2π")])
 
     @staticmethod
+    def _placement(head: dict) -> tuple[str, dict]:
+        """Axis units and header: metres only when the header has both resolution and offset."""
+        if head.get("_imgresolution") is None or head.get("_offset") is None:
+            return "px", {}
+        return "m", head
+
+    @staticmethod
     def _latest(stream):
         latest = None
         while stream.has_new_data(timeout_ms=0):
@@ -127,7 +134,8 @@ class SlmMonitor(Applet):
                 levels = (0.0, float(self._phase_period))
             else:
                 levels = (0.0, max(float(image.max()), 1e-12))
-            panel.set_units("px" if frame_geometry(head)[0] is None else "m")
+            units, head = self._placement(head)
+            panel.set_units(units)
             panel.show_image(image, head, levels=levels)
 
 
