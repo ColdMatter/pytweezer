@@ -24,24 +24,3 @@ class OptimiseMOTLight(TweezerOptimisation, LoadTweezers):
     ]
     n_calls = Integer(40, min=1, group=SEARCH)
     n_initial = Integer(10, min=1, group=SEARCH)
-
-    def measure(
-        self,
-        *,
-        cool_vco: float | None = None,
-        cool_vva: float | None = None,
-        rep_vco: float | None = None,
-        rep_vva: float | None = None,
-    ) -> dict[str, float]:
-        """Score the MOT light; ``None`` keeps a saved value."""
-        light = {
-            parameter: value
-            for parameter, value in (
-                ("tMOTLoadCoolVCO", cool_vco),
-                ("tMOTLoadCoolVVA", cool_vva),
-                ("tMOTLoadRepVCO", rep_vco),
-                ("tMOTLoadRepVVA", rep_vva),
-            )
-            if value is not None
-        }
-        return self.score_batch(BackgroundDrop=0, **light)

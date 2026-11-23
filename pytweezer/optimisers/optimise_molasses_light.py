@@ -25,6 +25,7 @@ class OptimiseMolassesLight(TweezerOptimisation, LoadTweezers):
     """
 
     objective = "score"
+    drop = "drop_duration"
     dimensions: ClassVar[list[Dimension]] = [
         Dimension(setting, span=span, save_as=parameter, limits=(0, 10))
         for setting, parameter, span in _MOLASSES_LIGHT
@@ -35,17 +36,6 @@ class OptimiseMolassesLight(TweezerOptimisation, LoadTweezers):
     drop_duration = Integer(
         3, min=0, group="Analysis", tooltip="the script's tDropDuration"
     )
-
-    def measure(self, **settings: float | None) -> dict[str, float]:
-        """Score the molasses light; a missing or ``None`` setting keeps its saved value."""
-        light = {
-            parameter: settings[setting]
-            for setting, parameter, _ in _MOLASSES_LIGHT
-            if settings.get(setting) is not None
-        }
-        return self.score_batch(
-            BackgroundDrop=1, tDropDuration=self.drop_duration, **light
-        )
 
     def objective_of(
         self, results: dict[str, float], settings: dict[str, float]

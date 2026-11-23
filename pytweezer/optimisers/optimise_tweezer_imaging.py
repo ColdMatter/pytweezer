@@ -34,7 +34,7 @@ class OptimiseTweezerImaging(TweezerOptimisation, LoadTweezers):
             imaging |= {"tImgCoolVCO1": imaging_vco, "tImgCoolVCO2": imaging_vco}
         if imaging_vva is not None:
             imaging |= {"tImgCoolVVA1": imaging_vva, "tImgCoolVVA2": imaging_vva}
-        return self.score_batch(BackgroundDrop=0, **imaging)
+        return self.score_batch(**self.drop_overrides(), **imaging)
 
     def objective_of(
         self, results: dict[str, float], settings: dict[str, float]

@@ -18,6 +18,7 @@ class OptimiseMolassesShims(TweezerOptimisation, LoadTweezers):
     """
 
     objective = "score"
+    drop = "drop_duration"
     # The shims are analog outputs, in volts, of a +-10 V card.
     dimensions: ClassVar[list[Dimension]] = [
         Dimension(
@@ -36,27 +37,6 @@ class OptimiseMolassesShims(TweezerOptimisation, LoadTweezers):
     drop_duration = Integer(
         3, min=0, group="Analysis", tooltip="the script's tDropDuration"
     )
-
-    def measure(
-        self,
-        *,
-        shim_x: float | None = None,
-        shim_y: float | None = None,
-        shim_z: float | None = None,
-    ) -> dict[str, float]:
-        """Score the molasses shims; ``None`` keeps a saved value."""
-        shims = {
-            parameter: value
-            for parameter, value in (
-                ("tMolassesShimXccValue", shim_x),
-                ("tMolassesShimYccValue", shim_y),
-                ("tMolassesShimZccValue", shim_z),
-            )
-            if value is not None
-        }
-        return self.score_batch(
-            BackgroundDrop=1, tDropDuration=self.drop_duration, **shims
-        )
 
     def objective_of(
         self, results: dict[str, float], settings: dict[str, float]
