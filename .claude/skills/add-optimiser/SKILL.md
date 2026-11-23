@@ -140,16 +140,16 @@ the saved value) and takes the drop from `drop`: a class attribute naming the
 argument that holds the drop duration (`tDropDuration`), or `None` (the
 default) for `BackgroundDrop=0`. Only `OptimiseTweezerImaging` overrides
 `measure()`, because one setting sets two script parameters. Every evaluation
-takes two images; loading and fidelity come from the first. It scores each batch through
-`TrapSites` (`analysis/array_loading.py`): `LoadTweezers.trap_sites` holds the
+takes two images; loading and fidelity come from the first. It scores each
+batch through `TrapSites` (`analysis/array_loading.py`): `LoadTweezers.trap_sites` holds the
 accepted sites with their window, feature size and threshold, and `score_batch`
 only calls its `counts`, `fit_loading` and `survival`, never inline maths.
 
 - `FindTrapSites` (`Fit`) takes `calibration_shots` with no drop, fits the
   rig's array geometry (or a `default_rows` × `default_columns` grid) to the
   top-hat filtered (`top_hat_image`) mean of their first images
-  (`analysis/trap_sites.py`), fits the occupancy threshold with a `TrapSites`, and proposes
-  `TRAP_SITE_KEYS`: `trap_sites` (sensor pixels, `(y, x)`), `trap_threshold`,
+  (`analysis/trap_sites.py`), fits the occupancy threshold with a `TrapSites`,
+  and proposes `TRAP_SITE_KEYS`: `trap_sites` (sensor pixels, `(y, x)`), `trap_threshold`,
   `trap_window_size`, `trap_feature_size`, `trap_geometry`. Tweezer
   measurements refuse to run when the saved `trap_geometry` is not the rig's
   current array, so rerun it after changing the array.
@@ -158,7 +158,9 @@ only calls its `counts`, `fit_loading` and `survival`, never inline maths.
   `score_batch()`. A search for the shortest time subtracts
   `shortfall_penalty` (10) times each shortfall below a threshold
   (`loading_threshold` 0.55, `survival_threshold` 0.8) from
-  `shortness(time, bounds)`, so any miss ranks below any run that passes.
+  `shortness(time, bounds)`. A shortfall of 1/`shortfall_penalty` costs as much
+  as the whole time range, so at 10 the threshold is soft; a near-hard one
+  needs a larger penalty (e.g. 100).
   The time is a whole-number dimension (`load_time`, `molasses_time`).
 - `OptimiseTweezerImaging` is Bayesian with span dimensions around the saved
   `tImgCoolVCO`/`tImgCoolVVA`, no drop, scored `fidelity_weight` (0.5) ×
@@ -172,8 +174,9 @@ only calls its `counts`, `fit_loading` and `survival`, never inline maths.
   for the shortest load that reaches `loading_threshold`, with no drop. Its
   `MOT_LOAD_TIME` script parameter name and `load_time` limits are
   placeholders (FIXME in the module).
-- `OptimiseMolassesLight` searches both molasses stages' (`tMol{Cool,Rep}{VCO,VVA}{1,2}`,
-  eight dimensions) and the molasses time, scored like `OptimiseMolassesShims`.
+- `OptimiseMolassesLight` searches both molasses stages'
+  (`tMol{Cool,Rep}{VCO,VVA}{1,2}`, eight dimensions) and the molasses time,
+  scored like `OptimiseMolassesShims`.
 
 Tests: `tests/test_optimisers.py`,
 `tests/test_tweezer_array.py`, `tests/test_trap_sites.py`,

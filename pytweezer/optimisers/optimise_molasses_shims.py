@@ -27,6 +27,7 @@ class OptimiseMolassesShims(TweezerOptimisation, LoadTweezers):
         Dimension(
             "shim_z", span=0.25, save_as="tMolassesShimZccValue", limits=(-10, 10)
         ),
+        # FIXME: placeholder time limits (1, 20), to check against the script
         Dimension(
             "molasses_time", save_as="tMolassesDuration", low=1, high=20, whole=True
         ),

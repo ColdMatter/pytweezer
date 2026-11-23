@@ -17,10 +17,10 @@ class FindTrapSites(Fit, LoadTweezers):
     Takes ``calibration_shots`` with no drop, and fits the geometry of the
     array the rig has on the SLM (or, when it does not know, a
     ``default_rows`` x ``default_columns`` grid ``default_spacing`` apart) to
-    the mean of their first images, top-hat filtered, free in position, rotation and scale (see
-    :mod:`pytweezer.analysis.trap_sites`). It then fits the occupancy
-    threshold at those sites, and proposes both for every tweezer measurement
-    to use.
+    the mean of their first images, top-hat filtered, free in position,
+    rotation and scale (see :mod:`pytweezer.analysis.trap_sites`). It then
+    fits the occupancy threshold at those sites, and proposes both for every
+    tweezer measurement to use.
     """
 
     proposal_units: ClassVar[dict[str, str]] = {

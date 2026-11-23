@@ -25,6 +25,7 @@ class OptimiseMolassesLight(TweezerOptimisation, LoadTweezers):
         Dimension(setting, span=span, save_as=parameter, limits=(0, 10))
         for setting, parameter, span in _MOLASSES_LIGHT
     ] + [
+        # FIXME: placeholder time limits (1, 20), to check against the script
         Dimension(
             "molasses_time", save_as="tMolassesDuration", low=1, high=20, whole=True
         )

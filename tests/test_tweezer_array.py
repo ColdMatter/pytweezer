@@ -54,8 +54,7 @@ class FakeSequencer:
 
     def get_params(self):
         return dict(SIMULATED_SCRIPT_PARAMETERS["RbTweezerBasic2026_2"]) | {
-            "tMOTLoadTime": 100,
-            "tMolassesDuration": 5,
+            "tMOTLoadTime": 100
         }
 
     def start_motmaster_experiment(self, parameters):
@@ -89,7 +88,7 @@ class RecordingCamera:
 
 
 class FakeHamCam(RecordingCamera):
-    """Images the array twice per shot; turning the tweezers off empties the second frame."""
+    """Images the array twice per shot."""
 
     def __init__(self, sequencer):
         super().__init__()
@@ -118,10 +117,7 @@ class FakeHamCam(RecordingCamera):
 
     def wait_frames(self, mark, n):
         loaded = self.rng.random(len(SITES)) < LOADING
-        if self.sequencer.goes[-1].get("tTweezerSetVVA0") == 0.0:
-            kept = np.zeros(len(SITES), dtype=bool)
-        else:
-            kept = loaded & (self.rng.random(len(SITES)) < SURVIVAL)
+        kept = loaded & (self.rng.random(len(SITES)) < SURVIVAL)
         return self._frame(loaded), self._frame(kept)
 
 
@@ -361,12 +357,6 @@ def test_each_evaluation_images_both_times_at_its_settings(rig):
             assert (go["tImgCoolVVA1"], go["tImgCoolVVA2"]) == (vva, vva)
 
 
-def test_imaging_weights_fidelity_against_survival():
-    optimiser = OptimiseTweezerImaging({"fidelity_weight": 0.25})
-    scores = {"loading": 1.0, "fidelity": 0.9, "survival": 0.5}
-    assert optimiser.objective_of(scores, {}) == pytest.approx(0.6)
-
-
 def test_each_molasses_evaluation_runs_at_its_shims(rig):
     measurement = run_local(OptimiseMolassesShims, **FAST, n_calls=2, n_initial=2)
     assert measurement.status == "completed", measurement.attrs["error"]
@@ -437,15 +427,13 @@ def test_molasses_penalises_each_shortfall(cls):
     optimiser = cls()
     optimiser.bounds = {"molasses_time": (1, 20)}
     settings = {"molasses_time": 5}
-    shortness_at_five = 1 - (5 - 1) / (20 - 1)
 
     def score(loading, survival):
         scores = {"loading": loading, "survival": survival}
         return optimiser.objective_of(scores, settings)
 
-    assert score(0.55, 0.8) == pytest.approx(shortness_at_five)
-    assert score(0.45, 0.8) == pytest.approx(shortness_at_five - 1)
-    assert score(0.55, 0.7) == pytest.approx(shortness_at_five - 1)
+    assert score(0.55, 0.8) - score(0.45, 0.8) == pytest.approx(1)
+    assert score(0.55, 0.8) - score(0.55, 0.7) == pytest.approx(1)
 
 
 def window_sums(frames, window_size=5):

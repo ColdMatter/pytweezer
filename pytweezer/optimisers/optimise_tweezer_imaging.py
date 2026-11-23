@@ -9,7 +9,7 @@ from pytweezer.optimisers.tweezer_optimisation import TweezerOptimisation
 
 
 class OptimiseTweezerImaging(TweezerOptimisation, LoadTweezers):
-    """Find the imaging cooling-light VCO and VVA that keep the most atoms through imaging.
+    """Find the imaging cooling-light VCO and VVA that best trade imaging fidelity against survival.
 
     Each evaluation images the atoms twice with no drop between. The score
     weights the fidelity by ``fidelity_weight`` and the survival by the rest.
