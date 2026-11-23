@@ -51,27 +51,17 @@ from pytweezer.analysis.cloud_fit import (
     FIELDS,
     CloudFit,
     contour_ellipses,
-    frame_geometry,
 )
 from pytweezer.GUI.applet import Applet, run_applet
 from pytweezer.GUI.viewers.archive.zmq_ROI import zmq_ROI
 from pytweezer.GUI.viewers.data_sidebar import DataSidebar
+from pytweezer.GUI.views.image import frame_rect
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import DataClient, ImageClient, PropertyAttribute, tweezerpath
 
 logger = get_logger(__name__)
 
 OVERLAY_PEN = pg.mkPen("w", width=1)
-
-
-def frame_rect(head: dict, shape: tuple[int, ...]) -> QtCore.QRectF:
-    """Where a frame of ``shape`` sits in the plot, from its header's ``_imgresolution`` and ``_offset``."""
-    resolution, origin = frame_geometry(head)
-    res_x, res_y = resolution or (1.0, 1.0)
-    rows, cols = shape[:2]
-    return QtCore.QRectF(
-        origin[0] * res_x, origin[1] * res_y, cols * res_x, rows * res_y
-    )
 
 
 def overlay_paths(head: dict, n: int) -> list[np.ndarray]:
