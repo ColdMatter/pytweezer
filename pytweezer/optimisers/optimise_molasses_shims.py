@@ -3,18 +3,15 @@ from __future__ import annotations
 from typing import ClassVar
 
 from pytweezer.experiment.arguments import Integer, Number
-from pytweezer.experiment.optimisers import SEARCH, Dimension
+from pytweezer.experiment.optimisers import SEARCH, Dimension, shortfall, shortness
 from pytweezer.experiments.load_tweezers import LoadTweezers
 from pytweezer.optimisers.tweezer_optimisation import TweezerOptimisation
 
 
 class OptimiseMolassesShims(TweezerOptimisation, LoadTweezers):
-    """Find the molasses shim currents that recapture the most atoms after a drop.
+    """Find the shortest molasses, with the shim currents, that keeps loading and drop survival above their thresholds.
 
-    Each evaluation drops the atoms for ``drop_duration`` between the two
-    images. Below ``loading_floor`` the score is the loading; above it, the
-    floor plus the recapture probability, so every setting that loads the
-    array outscores every one that does not, and among those the coldest wins.
+    Each evaluation drops the atoms for ``drop_duration`` between the two images.
     """
 
     objective = "score"
@@ -30,17 +27,24 @@ class OptimiseMolassesShims(TweezerOptimisation, LoadTweezers):
         Dimension(
             "shim_z", span=0.25, save_as="tMolassesShimZccValue", limits=(-10, 10)
         ),
+        Dimension("molasses_time", save_as="tMolassesDuration", low=1, high=20),
     ]
     n_calls = Integer(50, min=1, group=SEARCH)
     n_initial = Integer(10, min=1, group=SEARCH)
-    loading_floor = Number(0.5, min=0, max=1, group=SEARCH)
+    loading_threshold = Number(0.55, min=0, max=1, group=SEARCH)
+    survival_threshold = Number(0.8, min=0, max=1, group=SEARCH)
+    shortfall_penalty = Number(10, min=0, group=SEARCH)
     drop_duration = Integer(
         3, min=0, group="Analysis", tooltip="the script's tDropDuration"
     )
 
     def objective_of(
-        self, results: dict[str, float], settings: dict[str, float]
+        self, scores: dict[str, float], settings: dict[str, float]
     ) -> float:
-        if results["loading"] < self.loading_floor:
-            return results["loading"]
-        return self.loading_floor + results["survival"]
+        return (
+            shortness(settings["molasses_time"], self.bounds["molasses_time"])
+            - self.shortfall_penalty
+            * shortfall(scores["loading"], self.loading_threshold)
+            - self.shortfall_penalty
+            * shortfall(scores["survival"], self.survival_threshold)
+        )

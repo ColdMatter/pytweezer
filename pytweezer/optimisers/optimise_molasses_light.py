@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from pytweezer.experiment.arguments import Integer, Number
-from pytweezer.experiment.optimisers import SEARCH, Dimension
+from pytweezer.experiment.optimisers import SEARCH, Dimension, shortfall, shortness
 from pytweezer.experiments.load_tweezers import LoadTweezers
 from pytweezer.optimisers.tweezer_optimisation import TweezerOptimisation
 
@@ -17,29 +17,30 @@ _MOLASSES_LIGHT = [
 
 
 class OptimiseMolassesLight(TweezerOptimisation, LoadTweezers):
-    """Find the cooling and repump VCOs and VVAs of both molasses stages that recapture the most atoms after a drop.
-
-    Scored as :class:`~pytweezer.optimisers.optimise_molasses_shims.OptimiseMolassesShims`:
-    below ``loading_floor`` the score is the loading; above it, the floor plus
-    the recapture probability after a ``drop_duration`` drop.
-    """
+    """Find the shortest molasses, with the cooling and repump VCOs and VVAs of both stages, that keeps loading and drop survival above their thresholds."""
 
     objective = "score"
     drop = "drop_duration"
     dimensions: ClassVar[list[Dimension]] = [
         Dimension(setting, span=span, save_as=parameter, limits=(0, 10))
         for setting, parameter, span in _MOLASSES_LIGHT
-    ]
+    ] + [Dimension("molasses_time", save_as="tMolassesDuration", low=1, high=20)]
     n_calls = Integer(80, min=1, group=SEARCH)
     n_initial = Integer(16, min=1, group=SEARCH)
-    loading_floor = Number(0.5, min=0, max=1, group=SEARCH)
+    loading_threshold = Number(0.55, min=0, max=1, group=SEARCH)
+    survival_threshold = Number(0.8, min=0, max=1, group=SEARCH)
+    shortfall_penalty = Number(10, min=0, group=SEARCH)
     drop_duration = Integer(
         3, min=0, group="Analysis", tooltip="the script's tDropDuration"
     )
 
     def objective_of(
-        self, results: dict[str, float], settings: dict[str, float]
+        self, scores: dict[str, float], settings: dict[str, float]
     ) -> float:
-        if results["loading"] < self.loading_floor:
-            return results["loading"]
-        return self.loading_floor + results["survival"]
+        return (
+            shortness(settings["molasses_time"], self.bounds["molasses_time"])
+            - self.shortfall_penalty
+            * shortfall(scores["loading"], self.loading_threshold)
+            - self.shortfall_penalty
+            * shortfall(scores["survival"], self.survival_threshold)
+        )

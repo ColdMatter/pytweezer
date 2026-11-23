@@ -53,7 +53,10 @@ class FakeSequencer:
     def set_trigger_mode(self, value): ...
 
     def get_params(self):
-        return dict(SIMULATED_SCRIPT_PARAMETERS["RbTweezerBasic2026_2"])
+        return dict(SIMULATED_SCRIPT_PARAMETERS["RbTweezerBasic2026_2"]) | {
+            "tMOTLoadTime": 100.0,
+            "tMolassesDuration": 5.0,
+        }
 
     def start_motmaster_experiment(self, parameters):
         if self.fail:
@@ -357,26 +360,10 @@ def test_each_evaluation_images_both_times_at_its_settings(rig):
             assert (go["tImgCoolVVA1"], go["tImgCoolVVA2"]) == (vva, vva)
 
 
-@pytest.mark.parametrize(
-    ("fidelity_floor", "expected"),
-    [(0.9, "survival"), (1.0, "0.8 fidelity")],
-)
-def test_the_score_is_survival_only_above_the_fidelity_floor(
-    rig, fidelity_floor, expected
-):
-    measurement = run_local(
-        OptimiseTweezerImaging,
-        **FAST,
-        n_calls=1,
-        n_initial=1,
-        fidelity_floor=fidelity_floor,
-    )
-    results = measurement.results
-    score = {
-        "survival": results["survival"][0],
-        "0.8 fidelity": 0.8 * results["fidelity"][0],
-    }
-    assert results["objective"][0] == pytest.approx(score[expected])
+def test_imaging_weights_fidelity_against_survival():
+    optimiser = OptimiseTweezerImaging({"fidelity_weight": 0.25})
+    scores = {"loading": 1.0, "fidelity": 0.9, "survival": 0.5}
+    assert optimiser.objective_of(scores, {}) == pytest.approx(0.6)
 
 
 def test_each_molasses_evaluation_runs_at_its_shims(rig):
@@ -433,27 +420,31 @@ def test_each_light_evaluation_runs_at_its_settings(rig, cls, sent_as):
             assert {parameter: go[parameter] for parameter in expected} == expected
 
 
+def test_mot_scores_shorter_loads_higher_once_loading_clears_the_threshold():
+    optimiser = OptimiseMOTLight()
+    optimiser.bounds = {"load_time": (10, 500)}
+
+    def score(load_time, loading):
+        return optimiser.objective_of({"loading": loading}, {"load_time": load_time})
+
+    assert score(10, 0.6) > score(500, 0.6)
+    assert score(10, 0.40) < score(500, 0.55)
+
+
 @pytest.mark.parametrize("cls", [OptimiseMolassesShims, OptimiseMolassesLight])
-@pytest.mark.parametrize(
-    ("loading_floor", "expected"),
-    [(0.5, "floor plus recapture"), (0.9, "loading")],
-)
-def test_the_molasses_score_counts_recapture_only_once_the_array_loads(
-    rig, cls, loading_floor, expected
-):
-    measurement = run_local(
-        cls,
-        **FAST,
-        n_calls=1,
-        n_initial=1,
-        loading_floor=loading_floor,
-    )
-    results = measurement.results
-    score = {
-        "floor plus recapture": loading_floor + results["survival"][0],
-        "loading": results["loading"][0],
-    }
-    assert results["objective"][0] == pytest.approx(score[expected])
+def test_molasses_penalises_each_shortfall(cls):
+    optimiser = cls()
+    optimiser.bounds = {"molasses_time": (1, 20)}
+    settings = {"molasses_time": 5}
+    shortness = 1 - (5 - 1) / (20 - 1)
+
+    def score(loading, survival):
+        scores = {"loading": loading, "survival": survival}
+        return optimiser.objective_of(scores, settings)
+
+    assert score(0.55, 0.8) == pytest.approx(shortness)
+    assert score(0.45, 0.8) == pytest.approx(shortness - 1)
+    assert score(0.55, 0.7) == pytest.approx(shortness - 1)
 
 
 def window_sums(frames, window_size=5):

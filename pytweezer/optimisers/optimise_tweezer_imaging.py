@@ -11,10 +11,8 @@ from pytweezer.optimisers.tweezer_optimisation import TweezerOptimisation
 class OptimiseTweezerImaging(TweezerOptimisation, LoadTweezers):
     """Find the imaging cooling-light VCO and VVA that keep the most atoms through imaging.
 
-    Each evaluation images the atoms twice with no drop between. The score is
-    the survival while the fidelity exceeds ``fidelity_floor``, and
-    0.8 × fidelity below it, so a setting too dim to tell full sites from empty
-    ones scores low however many atoms it appears to keep.
+    Each evaluation images the atoms twice with no drop between. The score
+    weights the fidelity by ``fidelity_weight`` and the survival by the rest.
     """
 
     objective = "score"
@@ -23,7 +21,7 @@ class OptimiseTweezerImaging(TweezerOptimisation, LoadTweezers):
         Dimension("imaging_vva", span=0.2, save_as="tImgCoolVVA"),
     ]
     n_initial = Integer(10, min=1, group=SEARCH)
-    fidelity_floor = Number(0.99, min=0, max=1, group=SEARCH)
+    fidelity_weight = Number(0.5, min=0, max=1, group=SEARCH)
 
     def measure(
         self, *, imaging_vco: float | None = None, imaging_vva: float | None = None
@@ -37,8 +35,7 @@ class OptimiseTweezerImaging(TweezerOptimisation, LoadTweezers):
         return self.score_batch(**self.drop_overrides(), **imaging)
 
     def objective_of(
-        self, results: dict[str, float], settings: dict[str, float]
+        self, scores: dict[str, float], settings: dict[str, float]
     ) -> float:
-        if results["fidelity"] > self.fidelity_floor:
-            return results["survival"]
-        return 0.8 * results["fidelity"]
+        w = self.fidelity_weight
+        return w * scores["fidelity"] + (1 - w) * scores["survival"]
