@@ -280,6 +280,21 @@ def projection_monitor(qapp, monkeypatch):
     return image_plot_monitor.ImageProjectionDisplay("Test Projections")
 
 
+def test_saved_projection_streams_subscribe_at_start(qapp, monkeypatch):
+    fake_hubs(monkeypatch)
+    monkeypatch.setattr(image_plot_monitor, "DataClient", FakeStream)
+
+    class SeededProps(FakeProps):
+        def __init__(self, name=""):
+            super().__init__(name)
+            self.values["projectionstreams"] = ["p"]
+
+    monkeypatch.setattr(applet, "Properties", SeededProps)
+    monitor = image_plot_monitor.ImageProjectionDisplay("Test Projections")
+
+    assert set(monitor.projection_curves) == {"p_x", "p_y"}
+
+
 def test_projection_monitor_builds_and_draws_both_profiles(projection_monitor):
     monitor = projection_monitor
     x = np.arange(48) * 1e-6

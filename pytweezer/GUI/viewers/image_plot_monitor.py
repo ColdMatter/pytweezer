@@ -21,53 +21,34 @@ import pyqtgraph as pg
 from PyQt6 import QtCore
 
 from pytweezer.GUI.applet import run_applet
-from pytweezer.GUI.viewers.image_monitor import ImageDisplay
+from pytweezer.GUI.image_applet import ImageApplet
 from pytweezer.servers import DataClient, PropertyAttribute
 
-SIDE_PLOT_SIZE = 140
-AXIS_SIZE = 60
 FIT_PEN = pg.mkPen("w", width=2)
 
 
-class ImageProjectionDisplay(ImageDisplay):
+class ImageProjectionDisplay(ImageApplet):
     """Image display with the projection plots above and left of the image."""
 
     _projectionstreams = PropertyAttribute("projectionstreams", ["--None--"])
 
     def init_gui(self):
-        self.projectionclient = DataClient("imageprojectionviewer")
-        self.projection_curves: dict[str, tuple[pg.PlotDataItem, pg.PlotDataItem]] = {}
-        self.top_plot = None
-        self.left_plot = None
         super().init_gui()
-
-        self.top_plot = self.view.graphics.addPlot(row=0, col=1)
-        self.left_plot = self.view.graphics.addPlot(row=1, col=0)
-        self.top_plot.setFixedHeight(SIDE_PLOT_SIZE)
-        self.top_plot.setXLink(self.view.plot)
-        self.top_plot.hideAxis("bottom")
-        self.left_plot.setFixedWidth(SIDE_PLOT_SIZE)
-        self.left_plot.setYLink(self.view.plot)
-        self.left_plot.hideAxis("left")
-        # The image's y-axis is inverted; a linked view follows the range but not
-        # the direction.
-        self.left_plot.getViewBox().invertY(True)
-        # Equal axis widths keep the top plot's view box above the image's.
-        for plot in (self.view.plot, self.top_plot):
-            plot.getAxis("left").setWidth(AXIS_SIZE)
-        for plot in (self.view.plot, self.left_plot):
-            plot.getAxis("bottom").setHeight(AXIS_SIZE // 2)
-        self.view.graphics.ci.layout.setRowStretchFactor(1, 4)
-        self.view.graphics.ci.layout.setColumnStretchFactor(1, 4)
-
+        self.top_plot = self.view.add_side_plot("top")
+        self.left_plot = self.view.add_side_plot("left")
+        self.projection_curves: dict[str, tuple[pg.PlotDataItem, pg.PlotDataItem]] = {}
+        self.projectionclient = DataClient("imageprojectionviewer")
         self.view.add_menu_action("Projections", self.subscribe_projections)
-        self._rebuild_projection_curves()
+        self._subscribe_projections()
 
     def sizeHint(self):
         return QtCore.QSize(820, 760)
 
     def update_subscriptions(self):
         super().update_subscriptions()
+        self._subscribe_projections()
+
+    def _subscribe_projections(self):
         self.projectionclient.unsubscribe()
         self.projectionclient.subscribe(self._projection_channels())
         self._rebuild_projection_curves()
@@ -90,8 +71,6 @@ class ImageProjectionDisplay(ImageDisplay):
         self.open_subscription_editor("projectionstreams", choices=choices)
 
     def _rebuild_projection_curves(self):
-        if self.top_plot is None:
-            return
         for channel, curves in self.projection_curves.items():
             plot = self.top_plot if channel.endswith("_x") else self.left_plot
             for curve in curves:

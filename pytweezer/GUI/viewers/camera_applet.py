@@ -46,9 +46,8 @@ from pytweezer.GUI.applet import run_applet
 from pytweezer.GUI.background import clear_tracebacks
 from pytweezer.GUI.components import set_state
 from pytweezer.GUI.experiments.feed import ExperimentFeed
-from pytweezer.GUI.image_applet import CameraROI, camera_roi
+from pytweezer.GUI.image_applet import CameraROI, ImageApplet, camera_roi
 from pytweezer.GUI.viewers.camera_sidebar import CameraSidebar
-from pytweezer.GUI.viewers.image_monitor import ImageDisplay
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import Properties, PropertyAttribute
 from pytweezer.servers.device_client import get_device
@@ -170,7 +169,7 @@ def _close_client(device: Any) -> None:
         pass
 
 
-class CameraApplet(ImageDisplay):
+class CameraApplet(ImageApplet):
     """The Image Monitor with a camera's settings, Live and Snap in a sidebar on its left."""
 
     _camera = PropertyAttribute("camera", "")

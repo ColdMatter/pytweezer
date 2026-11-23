@@ -25,8 +25,8 @@ from pytweezer.experiment.client import (
 )
 from pytweezer.GUI.applet import run_applet
 from pytweezer.GUI.experiments.feed import ExperimentFeed
+from pytweezer.GUI.image_applet import ImageApplet
 from pytweezer.GUI.theme import CURVE_COLORS
-from pytweezer.GUI.viewers.image_monitor import ImageDisplay
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import PropertyAttribute
 
@@ -98,7 +98,7 @@ class SiteOverlay:
                 self.labels.append(label)
 
 
-class TweezerDisplay(ImageDisplay):
+class TweezerDisplay(ImageApplet):
     """The Image Monitor with the accepted trap sites drawn over each frame."""
 
     _show_site_labels = PropertyAttribute("show_site_labels", False)
