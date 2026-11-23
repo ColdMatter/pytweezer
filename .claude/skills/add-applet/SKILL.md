@@ -230,7 +230,7 @@ Two pyqtgraph traps worth knowing:
 ## Fit overlays and the projections monitor
 
 The Image Monitor draws a fit on top of the image from a *data* stream, with no new viewer code:
-list the fit's stream in `overlaystreams` (the `CloudFitAnalysis` in `analysis/cloud_fit.py`
+list the fit's stream in `overlaystreams` (the `CloudFitAnalysis` in `analyses/live/cloud_fit.py`
 publishes one; its header carries `cloud_fit.FIELDS`: `x0`, `y0`, `sigma_major`, `sigma_minor`,
 `angle`, ... in the image's plot coordinates) and `n_contours` sets how many ellipses are drawn.
 `overlay_paths(head, n)` in `viewers/image_monitor.py` turns such a header into the ellipses (`[]`

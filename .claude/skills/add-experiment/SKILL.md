@@ -448,7 +448,7 @@ The Rb tweezer experiments, in the order a session uses them:
    itself keeps one shot per point, which the default analyses expect.
 
 Shots tag their HamCam frames with `start_shot({"rid": self.rid})`; the live
-tweezer loading analysis (`analysis/tweezer_loading.py`) starts afresh whenever
+tweezer loading analysis (`analyses/live/tweezer_loading.py`) starts afresh whenever
 the rid changes and places the saved sites by each frame's
 `roi_x0`/`roi_y0` header.
 

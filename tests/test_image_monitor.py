@@ -3,8 +3,8 @@ import pyqtgraph as pg
 import pytest
 from PyQt6 import QtCore
 
+from pytweezer.analyses.live.roi_slice import RoiSlice
 from pytweezer.analysis.cloud_fit import fit_cloud
-from pytweezer.analysis.roi_slice import RoiSlice
 from pytweezer.GUI import applet
 from pytweezer.GUI.viewers import data_sidebar, image_monitor, image_plot_monitor
 from pytweezer.GUI.viewers.archive import zmq_ROI

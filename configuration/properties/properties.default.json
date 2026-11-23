@@ -28,8 +28,7 @@
                 ]
             }
         },
-        "Data": {},
-        "analysisdir": "C:\\Users\\tweez\\ColdMatter\\pytweezer/pytweezer/analysis/"
+        "Data": {}
     },
     "Viewer": {
         "TweezerViewer": {

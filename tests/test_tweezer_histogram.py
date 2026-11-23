@@ -46,7 +46,7 @@ def frames_file(scan=None):
 
 
 def test_frames_file_gives_the_live_analysis_result_at_the_sites_it_found():
-    from pytweezer.analysis.tweezer_loading import LoadingStatistics
+    from pytweezer.analyses.live.tweezer_loading import LoadingStatistics
 
     head, photons = tweezer_histogram(frames_file(), FRAMES_SETTINGS)
 
