@@ -195,7 +195,8 @@ unrelated JSON data.
 
 A singular package is framework (`experiment/`, `analysis/`) and a plural one is
 what people edit day to day (`experiments/`, `optimisers/`, `analyses/`,
-`GUI/viewers/`, `GUI/default_analyses/`).
+`GUI/viewers/`, `GUI/default_analyses/`); `GUI/views/` is the exception, framework:
+the shared base drawings that applets and default-analysis views build on.
 
 Every managed process is launched the same way — `python <script> <name>`, where
 `name` is the CONFIG key that the script looks itself up under.

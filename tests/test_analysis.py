@@ -1,4 +1,4 @@
-"""Unit tests for the streaming analysis processes in ``pytweezer/analysis/``.
+"""Unit tests for the streaming analysis processes in ``pytweezer/analyses/live/``.
 
 An analysis's real ``__init__`` opens a :class:`Properties` connection and a
 pub/sub client, so constructing one here would need live hubs and would leave

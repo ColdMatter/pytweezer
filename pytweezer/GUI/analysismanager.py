@@ -337,7 +337,6 @@ class AnalysisManager(BWidget):
         manager_conf = self.conf["Servers"]["Analysis Manager"]
         endpoint = f"tcp://{manager_conf['host']}:{manager_conf['port']}"
         self.rpc = AnalysisManagerClient(endpoint)
-        self.analysisdir = live_analyses_path
         self._last_snapshot_error = ""
         self._filters = {}
         self._running = {}
@@ -383,7 +382,7 @@ class AnalysisManager(BWidget):
         self.filters_region.body.addLayout(buttons)
         layout.addWidget(self.filters_region, 1)
 
-        self.add_sheet = AddFilterSheet(self.analysisdir, self._active_streams)
+        self.add_sheet = AddFilterSheet(live_analyses_path, self._active_streams)
         self.add_sheet.added.connect(self.add_filter)
         layout.addWidget(self.add_sheet)
         self._update_buttons()
@@ -422,7 +421,6 @@ class AnalysisManager(BWidget):
             return
 
         self._last_snapshot_error = ""
-        self.analysisdir = response.get("analysisdir", self.analysisdir)
         filters = response.get("filters", {})
         running = response.get("running", {})
         self.table.update_filters(filters, running)
