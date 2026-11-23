@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pytweezer.analysis.default_analyses.tweezer_histogram import (
+from pytweezer.analyses.default.tweezer_histogram import (
     HistogramSettings,
     needed_results,
     point_groups,

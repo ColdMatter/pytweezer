@@ -2,9 +2,10 @@
 
 An experiment names its analyses in ``Experiment.analyses``; each file records
 those names (root attr ``analyses``) when it is created, so the tab never
-imports the experiment. This module holds the views' framework; the analyses
-themselves, and the registry mapping each name to its view, are in
-:mod:`pytweezer.analysis.default_analyses`. A view loads what it needs over its
+imports the experiment. This module holds the views' framework; the
+calculations are in :mod:`pytweezer.analyses.default`, and the views with the
+registry mapping each name to its view in :mod:`pytweezer.GUI.default_analyses`.
+A view loads what it needs over its
 own archive connection and computes off the GUI thread, so a large file never
 stalls the tab.
 """

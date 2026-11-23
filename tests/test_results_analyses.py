@@ -4,20 +4,18 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from pytweezer.analyses.default.cloud import cloud_sizes
 from pytweezer.analysis.cloud_fit import fit_frames
-from pytweezer.analysis.default_analyses import tweezer_histogram as tweezer_analysis
-from pytweezer.analysis.default_analyses.cloud import (
-    CloudFitView,
-    CloudTemperatureView,
-    cloud_sizes,
-    holds_seconds,
-)
-from pytweezer.analysis.default_analyses.tweezer_histogram import (
-    TweezerHistogramView,
-)
 from pytweezer.experiment import ListAxis, Number, Scan, run_local
 from pytweezer.experiment.archive import ArchiveUnavailable, ResultsArchive
 from pytweezer.experiment.motmaster import MotMasterNumber
+from pytweezer.GUI.default_analyses import tweezer_histogram as tweezer_analysis
+from pytweezer.GUI.default_analyses.cloud import (
+    CloudFitView,
+    CloudTemperatureView,
+    holds_seconds,
+)
+from pytweezer.GUI.default_analyses.tweezer_histogram import TweezerHistogramView
 from pytweezer.GUI.experiments.analyses import declared_analyses
 from tests.helpers import until, write_run
 from tests.test_analysis import SITE_CENTRES

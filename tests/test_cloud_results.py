@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from scipy.constants import atomic_mass, k
 
-from pytweezer.analysis.default_analyses.cloud import (
+from pytweezer.analyses.default.cloud import (
     cloud_temperature,
     guess_time_axis,
     tof_fit,

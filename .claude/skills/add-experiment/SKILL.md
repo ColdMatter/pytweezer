@@ -229,18 +229,18 @@ analyses the experiment declares as a class attribute (inherited), e.g.
 `LoadTweezers`' `analyses = ("tweezer_histogram", "tweezer_photon_histogram")`;
 an optimiser declares none. Each file records the names (root attr
 `analyses`), so the tab never imports the experiment. Each default analysis
-is one self-contained module in `pytweezer/analysis/default_analyses/`: its
-computation, its view and its `ANALYSES` entries (`{name: AnalysisEntry}`),
-merged in that package's `__init__`. The view is an `AnalysisView` from
+has its computation, free of Qt, in `pytweezer/analyses/default/`, and its view
+and `ANALYSES` entries (`{name: AnalysisEntry}`) in the same-named module of
+`pytweezer/GUI/default_analyses/`, merged in that package's `__init__`. The view is an `AnalysisView` from
 `pytweezer/GUI/experiments/analyses.py`, usually a `ComputedAnalysisView`, which loads and computes off the GUI thread
 through its hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`;
 `compute` reads one point's large result, such as an image, with `point_result`).
 A view reads only what the file recorded, so record what it needs (the tweezer
 histograms, whose readout also gives the imaging survival, take `first_counts`/`second_counts` with `trap_sites` and
-`threshold`, else per-site photons, else the `hamcam_images` stack: `default_analyses/tweezer_histogram.py`;
+`threshold`, else per-site photons, else the `hamcam_images` stack: `analyses/default/tweezer_histogram.py`;
 the MOT Gaussian fit, `cloud_fit`, takes `<camera>_<field>`, `_error` and
 `<camera>_mean_image`, as `LoadTweezersMOTImage.record_cloud_fit` records them:
-`default_analyses/cloud.py`; `cloud_temperature` fits the time-of-flight
+`analyses/default/cloud.py`; `cloud_temperature` fits the time-of-flight
 expansion of those sizes against a scanned time argument, and needs the constant
 `cloud_mass_amu`).
 A name this GUI doesn't know is listed disabled, and every analysis is disabled

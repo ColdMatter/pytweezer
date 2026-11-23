@@ -19,15 +19,15 @@ your script at all.
 
 An analysis of a *finished measurement file*, offered in the Results tab, is a
 different thing: no process, no stream, nothing in this skill's `process`
-contract applies. Write it as one self-contained module in
-`pytweezer/analysis/default_analyses/` (the Analysis Manager lists only files
-directly in `pytweezer/analyses/live/`): its computation from a `Measurement`, its
-view (an `AnalysisView` from `pytweezer/GUI/experiments/analyses.py`, whose
+contract applies. Write its computation, free of Qt, in
+`pytweezer/analyses/default/` (the Analysis Manager lists only files directly in
+`pytweezer/analyses/live/`), and its view in `pytweezer/GUI/default_analyses/`: an
+`AnalysisView` from `pytweezer/GUI/experiments/analyses.py`, whose
 `set_measurement(archive, path, measurement)` loads over its own archive
-connection and computes off the GUI thread) and its `ANALYSES` entries; merge
+connection and computes off the GUI thread, plus its `ANALYSES` entries; merge
 those into the package's `ANALYSES` in its `__init__`, and name it in the
 experiment's `analyses = (...)` (the experiment side is the `add-experiment`
-skill's). `default_analyses/tweezer_histogram.py` is the example; it shares its numbers with the
+skill's). `analyses/default/tweezer_histogram.py` is the example; it shares its numbers with the
 live `tweezer_loading.py` through `array_loading.py`, so the two cannot disagree.
 Do the same whenever a live and a file analysis compute one quantity.
 
