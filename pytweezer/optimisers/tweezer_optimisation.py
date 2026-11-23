@@ -38,7 +38,12 @@ class TweezerOptimisation(BayesianOptimisation):
         With ``save_raw_images`` the frames are recorded as ``hamcam_images``,
         ``(shots, 2, height, width)`` per point.
         """
-        stacks = np.array([self.take_shot(**overrides) for _ in range(self.shots)])
+        stacks = []
+        for _ in range(self.shots):
+            mark = self.hamcam.start_shot({"rid": self.rid})
+            self.run_motmaster_sequence(**overrides)
+            stacks.append(self.hamcam.wait_frames(mark, 2))
+        stacks = np.array(stacks)
         if self.save_raw_images:
             self.record("hamcam_images", stacks)
         return list(stacks[:, 0]), list(stacks[:, 1])

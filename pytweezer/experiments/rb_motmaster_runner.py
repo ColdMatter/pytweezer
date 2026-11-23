@@ -53,14 +53,6 @@ class RbMotMasterRunner(MotMasterExperiment):
         tooltip="Longest wait for the frame counts to settle",
     )
 
-    @classmethod
-    def devices(cls) -> dict[str, Device]:
-        # Reservations are fixed per class, so every camera is reserved; only
-        # the ticked ones are connected to.
-        return super().devices() | {
-            prefix: Device(name) for prefix, name in CAMERAS.items()
-        }
-
     def prepare(self) -> None:
         super().prepare()
         ticked = {"hamcam": self.use_hamcam, "orca": self.use_orca}
@@ -84,7 +76,7 @@ class RbMotMasterRunner(MotMasterExperiment):
             name: camera.start_shot({"rid": self.rid})
             for name, camera in self.cameras.items()
         }
-        self.run_sequences()
+        self.run_motmaster_sequence()
         settle_frame_counts(self.cameras, self.frame_settle, self.frame_timeout, 0.05)
         for name, camera in self.cameras.items():
             if camera.frames_acquired() < marks[name]:
@@ -109,3 +101,11 @@ class RbMotMasterRunner(MotMasterExperiment):
                 camera.end_shots()
         finally:
             super().finish()
+
+    @classmethod
+    def devices(cls) -> dict[str, Device]:
+        # Reservations are fixed per class, so every camera is reserved; only
+        # the ticked ones are connected to.
+        return super().devices() | {
+            prefix: Device(name) for prefix, name in CAMERAS.items()
+        }

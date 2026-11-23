@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -137,18 +137,6 @@ class LoadTweezers(MotMasterExperiment):
         tooltip="record the sum of the raw pixel values in each site's window, "
         "beside its occupancy",
     )
-    use_motmaster_parameter_overrides = Bool(
-        True,
-        scannable=False,
-        tooltip="send the saved parameters bound to the sequence to MOTMaster as "
-        "parameter overrides; off, the script's own values run (a value set in "
-        "the form still wins)",
-    )
-
-    def saved_bindings(self) -> dict[str, str]:
-        return (
-            super().saved_bindings() if self.use_motmaster_parameter_overrides else {}
-        )
 
     def prepare(self) -> None:
         super().prepare()
@@ -187,12 +175,49 @@ class LoadTweezers(MotMasterExperiment):
         self.record("trap_feature_size", self.trap_feature_size, unit="px")
         self.record("threshold", self.trap_threshold, unit="photons")
 
+    def run_point(self) -> None:
+        mark = self.hamcam.start_shot({"rid": self.rid})
+        self.run_motmaster_sequence()
+        frames = np.asarray(self.hamcam.wait_frames(mark, 2))
+        self.record_data(frames)
+
     def finish(self) -> None:
         try:
             self.hamcam.start_live()  # does nothing unless a failure left it stopped
             self.hamcam.end_shots()
+
         finally:
             super().finish()
+
+    def record_data(self, frames: np.ndarray) -> None:
+        """Record the frames, signal and per-site results of one shot's two HamCam ``frames``."""
+        if self.save_raw_images:
+            self.record("hamcam_images", frames)
+        first_image, second_image = frames
+        self.record(
+            "signal_counts",
+            float(first_image.sum(dtype=float) - second_image.sum(dtype=float)),
+            unit="counts",
+        )
+        if self.trap_sites is None:
+            return
+
+        photons = photons_at_sites(
+            top_hat(frames, self.trap_feature_size),
+            self.trap_sites,
+            self.trap_window_size,
+        )
+        first, second = photons > self.trap_threshold
+        self.record("first_occupied", first)
+        self.record("second_occupied", second)
+        self.record("loading", float(first.mean()))
+        self.record("survival", float(second[first].mean()) if first.any() else np.nan)
+        if self.save_tweezer_counts:
+            first_counts, second_counts = site_counts(
+                frames, self.trap_sites, self.trap_window_size
+            )
+            self.record("first_counts", first_counts, unit="counts")
+            self.record("second_counts", second_counts, unit="counts")
 
     def saved_trap_sites(
         self, saved: dict
@@ -242,46 +267,6 @@ class LoadTweezers(MotMasterExperiment):
             )
         return {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}, ""
 
-    def take_shot(self, **overrides: Any) -> np.ndarray:
-        """Run the sequence once with script-parameter ``overrides``; the HamCam's two frames."""
-        mark = self.hamcam.start_shot({"rid": self.rid})
-        self.run_sequences(**overrides)
-        return np.asarray(self.hamcam.wait_frames(mark, 2))
-
-    def run_point(self) -> None:
-        frames = self.take_shot()
-        self.record_data(frames)
-
-    def record_data(self, frames: np.ndarray) -> None:
-        """Record the frames, signal and per-site results of one shot's two HamCam ``frames``."""
-        if self.save_raw_images:
-            self.record("hamcam_images", frames)
-        first_image, second_image = frames
-        self.record(
-            "signal_counts",
-            float(first_image.sum(dtype=float) - second_image.sum(dtype=float)),
-            unit="counts",
-        )
-        if self.trap_sites is None:
-            return
-
-        photons = photons_at_sites(
-            top_hat(frames, self.trap_feature_size),
-            self.trap_sites,
-            self.trap_window_size,
-        )
-        first, second = photons > self.trap_threshold
-        self.record("first_occupied", first)
-        self.record("second_occupied", second)
-        self.record("loading", float(first.mean()))
-        self.record("survival", float(second[first].mean()) if first.any() else np.nan)
-        if self.save_tweezer_counts:
-            first_counts, second_counts = site_counts(
-                frames, self.trap_sites, self.trap_window_size
-            )
-            self.record("first_counts", first_counts, unit="counts")
-            self.record("second_counts", second_counts, unit="counts")
-
 
 class LoadTweezersNImages(LoadTweezers):
     """Load the tweezers and image them ``n_images`` times per point."""
@@ -294,7 +279,7 @@ class LoadTweezersNImages(LoadTweezers):
     def run_point(self) -> None:
         # The live mode broadcasts the frames; nothing is recorded.
         mark = self.hamcam.start_shot({"rid": self.rid})
-        self.run_sequences()
+        self.run_motmaster_sequence()
         self.hamcam.wait_frames(mark, 1)
 
 
@@ -329,17 +314,17 @@ class LoadTweezersMOTImage(LoadTweezers):
         self.orca.start_live()
         self.record("cloud_mass_amu", SPECIES_MASS_AMU["Rb"], unit="u")
 
+    def run_point(self) -> None:
+        orca_mark = self.orca.start_shot({"rid": self.rid})
+        super().run_point()
+        self.record_cloud_fit(np.asarray(self.orca.wait_frames(orca_mark, 1)))
+
     def finish(self) -> None:
         try:
             self.orca.start_live()  # does nothing unless a failure left it stopped
             self.orca.end_shots()
         finally:
             super().finish()
-
-    def run_point(self) -> None:
-        orca_mark = self.orca.start_shot({"rid": self.rid})
-        super().run_point()
-        self.record_cloud_fit(np.asarray(self.orca.wait_frames(orca_mark, 1)))
 
     def record_cloud_fit(self, frames: np.ndarray) -> None:
         """Fit the mean of the ORCA's ``frames`` and record the cloud as ``orca_*``."""

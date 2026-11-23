@@ -28,8 +28,10 @@ name; a dict maps a script parameter to a differently named key::
     )
 
 A value set in the form (or scanned) beats the saved one, and an override passed
-to :meth:`MotMasterExperiment.run_sequences` beats both. The saved values sent
+to :meth:`MotMasterExperiment.run_motmaster_sequence` beats both. The saved values sent
 are recorded as the constant ``saved_sequence``, keyed by script parameter.
+With ``use_motmaster_parameter_overrides`` off, none are sent and the script's
+own values run.
 
 Two machines are run together by MOTMaster's linked mode: the primary claims its
 secondary itself and fires it by TTL, so the experiment declares only the
@@ -56,6 +58,7 @@ from typing import Any
 
 from pytweezer.experiment.arguments import (
     Argument,
+    Bool,
     Choice,
     Device,
     Integer,
@@ -189,6 +192,9 @@ class MotMasterExperiment(Experiment):
     :meth:`prepare` configures the sequencer completely on each task, since its
     settings persist between tasks. Repeated shots come from the scan's
     ``repetitions``, giving one stored point per shot.
+
+    An experiment whose MOTMaster binds saved parameters (``saved=``) is given
+    the argument ``use_motmaster_parameter_overrides``.
     """
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -200,6 +206,18 @@ class MotMasterExperiment(Experiment):
                 "experiment drives one MOTMaster. Run two machines together in "
                 "linked mode: MotMaster(..., linked=True) on the primary"
             )
+        if any(sequencer.saved for sequencer in sequencers.values()) and (
+            "use_motmaster_parameter_overrides" not in cls.arguments()
+        ):
+            overrides = Bool(
+                True,
+                scannable=False,
+                tooltip="send the saved parameters bound to the sequence to "
+                "MOTMaster as parameter overrides; off, the script's own values "
+                "run (a value set in the form still wins)",
+            )
+            overrides.__set_name__(cls, "use_motmaster_parameter_overrides")
+            cls.use_motmaster_parameter_overrides = overrides
         targets: dict[str, str] = {}
         for name, argument in cls.motmaster_arguments().items():
             parameter = argument.motmaster_name
@@ -287,8 +305,11 @@ class MotMasterExperiment(Experiment):
         self._bind_saved_parameters(set_in_form)
 
     def saved_bindings(self) -> dict[str, str]:
-        """``{script parameter: saved key}`` this task sends; by default the ``saved=`` ones."""
-        return self.motmaster()[1].saved
+        """``{script parameter: saved key}`` this task sends: the ``saved=`` ones, or none with ``use_motmaster_parameter_overrides`` off."""
+        saved = self.motmaster()[1].saved
+        if saved and not self.use_motmaster_parameter_overrides:
+            return {}
+        return saved
 
     def _bind_saved_parameters(self, set_in_form: dict[str, Any]) -> None:
         bindings = self.saved_bindings()
@@ -343,7 +364,7 @@ class MotMasterExperiment(Experiment):
             )
         return int(value)
 
-    def run_sequences(self, **overrides: Any) -> None:
+    def run_motmaster_sequence(self, **overrides: Any) -> None:
         """Run the script once (blocking) with the current parameters plus ``overrides``.
 
         ``overrides`` are keyed by script parameter and beat the form's values,
@@ -360,7 +381,7 @@ class MotMasterExperiment(Experiment):
         getattr(self, self.motmaster()[0]).start_motmaster_experiment(sent)
 
     def run_point(self) -> None:
-        self.run_sequences()
+        self.run_motmaster_sequence()
 
     def close_devices(self) -> None:
         # Here rather than in finish(), which subclasses override: a link left on

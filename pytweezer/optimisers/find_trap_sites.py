@@ -56,9 +56,6 @@ class FindTrapSites(Fit, LoadTweezers):
     default_columns = Integer(8, min=1, group="Default array")
     default_spacing = Number(5e-6, unit="um", scale=1e-6, min=0, group="Default array")
 
-    def saved_trap_sites(self, saved):
-        return None, ""  # it finds them
-
     def prepare(self) -> None:
         super().prepare()
         array = self.rig.get_array()
@@ -70,20 +67,23 @@ class FindTrapSites(Fit, LoadTweezers):
             )
         self.record("sites_from", "rig" if array else "default")
 
+    def saved_trap_sites(self, saved):
+        return None, ""  # it finds them
+
     def take_calibration_shots(self) -> tuple[list, list]:
         """``calibration_shots`` shots with the tweezers off in the background drop.
 
         Returns their first and second frames. With ``save_raw_images`` the
         frames are recorded as ``hamcam_images``, ``(shots, 2, height, width)``.
         """
-        stacks = np.array(
-            [
-                self.take_shot(
-                    BackgroundDrop=1, tTweezerSetVVA0=0.0, tTweezerSetVVA1=0.0
-                )
-                for _ in range(self.calibration_shots)
-            ]
-        )
+        stacks = []
+        for _ in range(self.calibration_shots):
+            mark = self.hamcam.start_shot({"rid": self.rid})
+            self.run_motmaster_sequence(
+                BackgroundDrop=1, tTweezerSetVVA0=0.0, tTweezerSetVVA1=0.0
+            )
+            stacks.append(self.hamcam.wait_frames(mark, 2))
+        stacks = np.array(stacks)
         if self.save_raw_images:
             self.record("hamcam_images", stacks)
         return list(stacks[:, 0]), list(stacks[:, 1])
