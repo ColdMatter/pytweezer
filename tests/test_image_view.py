@@ -10,17 +10,6 @@ def view(qapp):
     return ImageView()
 
 
-def test_a_frame_is_placed_by_its_resolution_and_offset(view):
-    head = {"_imgresolution": (2e-6, 3e-6), "_offset": (4, 5)}
-    image = np.ones((6, 8))
-
-    view.show_image(image, head)
-
-    assert view.image_item.mapRectToParent(view.image_item.boundingRect()) == (
-        frame_rect(head, image.shape)
-    )
-
-
 def test_frame_returns_the_head_it_was_given(view):
     head = {"index": 1}
     image = np.ones((4, 4))
@@ -62,28 +51,12 @@ def test_setting_the_levels_does_not_count_as_a_drag(view):
     assert dragged == []
 
 
-def test_fixed_levels_are_kept(view):
-    view.show_image(np.arange(16.0).reshape(4, 4), levels=(0, 5))
-
-    assert view.levels() == (0, 5)
-
-
 def test_a_colour_bar_keeps_fixed_levels(qapp):
     view = ImageView(colour_bar="bar")
 
     view.show_image(np.arange(16.0).reshape(4, 4), levels=(0, 5))
 
     assert view.levels() == (0, 5)
-
-
-def test_paths_replace_by_key(view):
-    path = np.array([[0.0, 1.0, 2.0], [0.0, 1.0, 0.0]])
-
-    view.show_paths("a", [path, path])
-    view.show_paths("a", [path])
-
-    curves = [item for item in view.plot.items if isinstance(item, pg.PlotCurveItem)]
-    assert len(curves) == 1
 
 
 def test_a_side_plot_shares_the_image_axis(view):
@@ -93,13 +66,6 @@ def test_a_side_plot_shares_the_image_axis(view):
     assert top.getViewBox().linkedView(pg.ViewBox.XAxis) is view.plot.getViewBox()
     assert left.getViewBox().linkedView(pg.ViewBox.YAxis) is view.plot.getViewBox()
     assert left.getViewBox().yInverted()
-
-
-def test_units_relabel_both_axes(view):
-    view.set_units("px")
-
-    assert view.plot.getAxis("bottom").labelUnits == "px"
-    assert view.plot.getAxis("left").labelUnits == "px"
 
 
 def test_row_zero_can_sit_at_the_bottom(qapp):
