@@ -28,9 +28,11 @@ unwanted and is undone here.
 3. A default analysis is a Qt-free calculation in `analyses/default/`, plus a
    short view in `GUI/default_analyses/`. Each analysis has its own module;
    none shares a file with framework code.
-4. **Every drawing lives in `GUI/views/`**, shared or not, so nothing has to
-   move once a second panel wants it. Applets and default-analysis views import
-   their drawings from there, never from one another.
+4. **Every base drawing lives in `GUI/views/`**: the image viewer, the line
+   plot and the histogram plotter. A specialisation of one (an image with trap
+   sites marked, say) lives in the applet or default analysis that uses it,
+   and moves to `GUI/views/` only once a second panel needs it. Applets and
+   default-analysis views never import from one another.
 5. In every experiment and optimiser, `prepare`, `run_point` and `finish`
    (and `measure` and `fit` in optimisers) read as a plain sequence of physics
    steps. Helper methods (`saved_trap_sites`, say) may be more involved, as
@@ -45,8 +47,8 @@ unwanted and is undone here.
   and returns what to plot and a generic view draws it. That is a separate,
   larger project; views stay hand-written Qt.
 - Merging the two cloud-fit outline drawings (the image monitor's and
-  `CloudFitView`'s, both from `contour_ellipses`). Each moves into `GUI/views/`
-  as it is; making them one drawing is a later design change.
+  `CloudFitView`'s, both from `contour_ellipses`). Each stays a specialisation
+  in its own panel; making them one shared drawing is a later design change.
 - Running default analyses during an experiment. They are still calculated
   when a file is opened in the Results tab.
 - Deleting old code (`analysis_old.py`, `crashit.py` and the like). These files
@@ -130,12 +132,14 @@ pytweezer/
       __init__.py              ANALYSES = tweezer_histogram.ANALYSES | cloud.ANALYSES
       tweezer_histogram.py     TweezerHistogramView + its ANALYSES entries
       cloud.py                 CloudFitView, CloudTemperatureView + entries
-    views/                     EVERY drawing (see "Views" below)
-      tweezer_loading.py       TweezerLoadingPlots
-      cloud.py                 the cloud-fit and temperature drawings
-      image.py, live_plot.py…  phase 2: the applets' drawings
-    viewers/                   applets: properties, subscriptions, and handing
-                               each message to their views
+    views/                     base drawings, plus specialisations once shared
+      image.py                 image viewer (phase 2, out of ImageDisplay)
+      line_plot.py             line plot (phase 2, out of LivePlot's PlotPanel)
+      histogram.py             histogram plotter (out of TweezerLoadingPlots)
+      tweezer_loading.py       TweezerLoadingPlots: a specialisation, here
+                               because the applet and a default analysis share it
+    viewers/                   applets: properties, subscriptions, any
+                               specialised drawing only they use
     applet.py                  applet FRAMEWORK
 ```
 
@@ -153,31 +157,53 @@ pytweezer/
 
 ## Views
 
-A **view** is a widget that shows data it is handed: arrays, fit results,
-headers. It knows nothing of streams, Properties, devices, the archive or
-threads. An **applet** (in `GUI/viewers/`) owns the properties and
-subscriptions and hands each message to its views. A **default-analysis view**
-(in `GUI/default_analyses/`) owns the controls and the compute wiring
+A **base view** is a general-purpose widget that shows data it is handed:
+the image viewer, the line plot and the histogram plotter. It knows nothing of
+streams, Properties, devices, the archive or threads, and nothing specific to
+one measurement. Base views live in `GUI/views/`.
+
+A **specialisation** builds on a base view for one purpose. Examples are an
+image with trap sites marked, a histogram with a two-Gaussian fit and a
+threshold, or a cloud image with fit outlines. It lives beside the one applet
+or default analysis that uses it. Once a second panel needs it, it moves to
+`GUI/views/`, as `TweezerLoadingPlots` does now.
+
+An **applet** (in `GUI/viewers/`) owns its properties and subscriptions and
+hands each message to its views. A **default-analysis view** (in
+`GUI/default_analyses/`) owns its controls and the compute wiring
 (`ComputedAnalysisView`) and hands each result to its views. Controls that talk
-to a device, like `camera_sidebar.py`, are not views and stay with their applet.
+to a device, like `camera_sidebar.py`, are not views and stay with their
+applet.
 
 The work comes in two phases. Each gets its own plan, and phase 1 ships before
-phase 2 starts:
+phase 2 starts.
 
-- **Phase 1**, with the analysis split: create `GUI/views/` with
-  `TweezerLoadingPlots` and the default analyses' drawings (`CloudFitDrawing`
-  and `TemperatureDrawing` already mark where those split from their views).
-- **Phase 2, the applets.** Their drawing is fused into the applet classes by
-  inheritance: `CameraApplet`, `ImageProjectionDisplay` and `TweezerDisplay`
-  subclass the `ImageDisplay` applet, and `StackedPlotter` subclasses
-  `LivePlot`. Separating them means pulling an image view (image, colour bar,
-  ROIs, overlays, data sidebar) out of `ImageDisplay`, and a plot view out of
-  `LivePlot`, then having each applet hold a view rather than inherit one. The
-  same goes for `slm_monitor`'s `ImagePanel`, `scalar_history`, and
-  `tweezer_monitor`'s `SiteOverlay`. This is a refactor, not a move, and the
-  camera applet is 850 lines, so applets must look and behave exactly as
-  before. Check each in the real GUI (`run-pytweezer` skill), not only in tests.
-  Saved applet Properties keep their keys.
+- **Phase 1**, with the analysis split:
+  - Create `GUI/views/` with a histogram plotter pulled out of
+    `TweezerLoadingPlots`'s histogram panels.
+  - `TweezerLoadingPlots` moves there as a shared specialisation built on that
+    plotter.
+  - The cloud-fit and temperature drawings stay in
+    `GUI/default_analyses/cloud.py` as specialisations.
+- **Phase 2, the applets.** Today the drawing is fused into the applet classes
+  by inheritance:
+  - `CameraApplet`, `ImageProjectionDisplay` and `TweezerDisplay` subclass the
+    `ImageDisplay` applet.
+  - `StackedPlotter` subclasses `LivePlot`.
+
+  Phase 2 pulls the base image viewer (image, colour bar, ROIs, overlays) out
+  of `ImageDisplay` and the line plot out of `LivePlot`'s `PlotPanel`. Each
+  applet then holds a view, base or specialised, rather than inheriting from
+  another applet. A specialised view may subclass its base view.
+  - `TweezerDisplay`'s site overlay and `ImageProjectionDisplay`'s projections
+    become image-viewer specialisations in their own applets.
+  - `slm_monitor`'s `ImagePanel` and `scalar_history` are rebuilt on the base
+    views.
+
+  This is a refactor, not a move. The camera applet is 850 lines, so applets
+  must look and behave exactly as before. Check each one in the real GUI
+  (`run-pytweezer` skill), not only in tests. Saved applet Properties keep
+  their keys.
 
 ## Readable experiments: what changes
 
@@ -219,8 +245,8 @@ builder.
   - live analyses go in `analyses/live/`;
   - a default analysis is a calculation in `analyses/default/` plus a view in
     `GUI/default_analyses/`;
-  - every drawing goes in `GUI/views/`; applets and default-analysis views
-    only wire data to views;
+  - base drawings go in `GUI/views/`, and specialisations stay with the panel
+    that uses them until they are shared;
   - singular means framework, plural means editable.
 
   Approving this design is the go-ahead for those skill changes.
@@ -248,5 +274,5 @@ The library modules named under Anti-goals do not move.
 - Whether a plain `git mv` or a split commit works best for each move, keeping
   history readable.
 - The order of the work within each phase and how it is split into commits.
-- In phase 2, the views' exact boundaries and APIs, as long as an applet holds
-  its views rather than inheriting from them.
+- The base views' exact boundaries and APIs, as long as each is general-purpose
+  and an applet holds its views rather than inheriting from another applet.
