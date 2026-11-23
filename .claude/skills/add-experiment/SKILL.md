@@ -231,18 +231,23 @@ an optimiser declares none. Each file records the names (root attr
 `analyses`), so the tab never imports the experiment. Each default analysis
 has its computation, free of Qt, in `pytweezer/analyses/default/`, and its view
 and `ANALYSES` entries (`{name: AnalysisEntry}`) in the same-named module of
-`pytweezer/GUI/default_analyses/`, merged in that package's `__init__`. The view is an `AnalysisView` from
-`pytweezer/GUI/experiments/analyses.py`, usually a `ComputedAnalysisView`, which loads and computes off the GUI thread
-through its hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`;
+`pytweezer/GUI/default_analyses/`, merged in that package's `__init__`. The view
+is an `AnalysisView` from `pytweezer/GUI/experiments/analyses.py`, usually a
+`ComputedAnalysisView`, which loads and computes off the GUI thread through its
+hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`;
 `compute` reads one point's large result, such as an image, with `point_result`).
-A view reads only what the file recorded, so record what it needs (the tweezer
-histograms, whose readout also gives the imaging survival, take `first_counts`/`second_counts` with `trap_sites` and
-`threshold`, else per-site photons, else the `hamcam_images` stack: `analyses/default/tweezer_histogram.py`;
-the MOT Gaussian fit, `cloud_fit`, takes `<camera>_<field>`, `_error` and
-`<camera>_mean_image`, as `LoadTweezersMOTImage.record_cloud_fit` records them:
-`analyses/default/cloud.py`; `cloud_temperature` fits the time-of-flight
-expansion of those sizes against a scanned time argument, and needs the constant
-`cloud_mass_amu`).
+A view reads only what the file recorded, so record what it needs:
+
+- the tweezer histograms, whose readout also gives the imaging survival, take
+  `first_counts`/`second_counts` with `trap_sites` and `threshold`, else per-site
+  photons, else the `hamcam_images` stack
+  (`analyses/default/tweezer_histogram.py`);
+- the MOT Gaussian fit, `cloud_fit`, takes `<camera>_<field>`, `_error` and
+  `<camera>_mean_image`, as `LoadTweezersMOTImage.record_cloud_fit` records them
+  (`analyses/default/cloud.py`);
+- `cloud_temperature` fits the time-of-flight expansion of those sizes against a
+  scanned time argument, and needs the constant `cloud_mass_amu`.
+
 A name this GUI doesn't know is listed disabled, and every analysis is disabled
 until the measurement finishes. An analysis only reads the file, through its
 own archive connection, off the GUI thread. The tab remembers the choice per
@@ -420,10 +425,14 @@ The Rb tweezer experiments, in the order a session uses them:
    `saved_sequence`. `use_motmaster_parameter_overrides=False` sends none of them, so the
    script's own values run (`MotMasterExperiment` gives this argument to every
    experiment whose `MotMaster` declares `saved=`, and `saved_bindings()` reads it);
-   the trap sites are still read from the saved parameters. It and everything built on it also read the trap sites in
-   `prepare()` (`saved_trap_sites(saved)`), moved into the ROI
+   the trap sites are still read from the saved parameters. It and everything
+   built on it also read the trap sites in `prepare()` (`saved_trap_sites(saved)`),
+   moved into the ROI
    (`hamcam_roi_x0`/`_y0`/`_width`/`_height`, unbinned; binning is fixed at 1)
-   by the origin `set_roi` returned (`roi_origin`, `(x0, y0)`).
+   by the origin `set_roi` returned (`roi_origin`, `(x0, y0)`). They become
+   `LoadTweezers.trap_sites`, a `TrapSites` (`analysis/array_loading.py`) that
+   also carries the saved `trap_window_size`, `trap_feature_size` and
+   `trap_threshold`; the experiments score frames only through its methods.
    Scans of the EM-gain sensitivity `hamcam_gain` and of the ROI are
    refused. They are refused when none are saved or when a summing window
    leaves the ROI; when `trap_geometry` is not the rig's array
@@ -448,8 +457,8 @@ The Rb tweezer experiments, in the order a session uses them:
    itself keeps one shot per point, which the default analyses expect.
 
 Shots tag their HamCam frames with `start_shot({"rid": self.rid})`; the live
-tweezer loading analysis (`analyses/live/tweezer_loading.py`) starts afresh whenever
-the rid changes and places the saved sites by each frame's
+tweezer loading analysis (`analyses/live/tweezer_loading.py`) starts afresh
+whenever the rid changes and places the saved sites by each frame's
 `roi_x0`/`roi_y0` header.
 
 ## Files

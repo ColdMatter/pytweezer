@@ -167,9 +167,24 @@ Not everything worth viewing is a stream:
   columns, as the Optimisers tab and the notebooks do, so a subclass gets that
   for free.
 
-A plot that another panel also shows belongs in one widget the applet only
-wraps: `TweezerLoadingPlots`, in `GUI/views/tweezer_loading.py`, is drawn by both the Tweezer
-Loading applet and that tab's histogram view, so the two cannot drift apart.
+## Drawings: `GUI/views/`, specialisations, and who imports whom
+
+A **base view** is a general-purpose widget that shows what it is handed and
+knows nothing of streams, Properties, devices or the archive. The base drawings
+(image viewer, line plot, histogram plotter) live in `pytweezer/GUI/views/`;
+`histogram.py` (`HistogramPlot`) is there now. The image viewer and line plot
+join it in phase 2 of the framework split; until then the applets' drawing
+still sits in `viewers/image_monitor.py` and `viewers/live_plot.py`.
+
+A **specialisation** (an image with trap sites marked, a histogram with a fit
+and a threshold) stays in the applet or default-analysis view that uses it, and
+moves to `GUI/views/` once a second panel needs it. `TweezerLoadingPlots` in
+`GUI/views/tweezer_loading.py` is the shared example: the Tweezer Loading applet
+and that tab's histogram view both draw it, so the two cannot drift apart.
+
+Applets (`GUI/viewers/`) and default-analysis views
+(`GUI/default_analyses/`) never import from one another; share through
+`GUI/views/`.
 
 ## Properties are the user's knobs
 

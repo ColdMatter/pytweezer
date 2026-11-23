@@ -193,6 +193,10 @@ Devices tab say that). Filesystem-layout constants live in
 `pytweezer/configuration/paths.py`; the **root** `configuration/` directory is
 unrelated JSON data.
 
+A singular package is framework (`experiment/`, `analysis/`) and a plural one is
+what people edit day to day (`experiments/`, `optimisers/`, `analyses/`,
+`GUI/viewers/`, `GUI/default_analyses/`).
+
 Every managed process is launched the same way — `python <script> <name>`, where
 `name` is the CONFIG key that the script looks itself up under.
 

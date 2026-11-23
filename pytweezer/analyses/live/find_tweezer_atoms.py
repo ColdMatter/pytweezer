@@ -5,7 +5,6 @@ from scipy import ndimage
 
 from pytweezer.servers import DataClient, ImageClient, Properties, PropertyAttribute
 
-# filepath: /home/twalker/RbCaF/pytweezer/pytweezer/analysis/find_tweezer_atoms.py
 """ Identify atom locations in a tweezer image and stream their positions.
 
 Input:

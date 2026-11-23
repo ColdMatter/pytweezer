@@ -43,7 +43,10 @@ pub/sub layer ({mod}`pytweezer.servers.clients`), with an XSUB/XPUB proxy
 ({mod}`pytweezer.servers.xsub_xpub`) forwarding between publishers and
 subscribers. Streaming analysis processes
 ({mod}`pytweezer.analysis.analysis_base`) subscribe to a stream, transform each
-message, and republish the result.
+message, and republish the result. The scripts people edit are in
+`pytweezer/analyses/live/`; the framework and shared maths stay in
+{mod}`pytweezer.analysis`. A singular package is framework and a plural one is
+what people edit.
 
 ## Experiments and measurement data
 
