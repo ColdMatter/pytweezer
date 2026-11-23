@@ -22,7 +22,7 @@ os.environ["PYTWEEZER_LOG_PUBLISH"] = "0"
 import numpy as np
 from PyQt6 import QtCore, QtTest, QtWidgets
 
-from pytweezer import servers
+from pytweezer.GUI import applet as applet_module
 from pytweezer.GUI.theme import apply_theme
 
 WINDOW_SIZE = (1000, 700)
@@ -125,9 +125,11 @@ def fake_hubs(trap_sites):
 
 def publish(message):
     """Deliver ``message`` (``(channel, ...)``) to every stream subscribed to its channel."""
-    for stream in FakeStream.live:
-        if message[0] in stream.channels:
-            stream.queue.append(message)
+    receivers = [stream for stream in FakeStream.live if message[0] in stream.channels]
+    if not receivers:
+        raise RuntimeError(f"nothing is subscribed to channel {message[0]!r}")
+    for stream in receivers:
+        stream.queue.append(message)
 
 
 def gaussian_frame(shape=FRAME_SHAPE, centre=(0.45, 0.55), sigma=(14.0, 10.0)):
@@ -161,7 +163,9 @@ def camera_messages():
     """A frame on the stream of the camera the applet opens on: the first one in CONFIG."""
     from pytweezer.drivers.camera_catalogue import camera_conf, camera_names
 
-    stream = camera_conf(camera_names()[0])["stream_name"]
+    camera = camera_names()[0]
+    print(f"CameraApplet camera: {camera}")
+    stream = camera_conf(camera)["stream_name"]
     return image_messages(stream)
 
 
@@ -314,6 +318,8 @@ APPLETS = [
 def screenshot(class_name, module_name, seed, messages, out_dir):
     module = importlib.import_module(VIEWERS + module_name)
     fake_hubs(SITES)
+    if applet_module.Properties is not FakeProps:
+        raise RuntimeError("the Properties fake did not take effect")
     FakeStream.live.clear()
     FakeProps.seed = seed
     widget = getattr(module, class_name)(class_name)
@@ -325,6 +331,10 @@ def screenshot(class_name, module_name, seed, messages, out_dir):
     for _ in range(3):
         widget.poll()
         QtTest.QTest.qWait(100)
+    for stream in FakeStream.live:
+        if stream.queue:
+            channels = sorted({message[0] for message in stream.queue})
+            raise RuntimeError(f"{class_name} left unread messages on {channels}")
     path = out_dir / f"{class_name}.png"
     if not widget.grab().save(str(path)):
         raise RuntimeError(f"could not write {path}")
@@ -340,7 +350,6 @@ def main(out_dir):
     apply_theme(app)
     for module_name in {entry[1] for entry in APPLETS}:
         importlib.import_module(VIEWERS + module_name)
-    assert servers.Properties is not FakeProps
     for class_name, module_name, seed, messages in APPLETS:
         print(screenshot(class_name, module_name, seed, messages, out_dir))
     sys.stdout.flush()
