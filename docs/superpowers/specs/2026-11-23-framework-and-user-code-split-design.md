@@ -28,9 +28,9 @@ unwanted and is undone here.
 3. A default analysis is a Qt-free calculation in `analyses/default/`, plus a
    short view in `GUI/default_analyses/`. Each analysis has its own module;
    none shares a file with framework code.
-4. A drawing used by more than one panel lives in `GUI/views/`. Applets and
-   default-analysis views both import from there. They never import from each
-   other.
+4. **Every drawing lives in `GUI/views/`**, shared or not, so nothing has to
+   move once a second panel wants it. Applets and default-analysis views import
+   their drawings from there, never from one another.
 5. In every experiment and optimiser, `prepare`, `run_point` and `finish`
    (and `measure` and `fit` in optimisers) read as a plain sequence of physics
    steps. Helper methods (`saved_trap_sites`, say) may be more involved, as
@@ -44,8 +44,9 @@ unwanted and is undone here.
 - A declarative default-analysis API, where an analysis declares its controls
   and returns what to plot and a generic view draws it. That is a separate,
   larger project; views stay hand-written Qt.
-- Restructuring the applets themselves. `GUI/applet.py` versus `GUI/viewers/`
-  already follows the pattern. Only `TweezerLoadingPlots` moves.
+- Merging the two cloud-fit outline drawings (the image monitor's and
+  `CloudFitView`'s, both from `contour_ellipses`). Each moves into `GUI/views/`
+  as it is; making them one drawing is a later design change.
 - Running default analyses during an experiment. They are still calculated
   when a file is opened in the Results tab.
 - Deleting old code (`analysis_old.py`, `crashit.py` and the like). These files
@@ -129,9 +130,12 @@ pytweezer/
       __init__.py              ANALYSES = tweezer_histogram.ANALYSES | cloud.ANALYSES
       tweezer_histogram.py     TweezerHistogramView + its ANALYSES entries
       cloud.py                 CloudFitView, CloudTemperatureView + entries
-    views/                     drawings shared by more than one panel
+    views/                     EVERY drawing (see "Views" below)
       tweezer_loading.py       TweezerLoadingPlots
-    viewers/                   applets (tweezer_loading.py imports GUI/views)
+      cloud.py                 the cloud-fit and temperature drawings
+      image.py, live_plot.py…  phase 2: the applets' drawings
+    viewers/                   applets: properties, subscriptions, and handing
+                               each message to their views
     applet.py                  applet FRAMEWORK
 ```
 
@@ -146,6 +150,34 @@ pytweezer/
 - Remove `analysisdir` from `configuration/properties/properties.default.json`.
   A PC's saved `properties.json` may still contain it; it is simply ignored.
 - The GUI keeps taking the folder from the server's response, as it does now.
+
+## Views
+
+A **view** is a widget that shows data it is handed: arrays, fit results,
+headers. It knows nothing of streams, Properties, devices, the archive or
+threads. An **applet** (in `GUI/viewers/`) owns the properties and
+subscriptions and hands each message to its views. A **default-analysis view**
+(in `GUI/default_analyses/`) owns the controls and the compute wiring
+(`ComputedAnalysisView`) and hands each result to its views. Controls that talk
+to a device, like `camera_sidebar.py`, are not views and stay with their applet.
+
+The work comes in two phases. Each gets its own plan, and phase 1 ships before
+phase 2 starts:
+
+- **Phase 1**, with the analysis split: create `GUI/views/` with
+  `TweezerLoadingPlots` and the default analyses' drawings (`CloudFitDrawing`
+  and `TemperatureDrawing` already mark where those split from their views).
+- **Phase 2, the applets.** Their drawing is fused into the applet classes by
+  inheritance: `CameraApplet`, `ImageProjectionDisplay` and `TweezerDisplay`
+  subclass the `ImageDisplay` applet, and `StackedPlotter` subclasses
+  `LivePlot`. Separating them means pulling an image view (image, colour bar,
+  ROIs, overlays, data sidebar) out of `ImageDisplay`, and a plot view out of
+  `LivePlot`, then having each applet hold a view rather than inherit one. The
+  same goes for `slm_monitor`'s `ImagePanel`, `scalar_history`, and
+  `tweezer_monitor`'s `SiteOverlay`. This is a refactor, not a move, and the
+  camera applet is 850 lines, so applets must look and behave exactly as
+  before. Check each in the real GUI (`run-pytweezer` skill), not only in tests.
+  Saved applet Properties keep their keys.
 
 ## Readable experiments: what changes
 
@@ -187,7 +219,8 @@ builder.
   - live analyses go in `analyses/live/`;
   - a default analysis is a calculation in `analyses/default/` plus a view in
     `GUI/default_analyses/`;
-  - shared drawings go in `GUI/views/`;
+  - every drawing goes in `GUI/views/`; applets and default-analysis views
+    only wire data to views;
   - singular means framework, plural means editable.
 
   Approving this design is the go-ahead for those skill changes.
@@ -214,4 +247,6 @@ The library modules named under Anti-goals do not move.
   steps.
 - Whether a plain `git mv` or a split commit works best for each move, keeping
   history readable.
-- The order of the work and how it is split into commits.
+- The order of the work within each phase and how it is split into commits.
+- In phase 2, the views' exact boundaries and APIs, as long as an applet holds
+  its views rather than inheriting from them.
