@@ -170,11 +170,11 @@ Not everything worth viewing is a stream:
 ## Drawings: `GUI/views/`, specialisations, and who imports whom
 
 A **base view** is a general-purpose widget that shows what it is handed and
-knows nothing of streams, Properties, devices or the archive. The base drawings
-(image viewer, line plot, histogram plotter) live in `pytweezer/GUI/views/`;
-`histogram.py` (`HistogramPlot`) is there now. The image viewer and line plot
-join it in phase 2 of the framework split; until then the applets' drawing
-still sits in `viewers/image_monitor.py` and `viewers/live_plot.py`.
+knows nothing of streams, Properties, devices or the archive. Base drawings
+belong in `pytweezer/GUI/views/`. Only the histogram plotter exists there so far
+(`histogram.py`, `HistogramPlot`). The image viewer and line plot are added in
+phase 2 of the framework split; until then the applets' drawing still sits in
+`viewers/image_monitor.py` and `viewers/live_plot.py`.
 
 A **specialisation** (an image with trap sites marked, a histogram with a fit
 and a threshold) stays in the applet or default-analysis view that uses it, and

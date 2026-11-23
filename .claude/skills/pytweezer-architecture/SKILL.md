@@ -187,8 +187,9 @@ In the package tree a singular folder is framework and shared maths, and a
 plural one is what people edit day to day. `experiment/` (framework) and
 `experiments/`; `analysis/` (framework, shared maths, no Qt) and `analyses/`
 (`live/` Analysis Manager scripts, `default/` Results-tab calculations);
-`optimisers/`; and in the GUI, `viewers/` (applets), `default_analyses/` (Results-tab
-views) and `views/` (shared base drawings). The Analysis Manager reads
+`optimisers/`; and in the GUI, `viewers/` (applets) and `default_analyses/`
+(Results-tab views). `GUI/views/` is the exception: it is framework, the shared
+base drawings those applets and views are built on. The Analysis Manager reads
 `paths.live_analyses_path`, i.e. `pytweezer/analyses/live/`.
 
 ## Where to go next

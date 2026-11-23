@@ -243,7 +243,7 @@ and assert on what came back or what got published:
 
 ```python
 def test_centre_of_mass_finds_a_single_bright_spot():
-    from pytweezer.analysis.centre_of_mass import CentreOfMass
+    from pytweezer.analyses.live.centre_of_mass import CentreOfMass
 
     com = build(CentreOfMass, {"threshold": 0.0})
     frame = np.zeros((8, 8), dtype=np.uint16)
