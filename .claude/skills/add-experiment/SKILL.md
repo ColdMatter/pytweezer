@@ -436,7 +436,7 @@ The Rb tweezer experiments, in the order a session uses them:
    MOT from the same shot, recorded as an `orca_*` cloud fit;
    `LoadTweezers` itself never touches the ORCA.
 4. The classes whose point is a batch of shots each loop `take_shot()`
-   themselves: `TweezerOptimisation.take_batch(**sequence)` (`score_batch()`,
+   themselves: `TweezerOptimisation.take_batch(**overrides)` (`score_batch()`,
    the base of the Bayesian optimisers, in `optimisers/tweezer_optimisation.py`) and `FindTrapSites.take_calibration_shots()`.
    Their `first_occupied`/`second_occupied`/`*_counts` are `(shots, sites)` per
    point, and `save_raw_images` (off by default there) records

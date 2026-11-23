@@ -242,10 +242,10 @@ class LoadTweezers(MotMasterExperiment):
             )
         return {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}, ""
 
-    def take_shot(self, **sequence: Any) -> np.ndarray:
-        """Run the sequence once with script parameters ``sequence``; the HamCam's two frames."""
+    def take_shot(self, **overrides: Any) -> np.ndarray:
+        """Run the sequence once with script-parameter ``overrides``; the HamCam's two frames."""
         mark = self.hamcam.start_shot({"rid": self.rid})
-        self.run_sequences(**sequence)
+        self.run_sequences(**overrides)
         return np.asarray(self.hamcam.wait_frames(mark, 2))
 
     def run_point(self) -> None:
