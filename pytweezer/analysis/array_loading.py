@@ -41,11 +41,6 @@ def top_hat(frames: Iterable[np.ndarray], feature_size: int) -> list[np.ndarray]
     return [top_hat_image(frame, feature_size) for frame in frames]
 
 
-def background_subtracted_mean(images, backgrounds) -> np.ndarray:
-    """Mean of ``images`` minus the mean of ``backgrounds``."""
-    return an.tweezer_show_bg_subtracted(images, backgrounds, show=False)
-
-
 def site_counts(
     frames: Iterable[np.ndarray], sites: dict[int, tuple[int, int]], window_size: int
 ) -> np.ndarray:

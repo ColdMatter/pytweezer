@@ -37,13 +37,14 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   `Dimension` `<setting>_low/_high`); declare one of those names yourself to
   override it. `Dimension(..., span=0.5, save_as=...)` instead searches its
   `save_as` value at the start of the run ± `<setting>_span`; every Bayesian run
-  records its `search_bounds`. `Dimension(..., whole=True)` asks only whole numbers (for an Int32 script
-  parameter). `Dimension(..., limits=(low, high))` clips
+  records its `search_bounds`. `Dimension(..., whole=True)` asks only whole
+  numbers (for an Int32 script parameter; a range holding fewer than two raises
+  `ValueError` at `prepare()`). `Dimension(..., limits=(low, high))` clips
   either kind of range to what the hardware takes (an analog output's ±10 V);
-  a range wholly outside them raises `ValueError` at `prepare()`. Duplicate settings or `save_as`, a bad `goal`,
-  `low >= high`, neither bounds nor span, a non-positive span, or a span with
-  bounds raise `TypeError` when the class is defined (a `Stage` likewise:
-  `start`/`stop` or `span`, not both).
+  a range wholly outside them raises `ValueError` at `prepare()`. Duplicate
+  settings or `save_as`, a bad `goal`, `low >= high`, neither bounds nor span,
+  a non-positive span, or a span with bounds raise `TypeError` when the class
+  is defined (a `Stage` likewise: `start`/`stop` or `span`, not both).
 - `Stage(..., span=s, save_as=...)` is the alternative to `start`/`stop`: it
   generates `<setting>_span` and `<setting>_centre` instead of
   `_start/_stop`, and sweeps `centre - span` to `centre + span`. The centre is
@@ -67,10 +68,11 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   from `xi_start` to `xi_end`; a non-finite objective is told as the worst so
   far.
 - Override `objective_of(results, settings)` for an objective computed from
-  several results or the settings measured at (`shortfall(value, threshold)` and
-  `shortness(value, bounds)` in `experiment/optimisers.py` help build penalties;
-  a Bayesian run's `self.bounds` holds its search bounds), and `best(settings, objectives)` to choose differently; in a
-  `StagedScan`, `self.stage` is the `Stage` being chosen for.
+  several results or the settings measured at, and `best(settings, objectives)`
+  to choose differently; in a `StagedScan`, `self.stage` is the `Stage` being
+  chosen for. `shortfall(value, threshold)` and `shortness(value, bounds)` in
+  `experiment/optimisers.py` help build penalties; a Bayesian run's
+  `self.bounds` holds its search bounds.
 - The mixins record their own results — `stage`, `setting`, `objective`
   (staged); each setting name, `objective`, `xi` (Bayesian) — so `measure()`
   must not return those names. Progress constants: `stages_done/_total`,
@@ -131,31 +133,47 @@ fit view draws the results `calibration_image` and `roi_sites`
 The measurements they run (`SlmTweezerArray`, `LoadTweezers`) are described
 under "Tweezer array measurements" in add-experiment. The Bayesian ones are
 `(TweezerOptimisation, LoadTweezers)`: `TweezerOptimisation`
-(`optimisers/tweezer_optimisation.py`) adds `shots` and `score_batch()`, and
-refuses to run without accepted trap sites. It scores each batch through
+(`optimisers/tweezer_optimisation.py`) adds `shots`, `score_batch()` and a
+generic `measure()`, and refuses to run without accepted trap sites. `measure()`
+passes each setting to its dimension's `save_as` script parameter (`None` keeps
+the saved value) and takes the drop from `drop`: a class attribute naming the
+argument that holds the drop duration (`tDropDuration`), or `None` (the
+default) for `BackgroundDrop=0`. Only `OptimiseTweezerImaging` overrides
+`measure()`, because one setting sets two script parameters. Every evaluation
+takes two images; loading and fidelity come from the first. It scores each batch through
 `TrapSites` (`analysis/array_loading.py`): `LoadTweezers.trap_sites` holds the
 accepted sites with their window, feature size and threshold, and `score_batch`
 only calls its `counts`, `fit_loading` and `survival`, never inline maths.
 
-- `FindTrapSites` (`Fit`) takes `calibration_shots` with the tweezers off
-  during the background drop, fits the rig's array geometry (or a
-  `default_rows` × `default_columns` grid) to their mean filtered image
-  (`analysis/trap_sites.py`) after `background_subtracted_mean` and
-  `top_hat_image`, fits the occupancy threshold with a `TrapSites`, and proposes
+- `FindTrapSites` (`Fit`) takes `calibration_shots` with no drop, fits the
+  rig's array geometry (or a `default_rows` × `default_columns` grid) to the
+  top-hat filtered (`top_hat_image`) mean of their first images
+  (`analysis/trap_sites.py`), fits the occupancy threshold with a `TrapSites`, and proposes
   `TRAP_SITE_KEYS`: `trap_sites` (sensor pixels, `(y, x)`), `trap_threshold`,
   `trap_window_size`, `trap_feature_size`, `trap_geometry`. Tweezer
   measurements refuse to run when the saved `trap_geometry` is not the rig's
   current array, so rerun it after changing the array.
-- `OptimiseTweezerImaging` and `OptimiseMolassesShims` are Bayesian with span
-  dimensions around the saved `tImgCoolVCO`/`tImgCoolVVA` and
-  `tMolassesShim{X,Y,Z}ccValue` (limited to the card's ±10 V), scored by `objective_of` with a fidelity or
-  loading floor. Their `measure()` passes plain script parameter names
-  (`BackgroundDrop=1`, `tMolassesShimXccValue=...`) to `score_batch()`.
+- Their objectives are penalty forms, computed by `objective_of(scores,
+  settings)` from `loading`, `survival` and `fidelity`, all measured by
+  `score_batch()`. A search for the shortest time subtracts
+  `shortfall_penalty` (10) times each shortfall below a threshold
+  (`loading_threshold` 0.55, `survival_threshold` 0.8) from
+  `shortness(time, bounds)`, so any miss ranks below any run that passes.
+  The time is a whole-number dimension (`load_time`, `molasses_time`).
+- `OptimiseTweezerImaging` is Bayesian with span dimensions around the saved
+  `tImgCoolVCO`/`tImgCoolVVA`, no drop, scored `fidelity_weight` (0.5) ×
+  fidelity + (1 − weight) × survival. It overrides `measure()` to set both
+  imaging stages' VCO or VVA (`tImgCoolVCO1/2`).
+- `OptimiseMolassesShims` has span dimensions around
+  `tMolassesShim{X,Y,Z}ccValue` (limited to the card's ±10 V) and the whole
+  `molasses_time` (`tMolassesDuration`, 1–20); `drop = "drop_duration"`.
 - `OptimiseMOTLight` searches the MOT-loading cooling and repump VCOs and VVAs
-  (`tMOTLoad{Cool,Rep}{VCO,VVA}`) for the most loading, with no drop;
-  `OptimiseMolassesLight` searches both molasses stages' (`tMol{Cool,Rep}{VCO,VVA}{1,2}`,
-  eight dimensions), scored like `OptimiseMolassesShims`. All are limited to
-  0–10 V.
+  (`tMOTLoad{Cool,Rep}{VCO,VVA}`, limited to 0–10 V) and the whole `load_time`,
+  for the shortest load that reaches `loading_threshold`, with no drop. Its
+  `MOT_LOAD_TIME` script parameter name and `load_time` limits are
+  placeholders (FIXME in the module).
+- `OptimiseMolassesLight` searches both molasses stages' (`tMol{Cool,Rep}{VCO,VVA}{1,2}`,
+  eight dimensions) and the molasses time, scored like `OptimiseMolassesShims`.
 
 Tests: `tests/test_optimisers.py`,
 `tests/test_tweezer_array.py`, `tests/test_trap_sites.py`,

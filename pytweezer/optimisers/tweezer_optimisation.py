@@ -13,15 +13,15 @@ from pytweezer.experiment.optimisers import BayesianOptimisation
 class TweezerOptimisation(BayesianOptimisation):
     """A Bayesian optimisation whose evaluations score a batch of tweezer shots, mixed with :class:`~pytweezer.experiments.load_tweezers.LoadTweezers`.
 
-    An optimiser subclasses ``(TweezerOptimisation, LoadTweezers)`` and its
-    ``measure`` returns :meth:`score_batch` at the settings it is given. The
+    An optimiser subclasses ``(TweezerOptimisation, LoadTweezers)``. The
     trap sites, summing window, top-hat size and occupancy threshold are
     those accepted from :class:`~pytweezer.optimisers.find_trap_sites.FindTrapSites`;
     an optimisation refuses to run without them.
 
-    ``measure`` maps each setting to its dimension's ``save_as`` script
-    parameter. ``drop`` names the argument holding the drop duration between
-    the two images, or ``None`` for no drop.
+    :meth:`measure` maps each setting to its dimension's ``save_as`` script
+    parameter and returns :meth:`score_batch` at them; an optimiser overrides
+    it only when a setting maps to something else. ``drop`` names the argument
+    holding the drop duration between the two images, or ``None`` for no drop.
     """
 
     drop: ClassVar[str | None] = None

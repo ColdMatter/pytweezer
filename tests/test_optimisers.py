@@ -339,6 +339,12 @@ def test_a_whole_dimension_is_only_ever_asked_at_whole_values():
     assert float(m.constants["proposed.demo_power"]).is_integer()
 
 
+def test_a_whole_dimension_without_two_whole_numbers_is_refused():
+    m = run_local(WholePower, power_low=1.2, power_high=1.8)
+    assert m.status == "failed"
+    assert "power" in m.attrs["error"]
+
+
 class LowestCounts(DemoBayesian):
     goal = "min"
 

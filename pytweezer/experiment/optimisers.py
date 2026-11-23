@@ -597,7 +597,13 @@ class BayesianOptimisation(Optimiser):
         low, high = self.bounds[dimension.setting]
         if not dimension.whole:
             return (low, high)
-        return skopt.space.Integer(math.ceil(low), math.floor(high))
+        first, last = math.ceil(low), math.floor(high)
+        if not first < last:
+            raise ValueError(
+                f"{dimension.setting} is whole but its range {low} to {high} "
+                "holds fewer than two whole numbers"
+            )
+        return skopt.space.Integer(first, last)
 
     def _xi(self, index: int) -> float:
         fraction = index / max(self.n_calls - 1, 1)

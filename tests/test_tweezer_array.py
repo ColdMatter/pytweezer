@@ -254,13 +254,14 @@ def test_find_trap_sites_keeps_the_rigs_order_of_its_array(rig):
     assert measurement.constants["sites_from"] == "rig"
 
 
-def test_find_trap_sites_takes_its_shots_with_the_tweezers_off_in_the_background_drop(
-    rig,
-):
+TWEEZER_VVAS = ("tTweezerSetVVA0", "tTweezerSetVVA1")
+
+
+def test_find_trap_sites_takes_its_shots_without_a_drop(rig):
     run_local(FindTrapSites, calibration_shots=30)
     assert len(rig.goes) == 30
-    assert all(go["BackgroundDrop"] == 1 for go in rig.goes)
-    assert all(go["tTweezerSetVVA0"] == go["tTweezerSetVVA1"] == 0.0 for go in rig.goes)
+    assert all(go["BackgroundDrop"] == 0 for go in rig.goes)
+    assert not any(name in go for go in rig.goes for name in TWEEZER_VVAS)
 
 
 def test_measurements_record_the_saved_sites_in_their_roi(rig):
@@ -436,15 +437,15 @@ def test_molasses_penalises_each_shortfall(cls):
     optimiser = cls()
     optimiser.bounds = {"molasses_time": (1, 20)}
     settings = {"molasses_time": 5}
-    shortness = 1 - (5 - 1) / (20 - 1)
+    shortness_at_five = 1 - (5 - 1) / (20 - 1)
 
     def score(loading, survival):
         scores = {"loading": loading, "survival": survival}
         return optimiser.objective_of(scores, settings)
 
-    assert score(0.55, 0.8) == pytest.approx(shortness)
-    assert score(0.45, 0.8) == pytest.approx(shortness - 1)
-    assert score(0.55, 0.7) == pytest.approx(shortness - 1)
+    assert score(0.55, 0.8) == pytest.approx(shortness_at_five)
+    assert score(0.45, 0.8) == pytest.approx(shortness_at_five - 1)
+    assert score(0.55, 0.7) == pytest.approx(shortness_at_five - 1)
 
 
 def window_sums(frames, window_size=5):

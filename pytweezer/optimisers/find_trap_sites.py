@@ -4,11 +4,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from pytweezer.analysis.array_loading import (
-    TrapSites,
-    background_subtracted_mean,
-    top_hat_image,
-)
+from pytweezer.analysis.array_loading import TrapSites, top_hat_image
 from pytweezer.analysis.trap_sites import default_geometry, fit_trap_sites
 from pytweezer.experiment.arguments import Bool, Integer, Number
 from pytweezer.experiment.optimisers import SEARCH, Fit
@@ -18,11 +14,10 @@ from pytweezer.experiments.load_tweezers import LoadTweezers
 class FindTrapSites(Fit, LoadTweezers):
     """Find the trap sites by fitting the array's geometry to the atoms, and propose them.
 
-    Takes ``calibration_shots`` with the tweezers off during the background
-    drop, and fits the geometry of the array the rig has on the SLM (or, when
-    it does not know, a ``default_rows`` x ``default_columns`` grid
-    ``default_spacing`` apart) to their mean background-subtracted, top-hat
-    filtered image, free in position, rotation and scale (see
+    Takes ``calibration_shots`` with no drop, and fits the geometry of the
+    array the rig has on the SLM (or, when it does not know, a
+    ``default_rows`` x ``default_columns`` grid ``default_spacing`` apart) to
+    the mean of their first images, top-hat filtered, free in position, rotation and scale (see
     :mod:`pytweezer.analysis.trap_sites`). It then fits the occupancy
     threshold at those sites, and proposes both for every tweezer measurement
     to use.
@@ -73,27 +68,25 @@ class FindTrapSites(Fit, LoadTweezers):
     def saved_trap_sites(self, saved):
         return None, ""  # it finds them
 
-    def take_calibration_shots(self) -> tuple[list, list]:
-        """``calibration_shots`` shots with the tweezers off in the background drop.
+    def take_calibration_shots(self) -> list:
+        """``calibration_shots`` shots with no drop; their first frames.
 
-        Returns their first and second frames. With ``save_raw_images`` the
-        frames are recorded as ``hamcam_images``, ``(shots, 2, height, width)``.
+        With ``save_raw_images`` both frames are recorded as
+        ``hamcam_images``, ``(shots, 2, height, width)``.
         """
         stacks = []
         for _ in range(self.calibration_shots):
             mark = self.hamcam.start_shot({"rid": self.rid})
-            self.run_motmaster_sequence(
-                BackgroundDrop=1, tTweezerSetVVA0=0.0, tTweezerSetVVA1=0.0
-            )
+            self.run_motmaster_sequence(BackgroundDrop=0)
             stacks.append(self.hamcam.wait_frames(mark, 2))
         stacks = np.array(stacks)
         if self.save_raw_images:
             self.record("hamcam_images", stacks)
-        return list(stacks[:, 0]), list(stacks[:, 1])
+        return list(stacks[:, 0])
 
     def fit(self) -> dict:
-        firsts, backgrounds = self.take_calibration_shots()
-        average = background_subtracted_mean(firsts, backgrounds)
+        firsts = self.take_calibration_shots()
+        average = np.mean(firsts, axis=0)
         self.record("calibration_image", average)
         found = fit_trap_sites(
             top_hat_image(average, self.feature_size),
