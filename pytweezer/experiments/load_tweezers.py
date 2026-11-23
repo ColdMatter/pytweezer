@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from pytweezer.analysis import analysis as an
-from pytweezer.analysis.array_loading import photons_at_sites
+from pytweezer.analysis.array_loading import photons_at_sites, site_counts, top_hat
 from pytweezer.analysis.cloud_fit import SPECIES_MASS_AMU, fit_frames
 from pytweezer.analysis.trap_sites import same_geometry, to_roi
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
@@ -245,46 +244,12 @@ class LoadTweezers(MotMasterExperiment):
 
     def take_shot(self, **sequence: Any) -> np.ndarray:
         """Run the sequence once with script parameters ``sequence``; the HamCam's two frames."""
-        return self.take_frames(2, **sequence)
-
-    def take_frames(self, n: int, **sequence: Any) -> np.ndarray:
-        """Run the sequence once with script parameters ``sequence``; the HamCam's first ``n`` frames of it."""
         mark = self.hamcam.start_shot({"rid": self.rid})
         self.run_sequences(**sequence)
-        return np.asarray(self.hamcam.wait_frames(mark, n))
-
-    @staticmethod
-    def top_hat(frames, feature_size: int) -> list[np.ndarray]:
-        return [
-            an.morphological_tophat_high_pass(
-                np.asarray(frame, dtype=float), feature_size=feature_size
-            )
-            for frame in frames
-        ]
-
-    def site_photons(self, frames) -> np.ndarray:
-        """Every site's photons in each of ``frames``, top-hat filtered: ``(frames, sites)``."""
-        filtered = self.top_hat(frames, self.trap_feature_size)
-        return photons_at_sites(filtered, self.trap_sites, self.trap_window_size)
-
-    def site_counts(self, frames) -> np.ndarray:
-        """Every site's summed raw pixel values in each of ``frames``: ``(frames, sites)``."""
-        return np.array(
-            [
-                an.sum_pixel_values(
-                    np.asarray(frame),
-                    self.trap_sites,
-                    window_size=self.trap_window_size,
-                )
-                for frame in frames
-            ]
-        )
+        return np.asarray(self.hamcam.wait_frames(mark, 2))
 
     def run_point(self) -> None:
-        self.record_tweezers(self.take_shot())
-
-    def record_tweezers(self, frames: np.ndarray) -> None:
-        """Record the tweezer results of one shot's two HamCam ``frames``."""
+        frames = self.take_shot()
         if self.save_raw_images:
             self.record("hamcam_images", frames)
         first_image, second_image = frames
@@ -293,19 +258,25 @@ class LoadTweezers(MotMasterExperiment):
             float(first_image.sum(dtype=float) - second_image.sum(dtype=float)),
             unit="counts",
         )
-        if self.trap_sites is not None:
-            images = [first_image, second_image]
-            first, second = self.site_photons(images) > self.trap_threshold
-            self.record("first_occupied", first)
-            self.record("second_occupied", second)
-            self.record("loading", float(first.mean()))
-            self.record(
-                "survival", float(second[first].mean()) if first.any() else np.nan
+        if self.trap_sites is None:
+            return
+
+        photons = photons_at_sites(
+            top_hat(frames, self.trap_feature_size),
+            self.trap_sites,
+            self.trap_window_size,
+        )
+        first, second = photons > self.trap_threshold
+        self.record("first_occupied", first)
+        self.record("second_occupied", second)
+        self.record("loading", float(first.mean()))
+        self.record("survival", float(second[first].mean()) if first.any() else np.nan)
+        if self.save_tweezer_counts:
+            first_counts, second_counts = site_counts(
+                frames, self.trap_sites, self.trap_window_size
             )
-            if self.save_tweezer_counts:
-                first, second = self.site_counts(images)
-                self.record("first_counts", first, unit="counts")
-                self.record("second_counts", second, unit="counts")
+            self.record("first_counts", first_counts, unit="counts")
+            self.record("second_counts", second_counts, unit="counts")
 
 
 class LoadTweezersNImages(LoadTweezers):
@@ -316,12 +287,11 @@ class LoadTweezersNImages(LoadTweezers):
         script="RbTweezerBasic2026_multiple_images",
     )
 
-    def take_shot(self, **sequence: Any) -> np.ndarray:
-        """Run the sequence once with script parameters ``sequence``; the HamCam's ten frames."""
-        return self.take_frames(1, **sequence)
-
     def run_point(self) -> None:
-        self.take_shot()
+        # The live mode broadcasts the frames; nothing is recorded.
+        mark = self.hamcam.start_shot({"rid": self.rid})
+        self.run_sequences()
+        self.hamcam.wait_frames(mark, 1)
 
 
 class LoadTweezersMOTImage(LoadTweezers):
@@ -364,10 +334,8 @@ class LoadTweezersMOTImage(LoadTweezers):
 
     def run_point(self) -> None:
         orca_mark = self.orca.start_shot({"rid": self.rid})
-        hamcam_frames = self.take_shot()
-        orca_frames = np.asarray(self.orca.wait_frames(orca_mark, 1))
-        self.record_tweezers(hamcam_frames)
-        self.record_cloud_fit(orca_frames)
+        super().run_point()
+        self.record_cloud_fit(np.asarray(self.orca.wait_frames(orca_mark, 1)))
 
     def record_cloud_fit(self, frames: np.ndarray) -> None:
         """Fit the mean of the ORCA's ``frames`` and record the cloud as ``orca_*``."""

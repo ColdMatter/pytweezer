@@ -25,6 +25,28 @@ def find_sites(image, n_sites, step):
     return None
 
 
+def top_hat(frames: Iterable[np.ndarray], feature_size: int) -> list[np.ndarray]:
+    """Each of ``frames`` top-hat filtered, keeping bright features smaller than ``feature_size``."""
+    return [
+        an.morphological_tophat_high_pass(
+            np.asarray(frame, dtype=float), feature_size=feature_size
+        )
+        for frame in frames
+    ]
+
+
+def site_counts(
+    frames: Iterable[np.ndarray], sites: dict[int, tuple[int, int]], window_size: int
+) -> np.ndarray:
+    """Summed raw pixel values in a ``window_size`` box at every site of every frame, ``(frames, sites)``."""
+    return np.array(
+        [
+            an.sum_pixel_values(np.asarray(frame), sites, window_size=window_size)
+            for frame in frames
+        ]
+    )
+
+
 def photons_at_sites(
     frames: Iterable[np.ndarray], sites: dict[int, tuple[int, int]], window_size: int
 ) -> np.ndarray:

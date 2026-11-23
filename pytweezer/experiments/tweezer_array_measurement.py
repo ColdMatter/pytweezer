@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from pytweezer.analysis import analysis as an
-from pytweezer.analysis.array_loading import photons_at_sites
+from pytweezer.analysis.array_loading import photons_at_sites, site_counts, top_hat
 from pytweezer.experiment import Experiment
 from pytweezer.experiment.arguments import Bool, Integer
 from pytweezer.experiments.load_tweezers import LoadTweezers
@@ -57,10 +57,18 @@ class TweezerArrayMeasurement(LoadTweezers):
         """
         firsts, seconds = self.take_batch(**sequence)
         if self.save_tweezer_counts:
-            self.record("first_counts", self.site_counts(firsts), unit="counts")
-            self.record("second_counts", self.site_counts(seconds), unit="counts")
-        firsts = self.top_hat(firsts, self.trap_feature_size)
-        seconds = self.top_hat(seconds, self.trap_feature_size)
+            self.record(
+                "first_counts",
+                site_counts(firsts, self.trap_sites, self.trap_window_size),
+                unit="counts",
+            )
+            self.record(
+                "second_counts",
+                site_counts(seconds, self.trap_sites, self.trap_window_size),
+                unit="counts",
+            )
+        firsts = top_hat(firsts, self.trap_feature_size)
+        seconds = top_hat(seconds, self.trap_feature_size)
         # Loading is judged against a threshold refitted on this batch (the
         # accepted one only if the fit fails), survival against the accepted one.
         # TODO: check loading is judged against a per-batch refit while survival

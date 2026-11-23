@@ -198,7 +198,7 @@ is the example to copy:
   changes the frame shape, or something set in `prepare()` depends on it) is
   declared `scannable=False`.
 - A subclass adding a camera wraps the parent's shot rather than adding hooks
-  to it: `LoadTweezersMOTImage` starts the ORCA, calls `take_shot()`, then reads
+  to it: `LoadTweezersMOTImage` starts the ORCA, calls `super().run_point()`, then reads
   the ORCA's frame. Anything only a subclass needs stays in the subclass.
 
 Recording a MOT cloud: `LoadTweezersMOTImage.record_cloud_fit(frames)` fits the

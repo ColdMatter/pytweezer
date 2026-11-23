@@ -5,6 +5,7 @@ from typing import ClassVar
 import numpy as np
 
 from pytweezer.analysis import analysis as an
+from pytweezer.analysis.array_loading import top_hat
 from pytweezer.analysis.trap_sites import default_geometry, fit_trap_sites
 from pytweezer.experiment.arguments import Bool, Integer, Number
 from pytweezer.experiment.optimisers import SEARCH, Fit
@@ -104,7 +105,7 @@ class FindTrapSites(Fit, LoadTweezers):
             index: (round(y), round(x)) for index, (y, x) in enumerate(found.sites)
         }
         _, _, threshold, fidelity = an.get_array_loading_statistics(
-            self.top_hat(firsts, self.feature_size),
+            top_hat(firsts, self.feature_size),
             whole_pixels,
             threshold=self.initial_threshold,
             window_size=self.window_size,
