@@ -65,8 +65,10 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   evaluations, the first `n_initial` random, with `xi` falling geometrically
   from `xi_start` to `xi_end`; a non-finite objective is told as the worst so
   far.
-- Override `objective_of(results)` for an objective computed from several
-  results, and `best(settings, objectives)` to choose differently; in a
+- Override `objective_of(results, settings)` for an objective computed from
+  several results or the settings measured at (`shortfall(value, threshold)` and
+  `shortness(value, bounds)` in `experiment/optimisers.py` help build penalties;
+  a Bayesian run's `self.bounds` holds its search bounds), and `best(settings, objectives)` to choose differently; in a
   `StagedScan`, `self.stage` is the `Stage` being chosen for.
 - The mixins record their own results — `stage`, `setting`, `objective`
   (staged); each setting name, `objective`, `xi` (Bayesian) — so `measure()`

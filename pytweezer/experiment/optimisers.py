@@ -79,6 +79,17 @@ class Dimension:
     limits: tuple[float, float] | None = None
 
 
+def shortfall(value: float, threshold: float) -> float:
+    """How far ``value`` falls below ``threshold``; zero at or above it."""
+    return max(0.0, threshold - value)
+
+
+def shortness(value: float, bounds: tuple[float, float]) -> float:
+    """Where ``value`` sits in ``bounds``: 1 at the low end, 0 at the high end."""
+    low, high = bounds
+    return 1 - (value - low) / (high - low)
+
+
 class Optimiser:
     """Base of the optimiser mixins.
 
@@ -194,8 +205,15 @@ class Optimiser:
         """How many points the run has, from the argument values."""
         raise NotImplementedError
 
-    def objective_of(self, results: dict[str, float]) -> float:
-        """The objective of one shot, from ``measure()``'s results."""
+    def objective_of(
+        self, results: dict[str, float], settings: dict[str, float]
+    ) -> float:
+        """The objective of one shot, from ``measure()``'s results.
+
+        Args:
+            results: What ``measure()`` returned.
+            settings: The settings the shot was measured at.
+        """
         return results[self.objective]
 
     def best(self, settings: list[Any], objectives: list[float]) -> Any:
@@ -390,7 +408,7 @@ class StagedScan(Optimiser):
         }
         settings[stage.setting] = setting
         results = self.measure(**settings)
-        objective = float(self.objective_of(results))
+        objective = float(self.objective_of(results, settings))
         self.record("stage", stage_index)
         self.record("setting", setting)
         self.record("objective", objective)
@@ -561,7 +579,7 @@ class BayesianOptimisation(Optimiser):
     def prepare(self) -> None:
         self._evaluations: list[tuple[list[float], float]] = []
         self._told: list[float] = []
-        bounds = self.search_bounds()
+        self.bounds = bounds = self.search_bounds()
         self.record("search_bounds", {s: list(b) for s, b in bounds.items()})
         self._optimizer = skopt.Optimizer(
             dimensions=[bounds[dimension.setting] for dimension in self.dimensions],
@@ -580,13 +598,12 @@ class BayesianOptimisation(Optimiser):
     def run_point(self) -> None:
         xi = self._optimizer.acq_func_kwargs["xi"]
         values = [float(value) for value in self._optimizer.ask()]
-        results = self.measure(
-            **{
-                dimension.setting: value
-                for dimension, value in zip(self.dimensions, values, strict=True)
-            }
-        )
-        objective = float(self.objective_of(results))
+        settings = {
+            dimension.setting: value
+            for dimension, value in zip(self.dimensions, values, strict=True)
+        }
+        results = self.measure(**settings)
+        objective = float(self.objective_of(results, settings))
         for dimension, value in zip(self.dimensions, values, strict=True):
             self.record(dimension.setting, value)
         self.record("objective", objective)

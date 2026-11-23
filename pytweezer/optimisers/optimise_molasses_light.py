@@ -47,7 +47,9 @@ class OptimiseMolassesLight(TweezerOptimisation, LoadTweezers):
             BackgroundDrop=1, tDropDuration=self.drop_duration, **light
         )
 
-    def objective_of(self, results: dict[str, float]) -> float:
+    def objective_of(
+        self, results: dict[str, float], settings: dict[str, float]
+    ) -> float:
         if results["loading"] < self.loading_floor:
             return results["loading"]
         return self.loading_floor + results["survival"]

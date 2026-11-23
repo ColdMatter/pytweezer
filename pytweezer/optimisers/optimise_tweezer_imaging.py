@@ -36,7 +36,9 @@ class OptimiseTweezerImaging(TweezerOptimisation, LoadTweezers):
             imaging |= {"tImgCoolVVA1": imaging_vva, "tImgCoolVVA2": imaging_vva}
         return self.score_batch(BackgroundDrop=0, **imaging)
 
-    def objective_of(self, results: dict[str, float]) -> float:
+    def objective_of(
+        self, results: dict[str, float], settings: dict[str, float]
+    ) -> float:
         if results["fidelity"] > self.fidelity_floor:
             return results["survival"]
         return 0.8 * results["fidelity"]

@@ -22,6 +22,7 @@ from pytweezer.experiment.optimisers import (
     Fit,
     Stage,
     StagedScan,
+    shortness,
 )
 from pytweezer.experiment.runner import open_writer, run_points
 from pytweezer.experiment.scan import Point
@@ -529,3 +530,21 @@ def test_the_schema_gives_a_fits_proposals_with_their_units_and_group():
         "group": "Demo",
         "applies": False,
     }
+
+
+class ShortnessOfX(DemoBayesian):
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("x", low=0.0, high=10.0, save_as="demo_resonance"),
+    ]
+
+    def measure(self, **settings):
+        return {"counts": 0.0}
+
+    def objective_of(self, results, settings):
+        return shortness(settings["x"], self.bounds["x"])
+
+
+def test_a_bayesian_objective_sees_the_settings_it_scores():
+    m = run_local(ShortnessOfX, n_calls=5, n_initial=3)
+    assert m.status == "completed", m.attrs["error"]
+    assert np.allclose(m.results["objective"], 1 - m.results["x"] / 10)
