@@ -421,7 +421,7 @@ The Rb tweezer experiments, in the order a session uses them:
    `prepare()` (`saved_trap_sites(saved)`), moved into the ROI
    (`hamcam_roi_x0`/`_y0`/`_width`/`_height`, unbinned; binning is fixed at 1)
    by the origin `set_roi` returned (`roi_origin`, `(x0, y0)`).
-   Scans of the EM-gain sensitivity `hamcam_gain` and of the ROI are
+   The EM-gain sensitivity is `hamcam_gain` (scannable); scans of the ROI are
    refused. They are refused when none are saved or when a summing window
    leaves the ROI; when `trap_geometry` is not the rig's array
    (`same_geometry`; an unreachable rig is not checked) they are used with a
