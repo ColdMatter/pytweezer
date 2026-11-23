@@ -181,7 +181,7 @@ class ImageView(QtWidgets.QWidget):
         elif self.lut is not None:
             low, high = self.lut.levels()
         else:
-            low, high = self.image_item.getLevels()
+            low, high = self.image_item.getLevels() or (0.0, 0.0)
         return float(low), float(high)
 
     def set_bar_ticks(self, ticks: list[tuple[float, str]]) -> None:

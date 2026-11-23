@@ -46,10 +46,20 @@ def test_dragging_the_levels_reports_them(view):
     view.sig_levels_dragged.connect(lambda low, high: dragged.append((low, high)))
     view.show_image(np.arange(16.0).reshape(4, 4))
 
-    view.lut.setLevels(1, 2)
-    view.lut.sigLevelChangeFinished.emit(view.lut)
+    view.lut.region.setRegion((1, 2))
 
-    assert dragged[-1] == (1, 2)
+    assert dragged == [(1, 2)]
+
+
+def test_setting_the_levels_does_not_count_as_a_drag(view):
+    dragged = []
+    view.sig_levels_dragged.connect(lambda low, high: dragged.append((low, high)))
+    view.show_image(np.arange(16.0).reshape(4, 4))
+
+    view.set_levels(1, 2)
+
+    assert view.levels() == (1, 2)
+    assert dragged == []
 
 
 def test_fixed_levels_are_kept(view):
@@ -72,7 +82,6 @@ def test_paths_replace_by_key(view):
     view.show_paths("a", [path, path])
     view.show_paths("a", [path])
 
-    assert len(view._path_curves["a"]) == 1
     curves = [item for item in view.plot.items if isinstance(item, pg.PlotCurveItem)]
     assert len(curves) == 1
 
