@@ -289,7 +289,7 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
             )
         if head.get("background") and head.get("signal"):
             parts.append(
-                f"empty {head['background'][0]:.1f} ± {head['background'][1]:.1f} / full {head['signal'][0]:.1f} ± {head['signal'][1]:.1f} {unit}"
+                f"empty {head['background'][0]:.1f} ± {np.sqrt(head['background'][1]):.1f} / full {head['signal'][0]:.1f} ± {np.sqrt(head['signal'][1]):.1f} {unit}"
             )
         else:
             parts.append("fit failed: fixed threshold")
