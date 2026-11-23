@@ -46,8 +46,9 @@ from pytweezer.GUI.applet import run_applet
 from pytweezer.GUI.background import clear_tracebacks
 from pytweezer.GUI.components import set_state
 from pytweezer.GUI.experiments.feed import ExperimentFeed
+from pytweezer.GUI.image_applet import CameraROI, camera_roi
 from pytweezer.GUI.viewers.camera_sidebar import CameraSidebar
-from pytweezer.GUI.viewers.image_monitor import CameraROI, ImageDisplay, camera_roi
+from pytweezer.GUI.viewers.image_monitor import ImageDisplay
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import Properties, PropertyAttribute
 from pytweezer.servers.device_client import get_device
@@ -216,7 +217,7 @@ class CameraApplet(ImageDisplay):
         status_layout.addStretch(1)
         status_layout.addWidget(self.message)
         self.image_layout.insertWidget(1, self.status_bar)
-        self.plot.scene().sigMouseMoved.connect(self._mouse_moved)
+        self.view.sig_mouse_moved.connect(self._mouse_moved)
 
         sidebar = self.camera_sidebar
         sidebar.camera_chosen.connect(self._choose)
@@ -274,9 +275,8 @@ class CameraApplet(ImageDisplay):
         self._presets = None
         self._reset_fps()
         self._show_message("")
-        self.image_head = None
         self._frame_max = None
-        self.image_item.clear()
+        self.view.clear_image()
         self._update_readout()
         self.camera_sidebar.set_temperature(None)
         try:
@@ -654,14 +654,15 @@ class CameraApplet(ImageDisplay):
             self._show_message("")
 
     def _roi_from_drawn(self) -> None:
-        rois = [item for item in self.plot.items if isinstance(item, CameraROI)]
+        rois = [roi for roi in self.view.rois() if isinstance(roi, CameraROI)]
+        head = self.view.frame()[1]
         if not rois:
             self._show_message("From drawn ROI: draw an ROI on the image first.")
-        elif self.image_head is None:
+        elif head is None:
             self._show_message(
                 "From drawn ROI: no frame yet; the ROI is placed on the last frame."
             )
-        elif (roi := camera_roi(rois[0], self.image_item, self.image_head)) is None:
+        elif (roi := camera_roi(rois[0], self.view.image_item, head)) is None:
             self._show_message("From drawn ROI: the drawn ROI is off the frame.")
         else:
             self._show_message("")
@@ -751,10 +752,11 @@ class CameraApplet(ImageDisplay):
     # ---- frames, frame rate and the readout under the image ---------------
 
     def poll(self):
-        head = self.image_head
+        head = self.view.frame()[1]
         super().poll()
-        if self.image_head is not None and self.image_head is not head:
-            self._frame_arrived(self.image_head, self.imgdata)
+        frame, new_head = self.view.frame()
+        if new_head is not None and new_head is not head:
+            self._frame_arrived(new_head, frame)
         elif self._fps is not None and time.monotonic() - self._last_frame_at > max(
             FPS_WINDOW_S, 3 * self._frame_interval
         ):
@@ -798,17 +800,16 @@ class CameraApplet(ImageDisplay):
         self.camera_sidebar.set_fps(None)
 
     def _mouse_moved(self, position) -> None:
-        if self.plot.sceneBoundingRect().contains(position):
-            point = self.image_item.mapFromScene(position)
+        if self.view.plot.sceneBoundingRect().contains(position):
+            point = self.view.image_item.mapFromScene(position)
             self._cursor = (point.x(), point.y())
         else:
             self._cursor = None
         self._update_readout()
 
     def _update_readout(self) -> None:
-        head = self.image_head
-        frame = getattr(self, "imgdata", None) if head is not None else None
-        if frame is None or frame.ndim != 2:
+        frame, head = self.view.frame()
+        if head is None or frame.ndim != 2:
             text = "No frame yet"
         else:
             rows, cols = frame.shape

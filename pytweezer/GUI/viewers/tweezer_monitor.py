@@ -105,7 +105,7 @@ class TweezerDisplay(ImageDisplay):
 
     def init_gui(self):
         super().init_gui()
-        self.overlay = SiteOverlay(self.plot)
+        self.overlay = SiteOverlay(self.view.plot)
         self._saved_version = None
         self._placed = None
         self.feed = ExperimentFeed()
@@ -129,10 +129,10 @@ class TweezerDisplay(ImageDisplay):
 
     def poll(self):
         super().poll()
-        head = getattr(self, "image_head", None)
+        head = self.view.frame()[1]
         labels = bool(self._show_site_labels)
         if head is not None and self._placed != (id(head), labels):
-            self.overlay.place(self.image_item, head, labels=labels)
+            self.overlay.place(self.view.image_item, head, labels=labels)
             self._placed = (id(head), labels)
 
     def closeEvent(self, event):

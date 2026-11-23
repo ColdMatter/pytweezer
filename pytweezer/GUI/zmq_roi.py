@@ -1,6 +1,6 @@
 import pyqtgraph as pg
 from PyQt6 import QtCore
-from PyQt6.QtGui import *
+from PyQt6.QtGui import QColor
 
 from pytweezer.servers import Properties, PropertyAttribute
 

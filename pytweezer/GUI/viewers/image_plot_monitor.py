@@ -32,9 +32,6 @@ FIT_PEN = pg.mkPen("w", width=2)
 class ImageProjectionDisplay(ImageDisplay):
     """Image display with the projection plots above and left of the image."""
 
-    image_row = 1
-    image_col = 1
-
     _projectionstreams = PropertyAttribute("projectionstreams", ["--None--"])
 
     def init_gui(self):
@@ -44,28 +41,26 @@ class ImageProjectionDisplay(ImageDisplay):
         self.left_plot = None
         super().init_gui()
 
-        self.top_plot = self.graphics_layout.addPlot(row=0, col=1)
-        self.left_plot = self.graphics_layout.addPlot(row=1, col=0)
+        self.top_plot = self.view.graphics.addPlot(row=0, col=1)
+        self.left_plot = self.view.graphics.addPlot(row=1, col=0)
         self.top_plot.setFixedHeight(SIDE_PLOT_SIZE)
-        self.top_plot.setXLink(self.plot)
+        self.top_plot.setXLink(self.view.plot)
         self.top_plot.hideAxis("bottom")
         self.left_plot.setFixedWidth(SIDE_PLOT_SIZE)
-        self.left_plot.setYLink(self.plot)
+        self.left_plot.setYLink(self.view.plot)
         self.left_plot.hideAxis("left")
         # The image's y-axis is inverted; a linked view follows the range but not
         # the direction.
         self.left_plot.getViewBox().invertY(True)
         # Equal axis widths keep the top plot's view box above the image's.
-        for plot in (self.plot, self.top_plot):
+        for plot in (self.view.plot, self.top_plot):
             plot.getAxis("left").setWidth(AXIS_SIZE)
-        for plot in (self.plot, self.left_plot):
+        for plot in (self.view.plot, self.left_plot):
             plot.getAxis("bottom").setHeight(AXIS_SIZE // 2)
-        self.graphics_layout.ci.layout.setRowStretchFactor(1, 4)
-        self.graphics_layout.ci.layout.setColumnStretchFactor(1, 4)
+        self.view.graphics.ci.layout.setRowStretchFactor(1, 4)
+        self.view.graphics.ci.layout.setColumnStretchFactor(1, 4)
 
-        self.plot.getViewBox().menu.addAction("Projections").triggered.connect(
-            self.subscribe_projections
-        )
+        self.view.add_menu_action("Projections", self.subscribe_projections)
         self._rebuild_projection_curves()
 
     def sizeHint(self):
