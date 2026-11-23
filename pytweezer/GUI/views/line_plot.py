@@ -1,9 +1,7 @@
-"""A plot of named curves styled like every pytweezer plot."""
+"""A plot of named curves, each a line or markers."""
 
 import pyqtgraph as pg
 from PyQt6.QtGui import QAction
-
-from pytweezer.GUI.theme import plot_title_style, style_plot
 
 
 class LinePlot(pg.PlotWidget):
@@ -28,7 +26,6 @@ class LinePlot(pg.PlotWidget):
     ):
         super().__init__(parent)
         self._curves: dict[str, pg.PlotDataItem] = {}
-        style_plot(self)
         self.showGrid(x=True, y=True, alpha=0.15)
         if legend:
             self.addLegend(offset=(-10, 10))
@@ -79,7 +76,7 @@ class LinePlot(pg.PlotWidget):
 
     def set_title(self, text: str | None) -> None:
         """Title the plot, or hide the title if ``text`` is ``None``."""
-        self.setTitle(text, **plot_title_style())
+        self.setTitle(text)
 
     def link_x(self, other: "LinePlot | None") -> None:
         """Pan and zoom the x axis with ``other``'s, or on its own if ``None``."""

@@ -28,6 +28,9 @@ from pytweezer.GUI.applet import Applet, run_applet
 from pytweezer.GUI.views.line_plot import LinePlot
 from pytweezer.servers import DataClient, PropertyAttribute
 
+# The frame pyqtgraph's GraphicsLayoutWidget gave this plot when it was drawn on one.
+PLOT_MARGIN = 9
+
 
 class ScalarHistory(Applet):
     """Strip chart of one header field, one curve per subscribed data stream."""
@@ -50,6 +53,7 @@ class ScalarHistory(Applet):
         self.setLayout(layout)
 
         self.view = LinePlot(x_label="messages received")
+        self.view.plotItem.setContentsMargins(*[PLOT_MARGIN] * 4)
         layout.addWidget(self.view)
 
         # Latest values, monospaced so the digits hold their columns instead of
