@@ -14,14 +14,19 @@ from pytweezer.experiment.client import (
     ExperimentManagerClient,
     ManagerError,
     ManagerUnavailable,
+    delete_layout,
     delete_recipe,
+    get_layout,
     get_saved_parameter,
+    layouts,
     recipes,
+    save_layout,
     save_recipe,
     set_saved_parameters,
     submit,
     submit_recipe,
 )
+from pytweezer.experiment.layouts import Layout, Site
 from pytweezer.experiment.queue import WorkerRecord
 from pytweezer.experiment.recipes import Recipe
 from pytweezer.experiment.scan import LinearAxis, ListAxis, Scan
@@ -570,6 +575,41 @@ def test_notebook_recipes_round_trip(make_manager):
     delete_recipe(f"{DEMO}:RabiDemo", "check", client=client)
     delete_recipe(f"{DEMO}:RabiDemo", "string", client=client)
     assert recipes(client=client) == []
+
+
+def test_layouts_round_trip_and_survive_a_restart(make_manager):
+    client = in_process_client(make_manager())
+    ring = [Site(x_um=0, y_um=0), Site(x_um=5, y_um=0, on=False)]
+    save_layout(Layout(name="ring", sites=ring), client=client)
+
+    [saved] = layouts(client=in_process_client(make_manager()))
+    assert saved.name == "ring" and [s.on for s in saved.sites] == [True, False]
+    assert "@" in saved.submitter
+
+    moved = Layout(name="ring", sites=[Site(x_um=1, y_um=1)])
+    with pytest.raises(ManagerError, match="already exists"):
+        save_layout(moved, client=client)
+    save_layout(moved, overwrite=True, client=client)
+    assert get_layout(" ring ", client=client).sites[0].x_um == 1
+
+    delete_layout("ring", client=client)
+    assert layouts(client=client) == []
+
+
+def test_a_layout_with_no_site_on_is_refused(make_manager):
+    client = in_process_client(make_manager())
+    dark = Layout(name="dark", sites=[Site(x_um=0, y_um=0, on=False)])
+    with pytest.raises(ManagerError, match="no site is on"):
+        save_layout(dark, client=client)
+
+
+def test_get_layout_names_close_matches(make_manager):
+    client = in_process_client(make_manager())
+    save_layout(
+        Layout(name="checkerboard", sites=[Site(x_um=0, y_um=0)]), client=client
+    )
+    with pytest.raises(KeyError, match="checkerboard"):
+        get_layout("checkerbord", client=client)
 
 
 def test_notebook_calls_check_arguments_before_sending():

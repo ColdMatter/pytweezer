@@ -280,8 +280,8 @@ can't be.
 `Scan(repeat="scan")` repeats the whole grid rather than each point.
 `ExperimentManagerClient` has `get/pause/resume/terminate/abort/hold/release/
 delete/set_priority/snapshot/history/last_request/experiments/optimisers/describe_again/
-recipes/save_recipe/delete_recipe/submit_recipe/saved_parameters/
-set_saved_parameters/saved_parameter_history`.
+recipes/save_recipe/delete_recipe/submit_recipe/layouts/save_layout/
+delete_layout/saved_parameters/set_saved_parameters/saved_parameter_history`.
 
 For analysis, `Dataset` (`pytweezer/experiment/dataset.py`) reads a file by
 rid (or path) and passes attribute access through to its `Measurement`:
@@ -408,6 +408,14 @@ The Rb tweezer experiments, in the order a session uses them:
    envelope from `array_hologram.SAVED_KEYS`. The rig remembers it:
    `rig.get_array()` gives `sites` and trap `x_um`/`y_um` (`None` if the rig
    didn't write the mask).
+   `SlmTweezerLayout` (same file, same optics arguments) instead puts a named
+   layout's on sites on the SLM (`layout="ring"`, via `rig.make_layout`) and
+   records the whole layout as the `layout` constant. Layouts are drawn in the
+   Tweezer Layout applet and kept by the Experiment Manager in
+   `{data_root}/layouts.json`; from a notebook use `layouts()`,
+   `get_layout(name)`, `save_layout(Layout(...))` and `delete_layout(name)` in
+   `pytweezer.experiment.client` (`Layout`, `Site`, `rectangle`, `kagome` in
+   `pytweezer.experiment.layouts`).
 2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera
    and proposes the `trap_*` saved parameters.
 3. `LoadTweezers` (`load_tweezers.py`, a `MotMasterExperiment` with

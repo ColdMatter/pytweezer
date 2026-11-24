@@ -1,9 +1,11 @@
-"""The SLM tweezer-array experiment: trap weighting, target rendering, mask delivery."""
+"""The SLM tweezer experiments: trap weighting, target rendering, mask delivery."""
 
 import numpy as np
 import pytest
 
 from pytweezer.coordinators import rearrangement
+from pytweezer.experiment.introspect import runnable_experiments
+from pytweezer.experiment.layouts import Layout, Site
 from pytweezer.experiments import slm_tweezer_array
 from pytweezer.experiments.slm_tweezer_array import placement, render_target
 from pytweezer.helper_scripts import array_hologram
@@ -147,14 +149,20 @@ class RecordingRig:
         self.made = []
 
     def make_array(self, **array):
-        self.made.append(array)
         rows, columns = array["rows"], array["columns"]
         y_um, x_um = np.mgrid[0:rows, 0:columns] * array["spacing_um"]
+        return self._hologram(array, x_um.ravel(), y_um.ravel())
+
+    def make_layout(self, x_um, y_um, **layout):
+        return self._hologram({"x_um": x_um, "y_um": y_um, **layout}, x_um, y_um)
+
+    def _hologram(self, request, x_um, y_um):
+        self.made.append(request)
         return {
             "mask": np.full((1024, 1024), len(self.made), dtype=np.uint8),
-            "x_um": x_um.ravel(),
-            "y_um": y_um.ravel(),
-            "weights": np.ones(rows * columns),
+            "x_um": np.asarray(x_um, dtype=float),
+            "y_um": np.asarray(y_um, dtype=float),
+            "weights": np.ones(len(x_um)),
             "focal_pixel_um": 0.5,
             "grid_x_um": np.arange(-5.0, 15.0, 0.125),
             "grid_y_um": np.arange(-5.0, 10.0, 0.125),
@@ -179,6 +187,12 @@ def rig_and_streams(monkeypatch):
     )
     rig = RecordingRig()
     rig.saved = saved
+    rig.layouts = {}
+
+    def get_layout(name):
+        return rig.layouts[name.strip()]
+
+    monkeypatch.setattr(slm_tweezer_array, "get_layout", get_layout)
     sent = {}
     monkeypatch.setattr(
         "pytweezer.experiment.experiment._get_device", lambda name, timeout: rig
@@ -279,3 +293,79 @@ def test_a_missing_saved_optics_parameter_fails_the_run(rig_and_streams):
 
     assert measurement.status == "failed"
     assert "slm_envelope_sigma" in measurement.attrs["error"]
+
+
+ELL = [Site(x_um=0, y_um=0), Site(x_um=5, y_um=0, on=False), Site(x_um=0, y_um=5)]
+
+
+def test_only_the_two_tweezer_experiments_are_listed():
+    names = {cls.__name__ for cls in runnable_experiments(slm_tweezer_array)}
+    assert names == {"SlmTweezerArray", "SlmTweezerLayout"}
+
+
+def test_layout_experiment_puts_the_on_sites_of_the_named_layout_on_the_rig(
+    rig_and_streams,
+):
+    from pytweezer.experiment import run_local
+    from pytweezer.experiments.slm_tweezer_array import SlmTweezerLayout
+
+    rig, _ = rig_and_streams
+    rig.layouts["ell"] = Layout(name="ell", sites=ELL)
+
+    measurement = run_local(SlmTweezerLayout, layout="ell", iterations=5)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    ((made),) = rig.made
+    assert list(made["x_um"]) == [0, 0] and list(made["y_um"]) == [0, 5]
+    assert made["name"] == "ell"
+
+
+def test_layout_experiment_records_the_whole_layout_including_off_sites(
+    rig_and_streams,
+):
+    from pytweezer.experiment import run_local
+    from pytweezer.experiments.slm_tweezer_array import SlmTweezerLayout
+
+    rig, _ = rig_and_streams
+    rig.layouts["ell"] = Layout(name="ell", sites=ELL)
+
+    measurement = run_local(SlmTweezerLayout, layout="ell", iterations=5)
+
+    recorded = Layout.model_validate(measurement.constants["layout"])
+    assert [site.on for site in recorded.sites] == [True, False, True]
+
+
+def test_layout_experiment_with_no_site_on_fails_the_run(rig_and_streams):
+    from pytweezer.experiment import run_local
+    from pytweezer.experiments.slm_tweezer_array import SlmTweezerLayout
+
+    rig, _ = rig_and_streams
+    rig.layouts["dark"] = Layout(name="dark", sites=[Site(x_um=0, y_um=0, on=False)])
+
+    measurement = run_local(SlmTweezerLayout, layout="dark", iterations=5)
+
+    assert measurement.status == "failed"
+    assert "no site on" in measurement.attrs["error"]
+    assert rig.made == []
+
+
+def test_both_experiments_ask_the_rig_with_the_same_optics(rig_and_streams):
+    from pytweezer.experiment import run_local
+    from pytweezer.experiments.slm_tweezer_array import (
+        SlmTweezerArray,
+        SlmTweezerLayout,
+    )
+
+    rig, _ = rig_and_streams
+    rig.layouts["ell"] = Layout(name="ell", sites=ELL)
+
+    run_local(SlmTweezerArray, iterations=7, zernike=True)
+    run_local(SlmTweezerLayout, layout="ell", iterations=7, zernike=True)
+
+    geometry = {"rows", "columns", "spacing_um", "angle_deg", "x_um", "y_um", "name"}
+    array, layout = (
+        {k: v for k, v in made.items() if k not in geometry} for made in rig.made
+    )
+    assert array.keys() == layout.keys()
+    assert array["zernike"] is layout["zernike"] is True
+    assert array["blaze_um"] == layout["blaze_um"]

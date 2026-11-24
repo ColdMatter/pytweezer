@@ -284,49 +284,15 @@ class OptimisationBasedPhasemaskGeneratorGPU:
         return [Wn, Thetan, Xn, Yn]
 
     def generate_kagome_lattice(self, target_sites, spacing):
+        """Kagome lattice sites nearest ``target_sites`` in number, ``spacing`` µm apart.
+
+        See :func:`pytweezer.experiment.layouts.kagome`.
         """
-        Generates a circularly symmetric Kagome lattice of tweezer sites.
+        from pytweezer.experiment.layouts import kagome
 
-        Parameters:
-        - target_sites (int): The desired number of trap sites.
-        - spacing (float): The nearest-neighbor site spacing in microns.
-
-        Returns:
-        - x_pos (np.ndarray): Array of x coordinates for the trap sites.
-        - y_pos (np.ndarray): Array of y coordinates for the trap sites.
-        """
-        k_max = int(1.5 * np.sqrt(target_sites)) + 2
-        m_vals = np.arange(-k_max, k_max + 1)
-        n_vals = np.arange(-k_max, k_max + 1)
-        m, n = np.meshgrid(m_vals, n_vals)
-        m = m.flatten()
-        n = n.flatten()
-        a1 = np.array([2 * spacing, 0])
-        a2 = np.array([spacing, np.sqrt(3) * spacing])
-        b1 = np.array([spacing, 0])
-        b2 = np.array([spacing / 2, np.sqrt(3) * spacing / 2])
-        b3 = np.array([-spacing / 2, np.sqrt(3) * spacing / 2])
-        centers = np.outer(m, a1) + np.outer(n, a2)
-        sites_b1 = centers + b1
-        sites_b2 = centers + b2
-        sites_b3 = centers + b3
-        all_sites = np.vstack((sites_b1, sites_b2, sites_b3))
-        distances = np.linalg.norm(all_sites, axis=1)
-        rounded_distances = np.round(distances, decimals=5)
-        unique_radii, counts = np.unique(rounded_distances, return_counts=True)
-        cumulative_sites = np.cumsum(counts)
-        idx_closest = np.argmin(np.abs(cumulative_sites - target_sites))
-        optimal_radius = unique_radii[idx_closest]
-        actual_sites = cumulative_sites[idx_closest]
-        mask = rounded_distances <= optimal_radius
-        final_sites = all_sites[mask]
-        x_pos = final_sites[:, 0]
-        y_pos = final_sites[:, 1]
-
-        print(
-            f"Target sites: {target_sites} | Closest symmetric match: {actual_sites} sites"
-        )
-
+        sites = kagome(target_sites, spacing)
+        x_pos = np.array([site.x_um for site in sites])
+        y_pos = np.array([site.y_um for site in sites])
         return x_pos, y_pos
 
     def generate_zernike_phasemask(self, zernike_coeffs, wrap=False):
@@ -1466,54 +1432,16 @@ class OptimisationBasedPhasemaskGeneratorGPU3D:
         return [Wn, Thetan, Xn, Yn, Zn]
 
     def generate_kagome_lattice(self, target_sites, spacing):
+        """Kagome lattice sites nearest ``target_sites`` in number, ``spacing`` µm apart.
+
+        See :func:`pytweezer.experiment.layouts.kagome`.
         """
-        Generates a circularly symmetric Kagome lattice of tweezer sites.
+        from pytweezer.experiment.layouts import kagome
 
-        Parameters:
-        - target_sites (int): The desired number of trap sites.
-        - spacing (float): The nearest-neighbor site spacing in microns.
-
-        Returns:
-        - x_pos (np.ndarray): Array of x coordinates for the trap sites.
-        - y_pos (np.ndarray): Array of y coordinates for the trap sites.
-        - z_pos (np.ndarray): Array of z coordinates for the trap sites (currently all zeros).
-        """
-        k_max = int(1.5 * np.sqrt(target_sites)) + 2
-        m_vals = np.arange(-k_max, k_max + 1)
-        n_vals = np.arange(-k_max, k_max + 1)
-        m, n = np.meshgrid(m_vals, n_vals)
-        m = m.flatten()
-        n = n.flatten()
-        a1 = np.array([2 * spacing, 0])
-        a2 = np.array([spacing, np.sqrt(3) * spacing])
-        b1 = np.array([spacing, 0])
-        b2 = np.array([spacing / 2, np.sqrt(3) * spacing / 2])
-        b3 = np.array([-spacing / 2, np.sqrt(3) * spacing / 2])
-        centers = np.outer(m, a1) + np.outer(n, a2)
-        sites_b1 = centers + b1
-        sites_b2 = centers + b2
-        sites_b3 = centers + b3
-        all_sites = np.vstack((sites_b1, sites_b2, sites_b3))
-        distances = np.linalg.norm(all_sites, axis=1)
-        rounded_distances = np.round(distances, decimals=5)
-        unique_radii, counts = np.unique(rounded_distances, return_counts=True)
-        cumulative_sites = np.cumsum(counts)
-        idx_closest = np.argmin(np.abs(cumulative_sites - target_sites))
-        optimal_radius = unique_radii[idx_closest]
-        actual_sites = cumulative_sites[idx_closest]
-        mask = rounded_distances <= optimal_radius
-        final_sites = all_sites[mask]
-        x_pos = final_sites[:, 0]
-        y_pos = final_sites[:, 1]
-        z_pos = np.zeros_like(
-            x_pos
-        )  # For 3D extension, currently all traps are in the same focal plane (z=0)
-
-        print(
-            f"Target sites: {target_sites} | Closest symmetric match: {actual_sites} sites"
-        )
-
-        return x_pos, y_pos, z_pos
+        sites = kagome(target_sites, spacing)
+        x_pos = np.array([site.x_um for site in sites])
+        y_pos = np.array([site.y_um for site in sites])
+        return x_pos, y_pos, np.zeros_like(x_pos)
 
     def generate_zernike_phasemask(self, zernike_coeffs, wrap=False):
         """
@@ -2426,49 +2354,15 @@ class OptimisationBasedPhasemaskGeneratorGPUSeidel:
         return [Wn, Thetan, Xn, Yn]
 
     def generate_kagome_lattice(self, target_sites, spacing):
+        """Kagome lattice sites nearest ``target_sites`` in number, ``spacing`` µm apart.
+
+        See :func:`pytweezer.experiment.layouts.kagome`.
         """
-        Generates a circularly symmetric Kagome lattice of tweezer sites.
+        from pytweezer.experiment.layouts import kagome
 
-        Parameters:
-        - target_sites (int): The desired number of trap sites.
-        - spacing (float): The nearest-neighbor site spacing in microns.
-
-        Returns:
-        - x_pos (np.ndarray): Array of x coordinates for the trap sites.
-        - y_pos (np.ndarray): Array of y coordinates for the trap sites.
-        """
-        k_max = int(1.5 * np.sqrt(target_sites)) + 2
-        m_vals = np.arange(-k_max, k_max + 1)
-        n_vals = np.arange(-k_max, k_max + 1)
-        m, n = np.meshgrid(m_vals, n_vals)
-        m = m.flatten()
-        n = n.flatten()
-        a1 = np.array([2 * spacing, 0])
-        a2 = np.array([spacing, np.sqrt(3) * spacing])
-        b1 = np.array([spacing, 0])
-        b2 = np.array([spacing / 2, np.sqrt(3) * spacing / 2])
-        b3 = np.array([-spacing / 2, np.sqrt(3) * spacing / 2])
-        centers = np.outer(m, a1) + np.outer(n, a2)
-        sites_b1 = centers + b1
-        sites_b2 = centers + b2
-        sites_b3 = centers + b3
-        all_sites = np.vstack((sites_b1, sites_b2, sites_b3))
-        distances = np.linalg.norm(all_sites, axis=1)
-        rounded_distances = np.round(distances, decimals=5)
-        unique_radii, counts = np.unique(rounded_distances, return_counts=True)
-        cumulative_sites = np.cumsum(counts)
-        idx_closest = np.argmin(np.abs(cumulative_sites - target_sites))
-        optimal_radius = unique_radii[idx_closest]
-        actual_sites = cumulative_sites[idx_closest]
-        mask = rounded_distances <= optimal_radius
-        final_sites = all_sites[mask]
-        x_pos = final_sites[:, 0]
-        y_pos = final_sites[:, 1]
-
-        print(
-            f"Target sites: {target_sites} | Closest symmetric match: {actual_sites} sites"
-        )
-
+        sites = kagome(target_sites, spacing)
+        x_pos = np.array([site.x_um for site in sites])
+        y_pos = np.array([site.y_um for site in sites])
         return x_pos, y_pos
 
     def generate_zernike_phasemask(self, zernike_coeffs, wrap=False):

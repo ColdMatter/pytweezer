@@ -27,8 +27,8 @@ the coordinator contract):
   (``OptimisationBasedPhasemaskGeneratorGPU.iter_rearrangement_sequence``) and
   upload it to the SLM concurrently, then grab a reset image. Returns the
   before/after images.
-* :meth:`make_array` — compute the phase mask for a rectangular array and put it
-  on the SLM. :meth:`get_array` then says which array is on the SLM, for
+* :meth:`make_array` / :meth:`make_layout` — compute the phase mask for a
+  rectangular array, or for traps at given positions, and put it on the SLM. :meth:`get_array` then says which array is on the SLM, for
   analyses and experiments that need the number or positions of the sites; it
   returns ``None`` once anything else has written the SLM.
 * :meth:`test` / :meth:`status` / :meth:`shutdown`.
@@ -58,6 +58,7 @@ from pytweezer import analysis as an
 from pytweezer.coordinators.base import Coordinator
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.slm import SLM
+from pytweezer.experiment import layouts
 from pytweezer.helper_scripts import array_hologram
 
 try:
@@ -258,7 +259,32 @@ class Rearrangement(Coordinator):
         columns: int,
         spacing_um: float,
         angle_deg: float,
+        **optics,
+    ) -> dict:
+        """Put a ``rows`` x ``columns`` tweezer array on the SLM and remember it.
+
+        The sites are :func:`pytweezer.experiment.layouts.rectangle`'s; the
+        ``optics`` keywords are :meth:`make_layout`'s.
+        """
+        sites = layouts.rectangle(
+            int(rows), int(columns), float(spacing_um), float(angle_deg)
+        )
+        return self._put_hologram(
+            [site.x_um for site in sites],
+            [site.y_um for site in sites],
+            optics,
+            rows=int(rows),
+            columns=int(columns),
+            spacing_um=float(spacing_um),
+            angle_deg=float(angle_deg),
+        )
+
+    def make_layout(
+        self,
+        x_um: list[float],
+        y_um: list[float],
         *,
+        name: str,
         generator_settings: dict,
         envelope: dict | None,
         blaze_um: tuple[float, float],
@@ -270,7 +296,7 @@ class Rearrangement(Coordinator):
         damping: float,
         phase_randomness: float,
     ) -> dict:
-        """Put a ``rows`` x ``columns`` tweezer array on the SLM and remember it.
+        """Put traps at ``x_um``/``y_um`` on the SLM and remember them as layout ``name``.
 
         See :mod:`pytweezer.helper_scripts.array_hologram` for the mask, and its
         :func:`~pytweezer.helper_scripts.array_hologram.generator_settings` and
@@ -279,7 +305,23 @@ class Rearrangement(Coordinator):
         unweighted). Returns its result: the mask, the trap positions and
         weights, and the optimisation's final uniformity, min/max ratio and error.
         """
+        optics = {
+            "generator_settings": generator_settings,
+            "envelope": envelope,
+            "blaze_um": blaze_um,
+            "fresnel_focal_length_mm": fresnel_focal_length_mm,
+            "zernike": zernike,
+            "pupil_radius_um": pupil_radius_um,
+            "pupil_dump_um": pupil_dump_um,
+            "iterations": iterations,
+            "damping": damping,
+            "phase_randomness": phase_randomness,
+        }
+        return self._put_hologram(x_um, y_um, optics, layout=str(name))
+
+    def _put_hologram(self, x_um, y_um, optics: dict, **geometry) -> dict:
         self._require_gpu()
+        generator_settings = optics["generator_settings"]
         settings = {
             **generator_settings,
             "slm_res": tuple(generator_settings["slm_res"]),
@@ -287,27 +329,25 @@ class Rearrangement(Coordinator):
                 int(index): float(value)
                 for index, value in generator_settings["zernike_coeff_dict"].items()
             },
-            "fresnel_f_mm": float(fresnel_focal_length_mm),
-            "blaze_dx_dy_um": tuple(blaze_um),
+            "fresnel_f_mm": float(optics["fresnel_focal_length_mm"]),
+            "blaze_dx_dy_um": tuple(optics["blaze_um"]),
         }
         if self._array_generator is None or settings != self._array_settings:
             self._array_generator = array_hologram.make_generator(settings)
             self._array_settings = settings
-        hologram = array_hologram.array_hologram(
+        hologram = array_hologram.layout_hologram(
             self._array_generator,
-            rows=int(rows),
-            columns=int(columns),
-            spacing_um=float(spacing_um),
-            angle_deg=float(angle_deg),
-            envelope=envelope,
-            blaze_um=tuple(blaze_um),
-            fresnel_focal_length_mm=float(fresnel_focal_length_mm),
-            zernike=bool(zernike),
-            pupil_radius_um=float(pupil_radius_um),
-            pupil_dump_um=tuple(pupil_dump_um),
-            iterations=int(iterations),
-            damping=float(damping),
-            phase_randomness=float(phase_randomness),
+            np.asarray(x_um, dtype=float),
+            np.asarray(y_um, dtype=float),
+            envelope=optics["envelope"],
+            blaze_um=tuple(optics["blaze_um"]),
+            fresnel_focal_length_mm=float(optics["fresnel_focal_length_mm"]),
+            zernike=bool(optics["zernike"]),
+            pupil_radius_um=float(optics["pupil_radius_um"]),
+            pupil_dump_um=tuple(optics["pupil_dump_um"]),
+            iterations=int(optics["iterations"]),
+            damping=float(optics["damping"]),
+            phase_randomness=float(optics["phase_randomness"]),
         )
         self.slm.update_mask(hologram["mask"])
         self._remember_array(
@@ -315,10 +355,7 @@ class Rearrangement(Coordinator):
             x_um=hologram["x_um"],
             y_um=hologram["y_um"],
             weights=hologram["weights"],
-            rows=int(rows),
-            columns=int(columns),
-            spacing_um=float(spacing_um),
-            angle_deg=float(angle_deg),
+            **geometry,
         )
         return hologram
 
@@ -338,7 +375,7 @@ class Rearrangement(Coordinator):
         Always carries ``sites`` and the trap ``x_um``/``y_um`` (focal plane,
         relative to the blaze spot) and ``weights``; an array from
         :meth:`make_array` also carries ``rows``, ``columns``, ``spacing_um``
-        and ``angle_deg``.
+        and ``angle_deg``, and one from :meth:`make_layout` its ``layout`` name.
         """
         if self._array is None:
             return None
