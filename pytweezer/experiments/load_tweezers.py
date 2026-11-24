@@ -141,7 +141,21 @@ class LoadTweezers(MotMasterExperiment):
     def prepare(self) -> None:
         super().prepare()
         self.set_up_hamcam()
-        self.load_trap_sites()
+        self.read_trap_sites()
+
+    def run_point(self) -> None:
+        mark = self.hamcam.start_shot({"rid": self.rid})
+        self.run_motmaster_sequence()
+        frames = np.asarray(self.hamcam.wait_frames(mark, 2))
+        self.record_data(frames)
+
+    def finish(self) -> None:
+        try:
+            self.hamcam.start_live()  # does nothing unless a failure left it stopped
+            self.hamcam.end_shots()
+
+        finally:
+            super().finish()
 
     def set_up_hamcam(self) -> None:
         """Put the HamCam in external exposure with EM gain, binning 1 and the chosen ROI, live."""
@@ -162,11 +176,11 @@ class LoadTweezers(MotMasterExperiment):
         self.hamcam.set_gain(self.hamcam_gain)
         self.hamcam.start_live()
 
-    def load_trap_sites(self) -> None:
+    def read_trap_sites(self) -> None:
         """Load the accepted trap sites into ``trap_sites`` and record them, or record why there are none."""
         # Fetched only for sequence bindings, so not with the overrides off.
         saved = self.saved_parameters or get_saved_parameters()
-        self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(saved)
+        self.trap_sites, self.no_trap_sites_reason = self.get_trap_site_positions(saved)
         if self.trap_sites is None:
             if not self.no_trap_sites_reason:
                 return
@@ -181,20 +195,6 @@ class LoadTweezers(MotMasterExperiment):
         self.record("trap_window_size", self.trap_sites.window_size, unit="px")
         self.record("trap_feature_size", self.trap_sites.feature_size, unit="px")
         self.record("threshold", self.trap_sites.threshold, unit="photons")
-
-    def run_point(self) -> None:
-        mark = self.hamcam.start_shot({"rid": self.rid})
-        self.run_motmaster_sequence()
-        frames = np.asarray(self.hamcam.wait_frames(mark, 2))
-        self.record_data(frames)
-
-    def finish(self) -> None:
-        try:
-            self.hamcam.start_live()  # does nothing unless a failure left it stopped
-            self.hamcam.end_shots()
-
-        finally:
-            super().finish()
 
     def record_data(self, frames: np.ndarray) -> None:
         """Record the frames, signal and per-site results of one shot's two HamCam ``frames``."""
@@ -219,7 +219,7 @@ class LoadTweezers(MotMasterExperiment):
             self.record("first_counts", first_counts, unit="counts")
             self.record("second_counts", second_counts, unit="counts")
 
-    def saved_trap_sites(self, saved: dict) -> tuple[TrapSites | None, str]:
+    def get_trap_site_positions(self, saved: dict) -> tuple[TrapSites | None, str]:
         """The accepted trap sites in ``saved``, placed in whole pixels of this ROI; or ``None`` and why.
 
         An empty reason means the experiment wants none. Sites fitted to another

@@ -65,7 +65,7 @@ class FindTrapSites(Fit, LoadTweezers):
             )
         self.record("sites_from", "rig" if array else "default")
 
-    def saved_trap_sites(self, saved):
+    def get_trap_site_positions(self, saved):
         return None, ""  # it finds them
 
     def take_calibration_shots(self) -> list:
