@@ -25,7 +25,11 @@ import subprocess
 import time
 
 from pytweezer.configuration.config import get_config
-from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT, tweezerpath
+from pytweezer.configuration.paths import (
+    CATEGORY_SCRIPTS,
+    DEVICE_SERVER_SCRIPT,
+    tweezerpath,
+)
 
 MANAGED_CATEGORIES = ("Servers", "Devices", "Loggers")
 
@@ -46,9 +50,7 @@ def _managed_scripts():
     scripts = {}
     for category in MANAGED_CATEGORIES:
         for name, params in conf.get(category, {}).items():
-            script = params.get("script") or (
-                DEVICE_SERVER_SCRIPT if category == "Devices" else None
-            )
+            script = params.get("script") or CATEGORY_SCRIPTS.get(category)
             if not script:
                 continue
             raw_path = tweezerpath + "/bin/" + script

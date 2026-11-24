@@ -1,46 +1,21 @@
 """Generic logger launcher — the ``CONFIG["Loggers"]`` counterpart to
 ``device_server.py``.
 
-Each logger in ``CONFIG["Loggers"]`` is a background worker that reads a data
-source and writes values into the database. Rather than give every logger its own
-``argparse`` + config-reading boilerplate, this module provides a single
-launcher:
-
-* ``pytweezer-logger <logger_name>`` (console script) — start one logger.
-* The **logger manager** launches the same thing: each logger's ``script`` in the
-  config points here, so ``ProcessTile`` runs ``python logger_server.py <name>``.
-
-Adding a *new logger instance* means only editing ``config.py``. Adding a new
-*logger type* means writing a :class:`~pytweezer.loggers.base.Logger` subclass and
-adding one factory to :data:`LOGGER_REGISTRY`. Subclasses are imported lazily
-inside their factory so a broken/optional logger never breaks importing this
-launcher.
+Every logger runs this one launcher: ``pytweezer-logger <logger_name>``, or the
+Loggers tab, which runs ``python logger_server.py <name>``. It imports the
+:class:`~pytweezer.loggers.base.Logger` subclass named by the entry's
+``"class"`` (a ``"module.path:ClassName"`` string) and runs it, so a new logger
+type is a new class and a new instance is a new config entry; nothing is
+registered here.
 """
 
 import argparse
 import signal
 
-from pytweezer.configuration.config import get_config
+from pytweezer.configuration.config import get_config, load_class
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("logger server")
-
-
-# --------------------------------------------------------------------------- #
-# Logger-type factories: (name, conf) -> Logger instance
-# --------------------------------------------------------------------------- #
-
-
-def _make_ni_adc(name, conf):
-    from pytweezer.loggers.ni_adc_logger import NIADCLogger
-
-    return NIADCLogger(name, conf)
-
-
-#: Maps a logger's ``"logger"`` config key to the factory that builds it.
-LOGGER_REGISTRY = {
-    "ni_adc": _make_ni_adc,
-}
 
 
 # --------------------------------------------------------------------------- #
@@ -77,35 +52,24 @@ def resolve_logger(name):
 
 
 def build_logger(name, conf=None):
-    """Return the :class:`Logger` instance for the logger named ``name``.
-
-    The logger's ``"logger"`` key selects the factory in :data:`LOGGER_REGISTRY`.
-    """
+    """Return the :class:`Logger` instance for the logger named ``name``."""
     if conf is None:
         name, conf = resolve_logger(name)
 
-    logger_type = conf.get("logger")
-    if logger_type is None:
+    path = conf.get("class")
+    if not path:
         raise KeyError(
-            f"Logger {name!r} has no 'logger' key; expected one of "
-            f"{sorted(LOGGER_REGISTRY)}"
+            f"Logger {name!r} has no 'class'; expected a 'module.path:ClassName' "
+            "string naming its Logger subclass"
         )
-    try:
-        factory = LOGGER_REGISTRY[logger_type]
-    except KeyError:
-        raise KeyError(
-            f"Unknown logger type {logger_type!r} for {name!r}; "
-            f"registered types: {sorted(LOGGER_REGISTRY)}"
-        ) from None
-
-    return factory(name, conf)
+    return load_class(path)(name, conf)
 
 
 def run_logger(name):
     """Build and run the logger named ``name`` (blocks until interrupted)."""
     name, conf = resolve_logger(name)
     instance = build_logger(name, conf)
-    logger.info("Running logger %r (type=%s)", name, conf.get("logger"))
+    logger.info("Running logger %r (%s)", name, conf["class"])
     instance.run()
 
 

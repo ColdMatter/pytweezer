@@ -39,7 +39,7 @@ from bin.machine_lines import MachineLine, MachineWorker
 from pytweezer import machines
 from pytweezer.configuration import config
 from pytweezer.configuration.config import get_config, machine_name, this_pc_address
-from pytweezer.configuration.paths import DEVICE_SERVER_SCRIPT
+from pytweezer.configuration.paths import CATEGORY_SCRIPTS, DEVICE_SERVER_SCRIPT
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
 from pytweezer.logging_utils import get_logger
@@ -461,7 +461,9 @@ class ControlPanel(BWidget):
             port = _status_port(params)
             row = ManagedRow(
                 pname,
-                script=tweezerpath + "/bin/" + params["script"],
+                script=tweezerpath
+                + "/bin/"
+                + (params.get("script") or CATEGORY_SCRIPTS[category]),
                 run_at_startup=params.get("run_at_startup", False),
                 tooltip=params.get("tooltip"),
                 controllable=controllable,

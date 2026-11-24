@@ -27,11 +27,14 @@ propertyfilename = configpath + "/properties/properties.json"
 #: The committed tree a PC starts from until it has saved its own.
 propertydefaultsfilename = configpath + "/properties/properties.default.json"
 
-#: Device config entries omit ``"script"``: they all run device_server.py,
-#: differentiated by their ``"class"`` key. This is the one launcher not named
-#: per-entry in CONFIG. Path is relative to ``bin/`` (callers prefix
-#: ``tweezerpath + "/bin/"``), matching how ManagedRow/process_cleanup spawn it.
+#: Device and logger config entries omit ``"script"``: every device runs
+#: device_server.py and every logger logger_server.py, differentiated by their
+#: ``"class"`` key. Paths are relative to ``bin/`` (callers prefix
+#: ``tweezerpath + "/bin/"``), matching how ManagedRow/process_cleanup spawn them.
 DEVICE_SERVER_SCRIPT = "../pytweezer/servers/device_server.py"
+LOGGER_SERVER_SCRIPT = "../pytweezer/servers/logger_server.py"
+#: The launcher each category's entries run when they name no ``"script"``.
+CATEGORY_SCRIPTS = {"Devices": DEVICE_SERVER_SCRIPT, "Loggers": LOGGER_SERVER_SCRIPT}
 
 
 def read_json_tree(path: str) -> dict:

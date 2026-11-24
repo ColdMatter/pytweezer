@@ -66,11 +66,11 @@ host to do it (see the `pytweezer-gui-internals` skill).
   PC; connection string in `DATABASE["dsn"]`).
 - `CONFIG["GUI"]` — standalone GUI tools (StreamMonitor, Applet Launcher, …).
 
-Every category names its `"script"` explicitly **except Devices**: they all run
-`device_server.py`, differentiated by `"class"`, so the launcher path lives once
-in `DEVICE_SERVER_SCRIPT` (`pytweezer/configuration/paths.py`) and spawn sites
-(`DevicesPanel`, `process_cleanup`) reference that constant rather than
-`params["script"]`.
+Every category names its `"script"` explicitly **except Devices and Loggers**:
+every device runs `device_server.py` and every logger `logger_server.py`,
+differentiated by `"class"`, so each launcher path lives once in
+`CATEGORY_SCRIPTS` (`pytweezer/configuration/paths.py`) and spawn sites
+(`DevicesPanel`, `ControlPanel`, `process_cleanup`) look it up there.
 
 **Adding a port-owning entry renumbers every port after it.** Ports come from
 `get_next_port()` in declaration order across the whole literal, and `Servers`

@@ -7,10 +7,9 @@ inspects what would have reached the database.
 
 The failures it exists to catch are all silent at runtime:
 
-* a ``"logger"`` type that isn't in ``LOGGER_REGISTRY`` (the process dies at
-  startup with a KeyError nobody sees, and the GUI tile just says Crashed)
-* a missing/wrong ``"script"`` key, which ``ControlPanel`` indexes directly --
-  it takes down the whole **Loggers** tab, not just this row
+* a ``"class"`` that is missing, doesn't import or isn't a ``Logger`` subclass
+  (the process dies at startup with an error nobody sees, and the GUI tile
+  just says Crashed)
 * config keys the logger class never reads, so it silently runs on a default
 * field values the database cannot store: ``DBWriter`` drops every non-numeric
   field without raising, so a string or array reading vanishes with no error
@@ -29,17 +28,13 @@ import sys
 # Keep this check's log records off a running lab's Message hub.
 os.environ.setdefault("PYTWEEZER_LOG_PUBLISH", "0")
 
-import pytweezer
-from pytweezer.configuration.config import get_config
+from pytweezer.configuration.config import get_config, load_class
 from pytweezer.servers import logger_server
-
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(pytweezer.__file__)))
 
 #: Keys the framework itself consumes; never reported as unread by the class.
 FRAMEWORK_KEYS = {
     "run_at_startup",
-    "script",
-    "logger",
+    "class",
     "host",
     "port",
     "interval",
@@ -85,46 +80,25 @@ class RecordingWriter:
         self.closed = True
 
 
-def check_script_key(conf):
-    """The Loggers tab indexes ``params["script"]`` with no default."""
-    script = conf.get("script")
-    if not script:
-        problem(
-            "entry has no 'script' key - ControlPanel indexes params['script'] "
-            "directly, so this raises KeyError and the whole Loggers tab fails "
-            "to build (expected '../pytweezer/servers/logger_server.py')"
-        )
-        return
-    resolved = os.path.normpath(os.path.join(REPO_ROOT, "bin", script))
-    if not os.path.isfile(resolved):
-        problem(f"'script' resolves to {resolved} which does not exist")
-    elif os.path.basename(resolved) != "logger_server.py":
-        note(
-            f"'script' points at {os.path.basename(resolved)}; every logger "
-            f"normally runs ../pytweezer/servers/logger_server.py"
-        )
-    else:
-        ok("'script' resolves to logger_server.py")
+def check_class(conf):
+    """``"class"`` must import as a :class:`Logger` subclass."""
+    from pytweezer.loggers.base import Logger
 
-
-def check_registry(name, conf):
-    """The ``"logger"`` key must select a factory in LOGGER_REGISTRY."""
-    logger_type = conf.get("logger")
-    if logger_type is None:
-        problem(
-            f"entry has no 'logger' key; expected one of "
-            f"{sorted(logger_server.LOGGER_REGISTRY)}"
-        )
+    path = conf.get("class")
+    if not path:
+        problem("entry has no 'class'; expected a 'module.path:ClassName' string")
         return False
-    if logger_type not in logger_server.LOGGER_REGISTRY:
-        problem(
-            f"logger type {logger_type!r} is not registered in "
-            f"LOGGER_REGISTRY (registered: "
-            f"{sorted(logger_server.LOGGER_REGISTRY)}) - add a factory to "
-            f"pytweezer/servers/logger_server.py"
-        )
+    try:
+        cls = load_class(path)
+    except Exception as exc:
+        problem(f"'class' {path!r} does not import: {type(exc).__name__}: {exc}")
         return False
-    ok(f"logger type {logger_type!r} is registered")
+    if not (isinstance(cls, type) and issubclass(cls, Logger)):
+        problem(f"'class' {path!r} is not a Logger subclass")
+        return False
+    ok(f"'class' imports {cls.__name__}")
+    if "script" in conf:
+        note("'script' is unnecessary - every logger runs logger_server.py")
     return True
 
 
@@ -252,8 +226,7 @@ def check_logger(name):
     if canonical != name:
         note(f"config key is actually {canonical!r}")
 
-    check_script_key(conf)
-    if not check_registry(canonical, conf):
+    if not check_class(conf):
         return
 
     if not conf.get("run_at_startup", False):
