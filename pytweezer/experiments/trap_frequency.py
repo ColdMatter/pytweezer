@@ -30,6 +30,8 @@ class TrapFrequencyScan(LoadTweezers):
     as ``modulation_voltage``.
     """
 
+    analyses = ("trap_frequency", *LoadTweezers.analyses)
+
     modulation_frequency = Number(
         100e3,
         unit="kHz",

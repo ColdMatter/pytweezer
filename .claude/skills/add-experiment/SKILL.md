@@ -191,7 +191,7 @@ result.
 A view reads only what the file recorded, so record what it needs:
 `cloud_fit` reads the cloud fit above; `cloud_temperature` fits those sizes against a scanned time argument (native:
 seconds; MOTMaster: 10 µs ticks) and needs `cloud_mass_amu`; the tweezer
-histograms are in tweezer-array. Analyses are disabled until the measurement
+histograms and `trap_frequency` are in tweezer-array. Analyses are disabled until the measurement
 finishes; an unknown name is listed disabled.
 
 ## Running

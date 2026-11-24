@@ -76,7 +76,11 @@ point.
 - `TrapFrequencyScan` (`experiments/trap_frequency.py`) modulates the tweezers
   between the two images at `modulation_frequency` (via the VCO voltage
   `tTweezerModulationVCF`, recorded as `modulation_voltage`); scan it and plot
-  `survival` for parametric-heating dips.
+  `survival` for parametric-heating dips. Its first analysis, `trap_frequency`
+  (`analyses/default/trap_frequency.py`), pools survival per frequency from
+  `first_occupied`/`second_occupied` (else `survival`), finds the dips, and
+  takes the highest-frequency one at least `min_relative_depth` (default 0.5)
+  as prominent as the deepest as `2 ν_r`, fitting a Gaussian to it.
 
 `analyses = ("tweezer_histogram", "tweezer_photon_histogram")` for the Results
 tab (`analyses/default/tweezer_histogram.py`); they read `first_counts`/
