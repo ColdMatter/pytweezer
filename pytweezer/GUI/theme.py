@@ -296,6 +296,7 @@ QFrame#Region[kind="sheet"] {
     border-left: 3px solid #5b8def;
 }
 QWidget#ArgumentEditor,
+QWidget#EditorBody,
 QScrollArea#EditorScroll,
 QScrollArea#EditorScroll > QWidget,
 QGroupBox#EditorGroup,

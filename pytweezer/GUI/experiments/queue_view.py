@@ -1,6 +1,6 @@
 """Table of the running, waiting and recently finished tasks, with their controls."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from PyQt6 import QtCore, QtGui
 from PyQt6.QtWidgets import (
@@ -171,16 +171,21 @@ class QueueView(QWidget):
                 self.buttons[command] = button
         for command in ("abort", "delete"):
             self.buttons[command].setObjectName("DangerButton")
-        self.buttons["terminate"].setToolTip("Stop after the current point")
-        self.buttons["abort"].setToolTip(
-            "Kill the task now. A device call already in progress still completes."
-        )
         self.buttons["delete"].setToolTip("Remove a waiting task from the queue")
         self.buttons["edit"].setToolTip("Copy this task's settings into the editor")
         self.buttons["grafana"].setToolTip(
             "Show this task's results and the readings during it in Grafana"
         )
         layout.addLayout(buttons)
+        # Only while the queue has focus: the editor's fields need these keys.
+        for key, commands in (
+            ("Space", ("resume", "pause")),
+            ("Delete", ("terminate",)),
+            ("Shift+Delete", ("abort",)),
+        ):
+            shortcut = QtGui.QShortcut(QtGui.QKeySequence(key), self)
+            shortcut.setContext(QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(lambda c=commands: self._press_first_enabled(c))
         self._update_buttons()
 
     def set_snapshot(self, snapshot):
@@ -250,14 +255,28 @@ class QueueView(QWidget):
             return None
         return self.table.item(rows[0].row(), 0).data(_TASK)
 
+    def control_target(self):
+        """The task Pause, Resume, Terminate and Abort act on.
+
+        The selected task, else the most recently started running one.
+        """
+        task = self.selected_task()
+        if task is not None:
+            return task
+        return _newest_running(self.snapshot.get("running") or [])
+
     def _update_buttons(self):
         task = self.selected_task()
         status = task["status"] if task else None
+        target = self.control_target() or {}
+        target_status = target.get("status")
+        requested = target.get("requested")
         allowed = {
-            "pause": status == "running" and task.get("requested") != "pause",
-            "resume": status == "paused" or (task or {}).get("requested") == "pause",
-            "terminate": status in ("running", "paused"),
-            "abort": status in ("running", "paused"),
+            "pause": target_status == "running" and requested != "pause",
+            "resume": target_status == "paused" or requested == "pause",
+            "terminate": target_status in ("queued", "held")
+            or (target_status in ("running", "paused") and requested != "terminate"),
+            "abort": target_status in ("running", "paused"),
             "hold": status == "queued",
             "release": status == "held",
             "delete": status in ("queued", "held"),
@@ -268,12 +287,51 @@ class QueueView(QWidget):
         }
         for command, button in self.buttons.items():
             button.setEnabled(bool(allowed[command]))
+        self._label_controls(target, allowed)
+
+    def _label_controls(self, target, allowed):
+        waiting = target.get("status") in ("queued", "held")
+        texts = {
+            "pause": ("Pause", "Pause task {rid} at the next point (Space)"),
+            "resume": ("Resume", "Resume task {rid} (Space)"),
+            "terminate": ("Cancel", "Remove waiting task {rid} from the queue (Delete)")
+            if waiting
+            else ("Terminate", "Stop task {rid} after its current point (Delete)"),
+            "abort": (
+                "Abort",
+                (
+                    "Kill task {rid} now; a device call already in progress still "
+                    "completes (Shift+Delete)"
+                ),
+            ),
+        }
+        for command, (word, tooltip) in texts.items():
+            button = self.buttons[command]
+            if allowed[command]:
+                button.setText(f"{word} {target['rid']}")
+                button.setToolTip(
+                    tooltip.format(rid=target["rid"])
+                    + "\nWith no task selected: the most recently started running task"
+                )
+            else:
+                button.setText(word)
+                button.setToolTip("")
+
+    def _press_first_enabled(self, commands):
+        button = next(
+            (self.buttons[c] for c in commands if self.buttons[c].isEnabled()), None
+        )
+        if button is not None:
+            button.click()
 
     def _clicked(self, command):
-        task = self.selected_task()
+        controls = ("pause", "resume", "terminate", "abort")
+        task = self.control_target() if command in controls else self.selected_task()
         if task is None:
             return
         rid = task["rid"]
+        if command == "terminate" and task["status"] in ("queued", "held"):
+            command = "delete"
         if command == "edit":
             self.edit_requested.emit(task)
         elif command == "grafana":
@@ -340,6 +398,15 @@ def _pipeline(task):
 
 def _blocked(task):
     return bool(task.get("waiting_for"))
+
+
+def _newest_running(running):
+    def started(task):
+        if not task.get("t_start"):
+            return datetime.min.replace(tzinfo=UTC)
+        return datetime.fromisoformat(task["t_start"])
+
+    return max(running, key=lambda task: (started(task), task["rid"]), default=None)
 
 
 def _devices_text(devices):

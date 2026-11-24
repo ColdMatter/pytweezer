@@ -3,12 +3,10 @@
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QDockWidget,
-    QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QMessageBox,
-    QScrollArea,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -76,13 +74,8 @@ class ExperimentsPanel(QWidget):
 
         self.editor = ArgumentEditor()
         self.editor.set_parameter_source(DeviceParameterSource(lambda: self._simulated))
-        editor_scroll = QScrollArea()
-        editor_scroll.setObjectName("EditorScroll")
-        editor_scroll.setWidgetResizable(True)
-        editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        editor_scroll.setWidget(self.editor)
         editor_region = Region("sheet")
-        editor_region.body.addWidget(editor_scroll, 1)
+        editor_region.body.addWidget(self.editor, 1)
 
         self.queue_view = QueueView()
         self.queue_region = Region("well", "Queue", "")
