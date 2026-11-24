@@ -823,6 +823,8 @@ SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
         "BackgroundDrop": 0,
         "tDelay2": 100,
         "tDropDuration": 4,
+        "TweezerModulation": 0,
+        "tTweezerModulationVCF": 0.0,
     },
 }
 _SIMULATED_FALLBACK = {"tDelay1": 5, "tPulse": 20e-6, "coil_current": 1.5}
