@@ -86,3 +86,45 @@ def test_open_reports_a_crashing_dcam_library_instead_of_dying(monkeypatch):
     monkeypatch.setattr(hamamatsu, "_dcam_session", pytest.fail)
     with pytest.raises(RuntimeError, match="0xc0000602"):
         hamamatsu.open_dcam_camera("000407", "C9100")
+
+
+class RecordingDCAM:
+    def __init__(self):
+        self.calls = []
+
+    def pausing_acquisition(self, **kwargs):
+        return contextlib.nullcontext()
+
+    def __getattr__(self, name):
+        def call(*args, **kwargs):
+            self.calls.append((name, *args, *kwargs.items()))
+
+        return call
+
+
+@pytest.mark.parametrize(
+    ("mode", "calls"),
+    [
+        ("internal", [("set_trigger_mode", "int")]),
+        (
+            "edge",
+            [
+                ("set_trigger_mode", "ext"),
+                ("set_attribute_value", "trigger_active", 1),
+                ("setup_ext_trigger", ("invert", True)),
+            ],
+        ),
+        (
+            "level",
+            [
+                ("set_trigger_mode", "ext"),
+                ("set_attribute_value", "trigger_active", 2),
+                ("setup_ext_trigger", ("invert", True)),
+            ],
+        ),
+    ],
+)
+def test_dcam_exposure_mode_sets_the_trigger_activation(mode, calls):
+    backend = RecordingDCAM()
+    hamamatsu.set_dcam_exposure_mode(backend, mode)
+    assert backend.calls == calls

@@ -78,9 +78,6 @@ class LoadingCurve(Experiment):
 - `self.rid` is the task's run id (-1 under `run_local`). An experiment that
   chooses its own points overrides `planned_points(scan)`, raising
   `ValueError` for a scan it can't honour.
-- Camera settings experiments (`experiments/camera_settings.py`, base
-  `CameraSettings`) build their form from the driver's `CONTROLS`, send only
-  the ticked settings and save them as `<camera>_<control>` saved parameters.
 
 ## MOTMaster sequences
 
