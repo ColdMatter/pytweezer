@@ -27,14 +27,15 @@ KHZ = 1e3
 DATA_COLOUR = CURVE_COLORS[2]
 #: Dips not taken as the radial resonance; the accent marks the one that is.
 OTHER_DIP_PEN = pg.mkPen("#8d8e99", width=1, style=Qt.PenStyle.DashLine)
+OTHER_FIT_PEN = pg.mkPen("#8d8e99", width=PLOT_LINE_WIDTH)
 RESONANCE_PEN = pg.mkPen("#5b8def", width=PLOT_LINE_WIDTH)
 
 
 class TrapFrequencyView(ComputedAnalysisView):
     """Survival against modulation frequency, its dips, and the radial trap frequency.
 
-    Every detected dip is marked; the one taken as ``2 ν_r`` is marked in the
-    accent colour with its fit. Frequencies are shown in kHz.
+    Every detected dip is marked and fitted; the one taken as ``2 ν_r`` is in
+    the accent colour. Frequencies are shown in kHz.
     """
 
     def __init__(self, parent=None):
@@ -89,8 +90,7 @@ class TrapFrequencyView(ComputedAnalysisView):
             pen=pg.mkPen(DATA_COLOUR, width=PLOT_LINE_WIDTH),
         )
         self.plot.addItem(self.errors)
-        self.fit_curve = self.plot.plot([], [], pen=RESONANCE_PEN)
-        self.dip_lines: list[pg.InfiniteLine] = []
+        self.dip_items: list[pg.GraphicsObject] = []
 
         self.readout = QLabel()
         font = QFont("Consolas")
@@ -141,14 +141,13 @@ class TrapFrequencyView(ComputedAnalysisView):
         return trap_frequency(loaded, argument, min_relative_depth)
 
     def show_result(self, result):
-        for line in self.dip_lines:
-            self.plot.removeItem(line)
-        self.dip_lines = []
+        for item in self.dip_items:
+            self.plot.removeItem(item)
+        self.dip_items = []
         if result is None:
             self.readout.setText("")
             self.points.setData([], [])
             self.errors.setData(x=np.empty(0), y=np.empty(0), height=np.empty(0))
-            self.fit_curve.setData([], [])
             return
         f_khz = result.frequency / KHZ
         self.points.setData(f_khz, result.survival)
@@ -157,31 +156,45 @@ class TrapFrequencyView(ComputedAnalysisView):
         )
         for index, dip in enumerate(result.dips):
             chosen = index == result.chosen
-            line = pg.InfiniteLine(
-                pos=(result.resonance_hz if chosen else dip) / KHZ,
-                angle=90,
-                pen=RESONANCE_PEN if chosen else OTHER_DIP_PEN,
+            self._add_dip_item(
+                pg.InfiniteLine(
+                    pos=dip.centre_hz / KHZ,
+                    angle=90,
+                    pen=RESONANCE_PEN if chosen else OTHER_DIP_PEN,
+                )
             )
-            self.plot.addItem(line)
-            self.dip_lines.append(line)
-        if result.curve is None:
-            self.fit_curve.setData([], [])
-        else:
-            dense = np.linspace(*result.fit_range_hz, 200)
-            self.fit_curve.setData(dense / KHZ, gaussian_dip(dense, *result.curve))
+            if dip.curve is not None:
+                dense = np.linspace(*dip.fit_range_hz, 200)
+                self._add_dip_item(
+                    pg.PlotDataItem(
+                        dense / KHZ,
+                        gaussian_dip(dense, *dip.curve),
+                        pen=RESONANCE_PEN if chosen else OTHER_FIT_PEN,
+                    )
+                )
         self.readout.setText(self._summary(result))
+
+    def _add_dip_item(self, item):
+        self.plot.addItem(item)
+        self.dip_items.append(item)
 
     @staticmethod
     def _summary(result):
         if not result.success:
             return result.message
-        radial = format_value(result.radial_hz, result.radial_err_hz, 1 / KHZ)
-        resonance = format_value(result.resonance_hz, result.resonance_err_hz, 1 / KHZ)
-        others = len(result.dips) - 1
-        return (
-            f"ν_r = {radial} kHz    (2ν_r dip at {resonance} kHz; {result.message}; "
-            f"{others} other dip{'s' if others != 1 else ''} found)"
-        )
+        dip = result.radial_dip
+        radial = format_value(dip.trap_hz, dip.trap_err_hz, 1 / KHZ)
+        resonance = format_value(dip.centre_hz, dip.centre_err_hz, 1 / KHZ)
+        lines = [f"ν_r = {radial} kHz    (2ν_r dip at {resonance} kHz; {dip.message})"]
+        others = result.other_dips
+        if others:
+            lines.append(f"  {'other dips':>18}      {'f/2':>18}")
+        for other in others:
+            centre = format_value(other.centre_hz, other.centre_err_hz, 1 / KHZ)
+            half = format_value(other.trap_hz, other.trap_err_hz, 1 / KHZ)
+            fitted = "" if other.curve is not None else "    (lowest point, not fitted)"
+            lines.append(f"  {centre:>18} kHz  {half:>18} kHz{fitted}")
+        return "\n".join(lines)
 
 
 ANALYSES = {

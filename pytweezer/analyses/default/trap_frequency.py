@@ -5,8 +5,8 @@ Modulating the trap depth at ``2 ν / n`` heats atoms out of a trap of frequency
 radial and axial motion and their subharmonics. The radial ``2 ν_r`` is the
 highest-frequency dip that is still one of the most pronounced, since the axial
 frequency is lower and the subharmonics are weaker: :func:`trap_frequency`
-takes the highest-frequency dip at least ``min_relative_depth`` as prominent as
-the deepest, fits a Gaussian dip to it and halves its centre.
+fits a Gaussian to every dip, takes the highest-frequency one at least
+``min_relative_depth`` as prominent as the deepest, and halves its centre.
 """
 
 from __future__ import annotations
@@ -27,27 +27,44 @@ MIN_PROMINENCE = 0.1
 
 
 @dataclass
+class DipFit:
+    """One survival dip; frequencies in Hz.
+
+    ``curve`` is the fitted Gaussian dip as ``(baseline, depth, centre, sigma)``,
+    ``None`` when ``centre_hz`` is the lowest point of the dip instead;
+    ``fit_range_hz`` is the span of the points fitted.
+    """
+
+    prominence: float
+    centre_hz: float = np.nan
+    centre_err_hz: float = np.nan
+    curve: tuple[float, float, float, float] | None = None
+    fit_range_hz: tuple[float, float] | None = None
+    message: str = ""
+
+    @property
+    def trap_hz(self) -> float:
+        """The trap frequency if this dip is a ``2 ν`` resonance."""
+        return self.centre_hz / 2
+
+    @property
+    def trap_err_hz(self) -> float:
+        return self.centre_err_hz / 2
+
+
+@dataclass
 class TrapFrequencyFit:
     """The radial trap frequency found in one survival spectrum; frequencies in Hz.
 
-    ``dips`` are the detected dips' frequencies and ``prominences`` their
-    depths below the surrounding survival. ``chosen`` indexes the one taken as
-    ``2 ν_r`` (``None`` when there is none), and ``curve`` is the fitted
-    Gaussian dip as ``(baseline, depth, centre, sigma)``, ``None`` when the
-    centre is the lowest point of the dip instead; ``fit_range_hz`` is
-    the span of the points fitted.
+    ``dips`` are the detected dips in order of frequency, each fitted, and
+    ``chosen`` indexes the one taken as ``2 ν_r`` (``None`` when there is none).
     """
 
     frequency: np.ndarray
     survival: np.ndarray
     error: np.ndarray
-    dips: np.ndarray = field(default_factory=lambda: np.empty(0))
-    prominences: np.ndarray = field(default_factory=lambda: np.empty(0))
+    dips: list[DipFit] = field(default_factory=list)
     chosen: int | None = None
-    resonance_hz: float = np.nan
-    resonance_err_hz: float = np.nan
-    curve: tuple[float, float, float, float] | None = None
-    fit_range_hz: tuple[float, float] | None = None
     message: str = ""
 
     @property
@@ -55,12 +72,20 @@ class TrapFrequencyFit:
         return self.chosen is not None
 
     @property
+    def radial_dip(self) -> DipFit | None:
+        return None if self.chosen is None else self.dips[self.chosen]
+
+    @property
+    def other_dips(self) -> list[DipFit]:
+        return [dip for index, dip in enumerate(self.dips) if index != self.chosen]
+
+    @property
     def radial_hz(self) -> float:
-        return self.resonance_hz / 2
+        return np.nan if self.chosen is None else self.radial_dip.trap_hz
 
     @property
     def radial_err_hz(self) -> float:
-        return self.resonance_err_hz / 2
+        return np.nan if self.chosen is None else self.radial_dip.trap_err_hz
 
 
 def gaussian_dip(f, baseline, depth, centre, sigma):
@@ -141,45 +166,48 @@ def trap_frequency(
         result.message = "Too few frequencies measured to find a dip."
         return result
     indices, prominences = find_dips(result.survival, result.error)
-    result.dips = result.frequency[indices]
-    result.prominences = prominences
     if not indices.size:
         result.message = "No dip in survival stands out from the noise."
         return result
+    result.dips = [
+        fit_dip(result.frequency, result.survival, result.error, indices, n, prominence)
+        for n, prominence in enumerate(prominences)
+    ]
     candidates = np.flatnonzero(prominences >= min_relative_depth * prominences.max())
-    result.chosen = int(candidates[np.argmax(result.dips[candidates])])
-    _fit_dip(result, indices)
+    result.chosen = int(candidates[np.argmax(result.frequency[indices[candidates]])])
+    result.message = result.radial_dip.message
     return result
 
 
-def _fit_dip(result: TrapFrequencyFit, indices: np.ndarray) -> None:
-    """Fit a Gaussian dip between the chosen dip's neighbours; else take its lowest point."""
-    f, p, chosen = result.frequency, result.survival, result.chosen
-    centre_index = indices[chosen]
-    low = (indices[chosen - 1] + centre_index) // 2 + 1 if chosen > 0 else 0
-    high = (
-        (centre_index + indices[chosen + 1] + 1) // 2
-        if chosen + 1 < indices.size
-        else f.size
-    )
+def fit_dip(
+    f: np.ndarray,
+    p: np.ndarray,
+    error: np.ndarray,
+    indices: np.ndarray,
+    n: int,
+    prominence: float,
+) -> DipFit:
+    """Fit a Gaussian to dip ``n`` of ``indices`` between its neighbours; else take its lowest point."""
+    centre_index = indices[n]
+    low = (indices[n - 1] + centre_index) // 2 + 1 if n > 0 else 0
+    high = (centre_index + indices[n + 1] + 1) // 2 if n + 1 < indices.size else f.size
     region = slice(low, high)
     step = np.median(np.diff(f))
-    result.resonance_hz = float(f[centre_index])
-    result.resonance_err_hz = float(step / 2)
+    dip = DipFit(float(prominence), float(f[centre_index]), float(step / 2))
     if high - low < 5:
-        result.message = (
+        dip.message = (
             "Too few points across the dip to fit it: its lowest point is taken."
         )
-        return
+        return dip
     fx, fy = f[region], p[region]
-    sigma_y = result.error[region]
+    sigma_y = error[region]
     weighted = np.isfinite(sigma_y).all() and (sigma_y > 0).all()
     try:
         parameters, covariance = curve_fit(
             gaussian_dip,
             fx,
             fy,
-            p0=(fy.max(), result.prominences[chosen], f[centre_index], step),
+            p0=(fy.max(), prominence, f[centre_index], step),
             sigma=sigma_y if weighted else None,
             absolute_sigma=weighted,
             bounds=(
@@ -188,14 +216,15 @@ def _fit_dip(result: TrapFrequencyFit, indices: np.ndarray) -> None:
             ),
         )
     except (RuntimeError, ValueError):
-        result.message = "The dip could not be fitted: its lowest point is taken."
-        return
+        dip.message = "The dip could not be fitted: its lowest point is taken."
+        return dip
     centre_err = float(np.sqrt(covariance[2, 2]))
     if not np.isfinite(centre_err):
-        result.message = "The dip's fit is unconstrained: its lowest point is taken."
-        return
-    result.curve = tuple(float(value) for value in parameters)
-    result.fit_range_hz = (float(fx[0]), float(fx[-1]))
-    result.resonance_hz = result.curve[2]
-    result.resonance_err_hz = centre_err
-    result.message = "Gaussian fit to the dip"
+        dip.message = "The dip's fit is unconstrained: its lowest point is taken."
+        return dip
+    dip.curve = tuple(float(value) for value in parameters)
+    dip.fit_range_hz = (float(fx[0]), float(fx[-1]))
+    dip.centre_hz = dip.curve[2]
+    dip.centre_err_hz = centre_err
+    dip.message = "Gaussian fit to the dip"
+    return dip

@@ -55,10 +55,23 @@ def test_the_radial_frequency_is_half_the_highest_pronounced_dip(tmp_path, occup
     fit = trap_frequency(spectrum_file(tmp_path, occupancy), "x")
 
     assert fit.success, fit.message
-    assert fit.curve is not None
+    assert fit.radial_dip.curve is not None
     assert fit.radial_hz == pytest.approx(RADIAL_HZ, rel=0.02)
     assert abs(fit.radial_hz - RADIAL_HZ) < 4 * fit.radial_err_hz
     assert len(fit.dips) >= 3
+
+
+def test_every_dip_is_found_and_fitted_where_wide_enough(tmp_path):
+    fit = trap_frequency(spectrum_file(tmp_path), "x")
+
+    centres = {round(dip.centre_hz / 5e3) * 5e3: dip for dip in fit.dips}
+    assert set(centres) == {15e3, 30e3, 50e3, 95e3}
+    # 15 and 30 kHz are three points apart: too few to fit either.
+    assert centres[30e3].curve is None
+    assert centres[50e3].centre_hz == pytest.approx(RADIAL_HZ, rel=0.02)
+    assert centres[50e3].curve is not None
+    assert fit.radial_dip not in fit.other_dips
+    assert len(fit.other_dips) == len(fit.dips) - 1
 
 
 def test_a_dip_above_the_radial_one_is_taken_once_deep_enough(tmp_path):
@@ -85,12 +98,13 @@ def test_the_trap_frequency_scan_offers_its_analysis_first():
     assert "trap_frequency" in ANALYSES
 
 
-def test_the_view_shows_the_radial_frequency_and_marks_every_dip(qapp, tmp_path):
+def test_the_view_shows_the_radial_frequency_and_lists_every_dip(qapp, tmp_path):
     measurement = spectrum_file(tmp_path)
     view = TrapFrequencyView()
     view.set_measurement(ResultsArchive(tmp_path), "trap.h5", measurement)
     until(lambda: view.readout.text(), qapp=qapp)
 
     assert view.readout.text().startswith("ν_r = 47.")
-    assert len(view.dip_lines) >= 4
+    assert len(view.readout.text().splitlines()) >= 5
+    assert len(view.dip_items) >= 6
     assert len(view.points.getData()[0]) == len(FREQUENCIES_HZ)
