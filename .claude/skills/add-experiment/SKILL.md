@@ -1,23 +1,21 @@
 ---
 name: add-experiment
-description: Write, run, queue and read back pytweezer experiments — an Experiment subclass in pytweezer/experiments/ with declared arguments and devices, run per scan point by the Experiment Manager (or in-process with run_local), saving one h5 file per measurement — and the saved parameters they read. Use whenever the user wants to write, add or change an experiment or measurement sequence (a scan, a MOTMaster sequence plus camera readout, a calibration, tweezer loading or trap sites), submit or queue one from a notebook (submit/wait), scan an argument, record data from a run, load a measurement file, read or set saved parameters, give an experiment a Results-tab analysis, or work on the Experiment Manager, its workers, pipelines, device reservations or queue, or the Experiments/Results/Saved parameters tabs — even if they only describe the physics ("scan the tweezer depth and count atoms") without saying "experiment".
+description: Write, run, queue and read back pytweezer experiments — an Experiment subclass in pytweezer/experiments/ with declared arguments and devices, run per scan point by the Experiment Manager (or in-process with run_local), saving one h5 file per measurement — and the saved parameters they read. Use whenever the user wants to write, add or change an experiment or measurement sequence (a scan, a MOTMaster sequence plus camera readout, a calibration), submit or queue one from a notebook (submit/wait), scan an argument, record data from a run, load a measurement file, read or set saved parameters, give an experiment a Results-tab analysis, or work on the Experiment Manager, its workers, pipelines, device reservations or queue, or the Experiments/Results/Saved parameters tabs — even if they only describe the physics ("scan the load time and count atoms") without saying "experiment". For the Rb tweezer-array experiments themselves also use tweezer-array.
 ---
 
 # Experiments
 
-An experiment is a class in a module under `pytweezer/experiments/`
-(optimisers are under `pytweezer/optimisers/`: add-optimiser). The
+An experiment is a class in a module under `pytweezer/experiments/`. The
 Experiment Manager (a `CONFIG["Servers"]` process on the server PC) queues
-tasks and runs each one in a **fresh worker subprocess** that imports the
-module, makes one instance, and writes **one h5 file per measurement**, flushed
-after every point.
+tasks and runs each in a **fresh worker subprocess** that imports the module,
+makes one instance and writes **one h5 file per measurement**, flushed after
+every point. Optimisers are add-optimiser; the Rb tweezer-array experiments
+(`SlmTweezerArray`, `LoadTweezers`, trap sites) are tweezer-array.
 
 ## Writing one
 
 ```python
 # pytweezer/experiments/loading.py
-import numpy as np
-
 from pytweezer.experiment import Device, Experiment, Integer, Number
 
 
@@ -34,7 +32,7 @@ class LoadingCurve(Experiment):
 
     def run_point(self):
         # self.load_time holds this point's value (SI), self.point its index
-        mark = self.camera.start_shot({"rid": self.rid})  # camera is live
+        mark = self.camera.start_shot({"rid": self.rid})
         frames = self.camera.wait_frames(mark, self.shots)
         self.record("image", frames[0])
         self.record("atom_number", float(frames.sum()), unit="counts")
@@ -42,72 +40,53 @@ class LoadingCurve(Experiment):
     def finish(self): ...  # always runs, also after a failure or terminate
 ```
 
-Rules that matter:
-
+- **Methods go in the order `prepare`, `run_point`, `finish`, then everything
+  else** (helpers, `measure`, classmethods, overrides), so the class reads top
+  down in the order it runs. This applies to every class under `experiments/`
+  and `optimisers/`, including a subclass that overrides only some of the three.
 - **Arguments are class attributes** (`Number`, `Integer`, `Bool`, `Choice`,
-  `Text` in `pytweezer/experiment/arguments.py`). Values are SI; `unit`/`scale`
-  only control display (`Number(5e6, unit="MHz", scale=1e6)` shows "5 MHz").
-  `group=` and `tooltip=` lay out the form. `scannable=False` marks an
-  argument that must be one value for the whole task (something `prepare()`
-  depends on): the form greys out its Scan button and a scan of it is refused
-  by `submit`, `save_recipe` and `run_local`. Defaults are validated at import.
-  Submitted values are checked by the GUI
-  form and by `submit(ExperimentClass, ...)`; anything else (a
-  `"module:Class"` string) is only checked when the task starts.
+  `Text`; `experiment/arguments.py`). Values are SI; `unit`/`scale` only set
+  the display (`Number(5e6, unit="MHz", scale=1e6)` shows "5 MHz"); `group=`
+  and `tooltip=` lay out the form. `scannable=False` marks an argument that
+  must be one value for the whole task (something `prepare()` depends on);
+  scanning it is refused. Defaults are validated at import; submitted values
+  by the form and `submit(Class, ...)`, but a `"module:Class"` string only
+  when the task starts.
 - **No hardware at module import or class definition.** The manager imports
-  every module in a subprocess to list its arguments for the GUI.
-- `Device("<CONFIG name>")` gives a lazily created RPC client, closed when the
-  task ends. For `run_parallel`, take extra clients with
-  `self.device(name, fresh=True)` — one sipyco client per thread.
-- **Declare every device you use.** `self.device(name)` (also `fresh=True`)
-  raises `UndeclaredDeviceError` for a name outside the task's reserved set
-  (a member of a declared composite and a linked partner are in it), and a
-  queued task's worker also refuses a bare `get_device()` of anything outside
-  it (`device_client.restrict_devices`). The declarations are what the
-  manager reserves (see "Pipelines and device reservations").
-- **A variant that uses other devices is another experiment.** Loading the
-  tweezers with a MOT image on the ORCA and without it are two classes (the
-  imaging one usually a subclass), not one class with an option or a device
-  used only when it happens to be available. Each declares exactly the devices
-  it uses.
-- **Never design around a device's `run_at_startup` flag.** Which devices the
-  GUI starts at launch is lab state that anyone switches at any time; the value checked in
-  says nothing about how the device will be used. An experiment declares what
-  it needs and fails plainly if that device isn't running.
-- `record(name, value, unit="")`: in `run_point` it stores into
-  `/results/<name>` row `point.index`; in `prepare`/`finish` into
-  `/constants/<name>`. Each name's shape and dtype are fixed by its first
-  record (later values may only safely widen, e.g. int→float); a mismatch
-  raises and fails the task. Strings and dicts (as JSON) are allowed. A point
-  that doesn't record a name gets NaN (floats) and `/recorded/<name>` False.
+  every module in a subprocess to list its arguments.
+- **Declare every device you use.** `Device("<CONFIG name>")` is a lazily
+  created RPC client, closed when the task ends; under `run_parallel` take one
+  per thread with `self.device(name, fresh=True)`. A name outside the task's
+  reserved set raises `UndeclaredDeviceError`, and a queued worker also
+  refuses a bare `get_device()` of it. The declarations are what the manager
+  reserves.
+- **A variant that uses other devices is another experiment** (usually a
+  subclass), not an option or a device used only when it happens to be
+  available. **Never design around a device's `run_at_startup` flag**: it is
+  lab state anyone switches. Declare what you need and fail plainly if it
+  isn't running.
+- `record(name, value, unit="")`: in `run_point` into `/results/<name>` row
+  `point.index`; in `prepare`/`finish` into `/constants/<name>`. The first
+  record fixes shape and dtype (later values may only widen, e.g. int→float; a
+  mismatch fails the task). Strings and dicts (as JSON) are allowed. A point
+  that doesn't record a name gets NaN and `/recorded/<name>` False.
 - An exception in any hook fails the task (status `failed`, traceback in the
   file and the queue). Don't catch-and-print.
-- Order an experiment's methods `prepare`, `run_point`, `finish`, then
-  everything else (helpers, classmethods, overrides).
-- A class only appears in the GUI if it is defined in that module and
-  overrides `run_point`, so intermediate base classes stay hidden; a base that
-  inherits a concrete `run_point` hides with `run_point = Experiment.run_point`.
-- `self.rid` is the task's run id (-1 under `run_local`), e.g. to tag a shot's
-  live frames (`camera.start_shot({"rid": self.rid})`).
-- An experiment that chooses its own points overrides
-  `planned_points(scan)`, raising `ValueError` for a scan it can't honour.
-- Each camera has a settings experiment (`experiments/camera_settings.py`,
-  base `CameraSettings` in `experiment/camera_settings.py`) that sends only
-  the settings ticked in the form and leaves them, then saves them as saved
-  parameters (`<camera>_<control>`, via `store_camera_settings`). Its form is
-  built from the declared camera's driver `CONTROLS`; `control_defaults`
-  overrides a default. Add one per camera that needs it.
+- A class appears in the GUI only if it is defined in that module and
+  overrides `run_point`; a base that inherits a concrete `run_point` hides
+  with `run_point = Experiment.run_point`.
+- `self.rid` is the task's run id (-1 under `run_local`). An experiment that
+  chooses its own points overrides `planned_points(scan)`, raising
+  `ValueError` for a scan it can't honour.
+- Camera settings experiments (`experiments/camera_settings.py`, base
+  `CameraSettings`) build their form from the driver's `CONTROLS`, send only
+  the ticked settings and save them as `<camera>_<control>` saved parameters.
 
 ## MOTMaster sequences
 
 ```python
 from pytweezer.experiment import Device
-from pytweezer.experiment.motmaster import (
-    MotMaster,
-    MotMasterExperiment,
-    MotMasterInteger,
-    MotMasterNumber,
-)
+from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment, MotMasterInteger
 
 
 class Tof(MotMasterExperiment):
@@ -133,127 +112,94 @@ class Tof(MotMasterExperiment):
             super().finish()
 ```
 
-An experiment declares **one** `MotMaster`; a second is a `TypeError` at class
-definition (run two machines together in linked mode, below).
-`MotMaster(..., script_from="script")` in place of `script=` takes the script
-from a `Choice` argument declared `scannable=False`; `self.script_name()` is
-the one the task runs, and the form's parameter search follows the choice.
-`RbMotMasterRunner` (`experiments/rb_motmaster_runner.py`) offers every script
-in the Rb script folder (`drivers.motmaster.script_names`, read from disk at
-import) and records each ticked camera's frames per run.
-`MotMasterInteger` vs `MotMasterNumber` must match the script's parameter type
-(.NET `Int32` vs `Double`). Any other script parameter is set by its plain
-name, `submit(Tof, tPulse=3e-5)` or scanned with `ListAxis(argument="tPulse",
-...)`; the Experiments form adds these from its search box. Any undeclared
-identifier is taken as a script parameter, so a misspelt one is accepted at
-submit and fails in `prepare()` (or, if only scanned, just before the first
-`Go`) with a "did you mean" hint. Such names live in `self.extra_values`, not as
-attributes, so they cannot clash with the experiment's own attributes; a
-declared argument always wins over a script parameter of the same name.
-Dotted names (`rb.tPulse`, from before one-MOTMaster) are not arguments at all.
-Declared parameters are not searchable, Int32 ones need whole values, and
-unselected ones keep the script's defaults (not recorded in the file).
-`prepare()` sets linked mode, script, iterations, save toggle and untriggered
-mode on every task; repeats come from `Scan(repetitions=...)`, one stored point
-per shot; `run_motmaster_sequence(tPulse=3e-5)` overrides parameters for that one run.
-`MotMaster(..., saved=(...))` binds script parameters to saved parameters:
-a bare name for the key of the same name, `{parameter: key}` for another key.
-They are read once in `prepare()` (an unreachable manager raises `RuntimeError`,
-missing keys a `KeyError`) and sent with every run; precedence is a
-`run_motmaster_sequence` override > form or scan > saved > script default, and the saved
-values sent are the constant `saved_sequence` (`{parameter: value}`). Camera
-APIs differ between drivers — check the driver, not old notebooks.
+- **One `MotMaster` per experiment** (a second is a `TypeError`; drive two
+  machines with linked mode). `prepare()` sets linked mode, script,
+  iterations, save toggle and untriggered mode on every task. Repeats come
+  from `Scan(repetitions=...)`, one point per shot;
+  `run_motmaster_sequence(**overrides)` overrides parameters for one run.
+- `MotMasterInteger`/`MotMasterNumber` must match the script parameter's .NET
+  type (`Int32`/`Double`).
+- **Any undeclared identifier is a script parameter**: `submit(Tof,
+  tPulse=3e-5)`, `ListAxis(argument="tPulse", ...)`, or the form's search box.
+  A misspelt one is accepted at submit and fails in `prepare()` (or before the
+  first `Go` if only scanned) with a "did you mean" hint. They live in
+  `self.extra_values`; a declared argument wins over a script parameter of the
+  same name. Unselected ones keep the script's defaults and aren't recorded.
+- `script_from="script"` instead of `script=` takes the script from a
+  `scannable=False` `Choice`; `self.script_name()` is the one the task runs.
+  `RbMotMasterRunner` offers every script in the Rb folder and records each
+  ticked camera's frames.
+- `saved=(...)` binds script parameters to saved parameters: a bare name for
+  the key of that name, `{parameter: key}` for another. They are read once in
+  `prepare()` (unreachable manager: `RuntimeError`; missing key: `KeyError`),
+  sent with every run and recorded as the constant `saved_sequence`.
+  Precedence: `run_motmaster_sequence` override > form or scan > saved >
+  script default. Such an experiment gets a `use_motmaster_parameter_overrides`
+  argument; `False` sends none (`saved_bindings()`).
 
-**Linked mode** (one script driving PH-BONESAW and RbTweezer together, fired by
-TTL from the CaF side): declare only the primary,
-`MotMaster("CaF MotMaster", script=..., linked=True)`. Every parameter of both
-machines, `SecondaryTriggerDelay` included, is a parameter of that one script.
-The link lasts one task: `prepare()` sets linked mode on or off before setting
-the script and `close_devices()` releases it, even after a failure. While linked, the Rb MOTMaster refuses its
-own `SetScriptPath`/`Go`; if someone has ticked Linked by hand on PH-BONESAW, an
-Rb-only task takes back control of it (`set_linked(False)` on the secondary),
-and fails only if a linked run is in progress. Any linked failure, either
-machine, raises from the task.
-`experiments/linked_scope_test.py` is the minimal example; the MOTMaster side
-is EDMSuite's `motmaster-linked-mode` skill.
+**Linked mode** (one CaF script driving PH-BONESAW and RbTweezer together,
+fired by TTL): declare only the primary, `MotMaster("CaF MotMaster",
+script=..., linked=True)`; every parameter of both machines, including
+`SecondaryTriggerDelay`, is a parameter of that script. The link lasts one
+task: `prepare()` sets it and `close_devices()` releases it, even after a
+failure. While linked the Rb MOTMaster refuses its own `SetScriptPath`/`Go`;
+an Rb-only task takes back a hand-ticked link, failing only if a linked run is
+in progress. Minimal example: `experiments/linked_scope_test.py`; MOTMaster
+side: EDMSuite's `motmaster-linked-mode` skill.
 
 ## Cameras and cloud fits
 
-There is no camera base class: an experiment that uses a camera declares it as
-a `Device`, sets it up in `prepare()` (after `super().prepare()`) and reads it in
-its own shot, in plain calls. `LoadTweezers` (`experiments/load_tweezers.py`)
-is the example to copy:
+There is no camera base class: declare the camera as a `Device`, set it up in
+`prepare()` (after `super().prepare()`) and read it in your shot.
+`LoadTweezers.set_up_hamcam` and `LoadTweezersMOTImage`
+(`experiments/load_tweezers.py`) are the examples to copy. Camera APIs differ
+between drivers — check the driver, not old notebooks.
 
-- Cameras stay live, experiments included. `prepare()` stops live mode, sets
-  binning, ROI (`set_roi` returns the origin the camera actually used; keep
-  it), trigger source, any driver-specific options and gain, then starts live
-  again. `finish()` calls `end_shots()` in a `try`/`finally` around
-  `super().finish()` and leaves the camera live.
-- The shot calls `mark = camera.start_shot({"rid": self.rid})`, then
-  `run_motmaster_sequence(**overrides)`, then `camera.wait_frames(mark, n)`. The live
-  thread broadcasts the frames, tagged with the `rid` and their `index` in the
-  shot; the experiment does not broadcast them itself.
-- Camera settings are ordinary arguments named for the camera
-  (`hamcam_gain`, `hamcam_roi_x0`...). A scannable one is re-sent before a shot
-  whose value differs from the last sent; one that cannot change mid-task (it
-  changes the frame shape, or something set in `prepare()` depends on it) is
-  declared `scannable=False`.
-- A subclass adding a camera wraps the parent's shot rather than adding hooks
-  to it: `LoadTweezersMOTImage` starts the ORCA, calls `super().run_point()`, then reads
-  the ORCA's frame. Anything only a subclass needs stays in the subclass.
+- **Cameras stay live**, during experiments too. `prepare()` stops live, sets
+  binning, ROI (keep the origin `set_roi` returns: the camera may round it),
+  trigger, gain, then starts live. `finish()` calls `end_shots()` in a
+  `try`/`finally` around `super().finish()`.
+- A shot is `mark = camera.start_shot({"rid": self.rid})`,
+  `run_motmaster_sequence(...)`, `camera.wait_frames(mark, n)`. The live
+  thread broadcasts the frames tagged with `rid` and `index`; don't broadcast
+  them yourself.
+- Camera settings are arguments named for the camera (`hamcam_gain`,
+  `hamcam_roi_x0`...). A scannable one is re-sent before a shot when its value
+  changed; one that changes the frame shape or that `prepare()` relies on is
+  `scannable=False`.
+- A subclass adding a camera wraps the parent's shot (start its camera, call
+  `super().run_point()`, read it) rather than adding hooks to the parent.
 
-Recording a MOT cloud: `LoadTweezersMOTImage.record_cloud_fit(frames)` fits the
-mean of the ORCA's frames with `cloud_fit.fit_frames` and records `orca_<field>`
-and `orca_<field>_error` for the fields in `cloud_fit.FIELDS`/`ERROR_FIELDS`,
-plus `orca_mean_image` with `save_mean_image`. Lengths are metres when the
-camera's CONFIG entry has `object_pixel_m`, pixels otherwise; binning and ROI
-origin are read from the camera (`frame_geometry()`) at record time. A failed
-fit is NaN, never an error. It records the constant `cloud_mass_amu`
-(`cloud_fit.SPECIES_MASS_AMU`), which the temperature view needs. Another
-experiment fitting a cloud copies that method for its own camera. Declare
-`analyses = ("cloud_fit", "cloud_temperature")` for the Results tab's MOT views
-(see Running). The temperature view reads a native time argument as seconds and
-a MOTMaster one as ticks (10 µs default).
+To fit a cloud, copy `LoadTweezersMOTImage.record_cloud_fit` under your
+camera's prefix: it records `<camera>_<field>`, `_error` and
+`<camera>_mean_image` (metres if the camera's CONFIG has `object_pixel_m`;
+NaN, never an error, on a failed fit) plus the constant `cloud_mass_amu`.
+
+## Results-tab analyses
+
+`analyses = (...)` (a class attribute, inherited) lists what the Results tab's
+Analysis dropdown offers after "Plot against". The file stores the names (root
+attr `analyses`), so the tab never imports the experiment. Each analysis has a
+Qt-free computation in `pytweezer/analyses/default/` and a view plus its
+`ANALYSES` entry (`{name: AnalysisEntry}`) in the same-named module of
+`pytweezer/GUI/default_analyses/`, merged in that package's `__init__`. Views
+are usually `ComputedAnalysisView` (`GUI/experiments/analyses.py`), which
+computes off the GUI thread through `needed_results`/`settings`/`compute`/
+`show_result`/`unavailable_reason`; `point_result` reads one point's large
+result.
+
+A view reads only what the file recorded, so record what it needs:
+`cloud_fit` reads the cloud fit above; `cloud_temperature` fits those sizes against a scanned time argument (native:
+seconds; MOTMaster: 10 µs ticks) and needs `cloud_mass_amu`; the tweezer
+histograms are in tweezer-array. Analyses are disabled until the measurement
+finishes; an unknown name is listed disabled.
 
 ## Running
 
-From the GUI: **Experiments** tab → pick the class → edit, toggle "Scan" per
-argument → Submit; MOTMaster parameters beyond the declared ones are added from
-the search box. **Results** tab lists files as they appear (no refresh button)
-and quick-plots a scalar against a scan axis; "Resubmit" reloads its
-arguments. A running measurement plots live from the manager's published points,
-not by re-reading its file; see "The manager and its workers".
-
-Its **Analysis** dropdown offers "Plot against" for every file, then the
-analyses the experiment declares as a class attribute (inherited), e.g.
-`LoadTweezers`' `analyses = ("tweezer_histogram", "tweezer_photon_histogram")`;
-an optimiser declares none. Each file records the names (root attr
-`analyses`), so the tab never imports the experiment. Each default analysis
-has its computation, free of Qt, in `pytweezer/analyses/default/`, and its view
-and `ANALYSES` entries (`{name: AnalysisEntry}`) in the same-named module of
-`pytweezer/GUI/default_analyses/`, merged in that package's `__init__`. The view
-is an `AnalysisView` from `pytweezer/GUI/experiments/analyses.py`, usually a
-`ComputedAnalysisView`, which loads and computes off the GUI thread through its
-hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`;
-`compute` reads one point's large result, such as an image, with `point_result`).
-A view reads only what the file recorded, so record what it needs:
-
-- the tweezer histograms, whose readout also gives the imaging survival, take
-  `first_counts`/`second_counts` with `trap_sites` and `threshold`, else per-site
-  photons, else the `hamcam_images` stack
-  (`analyses/default/tweezer_histogram.py`);
-- the MOT Gaussian fit, `cloud_fit`, takes `<camera>_<field>`, `_error` and
-  `<camera>_mean_image`, as `LoadTweezersMOTImage.record_cloud_fit` records them
-  (`analyses/default/cloud.py`);
-- `cloud_temperature` fits the time-of-flight expansion of those sizes against a
-  scanned time argument, and needs the constant `cloud_mass_amu`.
-
-A name this GUI doesn't know is listed disabled, and every analysis is disabled
-until the measurement finishes. An analysis only reads the file, through its
-own archive connection, off the GUI thread. The tab remembers the choice per
-experiment class for the session.
-
-From a notebook or script:
+GUI: **Experiments** tab → pick the class, edit, tick "Scan" per argument,
+Submit. **Results** lists files as they appear, quick-plots a scalar against a
+scan axis (live from the manager's published points while running), and
+"Resubmit" reloads a run's arguments.
 
 ```python
 from pytweezer.experiment import LinearAxis, ListAxis, Scan, run_local
@@ -263,8 +209,8 @@ from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
 scan = Scan(
     axes=[LinearAxis(argument="load_time", start=0, stop=2e-3, n=21)],
     repetitions=3,
-    order="shuffle",
-)  # nested | snake | shuffle
+    order="shuffle",  # nested | snake | shuffle; repeat="scan" repeats the grid
+)
 rid = submit(LoadingCurve, scan, shots=2, label="after realignment", pipeline="main")
 task = wait(rid)  # Task: status, error, h5_path
 m = fetch_measurement(rid)  # any PC; results=[...] to load a subset
@@ -274,304 +220,79 @@ m = run_local(LoadingCurve, scan)  # in-process, no queue, in memory
 m.status, m.attrs["error"]  # a failure is recorded, not raised
 ```
 
-`submit` needs a class importable by the manager — **not one defined in a
-notebook**; use `run_local` for those (pass `path=` to keep a file). A plain
-`submit()` is refused at once if the class is not in the catalogue for its
-package (the manager keeps one for `pytweezer.experiments` and one for
-`pytweezer.optimisers`), its module
-fails to import, or its devices can't be reserved (`ReservationError`: unknown
-device, or `linked=True` on a MOTMaster with no `linked_partner`;
-`run_local` raises the same before running). While the catalogue
-is still being read the task is queued and resolved later, failing if it then
-can't be.
-`Scan(repeat="scan")` repeats the whole grid rather than each point.
-`ExperimentManagerClient` has `get/pause/resume/terminate/abort/hold/release/
-delete/set_priority/snapshot/history/last_request/experiments/optimisers/describe_again/
-recipes/save_recipe/delete_recipe/submit_recipe/saved_parameters/
-set_saved_parameters/saved_parameter_history`.
+- `submit` needs a class the manager can import — **not one defined in a
+  notebook**; use `run_local` for those (`path=` keeps a file). `submit` is
+  refused at once if the class isn't in the manager's catalogue (one for
+  `pytweezer.experiments`, one for `pytweezer.optimisers`), its module fails
+  to import, or its devices can't be reserved (`ReservationError`; `run_local`
+  raises the same). While the catalogue is being read the task queues and
+  resolves later.
+- `ExperimentManagerClient` (`experiment/client.py`) has the queue controls
+  (pause, resume, terminate, abort, hold, release, delete, set_priority), the
+  catalogues, recipes and saved parameters.
 
-For analysis, `Dataset` (`pytweezer/experiment/dataset.py`) reads a file by
-rid (or path) and passes attribute access through to its `Measurement`:
+For analysis, `Dataset` reads a file by rid (or path) on any PC:
 
 ```python
 from pytweezer.experiment import Dataset
 
-# Works on any PC; root=... for another data dir, results=[...] to load a subset.
-ds = Dataset(rid)
+ds = Dataset(rid)  # root=... for another data dir, results=[...] for a subset
 ds.summarise()  # same text as the Results tab's metadata pane
-# "dataframe" (default) | "dict" | "array"; or get_dataframe/get_dict/get_array
-df = ds.get_data()
-ax = ds.plot_scan("atom_number")  # mean ± SEM over repetitions; x, series, ax optional
+df = ds.get_data()  # "dataframe" (default) | "dict" | "array"
+ax = ds.plot_scan("atom_number")  # mean ± SEM over repetitions, stamped with the git commit
 ```
-
-`plot_scan` stamps the axes top-right with `ds.git_label` (`git 0a575d0`,
-`-dirty` if the run had uncommitted changes), so a plot always names the code
-that took it.
 
 Rows are the points run, in run order: `index`, `repetition`, scanned
-arguments, `t_start`, `t_end`, then results (SI). The DataFrame drops
-array results (images); `get_dict` stacks them; `get_array` is a structured
-array of the numeric scalars. `aggregate`/`describe` live in
-`pytweezer/experiment/summary.py`, shared with the Results tab.
+arguments, `t_start`, `t_end`, then results (SI). The DataFrame drops array
+results; `get_dict` stacks them.
 
-## Recipes
+## Recipes and saved parameters
 
-A recipe is a named, saved form — arguments, scan, priority and label — kept by
-the Experiment Manager in `{data_root}/recipes.json`, so every PC sees the same
-ones. In the **Experiments** tab (its tree has one item per experiment class,
-in sections that follow the folders under `pytweezer/experiments/`) the
-**Recipes** button lists the selected experiment's recipes: pick one to load it
-into the form (the header names it), *Submit now* queues one unchanged,
-*Delete* removes one for everyone. **Save as recipe…** stores the form (asks
-before replacing a name).
+A **recipe** is a named, saved form (arguments, scan, priority, label,
+pipeline) in `{data_root}/recipes.json`, shared by every PC: the Experiments
+tab's **Recipes** / **Save as recipe…**, or `save_recipe(Class, name, scan,
+**args, overwrite=False)`, `submit_recipe(Class, name, **overrides)`,
+`recipes(Class)`, `delete_recipe(Class, name)` from `experiment.client`. It
+stores every argument except those its scan sweeps (an override may not fix a
+scanned one); one naming an argument the experiment no longer declares is
+refused until re-saved from the form.
 
-```python
-from pytweezer.experiment.client import (
-    delete_recipe,
-    recipes,
-    save_recipe,
-    submit_recipe,
-)
-
-save_recipe(LoadingCurve, "nightly", scan, shots=2, label="nightly check")
-rid = submit_recipe(LoadingCurve, "nightly", shots=3)  # overrides fixed arguments
-save_recipe(LoadingCurve, "nightly", shots=4, overwrite=True)  # a taken name is refused
-recipes(LoadingCurve)
-delete_recipe(LoadingCurve, "nightly")
-```
-
-A recipe stores every argument value, not just changed ones, except those its
-scan sweeps. Submitting a
-recipe that uses an argument the experiment no longer declares is refused with
-the names; load it into the form, check it and save it again. An override may
-not fix an argument the recipe scans. MOTMaster `attribute.parameter` names are
-checked when the task runs, as for any submission.
-
-## Saved parameters
-
-Named calibrated values (float, int, bool, string, or an array of numbers) kept
-by the Experiment Manager in `{data_root}/saved_parameters.json`, with every
-change appended to `saved_parameters_log.jsonl`, so every PC and every task sees
-the same ones (`pytweezer/experiment/saved_parameters.py`).
+**Saved parameters** are named calibrated values (float, int, bool, string or
+numeric array) in `{data_root}/saved_parameters.json`, every change logged to
+`saved_parameters_log.jsonl` (`experiment/saved_parameters.py`):
 
 ```python
-from pytweezer.experiment.client import (
-    get_saved_parameter,
-    get_saved_parameters,
-    saved_parameter_history,
-    set_saved_parameters,
-)
+from pytweezer.experiment.client import get_saved_parameter, get_saved_parameters, saved_parameter_history, set_saved_parameters
 
-get_saved_parameter("tImgCoolVCO")  # KeyError names close matches
-get_saved_parameters()  # {key: value}; arrays as numpy arrays
-set_saved_parameters({"level": 0.3}, "realigned the probe")  # reason and user logged
-set_saved_parameters(
-    {"new_key": 1.0}, "first calibration", create=True, group="MOT", unit="V"
-)
+get_saved_parameter("tImgCoolVCO")  # KeyError names close matches; get_saved_parameters() for all
+set_saved_parameters({"level": 0.3}, "realigned the probe")  # all or none; reason and user logged
+set_saved_parameters({"new_key": 1.0}, "first calibration", create=True, group="MOT", unit="V")
 saved_parameter_history("level", limit=10)  # newest first; rid= for one run's
 ```
 
-- A set is all or none. Unknown keys are refused unless `create=True`; a key
-  keeps its type (int accepted for a float), and an array keeps its number of
-  dimensions and every axis length past the first.
-- Read them in `prepare()`/`run_point()` for the value at run time, or, for a
-  calibration the form may override, declare a saved-backed argument. Never
-  read one into an argument default (`Number(get_saved_parameter(...))`): it is
-  read at import, and recipes and prefilled forms pin the value current then,
-  silently overriding later recalibrations.
-- A saved-backed argument, `blaze = Number(saved="slm_blaze_x", unit="um",
-  scale=1e-6)` (a `Number` or `Integer` with `saved=` instead of a default), is
-  `None` until the task starts, when `open_writer` gives it the saved value
-  (SI); a missing key fails it before a file exists. A value in the form, a
-  request, a recipe or a scan axis wins. The file's `saved_arguments` header
-  lists the arguments that took saved values, and Results' Resubmit leaves
-  those unset again. The form shows such a field blank, with the saved value
-  greyed in it.
-- The **Saved parameters** tab edits values by hand with a reason and shows the
-  history; arrays are read-only there. Keys are created only by
-  `create=True`, an accepted `Fit`, or `import_parameters_json(path)` in
-  `saved_parameters.py` (each top-level category of a `parameters.json`
-  becomes a group).
-- A simulating manager keeps its own under `<data_root>/simulated/`, apart
-  from the lab's.
+- Unknown keys are refused unless `create=True`; a key keeps its type (int
+  accepted for float), an array its dimensions and every axis past the first.
+- **Never read one into an argument default**
+  (`Number(get_saved_parameter(...))`): that is read at import, and recipes and
+  prefilled forms then pin it, silently overriding later recalibrations. Read
+  it in `prepare()`/`run_point()`, or declare a **saved-backed argument**:
+  `blaze = Number(saved="slm_blaze_x", unit="um", scale=1e-6)` is `None` until
+  the task starts, then takes the saved value (a missing key fails the task).
+  A value from the form, request, recipe or scan wins; the file's
+  `saved_arguments` lists the ones that took saved values.
+- The **Saved parameters** tab edits values with a reason and shows history.
+  Keys are created only by `create=True`, an accepted `Fit`, or
+  `import_parameters_json(path)`. A simulating manager keeps its own set.
 
-## Optimisers
+## Files and the manager
 
-An optimiser (`StagedScan`, `BayesianOptimisation`, `Fit`) runs a measurement
-experiment and proposes saved-parameter values for someone to accept. It is an
-`Experiment`, but writing, running and accepting one is covered by the
-add-optimiser skill; a measurement it runs only needs a
-`measure(**settings) -> dict[str, float]` method.
+Each measurement is `{data_root}/YYYY/MM/DD/{rid:06d}_{Class}.h5`, with groups
+`/arguments`, `/scan`, `/points`, `/results`, `/recorded`, `/constants` and
+`/source`. Read it with `Dataset` or `fetch_measurement`, never by path from
+another PC. **Read [manager.md](manager.md) before working on** the file
+layout, `data_root`, the copier, the results archive, the database rows, or
+the manager itself: its published state, pipelines, device reservations,
+terminate/abort, worker adoption and simulation.
 
-## Tweezer array measurements
-
-The Rb tweezer experiments, in the order a session uses them:
-
-1. `SlmTweezerArray` (`slm_tweezer_array.py`) puts an array on the SLM through
-   `Rb Rearrangement Rig` (`rig.make_array(...)`, one mask per point, shown on
-   the `slm` image stream for the SLM Monitor applet). Its optics are `slm_*`
-   saved parameters in SI: the blaze, Fresnel lens and pupil as saved-backed
-   arguments, the generator, Zernike rows `[index, coefficient]` and depth
-   envelope from `array_hologram.SAVED_KEYS`. The rig remembers it:
-   `rig.get_array()` gives `sites` and trap `x_um`/`y_um` (`None` if the rig
-   didn't write the mask).
-2. The `FindTrapSites` optimiser (add-optimiser) fits the array on the camera
-   and proposes the `trap_*` saved parameters.
-3. `LoadTweezers` (`load_tweezers.py`, a `MotMasterExperiment` with
-   `hamcam = Device("Rb HamCam")`) runs every shot at the saved
-   sequence parameters (`LoadTweezers.rb.saved`, from `saved=` on its
-   `MotMaster`: script parameter → saved key; a missing key, or an unreachable manager, fails `prepare()`), a script
-   parameter set in the form winning; the values used are the constant
-   `saved_sequence`. `use_motmaster_parameter_overrides=False` sends none of them, so the
-   script's own values run (`MotMasterExperiment` gives this argument to every
-   experiment whose `MotMaster` declares `saved=`, and `saved_bindings()` reads it);
-   the trap sites are still read from the saved parameters. It and everything
-   built on it also read the trap sites in `prepare()` (`saved_trap_sites(saved)`),
-   moved into the ROI
-   (`hamcam_roi_x0`/`_y0`/`_width`/`_height`, unbinned; binning is fixed at 1)
-   by the origin `set_roi` returned (`roi_origin`, `(x0, y0)`). They become
-   `LoadTweezers.trap_sites`, a `TrapSites` (`analysis/array_loading.py`) that
-   also carries the saved `trap_window_size`, `trap_feature_size` and
-   `trap_threshold`; the experiments score frames only through its methods.
-   Scans of the EM-gain sensitivity `hamcam_gain` and of the ROI are
-   refused. They are refused when none are saved or when a summing window
-   leaves the ROI; when `trap_geometry` is not the rig's array
-   (`same_geometry`; an unreachable rig is not checked) they are used with a
-   logged warning. With sites, each
-   point records `first_occupied`/`second_occupied` (bool per site),
-   `loading` and the imaging `survival` (of the first image's atoms, the
-   fraction in the second; NaN if none), plus raw `first_counts`/`second_counts` with
-   `save_tweezer_counts`; frames are recorded as `hamcam_images`
-   (`(2, H, W)` per point) only with `save_raw_images`.
-   `LoadTweezers` runs without sites only if it records frames;
-   the optimisers built on `TweezerOptimisation` always need them.
-   `LoadTweezersMOTImage` is `LoadTweezers` plus the ORCA's one frame of the Rb
-   MOT from the same shot, recorded as an `orca_*` cloud fit;
-   `LoadTweezers` itself never touches the ORCA.
-4. The classes whose point is a batch of shots each loop the shot
-   (`start_shot`, `run_motmaster_sequence(**overrides)`, `wait_frames`) themselves: `TweezerOptimisation.take_batch(**overrides)` (`score_batch()`,
-   the base of the Bayesian optimisers, in `optimisers/tweezer_optimisation.py`) and `FindTrapSites.take_calibration_shots()`.
-   Their `first_occupied`/`second_occupied`/`*_counts` are `(shots, sites)` per
-   point, and `save_raw_images` (off by default there) records
-   `hamcam_images`, `(shots, 2, H, W)` per point. They declare no analyses; `LoadTweezers`
-   itself keeps one shot per point, which the default analyses expect.
-
-Shots tag their HamCam frames with `start_shot({"rid": self.rid})`; the live
-tweezer loading analysis (`analyses/live/tweezer_loading.py`) starts afresh
-whenever the rid changes and places the saved sites by each frame's
-`roi_x0`/`roi_y0` header.
-
-## Files
-
-`{data_root}/YYYY/MM/DD/{rid:06d}_{Class}.h5`. Root attrs: rid, experiment,
-class_name, label, submitter, host, status, error, times, n_points, n_done, git
-commit/dirty, analyses (JSON list of the class's `analyses`; absent in older
-files). Groups: `/arguments` (effective values; `__schema__` attr),
-`/scan` (spec JSON), `/points/{index,repetition,<axis>,t_start,t_end}`,
-`/results`, `/recorded`, `/constants`, `/source` (the module's code). Rows are
-planned points in execution order; only the first `n_done` ran. Files are
-never overwritten (mode `"x"`) and readable mid-run (`locking=False`).
-
-`data_root` = `$PYTWEEZER_DATA_DIR`; else
-`CONFIG["Servers"]["Experiment Manager"]["data_root"]`; else `<repo>/data`.
-The queue state lives in `{data_root}/queue_state.json`.
-
-When a task finishes, the manager copies its file to the same path under
-`CONFIG[...]["copy_root"]` (the router's USB drive, `\\10.59.0.1\g\pytweezer-data`;
-`<copy_root>/simulated` when simulating) on a background thread
-(`pytweezer/experiment/copier.py`). Runs never write to the network: a failed
-copy is retried every minute, and the paths still to copy are kept in
-`{data_root}/pending_copies.json` across restarts. Only a manager that binds its
-sockets copies, so tests building one with `bind=False` never touch the drive.
-
-Other PCs never read the manager's disk: it serves the files as sipyco RPC
-target `"results"` on `results_port` (`pytweezer/experiment/archive.py`).
-`ResultsArchive(root)` reads files directly and `RemoteArchive` is the same
-interface over RPC (`days`, `runs(day)`, `find(rid)`, `load(path, results)`,
-`planned_points(path)`, `point_result(path, name, index)` for one point's value,
-paths relative to `data_root`). `default_archive()` is
-local on the manager's PC or with `PYTWEEZER_DATA_DIR` set, remote elsewhere;
-the Results tab, `Dataset(rid)`, `fetch_measurement` and
-`points_with_readings(rid, ...)` all go through it. Its reads run in threads, so
-they never stall the notifier on the same event loop.
-
-The manager also writes each run into the database (`pytweezer.database`): a
-`runs` row on start and finish (git commit/dirty included), and a `points` row per point, holding its times,
-scanned values and 0-d numeric results. Those rows sit next to the monitor
-`readings`, so `points_with_readings(rid, "ni_adc")`
-(`pytweezer.database.analysis`) gives one row per point with the readings during
-it. `pytweezer-db-backfill` loads files the database missed. See
-`docs/notes/database.md`.
-
-## The manager and its workers
-
-Code: `pytweezer/servers/experiment_manager.py` (single-threaded REP loop),
-`pytweezer/experiment/{queue,worker,catalogue,introspect,client}.py`.
-
-- **Published state:** the manager serves sipyco notifier `"experiment"` on
-  `sync_port` (layout in the module): the queue snapshot (`running`, a list,
-  `queue`, `history`, `simulated`, `alive`, and `experiments_`/`optimisers_`/
-  `recipes_`/`saved_parameters_version` counters; waiting tasks carry `waiting_for`) and
-  `points`, keyed by rid, every point each running task (and each pipeline's
-  last finished one) has measured, with its scanned values and 0-d numeric
-  results. Only changes are sent; a GUI connecting late gets it all.
-  `GUI/experiments/feed.py`'s `ExperimentFeed` is the Qt side (one per GUI,
-  shared by its experiment tabs): `queue_changed`, `point_received`,
-  `connection_changed`, `points(rid)` and `held_points()`. The Live Plot applet
-  (`GUI/viewers/live_plot.py`) has its own feed and plots chosen scalar results
-  accumulated across tasks (context menu → *experiment results*). The Results tab
-  reads a running file once for metadata and the planned `/points` table
-  (`archive.planned_points`), plots from the feed, and reloads the file when the
-  task finishes; HDF5 cannot safely be re-read while it is written. Without a
-  connected feed it falls back to polling the archive.
-
-- **Pipelines and device reservations** (`reservations.py`, `queue.py`).
-  A pipeline is a named lane (`TaskRequest.pipeline`, default `"main"`, created
-  by submitting a new name; `Recipe`s keep theirs). Within one it is strictly
-  one task at a time, in order: priority (high first), then rid; a `due_time`
-  or hold passes a task over. Each worker is its own process, so pipelines run
-  in parallel, but a task starts only if no running or paused task holds a
-  device it reserves. A blocked head keeps its pipeline waiting while heads in
-  other pipelines may start, even at lower priority; the remedy for a stuck
-  task is `set_priority` (queue-view +/− buttons). Reservations are computed at
-  submit and stored as `Task.devices`: a plain device reserves itself, a
-  composite (CONFIG `"devices"`) itself and its sub-devices, a sub-device only
-  itself, and `MotMaster(linked=True)` also its CONFIG `linked_partner` (`"CaF
-  MotMaster"` names `"Rb MotMaster"`). `Device.reserves()` is the hook for other
-  hidden dependencies. Names match as `get_device()` does. Only queued tasks are subject to reservations: `run_local` and GUI
-  panels can drive a device another task holds, though `run_local` still
-  refuses devices the class doesn't declare.
-- The queue view has a Pipeline column and filter chips (a dot if one is
-  running, a count of waiting tasks). A task blocked by a device shows amber
-  `waiting: <device> (RID n)` (`all devices` while a running task's
-  reservation is unknown); a pipeline's next task whose reservation awaits the
-  catalogue's (re-)read of its module shows amber `waiting: reading
-  experiments`; one only behind its own pipeline shows `queued`.
-  The submit form's Pipeline box defaults to `main`; type a new name to create
-  one. `"points"` is per RID, and each pipeline shows its latest task's.
-- **Terminate** stops at the next point boundary (finish() runs). **Abort**
-  kills that task's worker immediately: a device call in flight (`Go()`, a
-  frame grab) still completes on the device. Devices are released the moment a
-  task ends however it ended (a `TODO` in `ExperimentQueue.finish`), so a task
-  in another pipeline can start on a sequencer that is not yet idle.
-- Pause keeps the task's devices open and reserved; hold only applies to waiting tasks.
-- State is saved on every change, because on Windows the GUI stops the manager
-  with `TerminateProcess`. Workers outlive the manager: on restart each running
-  worker is adopted again (pid + create time), otherwise its task is settled
-  from its h5 status (`interrupted`/`crashed`). A worker that can't reach the
-  manager for `orphan_timeout` s stops and marks itself `interrupted`.
-- **Simulation** (`"simulate": SIMULATING` on the manager's entry, so any
-  `pytweezer-server` off the server PC): `Device(...)` gives the experiment its
-  device's simulated backend, built in the worker by the same `build_spec` as a
-  device server, so no device servers or lab network are needed. Data goes to
-  `<data_root>/simulated/`; files carry `simulated=True`; the GUI shows a
-  banner. `run_local(..., simulate=True)` does the same in a notebook.
-- Worker output goes to `logs/experiments/<rid>.log`. Workers bind no ports,
-  so `pytweezer-kill-stale` ignores them.
-
-Tests: `tests/test_experiment_*.py`, `tests/test_motmaster_experiment.py`,
-`tests/test_results_{browser,archive,analyses}.py`, `tests/test_file_copier.py`,
-`tests/test_saved_parameters.py`; `test_experiment_e2e.py` runs a real manager
-and worker subprocesses on localhost. Tweezer measurements:
-`tests/test_tweezer_array.py`, `tests/test_slm_tweezer_array.py`,
-`tests/test_tweezer_histogram.py`.
+Tests: `tests/test_experiment_*.py`, `test_motmaster_experiment.py`,
+`test_saved_parameters.py`; more in [manager.md](manager.md).

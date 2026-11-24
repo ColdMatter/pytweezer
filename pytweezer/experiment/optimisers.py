@@ -67,7 +67,8 @@ class Dimension:
     It is searched between ``low`` and ``high`` or, given ``span`` instead,
     within ``span`` of the value ``save_as`` holds when the run starts, never
     outside ``limits`` (the ``(low, high)`` the hardware takes). Its best value
-    is proposed for the saved parameter ``save_as``.
+    is proposed for the saved parameter ``save_as``. With ``whole`` it is
+    only ever asked at whole numbers, for a script parameter that is an integer.
     """
 
     setting: str
@@ -77,6 +78,18 @@ class Dimension:
     high: float | None = None
     span: float | None = None
     limits: tuple[float, float] | None = None
+    whole: bool = False
+
+
+def shortfall(value: float, threshold: float) -> float:
+    """How far ``value`` falls below ``threshold``; zero at or above it."""
+    return max(0.0, threshold - value)
+
+
+def shortness(value: float, bounds: tuple[float, float]) -> float:
+    """Where ``value`` sits in ``bounds``: 1 at the low end, 0 at the high end."""
+    low, high = bounds
+    return 1 - (value - low) / (high - low)
 
 
 class Optimiser:
@@ -194,8 +207,15 @@ class Optimiser:
         """How many points the run has, from the argument values."""
         raise NotImplementedError
 
-    def objective_of(self, results: dict[str, float]) -> float:
-        """The objective of one shot, from ``measure()``'s results."""
+    def objective_of(
+        self, results: dict[str, float], settings: dict[str, float]
+    ) -> float:
+        """The objective of one shot, from ``measure()``'s results.
+
+        Args:
+            results: What ``measure()`` returned.
+            settings: The settings the shot was measured at.
+        """
         return results[self.objective]
 
     def best(self, settings: list[Any], objectives: list[float]) -> Any:
@@ -390,7 +410,7 @@ class StagedScan(Optimiser):
         }
         settings[stage.setting] = setting
         results = self.measure(**settings)
-        objective = float(self.objective_of(results))
+        objective = float(self.objective_of(results, settings))
         self.record("stage", stage_index)
         self.record("setting", setting)
         self.record("objective", objective)
@@ -561,10 +581,10 @@ class BayesianOptimisation(Optimiser):
     def prepare(self) -> None:
         self._evaluations: list[tuple[list[float], float]] = []
         self._told: list[float] = []
-        bounds = self.search_bounds()
+        self.bounds = bounds = self.search_bounds()
         self.record("search_bounds", {s: list(b) for s, b in bounds.items()})
         self._optimizer = skopt.Optimizer(
-            dimensions=[bounds[dimension.setting] for dimension in self.dimensions],
+            dimensions=[self._space(dimension) for dimension in self.dimensions],
             base_estimator="GP",
             acq_func="EI",
             n_initial_points=self.n_initial,
@@ -573,20 +593,36 @@ class BayesianOptimisation(Optimiser):
         )
         super().prepare()
 
+    def _space(self, dimension: Dimension) -> tuple[float, float] | skopt.space.Integer:
+        low, high = self.bounds[dimension.setting]
+        if not dimension.whole:
+            return (low, high)
+        first, last = math.ceil(low), math.floor(high)
+        if not first < last:
+            raise ValueError(
+                f"{dimension.setting} is whole but its range {low} to {high} "
+                "holds fewer than two whole numbers"
+            )
+        return skopt.space.Integer(first, last)
+
     def _xi(self, index: int) -> float:
         fraction = index / max(self.n_calls - 1, 1)
         return self.xi_start * (self.xi_end / self.xi_start) ** fraction
 
     def run_point(self) -> None:
         xi = self._optimizer.acq_func_kwargs["xi"]
-        values = [float(value) for value in self._optimizer.ask()]
-        results = self.measure(
-            **{
-                dimension.setting: value
-                for dimension, value in zip(self.dimensions, values, strict=True)
-            }
-        )
-        objective = float(self.objective_of(results))
+        values = [
+            int(value) if dimension.whole else float(value)
+            for dimension, value in zip(
+                self.dimensions, self._optimizer.ask(), strict=True
+            )
+        ]
+        settings = {
+            dimension.setting: value
+            for dimension, value in zip(self.dimensions, values, strict=True)
+        }
+        results = self.measure(**settings)
+        objective = float(self.objective_of(results, settings))
         for dimension, value in zip(self.dimensions, values, strict=True):
             self.record(dimension.setting, value)
         self.record("objective", objective)

@@ -83,6 +83,14 @@ class RbMotMasterRunner(MotMasterExperiment):
                 f"{name}_images", self.read_run_frames(name, camera, marks[name])
             )
 
+    def finish(self) -> None:
+        try:
+            for camera in getattr(self, "cameras", {}).values():
+                camera.start_live(self.buffer_frames)  # in case a failure stopped it
+                camera.end_shots()
+        finally:
+            super().finish()
+
     def read_run_frames(self, name: str, camera, mark: int) -> np.ndarray:
         """``camera``'s frames since ``mark``, checked to be the same count as at the first point."""
         if camera.frames_acquired() < mark:
@@ -99,14 +107,6 @@ class RbMotMasterRunner(MotMasterExperiment):
                 "during the first; every run must trigger it the same number of times"
             )
         return frames
-
-    def finish(self) -> None:
-        try:
-            for camera in getattr(self, "cameras", {}).values():
-                camera.start_live(self.buffer_frames)  # in case a failure stopped it
-                camera.end_shots()
-        finally:
-            super().finish()
 
     @classmethod
     def devices(cls) -> dict[str, Device]:
