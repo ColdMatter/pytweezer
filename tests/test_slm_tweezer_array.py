@@ -199,7 +199,7 @@ def test_rig_is_asked_for_the_array_in_the_form(rig_and_streams):
     rig, _ = rig_and_streams
 
     measurement = run_local(
-        SlmTweezerArray, rows=2, columns=3, spacing=4e-6, iterations=5
+        SlmTweezerArray, rows=2, columns=3, spacing=4e-6, iterations=5, sleep_time=0
     )
 
     assert measurement.status == "completed", measurement.attrs.get("error")
@@ -214,7 +214,9 @@ def test_mask_the_rig_made_is_the_one_recorded_and_broadcast(rig_and_streams):
 
     _, sent = rig_and_streams
 
-    measurement = run_local(SlmTweezerArray, rows=2, columns=3, iterations=5)
+    measurement = run_local(
+        SlmTweezerArray, sleep_time=0, rows=2, columns=3, iterations=5
+    )
 
     assert measurement.status == "completed", measurement.attrs.get("error")
     mask = np.full((1024, 1024), 1, dtype=np.uint8)
@@ -229,7 +231,9 @@ def test_target_and_simulated_trap_plane_are_sent_on_the_same_grid(rig_and_strea
 
     _, sent = rig_and_streams
 
-    measurement = run_local(SlmTweezerArray, rows=2, columns=3, iterations=5)
+    measurement = run_local(
+        SlmTweezerArray, sleep_time=0, rows=2, columns=3, iterations=5
+    )
 
     assert measurement.status == "completed", measurement.attrs.get("error")
     assert sent["slm_target"].shape == sent["slm_simulated"].shape
@@ -244,7 +248,7 @@ def test_the_optics_come_from_the_saved_parameters_unless_the_form_sets_them(
 
     rig, _ = rig_and_streams
 
-    measurement = run_local(SlmTweezerArray, iterations=5, blaze_x=50e-6)
+    measurement = run_local(SlmTweezerArray, sleep_time=0, iterations=5, blaze_x=50e-6)
 
     assert measurement.status == "completed", measurement.attrs.get("error")
     ((array),) = rig.made
@@ -263,7 +267,7 @@ def test_an_uncompensated_array_is_made_without_the_envelope(rig_and_streams):
 
     rig, _ = rig_and_streams
 
-    run_local(SlmTweezerArray, iterations=5, compensate_envelope=False)
+    run_local(SlmTweezerArray, sleep_time=0, iterations=5, compensate_envelope=False)
 
     assert rig.made[0]["envelope"] is None
 
@@ -275,7 +279,7 @@ def test_a_missing_saved_optics_parameter_fails_the_run(rig_and_streams):
     rig, _ = rig_and_streams
     del rig.saved["slm_envelope_sigma"]
 
-    measurement = run_local(SlmTweezerArray, iterations=5)
+    measurement = run_local(SlmTweezerArray, sleep_time=0, iterations=5)
 
     assert measurement.status == "failed"
     assert "slm_envelope_sigma" in measurement.attrs["error"]

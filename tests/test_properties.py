@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from pytweezer.servers import properties, property_server
+from pytweezer.servers import properties, property_server, sync
 from pytweezer.servers.property_server import PropertyServer
 from tests.helpers import until
 
@@ -30,6 +30,7 @@ def lab(tmp_path, monkeypatch):
     """A server that can be stopped and restarted on the same address;
     ``process()`` makes a client as a fresh process would."""
     monkeypatch.setattr(property_server, "SAVE_QUIET_S", 0.05)
+    monkeypatch.setattr(sync, "RECONNECT_MAX_S", sync.RECONNECT_MIN_S)
     lab = SimpleNamespace(
         path=str(tmp_path / "properties.json"), server=None, address=(0, 0)
     )

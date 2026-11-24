@@ -4,6 +4,7 @@ import time
 import pytest
 from sipyco.sync_struct import Notifier
 
+from pytweezer.servers import sync
 from pytweezer.servers.sync import SyncMirror, SyncServer
 from tests.helpers import until
 
@@ -96,7 +97,8 @@ def test_mirror_reconnects_after_server_restart(served):
         restarted.close()
 
 
-def test_mirror_waits_for_a_server_that_starts_later():
+def test_mirror_waits_for_a_server_that_starts_later(monkeypatch):
+    monkeypatch.setattr(sync, "RECONNECT_MAX_S", sync.RECONNECT_MIN_S)
     notifier = Notifier({"n": 0})
     probe = SyncServer({"state": notifier}, HOST, 0)
     port = probe.port

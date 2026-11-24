@@ -255,11 +255,11 @@ def test_describe_again_picks_up_a_changed_default(harness):
 
 
 def test_pause_resume_and_terminate_at_a_point_boundary(harness):
-    rid = harness.submit(Scan(repetitions=10), delay=0.2)
+    rid = harness.submit(Scan(repetitions=10), delay=0.1)
     harness.wait_until(rid, lambda t: t.points_done >= 1)
     harness.client.pause(rid)
     paused = harness.wait_until(rid, lambda t: t.status == "paused")
-    time.sleep(0.5)
+    time.sleep(0.3)
     assert harness.client.get(rid).points_done == paused.points_done
     harness.client.resume(rid)
     harness.wait_until(rid, lambda t: t.points_done > paused.points_done)
@@ -291,10 +291,10 @@ def test_abort_kills_the_worker(harness):
 
 
 def test_worker_survives_a_manager_restart(harness):
-    rid = harness.submit(five_points(), delay=0.4)
+    rid = harness.submit(five_points(), delay=0.25)
     harness.wait_until(rid, lambda t: t.points_done >= 1)
     harness.stop()
-    time.sleep(0.5)
+    time.sleep(0.2)
     harness.start()
     assert rid in harness.manager.processes  # adopted
     task = harness.wait_until(rid, lambda t: t.status.finished)

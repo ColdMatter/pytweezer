@@ -11,6 +11,7 @@ import pytest
 from tests.helpers import write_run
 
 DSN = os.environ.get("PYTWEEZER_TEST_DSN")
+DATABASE_TEST_LOCK = 7_317_001
 pytestmark = pytest.mark.skipif(not DSN, reason="PYTWEEZER_TEST_DSN not set")
 
 
@@ -21,6 +22,8 @@ def conn():
     from pytweezer.database.schema import ensure_schema
 
     with psycopg.connect(DSN, autocommit=True) as conn:
+        # Each test empties the same tables: one at a time across xdist workers.
+        conn.execute("SELECT pg_advisory_lock(%s)", (DATABASE_TEST_LOCK,))
         ensure_schema(conn)
         ensure_schema(conn)  # idempotent
         conn.execute("TRUNCATE readings, runs, points, measurements")

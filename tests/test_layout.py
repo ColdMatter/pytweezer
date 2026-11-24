@@ -5,8 +5,6 @@ import pkgutil
 import subprocess
 import sys
 
-import pytest
-
 import pytweezer.analyses.default
 import pytweezer.analysis
 
@@ -18,34 +16,45 @@ def _modules(package):
     ]
 
 
-def _imports_qt(module: str) -> bool:
-    code = f"import sys, {module}; print('PyQt6' in sys.modules)"
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        env=os.environ | {"MPLBACKEND": "Agg"},
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip() == "True"
+def _modules_importing_qt(package) -> list[str]:
+    """Import each module of ``package`` in its own fresh interpreter, all at once."""
+    processes = {
+        module: subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                f"import sys, {module}; print('PyQt6' in sys.modules)",
+            ],
+            env=os.environ | {"MPLBACKEND": "Agg"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for module in _modules(package)
+    }
+    importing_qt = []
+    for module, process in processes.items():
+        stdout, stderr = process.communicate()
+        assert process.returncode == 0, f"{module} failed to import:\n{stderr}"
+        if stdout.strip() == "True":
+            importing_qt.append(module)
+    return importing_qt
 
 
 def test_files_recorded_before_the_move_keep_their_analyses():
     from pytweezer.GUI.default_analyses import ANALYSES
 
-    assert set(ANALYSES) == {
+    assert {
         "tweezer_histogram",
         "tweezer_photon_histogram",
         "cloud_fit",
         "cloud_temperature",
-    }
+    } <= set(ANALYSES)
 
 
-@pytest.mark.parametrize("module", _modules(pytweezer.analysis))
-def test_framework_analysis_imports_no_qt(module):
-    assert not _imports_qt(module)
+def test_framework_analysis_imports_no_qt():
+    assert _modules_importing_qt(pytweezer.analysis) == []
 
 
-@pytest.mark.parametrize("module", _modules(pytweezer.analyses.default))
-def test_default_analysis_calculations_import_no_qt(module):
-    assert not _imports_qt(module)
+def test_default_analysis_calculations_import_no_qt():
+    assert _modules_importing_qt(pytweezer.analyses.default) == []

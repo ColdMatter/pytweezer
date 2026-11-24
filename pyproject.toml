@@ -55,6 +55,7 @@ pytweezer-db-backfill = "pytweezer.database.backfill:main"
 [dependency-groups]
 dev = [
     "pre-commit>=4.7,<5",
+    "pytest-xdist>=3.8,<4",
 ]
 docs = [
     "sphinx",
@@ -95,6 +96,8 @@ build-backend = "setuptools.build_meta"
 # tests/ imports its own helpers as `tests.*`; the editable install only exposes
 # pytweezer and bin.
 pythonpath = ["."]
+# Tests run in parallel (pytest-xdist); add -n0 to run in one process, e.g. for pdb.
+addopts = "-n auto"
 
 [tool.ruff]
 target-version = "py311"

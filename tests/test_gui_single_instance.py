@@ -50,7 +50,10 @@ def test_a_closed_gui_frees_the_pc_for_the_next_launch(qapp, port):
     claim_gui("client", port=port).close()
 
 
-def test_a_port_held_by_another_program_refuses_without_guessing(qapp, port):
+def test_a_port_held_by_another_program_refuses_without_guessing(
+    qapp, port, monkeypatch
+):
+    monkeypatch.setattr("bin.single_instance._REPLY_TIMEOUT_MS", 200)
     with socket.socket() as other:
         other.bind(("127.0.0.1", port))
         other.listen()

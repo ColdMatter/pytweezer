@@ -51,7 +51,7 @@ every push to main and every PR.
 
 ```bash
 uv sync                         # install deps, rebuild the C++ extensions and console scripts
-uv run pytest tests/ -q         # run the test suite
+uv run pytest tests/ -q         # run the test suite, in parallel (add -n0 for one process, e.g. pdb)
 uv run python <script>.py       # run any script inside the venv
 ```
 

@@ -457,7 +457,8 @@ def test_a_parameter_scan_runs_one_shot_per_value_in_order(dotnet_types):
     assert results == [60, 20, 40]
 
 
-def test_simulated_sequencer_serves_and_validates_parameters():
+def test_simulated_sequencer_serves_and_validates_parameters(monkeypatch):
+    monkeypatch.setattr(SimulatedMotMasterInterface, "sim_run_s", 0)
     simulated = SimulatedMotMasterInterface()
     parameters = simulated.script_parameters("RbTweezerBasic")
     assert type(parameters["tDelay1"]) is int and type(parameters["tPulse"]) is float
@@ -470,7 +471,8 @@ def test_simulated_sequencer_serves_and_validates_parameters():
         simulated.start_motmaster_experiment({"tDelay1": 7.5})
 
 
-def test_simulated_end_to_end_with_searched_parameters():
+def test_simulated_end_to_end_with_searched_parameters(monkeypatch):
+    monkeypatch.setattr(SimulatedMotMasterInterface, "sim_run_s", 0)
     from pytweezer.experiments.motmaster_arguments_test import MotMasterArgumentsTest
 
     scan = Scan(axes=[ListAxis(argument="tDelay1", values=[10, 20])])
