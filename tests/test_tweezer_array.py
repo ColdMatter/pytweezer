@@ -10,9 +10,19 @@ from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiments import load_tweezers
 from pytweezer.experiments.load_tweezers import LoadTweezers, LoadTweezersMOTImage
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
-from pytweezer.optimisers.optimise_molasses_light import OptimiseMolassesLight
-from pytweezer.optimisers.optimise_molasses_shims import OptimiseMolassesShims
-from pytweezer.optimisers.optimise_mot_light import OptimiseMOTLight
+from pytweezer.optimisers.optimise_molasses_light import (
+    OptimiseMolassesLight,
+    OptimiseMolassesLightMinTime,
+)
+from pytweezer.optimisers.optimise_molasses_shims import (
+    OptimiseMolassesShims,
+    OptimiseMolassesShimsMinTime,
+)
+from pytweezer.optimisers.optimise_mot_light import (
+    MOT_LOAD_TIME,
+    OptimiseMOTLight,
+    OptimiseMOTLightMinTime,
+)
 from pytweezer.optimisers.optimise_tweezer_imaging import OptimiseTweezerImaging
 
 #: The default 8x8, 5 µm grid at 2 px/µm, in the pixels of the camera's ROI.
@@ -411,8 +421,26 @@ def test_each_light_evaluation_runs_at_its_settings(rig, cls, sent_as):
             assert {parameter: go[parameter] for parameter in expected} == expected
 
 
+@pytest.mark.parametrize(
+    ("cls", "setting", "parameter"),
+    [
+        (OptimiseMOTLightMinTime, "load_time", MOT_LOAD_TIME),
+        (OptimiseMolassesShimsMinTime, "molasses_time", "tMolassesDuration"),
+        (OptimiseMolassesLightMinTime, "molasses_time", "tMolassesDuration"),
+    ],
+)
+def test_each_min_time_evaluation_runs_at_its_whole_time(rig, cls, setting, parameter):
+    measurement = run_local(cls, **FAST, n_calls=2, n_initial=2)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    for point in range(2):
+        time = measurement.results[setting][point]
+        assert time == round(time)
+        for go in rig.goes[point * FAST["shots"] : (point + 1) * FAST["shots"]]:
+            assert go[parameter] == time
+
+
 def test_mot_scores_shorter_loads_higher_once_loading_clears_the_threshold():
-    optimiser = OptimiseMOTLight()
+    optimiser = OptimiseMOTLightMinTime()
     optimiser.bounds = {"load_time": (10, 500)}
 
     def score(load_time, loading):
@@ -423,7 +451,20 @@ def test_mot_scores_shorter_loads_higher_once_loading_clears_the_threshold():
 
 
 @pytest.mark.parametrize("cls", [OptimiseMolassesShims, OptimiseMolassesLight])
-def test_molasses_penalises_each_shortfall(cls):
+def test_molasses_scores_survival_less_any_loading_shortfall(cls):
+    optimiser = cls()
+
+    def score(loading, survival):
+        return optimiser.objective_of({"loading": loading, "survival": survival}, {})
+
+    assert score(0.55, 0.9) - score(0.55, 0.8) == pytest.approx(0.1)
+    assert score(0.55, 0.8) - score(0.45, 0.8) == pytest.approx(1)
+
+
+@pytest.mark.parametrize(
+    "cls", [OptimiseMolassesShimsMinTime, OptimiseMolassesLightMinTime]
+)
+def test_min_time_molasses_penalises_each_shortfall(cls):
     optimiser = cls()
     optimiser.bounds = {"molasses_time": (1, 20)}
     settings = {"molasses_time": 5}

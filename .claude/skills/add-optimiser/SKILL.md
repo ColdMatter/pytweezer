@@ -155,28 +155,33 @@ only calls its `counts`, `fit_loading` and `survival`, never inline maths.
   current array, so rerun it after changing the array.
 - Their objectives are penalty forms, computed by `objective_of(scores,
   settings)` from `loading`, `survival` and `fidelity`, all measured by
-  `score_batch()`. A search for the shortest time subtracts
-  `shortfall_penalty` (10) times each shortfall below a threshold
-  (`loading_threshold` 0.55, `survival_threshold` 0.8) from
-  `shortness(time, bounds)`. A shortfall of 1/`shortfall_penalty` costs as much
-  as the whole time range, so at 10 the threshold is soft; a near-hard one
-  needs a larger penalty (e.g. 100).
-  The time is a whole-number dimension (`load_time`, `molasses_time`).
+  `score_batch()`, with `shortfall_penalty` (10) times each shortfall below a
+  threshold (`loading_threshold` 0.55, `survival_threshold` 0.8).
+- The MOT and molasses optimisers come in pairs in one module: the bare one
+  searches at the saved time; its `…MinTime` subclass adds the time as a
+  whole-number dimension (`load_time`, or `MOLASSES_TIME` from
+  `tweezer_optimisation.py`) and scores `shortness(time, bounds)` less the
+  penalties, so it proposes the shortest time that meets the thresholds, as a
+  saved parameter that `LoadTweezers` then uses on every run. A shortfall of
+  1/`shortfall_penalty` costs as much as the whole time range, so at 10 the
+  threshold is soft; a near-hard one needs a larger penalty (e.g. 100).
 - `OptimiseTweezerImaging` is Bayesian with span dimensions around the saved
   `tImgCoolVCO`/`tImgCoolVVA`, no drop, scored `fidelity_weight` (0.5) ×
   fidelity + (1 − weight) × survival. It overrides `measure()` to set both
   imaging stages' VCO or VVA (`tImgCoolVCO1/2`).
 - `OptimiseMolassesShims` has span dimensions around
-  `tMolassesShim{X,Y,Z}ccValue` (limited to the card's ±10 V) and the whole
-  `molasses_time` (`tMolassesDuration`, 1–20); `drop = "drop_duration"`.
+  `tMolassesShim{X,Y,Z}ccValue` (limited to the card's ±10 V), with
+  `drop = "drop_duration"`, scored by survival less the loading penalty.
+  `OptimiseMolassesShimsMinTime` adds `molasses_time` (`tMolassesDuration`,
+  1–20) and penalises both shortfalls.
+- `OptimiseMolassesLight`/`OptimiseMolassesLightMinTime` search both molasses
+  stages' light (`tMol{Cool,Rep}{VCO,VVA}{1,2}`, eight dimensions), scored
+  like the shims pair.
 - `OptimiseMOTLight` searches the MOT-loading cooling and repump VCOs and VVAs
-  (`tMOTLoad{Cool,Rep}{VCO,VVA}`, limited to 0–10 V) and the whole `load_time`,
-  for the shortest load that reaches `loading_threshold`, with no drop. Its
-  `MOT_LOAD_TIME` script parameter name and `load_time` limits are
-  placeholders (FIXME in the module).
-- `OptimiseMolassesLight` searches both molasses stages'
-  (`tMol{Cool,Rep}{VCO,VVA}{1,2}`, eight dimensions) and the molasses time,
-  scored like `OptimiseMolassesShims`.
+  (`tMOTLoad{Cool,Rep}{VCO,VVA}`, limited to 0–10 V) for the best `loading`,
+  with no drop. `OptimiseMOTLightMinTime` adds `load_time` for the shortest
+  load that reaches `loading_threshold`; its `MOT_LOAD_TIME` script parameter
+  name and limits are placeholders (FIXME in the module).
 
 Tests: `tests/test_optimisers.py`,
 `tests/test_tweezer_array.py`, `tests/test_trap_sites.py`,

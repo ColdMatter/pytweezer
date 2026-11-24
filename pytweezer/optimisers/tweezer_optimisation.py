@@ -7,7 +7,13 @@ from typing import ClassVar
 import numpy as np
 
 from pytweezer.experiment.arguments import Bool, Integer
-from pytweezer.experiment.optimisers import BayesianOptimisation
+from pytweezer.experiment.optimisers import BayesianOptimisation, Dimension
+
+#: The molasses time searched by the optimisers that minimise it.
+#: FIXME: placeholder limits (1, 20), to check against the script
+MOLASSES_TIME = Dimension(
+    "molasses_time", save_as="tMolassesDuration", low=1, high=20, whole=True
+)
 
 
 class TweezerOptimisation(BayesianOptimisation):
