@@ -25,7 +25,7 @@ class TrapFrequencyScan(LoadTweezers):
     so scanning ``modulation_frequency`` and plotting ``survival`` shows dips at
     twice the radial and axial frequencies. The modulation comes from a VCO set
     by the analogue ``tTweezerModulationVCF``, which maps -10 to 10 V linearly
-    onto ``vco_min_frequency`` to ``vco_max_frequency``: these must match the
+    onto ``modvcf_min_frequency`` to ``modvcf_max_frequency``: these must match the
     VCO's range as set on the generator. The voltage sent is recorded per point
     as ``modulation_voltage``.
     """
@@ -38,22 +38,22 @@ class TrapFrequencyScan(LoadTweezers):
         group="Modulation",
         tooltip="frequency of the tweezer intensity modulation",
     )
-    vco_min_frequency = Number(
+    modvcf_min_frequency = Number(
         10e3,
         unit="kHz",
         scale=1e3,
         min=0,
         group="Modulation",
-        tooltip="VCO frequency at -10 V on tTweezerModulationVCF",
+        tooltip="modulation frequency at -10 V on tTweezerModulationVCF",
         scannable=False,
     )
-    vco_max_frequency = Number(
+    modvcf_max_frequency = Number(
         300e3,
         unit="kHz",
         scale=1e3,
         min=0,
         group="Modulation",
-        tooltip="VCO frequency at +10 V on tTweezerModulationVCF",
+        tooltip="modulation frequency at +10 V on tTweezerModulationVCF",
         scannable=False,
     )
     hold_time = MotMasterInteger(
@@ -66,26 +66,28 @@ class TrapFrequencyScan(LoadTweezers):
     )
 
     def prepare(self) -> None:
-        if self.vco_max_frequency <= self.vco_min_frequency:
+        if self.modvcf_max_frequency <= self.modvcf_min_frequency:
             raise ValueError(
-                "vco_max_frequency must be above vco_min_frequency, not "
-                f"{self.vco_max_frequency} <= {self.vco_min_frequency} Hz"
+                "modvcf_max_frequency must be above modvcf_min_frequency, not "
+                f"{self.modvcf_max_frequency} <= {self.modvcf_min_frequency} Hz"
             )
         super().prepare()
 
     def run_point(self) -> None:
         if (
-            not self.vco_min_frequency
+            not self.modvcf_min_frequency
             <= self.modulation_frequency
-            <= self.vco_max_frequency
+            <= self.modvcf_max_frequency
         ):
             raise ValueError(
                 f"modulation_frequency {self.modulation_frequency} Hz is outside "
-                f"the VCO's range, {self.vco_min_frequency} to "
-                f"{self.vco_max_frequency} Hz"
+                f"the VCO's range, {self.modvcf_min_frequency} to "
+                f"{self.modvcf_max_frequency} Hz"
             )
         voltage = vcf_voltage(
-            self.modulation_frequency, self.vco_min_frequency, self.vco_max_frequency
+            self.modulation_frequency,
+            self.modvcf_min_frequency,
+            self.modvcf_max_frequency,
         )
         self.record("modulation_voltage", voltage, unit="V")
         mark = self.hamcam.start_shot({"rid": self.rid})
