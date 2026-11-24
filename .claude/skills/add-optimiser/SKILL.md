@@ -125,14 +125,20 @@ fit view draws the results `calibration_image` and `roi_sites`
 
 ## The Rb tweezer optimisers
 
-The measurements they run (`SlmTweezerArray`, `LoadTweezers`,
-`TweezerArrayMeasurement`) are described under "Tweezer array measurements" in
-add-experiment.
+The measurements they run (`SlmTweezerArray`, `LoadTweezers`) are described
+under "Tweezer array measurements" in add-experiment. The Bayesian ones are
+`(TweezerOptimisation, LoadTweezers)`: `TweezerOptimisation`
+(`optimisers/tweezer_optimisation.py`) adds `shots` and `score_batch()`, and
+refuses to run without accepted trap sites. It scores each batch through
+`TrapSites` (`analysis/array_loading.py`): `LoadTweezers.trap_sites` holds the
+accepted sites with their window, feature size and threshold, and `score_batch`
+only calls its `counts`, `fit_loading` and `survival`, never inline maths.
 
 - `FindTrapSites` (`Fit`) takes `calibration_shots` with the tweezers off
   during the background drop, fits the rig's array geometry (or a
   `default_rows` × `default_columns` grid) to their mean filtered image
-  (`analysis/trap_sites.py`), fits the occupancy threshold, and proposes
+  (`analysis/trap_sites.py`) after `background_subtracted_mean` and
+  `top_hat_image`, fits the occupancy threshold with a `TrapSites`, and proposes
   `TRAP_SITE_KEYS`: `trap_sites` (sensor pixels, `(y, x)`), `trap_threshold`,
   `trap_window_size`, `trap_feature_size`, `trap_geometry`. Tweezer
   measurements refuse to run when the saved `trap_geometry` is not the rig's

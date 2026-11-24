@@ -82,10 +82,11 @@ Rules that matter:
   that doesn't record a name gets NaN (floats) and `/recorded/<name>` False.
 - An exception in any hook fails the task (status `failed`, traceback in the
   file and the queue). Don't catch-and-print.
+- Order an experiment's methods `prepare`, `run_point`, `finish`, then
+  everything else (helpers, classmethods, overrides).
 - A class only appears in the GUI if it is defined in that module and
   overrides `run_point`, so intermediate base classes stay hidden; a base that
-  inherits a concrete `run_point` hides with `run_point = Experiment.run_point`
-  (`TweezerArrayMeasurement`).
+  inherits a concrete `run_point` hides with `run_point = Experiment.run_point`.
 - `self.rid` is the task's run id (-1 under `run_local`), e.g. to tag a shot's
   live frames (`camera.start_shot({"rid": self.rid})`).
 - An experiment that chooses its own points overrides
@@ -122,7 +123,7 @@ class Tof(MotMasterExperiment):
 
     def run_point(self):
         mark = self.camera.start_shot({"rid": self.rid})
-        self.run_sequences()  # blocks until Go() returns
+        self.run_motmaster_sequence()  # blocks until Go() returns
         self.record("image", self.camera.wait_frames(mark, 1)[0])
 
     def finish(self):
@@ -154,12 +155,12 @@ Declared parameters are not searchable, Int32 ones need whole values, and
 unselected ones keep the script's defaults (not recorded in the file).
 `prepare()` sets linked mode, script, iterations, save toggle and untriggered
 mode on every task; repeats come from `Scan(repetitions=...)`, one stored point
-per shot; `run_sequences(tPulse=3e-5)` overrides parameters for that one run.
+per shot; `run_motmaster_sequence(tPulse=3e-5)` overrides parameters for that one run.
 `MotMaster(..., saved=(...))` binds script parameters to saved parameters:
 a bare name for the key of the same name, `{parameter: key}` for another key.
 They are read once in `prepare()` (an unreachable manager raises `RuntimeError`,
 missing keys a `KeyError`) and sent with every run; precedence is a
-`run_sequences` override > form or scan > saved > script default, and the saved
+`run_motmaster_sequence` override > form or scan > saved > script default, and the saved
 values sent are the constant `saved_sequence` (`{parameter: value}`). Camera
 APIs differ between drivers — check the driver, not old notebooks.
 
@@ -189,7 +190,7 @@ is the example to copy:
   again. `finish()` calls `end_shots()` in a `try`/`finally` around
   `super().finish()` and leaves the camera live.
 - The shot calls `mark = camera.start_shot({"rid": self.rid})`, then
-  `run_sequences(**overrides)`, then `camera.wait_frames(mark, n)`. The live
+  `run_motmaster_sequence(**overrides)`, then `camera.wait_frames(mark, n)`. The live
   thread broadcasts the frames, tagged with the `rid` and their `index` in the
   shot; the experiment does not broadcast them itself.
 - Camera settings are ordinary arguments named for the camera
@@ -198,7 +199,7 @@ is the example to copy:
   changes the frame shape, or something set in `prepare()` depends on it) is
   declared `scannable=False`.
 - A subclass adding a camera wraps the parent's shot rather than adding hooks
-  to it: `LoadTweezersMOTImage` starts the ORCA, calls `take_shot()`, then reads
+  to it: `LoadTweezersMOTImage` starts the ORCA, calls `super().run_point()`, then reads
   the ORCA's frame. Anything only a subclass needs stays in the subclass.
 
 Recording a MOT cloud: `LoadTweezersMOTImage.record_cloud_fit(frames)` fits the
@@ -227,20 +228,26 @@ Its **Analysis** dropdown offers "Plot against" for every file, then the
 analyses the experiment declares as a class attribute (inherited), e.g.
 `LoadTweezers`' `analyses = ("tweezer_histogram", "tweezer_photon_histogram")`;
 an optimiser declares none. Each file records the names (root attr
-`analyses`), so the tab never imports the experiment. Names map to views in
-`pytweezer/GUI/experiments/analyses.py` (`ANALYSES`; a new one is a Qt-free
-computation in `pytweezer/analysis/` plus an `AnalysisView` registered there,
-usually a `ComputedAnalysisView`, which loads and computes off the GUI thread
-through its hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`;
+`analyses`), so the tab never imports the experiment. Each default analysis
+has its computation, free of Qt, in `pytweezer/analyses/default/`, and its view
+and `ANALYSES` entries (`{name: AnalysisEntry}`) in the same-named module of
+`pytweezer/GUI/default_analyses/`, merged in that package's `__init__`. The view
+is an `AnalysisView` from `pytweezer/GUI/experiments/analyses.py`, usually a
+`ComputedAnalysisView`, which loads and computes off the GUI thread through its
+hooks `needed_results`/`settings`/`compute`/`show_result`/`unavailable_reason`;
 `compute` reads one point's large result, such as an image, with `point_result`).
-A view reads only what the file recorded, so record what it needs (the tweezer
-histograms, whose readout also gives the imaging survival, take `first_counts`/`second_counts` with `trap_sites` and
-`threshold`, else per-site photons, else the `hamcam_images` stack: `analysis/tweezer_histogram.py`;
-the MOT Gaussian fit, `cloud_fit`, takes `<camera>_<field>`, `_error` and
-`<camera>_mean_image`, as `LoadTweezersMOTImage.record_cloud_fit` records them:
-`analysis/cloud_results.py`; `cloud_temperature` fits the time-of-flight
-expansion of those sizes against a scanned time argument, and needs the constant
-`cloud_mass_amu`).
+A view reads only what the file recorded, so record what it needs:
+
+- the tweezer histograms, whose readout also gives the imaging survival, take
+  `first_counts`/`second_counts` with `trap_sites` and `threshold`, else per-site
+  photons, else the `hamcam_images` stack
+  (`analyses/default/tweezer_histogram.py`);
+- the MOT Gaussian fit, `cloud_fit`, takes `<camera>_<field>`, `_error` and
+  `<camera>_mean_image`, as `LoadTweezersMOTImage.record_cloud_fit` records them
+  (`analyses/default/cloud.py`);
+- `cloud_temperature` fits the time-of-flight expansion of those sizes against a
+  scanned time argument, and needs the constant `cloud_mass_amu`.
+
 A name this GUI doesn't know is listed disabled, and every analysis is disabled
 until the measurement finishes. An analysis only reads the file, through its
 own archive connection, off the GUI thread. The tab remembers the choice per
@@ -416,12 +423,17 @@ The Rb tweezer experiments, in the order a session uses them:
    `MotMaster`: script parameter → saved key; a missing key, or an unreachable manager, fails `prepare()`), a script
    parameter set in the form winning; the values used are the constant
    `saved_sequence`. `use_motmaster_parameter_overrides=False` sends none of them, so the
-   script's own values run (it overrides `MotMasterExperiment.saved_bindings()`);
-   the trap sites are still read from the saved parameters. It and everything built on it also read the trap sites in
-   `prepare()` (`saved_trap_sites(saved)`), moved into the ROI
+   script's own values run (`MotMasterExperiment` gives this argument to every
+   experiment whose `MotMaster` declares `saved=`, and `saved_bindings()` reads it);
+   the trap sites are still read from the saved parameters. It and everything
+   built on it also read the trap sites in `prepare()` (`saved_trap_sites(saved)`),
+   moved into the ROI
    (`hamcam_roi_x0`/`_y0`/`_width`/`_height`, unbinned; binning is fixed at 1)
-   by the origin `set_roi` returned (`roi_origin`, `(x0, y0)`).
-   The EM-gain sensitivity is `hamcam_gain` (scannable); scans of the ROI are
+   by the origin `set_roi` returned (`roi_origin`, `(x0, y0)`). They become
+   `LoadTweezers.trap_sites`, a `TrapSites` (`analysis/array_loading.py`) that
+   also carries the saved `trap_window_size`, `trap_feature_size` and
+   `trap_threshold`; the experiments score frames only through its methods.
+   Scans of the EM-gain sensitivity `hamcam_gain` and of the ROI are
    refused. They are refused when none are saved or when a summing window
    leaves the ROI; when `trap_geometry` is not the rig's array
    (`same_geometry`; an unreachable rig is not checked) they are used with a
@@ -432,21 +444,21 @@ The Rb tweezer experiments, in the order a session uses them:
    `save_tweezer_counts`; frames are recorded as `hamcam_images`
    (`(2, H, W)` per point) only with `save_raw_images`.
    `LoadTweezers` runs without sites only if it records frames;
-   `TweezerArrayMeasurement` always needs them.
+   the optimisers built on `TweezerOptimisation` always need them.
    `LoadTweezersMOTImage` is `LoadTweezers` plus the ORCA's one frame of the Rb
    MOT from the same shot, recorded as an `orca_*` cloud fit;
    `LoadTweezers` itself never touches the ORCA.
-4. The classes whose point is a batch of shots each loop `take_shot()`
-   themselves: `TweezerArrayMeasurement.take_batch(**sequence)` (`score_batch()`,
-   used by the Bayesian optimisers) and `FindTrapSites.take_calibration_shots()`.
+4. The classes whose point is a batch of shots each loop the shot
+   (`start_shot`, `run_motmaster_sequence(**overrides)`, `wait_frames`) themselves: `TweezerOptimisation.take_batch(**overrides)` (`score_batch()`,
+   the base of the Bayesian optimisers, in `optimisers/tweezer_optimisation.py`) and `FindTrapSites.take_calibration_shots()`.
    Their `first_occupied`/`second_occupied`/`*_counts` are `(shots, sites)` per
    point, and `save_raw_images` (off by default there) records
    `hamcam_images`, `(shots, 2, H, W)` per point. They declare no analyses; `LoadTweezers`
    itself keeps one shot per point, which the default analyses expect.
 
 Shots tag their HamCam frames with `start_shot({"rid": self.rid})`; the live
-tweezer loading analysis (`analysis/tweezer_loading.py`) starts afresh whenever
-the rid changes and places the saved sites by each frame's
+tweezer loading analysis (`analyses/live/tweezer_loading.py`) starts afresh
+whenever the rid changes and places the saved sites by each frame's
 `roi_x0`/`roi_y0` header.
 
 ## Files

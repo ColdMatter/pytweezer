@@ -1,4 +1,4 @@
-"""The tweezer loading histogram of a measurement file.
+"""The tweezer loading histogram of a measurement file: ``tweezer_histogram`` (counts) and ``tweezer_photon_histogram``.
 
 The per-file counterpart of the live ``tweezer_loading`` analysis, giving the
 same ``(header, values)`` pair from what a file recorded, in the header's
@@ -17,6 +17,11 @@ same ``(header, values)`` pair from what a file recorded, in the header's
 Whichever image is histogrammed, the header also gives the imaging survival
 from the first image to the second, with both scored against the first
 image's threshold.
+
+:class:`~pytweezer.GUI.views.tweezer_loading.TweezerLoadingPlots` draws the pair,
+as the live ``tweezer_loading`` viewer does too.
+:class:`~pytweezer.GUI.default_analyses.tweezer_histogram.TweezerHistogramView`
+is the Results-tab view around it.
 """
 
 from dataclasses import dataclass
@@ -29,6 +34,7 @@ from pytweezer.analysis.array_loading import (
     imaging_survival,
     loading_statistics,
     photons_at_sites,
+    top_hat,
 )
 from pytweezer.experiment.storage import Measurement
 from pytweezer.experiment.summary import display_value
@@ -146,7 +152,7 @@ def tweezer_histogram(
         if not mask.any():
             return head | {"error": "No shots in this selection"}, None
         stack = measurement.results[FRAMES]
-        firsts = _filtered(stack[:, 0], settings)
+        firsts = top_hat(stack[:, 0], settings.feature_size)
         sites = find_sites(
             np.mean(firsts, axis=0), settings.sites, settings.detection_step
         )
@@ -160,7 +166,7 @@ def tweezer_histogram(
                 sites,
                 settings.window_size,
             )
-            for frames in (firsts, _filtered(stack[:, 1], settings))
+            for frames in (firsts, top_hat(stack[:, 1], settings.feature_size))
         ]
         fallback_threshold = settings.fallback_threshold
 
@@ -175,12 +181,3 @@ def tweezer_histogram(
         else loading_statistics(images[0], sites, fallback_threshold)["threshold"]
     )
     return head | imaging_survival(*images, first_threshold), photons
-
-
-def _filtered(frames, settings):
-    return [
-        an.morphological_tophat_high_pass(
-            np.asarray(frame, dtype=np.float64), feature_size=settings.feature_size
-        )
-        for frame in frames
-    ]

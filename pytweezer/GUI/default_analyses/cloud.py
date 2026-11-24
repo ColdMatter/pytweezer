@@ -1,4 +1,8 @@
-"""Results-tab views of the MOT cloud fits a measurement recorded."""
+"""The Results-tab views of the MOT cloud fits, and their ``ANALYSES`` entries.
+
+:class:`CloudFitView` and :class:`CloudTemperatureView` draw the calculations
+in :mod:`pytweezer.analyses.default.cloud`.
+"""
 
 import math
 from dataclasses import dataclass
@@ -9,8 +13,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout
 
-from pytweezer.analysis.cloud_fit import contour_ellipses
-from pytweezer.analysis.cloud_results import (
+from pytweezer.analyses.default.cloud import (
     SIZES,
     cloud_cameras,
     cloud_sizes,
@@ -20,9 +23,10 @@ from pytweezer.analysis.cloud_results import (
     point_image,
     scanned_arguments,
 )
+from pytweezer.analysis.cloud_fit import contour_ellipses
 from pytweezer.experiment.summary import display_value
 from pytweezer.GUI.components import CompactDoubleSpinBox
-from pytweezer.GUI.experiments.analyses import ComputedAnalysisView
+from pytweezer.GUI.experiments.analyses import AnalysisEntry, ComputedAnalysisView
 from pytweezer.GUI.theme import (
     CURVE_COLORS,
     PLOT_BACKGROUND,
@@ -562,3 +566,11 @@ class CloudTemperatureView(ComputedAnalysisView):
         unit_us = result.seconds_per_unit * 1e6
         lines.append(f"t = {result.argument} × {unit_us:g} µs")
         return "\n".join(lines)
+
+
+ANALYSES = {
+    "cloud_fit": AnalysisEntry("MOT Gaussian fit", CloudFitView),
+    "cloud_temperature": AnalysisEntry(
+        "MOT temperature (time of flight)", CloudTemperatureView
+    ),
+}

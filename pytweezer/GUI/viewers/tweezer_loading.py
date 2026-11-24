@@ -20,7 +20,7 @@ Properties:
 from PyQt6 import QtWidgets
 
 from pytweezer.GUI.applet import Applet, run_applet
-from pytweezer.GUI.tweezer_loading_plots import TweezerLoadingPlots
+from pytweezer.GUI.views.tweezer_loading import TweezerLoadingPlots
 from pytweezer.servers import DataClient, PropertyAttribute
 
 

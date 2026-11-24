@@ -167,10 +167,24 @@ Not everything worth viewing is a stream:
   columns, as the Optimisers tab and the notebooks do, so a subclass gets that
   for free.
 
-A plot that another panel also shows belongs in a widget module under
-`pytweezer/GUI/` that the applet only wraps: `tweezer_loading_plots.py` is drawn
-by both the Tweezer Loading applet and the Results tab's histogram view, so the
-two cannot drift apart.
+## Drawings: `GUI/views/`, specialisations, and who imports whom
+
+A **base view** is a general-purpose widget that shows what it is handed and
+knows nothing of streams, Properties, devices or the archive. Base drawings
+belong in `pytweezer/GUI/views/`. Only the histogram plotter exists there so far
+(`histogram.py`, `HistogramPlot`). The image viewer and line plot are added in
+phase 2 of the framework split; until then the applets' drawing still sits in
+`viewers/image_monitor.py` and `viewers/live_plot.py`.
+
+A **specialisation** (an image with trap sites marked, a histogram with a fit
+and a threshold) stays in the applet or default-analysis view that uses it, and
+moves to `GUI/views/` once a second panel needs it. `TweezerLoadingPlots` in
+`GUI/views/tweezer_loading.py` is the shared example: the Tweezer Loading applet
+and that tab's histogram view both draw it, so the two cannot drift apart.
+
+Applets (`GUI/viewers/`) and default-analysis views
+(`GUI/default_analyses/`) never import from one another; share through
+`GUI/views/`.
 
 ## Properties are the user's knobs
 
@@ -230,7 +244,7 @@ Two pyqtgraph traps worth knowing:
 ## Fit overlays and the projections monitor
 
 The Image Monitor draws a fit on top of the image from a *data* stream, with no new viewer code:
-list the fit's stream in `overlaystreams` (the `CloudFitAnalysis` in `analysis/cloud_fit.py`
+list the fit's stream in `overlaystreams` (the `CloudFitAnalysis` in `analyses/live/cloud_fit.py`
 publishes one; its header carries `cloud_fit.FIELDS`: `x0`, `y0`, `sigma_major`, `sigma_minor`,
 `angle`, ... in the image's plot coordinates) and `n_contours` sets how many ellipses are drawn.
 `overlay_paths(head, n)` in `viewers/image_monitor.py` turns such a header into the ellipses (`[]`

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from pytweezer.experiment.arguments import Number
 from pytweezer.experiment.motmaster import MotMasterInteger
 from pytweezer.experiments.load_tweezers import LoadTweezers
@@ -88,8 +90,8 @@ class TrapFrequencyScan(LoadTweezers):
             self.modvcf_max_frequency,
         )
         self.record("modulation_voltage", voltage, unit="V")
-        self.record_tweezers(
-            self.take_shot(
-                BackgroundDrop=0, TweezerModulation=1, tTweezerModulationVCF=voltage
-            )
+        mark = self.hamcam.start_shot({"rid": self.rid})
+        self.run_motmaster_sequence(
+            BackgroundDrop=0, TweezerModulation=1, tTweezerModulationVCF=voltage
         )
+        self.record_data(np.asarray(self.hamcam.wait_frames(mark, 2)))

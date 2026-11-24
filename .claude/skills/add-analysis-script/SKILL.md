@@ -1,6 +1,6 @@
 ---
 name: add-analysis-script
-description: Write a new streaming analysis process in pytweezer/analysis/ that subscribes to a live image or data stream, transforms each message, and republishes the result. Use this whenever the user wants to create, add, or write an analysis script, an analysis filter, or an image/data processing step — computing a centre of mass, fitting a peak, thresholding, counting atoms, averaging or subtracting frames, extracting a profile, deriving any quantity from a live camera or data stream — or asks how to get a new derived quantity onto a live plot or into the Analysis Manager. Applies even when the user only describes the maths ("find the centre of mass of images", "fit a Lorentzian to the trace") without saying "analysis" or "script".
+description: Write a new streaming analysis process in pytweezer/analyses/live/ that subscribes to a live image or data stream, transforms each message, and republishes the result. Use this whenever the user wants to create, add, or write an analysis script, an analysis filter, or an image/data processing step — computing a centre of mass, fitting a peak, thresholding, counting atoms, averaging or subtracting frames, extracting a profile, deriving any quantity from a live camera or data stream — or asks how to get a new derived quantity onto a live plot or into the Analysis Manager. Applies even when the user only describes the maths ("find the centre of mass of images", "fit a Lorentzian to the trace") without saying "analysis" or "script".
 ---
 
 # Adding a streaming analysis to pytweezer
@@ -9,7 +9,12 @@ An analysis is one small long-lived process: it subscribes to one or more pub/su
 streams, receives `(message, head, data)` in a loop, transforms each one, and
 republishes. `pytweezer/analysis/analysis_base.py` owns that loop, so writing an
 analysis means writing **one class with one `process` method** in a new file
-under `pytweezer/analysis/`.
+under `pytweezer/analyses/live/`. The folder names carry the rule: the singular
+`analysis/` is framework and shared maths (no Qt, no scripts people edit), and
+the plural `analyses/` is what you edit. Maths that a live script shares with an
+experiment, optimiser or default analysis goes in `analysis/` (as
+`array_loading.py` does for tweezer counts), so a script only wires it to a
+stream.
 
 There is no registry to edit and no config entry to add. The Analysis Manager
 scans the directory at runtime, so a correctly written file shows up in the GUI
@@ -19,16 +24,25 @@ your script at all.
 
 An analysis of a *finished measurement file*, offered in the Results tab, is a
 different thing: no process, no stream, nothing in this skill's `process`
-contract applies. Put the computation in a Qt-free module under
-`pytweezer/analysis/` taking a `Measurement` (it is not listed by the Analysis
-Manager, which only lists files with stream properties), write an `AnalysisView`
-for it in `pytweezer/GUI/experiments/analyses.py` — its `set_measurement(archive,
-path, measurement)` loads over its own archive connection and computes off the
-GUI thread — add an `AnalysisEntry` to `ANALYSES`, and name it in the
-experiment's `analyses = (...)` (the experiment side is the `add-experiment`
-skill's). `tweezer_histogram.py` is the example; it shares its numbers with the
-live `tweezer_loading.py` through `array_loading.py`, so the two cannot disagree.
-Do the same whenever a live and a file analysis compute one quantity.
+contract applies. It has two parts:
+
+- its calculation, free of Qt, in its own module of
+  `pytweezer/analyses/default/` (the Analysis Manager lists only files directly
+  in `pytweezer/analyses/live/`);
+- its view in the same-named module of `pytweezer/GUI/default_analyses/`: an
+  `AnalysisView` from `pytweezer/GUI/experiments/analyses.py`, whose
+  `set_measurement(archive, path, measurement)` loads over its own archive
+  connection and computes off the GUI thread, plus its `ANALYSES` entries. Merge
+  those into that package's `ANALYSES` in its `__init__`, and name the analysis
+  in the experiment's `analyses = (...)` (the experiment side is the
+  `add-experiment` skill's).
+
+`analyses/default/tweezer_histogram.py` and
+`GUI/default_analyses/tweezer_histogram.py` are the example. The calculation
+shares its numbers with the live `analyses/live/tweezer_loading.py` through
+`analysis/array_loading.py`, so the two cannot disagree. Do the same whenever a
+live and a file analysis compute one quantity. Drawing code shared with an
+applet belongs in `GUI/views/` (see the `add-applet` skill).
 
 ## How the framework runs your class
 
@@ -135,7 +149,7 @@ An analysis may subscribe to several streams. `self.current_stream` is the topic
 stream, and replaces its state dict rather than mutating it). Pass the input header's `rid`,
 `_offset` and `_imgresolution` through, so downstream viewers and fits can place the result.
 
-Fits: put a fit on the Data hub as header fields (`CloudFitAnalysis` in `analysis/cloud_fit.py`:
+Fits: put a fit on the Data hub as header fields (`CloudFitAnalysis` in `analyses/live/cloud_fit.py`, fit functions in `analysis/cloud_fit.py`:
 `fit_cloud(data, resolution, origin)` then `.as_dict()`). When it fails, publish `success: False`
 with every numeric field NaN, never the fit's seed or an exception, so a live plot shows a gap
 rather than a false zero; the Image Monitor's `overlaystreams` draws such a header over the image.
@@ -202,8 +216,8 @@ trip by writing "publishes two datastreams" in prose; `projections.py` says
 After writing the file, check it the way the GUI will:
 
 ```bash
-grep -c "imagestreams\|ImageAnalysis" pytweezer/analysis/<yourfile>.py
-grep -c "datastreams\|DataAnalysis" pytweezer/analysis/<yourfile>.py
+grep -c "imagestreams\|ImageAnalysis" pytweezer/analyses/live/<yourfile>.py
+grep -c "datastreams\|DataAnalysis" pytweezer/analyses/live/<yourfile>.py
 ```
 
 Exactly one of those must be non-zero.
@@ -229,7 +243,7 @@ and assert on what came back or what got published:
 
 ```python
 def test_centre_of_mass_finds_a_single_bright_spot():
-    from pytweezer.analysis.centre_of_mass import CentreOfMass
+    from pytweezer.analyses.live.centre_of_mass import CentreOfMass
 
     com = build(CentreOfMass, {"threshold": 0.0})
     frame = np.zeros((8, 8), dtype=np.uint16)

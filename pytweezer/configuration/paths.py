@@ -20,6 +20,8 @@ tweezerpath = os.path.realpath(_here + "/../..")
 configpath = os.path.realpath(_here + "/../../configuration/")
 
 icon_path = tweezerpath + "/pytweezer/GUI/icons/"
+#: The scripts the Analysis Manager lists and runs.
+live_analyses_path = tweezerpath + "/pytweezer/analyses/live/"
 #: This PC's Properties tree, saved by the Properties server; not tracked by git.
 propertyfilename = configpath + "/properties/properties.json"
 #: The committed tree a PC starts from until it has saved its own.

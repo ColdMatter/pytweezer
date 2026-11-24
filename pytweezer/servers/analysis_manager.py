@@ -8,8 +8,9 @@ from typing import Any
 import zmq
 
 from pytweezer.configuration.config import get_config
+from pytweezer.configuration.paths import live_analyses_path
 from pytweezer.logging_utils import get_logger
-from pytweezer.servers import Properties, tweezerpath, zmqcontext
+from pytweezer.servers import Properties, zmqcontext
 
 logger = get_logger("pytweezer.servers.analysis_manager")
 
@@ -27,9 +28,7 @@ class AnalysisManagerService:
 
         # Keep legacy property namespace so existing analysis configs still work.
         self.props = Properties("Analysis")
-        self.analysisdir = self.props.get(
-            "analysisdir", tweezerpath + "/pytweezer/analysis/"
-        )
+        self.analysisdir = live_analyses_path
 
         self.context = zmqcontext
         self.socket = self.context.socket(zmq.REP)

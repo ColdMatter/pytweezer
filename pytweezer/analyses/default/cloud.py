@@ -1,4 +1,4 @@
-"""The cloud fits a measurement file recorded, for the Results tab.
+"""The MOT cloud fits a measurement file recorded: ``cloud_fit`` and ``cloud_temperature``.
 
 Reads the cloud fits an experiment records per point for each camera, as
 :meth:`~pytweezer.experiments.load_tweezers.LoadTweezersMOTImage.record_cloud_fit`
@@ -10,6 +10,10 @@ each of :data:`~pytweezer.analysis.cloud_fit.ERROR_FIELDS`, and optionally
 The file does not record where the mean image sits in the camera frame, so
 :func:`point_image` refits it in its own pixel coordinates: the same fit of the
 same image as the one recorded, placed where the image is drawn.
+
+:class:`~pytweezer.GUI.default_analyses.cloud.CloudFitView` and
+:class:`~pytweezer.GUI.default_analyses.cloud.CloudTemperatureView` are the
+Results-tab views, in :mod:`pytweezer.GUI.default_analyses.cloud`.
 """
 
 from dataclasses import dataclass

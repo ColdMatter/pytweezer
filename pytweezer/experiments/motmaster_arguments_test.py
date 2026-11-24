@@ -30,4 +30,4 @@ class MotMasterArgumentsTest(MotMasterExperiment):
         for name, value in sent.items():
             self.record(f"sent_{name}", value)
         if not self.dry_run:
-            self.run_sequences()
+            self.run_motmaster_sequence()

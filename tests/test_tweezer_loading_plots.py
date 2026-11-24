@@ -1,4 +1,4 @@
-from pytweezer.GUI.tweezer_loading_plots import TweezerLoadingPlots
+from pytweezer.GUI.views.tweezer_loading import TweezerLoadingPlots
 from tests.test_analysis import SITE_CENTRES, loading_window, patterned_frame
 
 

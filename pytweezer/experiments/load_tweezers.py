@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pytweezer.analysis import analysis as an
-from pytweezer.analysis.array_loading import photons_at_sites
+from pytweezer.analysis.array_loading import TrapSites
 from pytweezer.analysis.cloud_fit import SPECIES_MASS_AMU, fit_frames
 from pytweezer.analysis.trap_sites import same_geometry, to_roi
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
@@ -116,7 +115,11 @@ class LoadTweezers(MotMasterExperiment):
     rig: Rearrangement = Device("Rb Rearrangement Rig")
 
     hamcam_gain = Number(
-        600, min=0, group="Camera", tooltip="EM-gain sensitivity of the HamCam"
+        600,
+        min=0,
+        group="Camera",
+        tooltip="EM-gain sensitivity of the HamCam, set once before the first point",
+        scannable=False,
     )
     hamcam_roi_x0 = _roi_argument(110, size=False)
     hamcam_roi_width = _roi_argument(256, size=True)
@@ -134,21 +137,14 @@ class LoadTweezers(MotMasterExperiment):
         tooltip="record the sum of the raw pixel values in each site's window, "
         "beside its occupancy",
     )
-    use_motmaster_parameter_overrides = Bool(
-        True,
-        scannable=False,
-        tooltip="send the saved parameters bound to the sequence to MOTMaster as "
-        "parameter overrides; off, the script's own values run (a value set in "
-        "the form still wins)",
-    )
-
-    def saved_bindings(self) -> dict[str, str]:
-        return (
-            super().saved_bindings() if self.use_motmaster_parameter_overrides else {}
-        )
 
     def prepare(self) -> None:
         super().prepare()
+        self.set_up_hamcam()
+        self.load_trap_sites()
+
+    def set_up_hamcam(self) -> None:
+        """Put the HamCam in external exposure with EM gain, binning 1 and the chosen ROI, live."""
         self.hamcam.stop_live()
         self.hamcam.set_binning(1)
         self.roi_origin = tuple(
@@ -164,9 +160,10 @@ class LoadTweezers(MotMasterExperiment):
         self.hamcam.enable_em_gain(True)
         self.hamcam.enable_direct_em_gain(True)
         self.hamcam.set_gain(self.hamcam_gain)
-        self.sent_gain = self.hamcam_gain
         self.hamcam.start_live()
 
+    def load_trap_sites(self) -> None:
+        """Load the accepted trap sites into ``trap_sites`` and record them, or record why there are none."""
         # Fetched only for sequence bindings, so not with the overrides off.
         saved = self.saved_parameters or get_saved_parameters()
         self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(saved)
@@ -180,27 +177,52 @@ class LoadTweezers(MotMasterExperiment):
                 )
             logger.info("Recording no trap sites: %s", self.no_trap_sites_reason)
             return
-        self.record("trap_sites", np.array(list(self.trap_sites.values())))
-        self.record("trap_window_size", self.trap_window_size, unit="px")
-        self.record("trap_feature_size", self.trap_feature_size, unit="px")
-        self.record("threshold", self.trap_threshold, unit="photons")
+        self.record("trap_sites", np.array(list(self.trap_sites.positions.values())))
+        self.record("trap_window_size", self.trap_sites.window_size, unit="px")
+        self.record("trap_feature_size", self.trap_sites.feature_size, unit="px")
+        self.record("threshold", self.trap_sites.threshold, unit="photons")
+
+    def run_point(self) -> None:
+        mark = self.hamcam.start_shot({"rid": self.rid})
+        self.run_motmaster_sequence()
+        frames = np.asarray(self.hamcam.wait_frames(mark, 2))
+        self.record_data(frames)
 
     def finish(self) -> None:
         try:
             self.hamcam.start_live()  # does nothing unless a failure left it stopped
             self.hamcam.end_shots()
+
         finally:
             super().finish()
 
-    def saved_trap_sites(
-        self, saved: dict
-    ) -> tuple[dict[int, tuple[int, int]] | None, str]:
-        """The accepted trap sites in ``saved`` as whole pixels of this ROI, by index; or ``None`` and why.
+    def record_data(self, frames: np.ndarray) -> None:
+        """Record the frames, signal and per-site results of one shot's two HamCam ``frames``."""
+        if self.save_raw_images:
+            self.record("hamcam_images", frames)
+        first_image, second_image = frames
+        self.record(
+            "signal_counts",
+            float(first_image.sum(dtype=float) - second_image.sum(dtype=float)),
+            unit="counts",
+        )
+        if self.trap_sites is None:
+            return
 
-        An empty reason means the experiment wants none.
+        first, second = self.trap_sites.occupied(frames)
+        self.record("first_occupied", first)
+        self.record("second_occupied", second)
+        self.record("loading", float(first.mean()))
+        self.record("survival", float(second[first].mean()) if first.any() else np.nan)
+        if self.save_tweezer_counts:
+            first_counts, second_counts = self.trap_sites.counts(frames)
+            self.record("first_counts", first_counts, unit="counts")
+            self.record("second_counts", second_counts, unit="counts")
 
-        Also sets ``trap_window_size``, ``trap_feature_size`` and
-        ``trap_threshold`` from ``saved``. Sites fitted to another
+    def saved_trap_sites(self, saved: dict) -> tuple[TrapSites | None, str]:
+        """The accepted trap sites in ``saved``, placed in whole pixels of this ROI; or ``None`` and why.
+
+        An empty reason means the experiment wants none. Sites fitted to another
         array than the rig has on the SLM are used with a warning; if the rig
         does not know its array, or cannot be reached, they are used unchecked.
         """
@@ -221,14 +243,12 @@ class LoadTweezers(MotMasterExperiment):
                 "has on the SLM; using them anyway. Run FindTrapSites again and "
                 "accept its proposal to fit the current array."
             )
-        self.trap_window_size = int(saved["trap_window_size"])
-        self.trap_feature_size = int(saved["trap_feature_size"])
-        self.trap_threshold = float(saved["trap_threshold"])
+        window_size = int(saved["trap_window_size"])
         # The camera may round the ROI's corner; sites are placed by the one it used.
         roi_x0, roi_y0 = self.roi_origin
         roi_width, roi_height = self.hamcam_roi_width, self.hamcam_roi_height
         sites = np.rint(to_roi(saved["trap_sites"], roi_y0, roi_x0)).astype(int)
-        half = self.trap_window_size // 2
+        half = window_size // 2
         outside = [
             index
             for index, (y, x) in enumerate(sites)
@@ -238,77 +258,13 @@ class LoadTweezers(MotMasterExperiment):
             return None, (
                 f"the summing windows of trap sites {outside} leave the camera's ROI"
             )
-        return {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}, ""
-
-    def take_shot(self, **sequence: Any) -> np.ndarray:
-        """Run the sequence once with script parameters ``sequence``; the HamCam's two frames."""
-        return self.take_frames(2, **sequence)
-
-    def take_frames(self, n: int, **sequence: Any) -> np.ndarray:
-        """Run the sequence once with script parameters ``sequence``; the HamCam's first ``n`` frames of it."""
-        if self.hamcam_gain != self.sent_gain:
-            # DCAM refuses some settings while capturing.
-            self.hamcam.stop_live()
-            self.hamcam.set_gain(self.hamcam_gain)
-            self.hamcam.start_live()
-            self.sent_gain = self.hamcam_gain
-        mark = self.hamcam.start_shot({"rid": self.rid})
-        self.run_sequences(**sequence)
-        return np.asarray(self.hamcam.wait_frames(mark, n))
-
-    @staticmethod
-    def top_hat(frames, feature_size: int) -> list[np.ndarray]:
-        return [
-            an.morphological_tophat_high_pass(
-                np.asarray(frame, dtype=float), feature_size=feature_size
-            )
-            for frame in frames
-        ]
-
-    def site_photons(self, frames) -> np.ndarray:
-        """Every site's photons in each of ``frames``, top-hat filtered: ``(frames, sites)``."""
-        filtered = self.top_hat(frames, self.trap_feature_size)
-        return photons_at_sites(filtered, self.trap_sites, self.trap_window_size)
-
-    def site_counts(self, frames) -> np.ndarray:
-        """Every site's summed raw pixel values in each of ``frames``: ``(frames, sites)``."""
-        return np.array(
-            [
-                an.sum_pixel_values(
-                    np.asarray(frame),
-                    self.trap_sites,
-                    window_size=self.trap_window_size,
-                )
-                for frame in frames
-            ]
-        )
-
-    def run_point(self) -> None:
-        self.record_tweezers(self.take_shot())
-
-    def record_tweezers(self, frames: np.ndarray) -> None:
-        """Record the tweezer results of one shot's two HamCam ``frames``."""
-        if self.save_raw_images:
-            self.record("hamcam_images", frames)
-        first_image, second_image = frames
-        self.record(
-            "signal_counts",
-            float(first_image.sum(dtype=float) - second_image.sum(dtype=float)),
-            unit="counts",
-        )
-        if self.trap_sites is not None:
-            images = [first_image, second_image]
-            first, second = self.site_photons(images) > self.trap_threshold
-            self.record("first_occupied", first)
-            self.record("second_occupied", second)
-            self.record("loading", float(first.mean()))
-            self.record(
-                "survival", float(second[first].mean()) if first.any() else np.nan
-            )
-            if self.save_tweezer_counts:
-                first, second = self.site_counts(images)
-                self.record("first_counts", first, unit="counts")
-                self.record("second_counts", second, unit="counts")
+        positions = {index: (int(y), int(x)) for index, (y, x) in enumerate(sites)}
+        return TrapSites(
+            positions,
+            window_size,
+            int(saved["trap_feature_size"]),
+            float(saved["trap_threshold"]),
+        ), ""
 
 
 class LoadTweezersNImages(LoadTweezers):
@@ -319,12 +275,11 @@ class LoadTweezersNImages(LoadTweezers):
         script="RbTweezerBasic2026_multiple_images",
     )
 
-    def take_shot(self, **sequence: Any) -> np.ndarray:
-        """Run the sequence once with script parameters ``sequence``; the HamCam's ten frames."""
-        return self.take_frames(1, **sequence)
-
     def run_point(self) -> None:
-        self.take_shot()
+        # The live mode broadcasts the frames; nothing is recorded.
+        mark = self.hamcam.start_shot({"rid": self.rid})
+        self.run_motmaster_sequence()
+        self.hamcam.wait_frames(mark, 1)
 
 
 class LoadTweezersMOTImage(LoadTweezers):
@@ -358,19 +313,17 @@ class LoadTweezersMOTImage(LoadTweezers):
         self.orca.start_live()
         self.record("cloud_mass_amu", SPECIES_MASS_AMU["Rb"], unit="u")
 
+    def run_point(self) -> None:
+        orca_mark = self.orca.start_shot({"rid": self.rid})
+        super().run_point()
+        self.record_cloud_fit(np.asarray(self.orca.wait_frames(orca_mark, 1)))
+
     def finish(self) -> None:
         try:
             self.orca.start_live()  # does nothing unless a failure left it stopped
             self.orca.end_shots()
         finally:
             super().finish()
-
-    def run_point(self) -> None:
-        orca_mark = self.orca.start_shot({"rid": self.rid})
-        hamcam_frames = self.take_shot()
-        orca_frames = np.asarray(self.orca.wait_frames(orca_mark, 1))
-        self.record_tweezers(hamcam_frames)
-        self.record_cloud_fit(orca_frames)
 
     def record_cloud_fit(self, frames: np.ndarray) -> None:
         """Fit the mean of the ORCA's ``frames`` and record the cloud as ``orca_*``."""

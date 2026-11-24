@@ -4,7 +4,11 @@ from typing import ClassVar
 
 import numpy as np
 
-from pytweezer.analysis import analysis as an
+from pytweezer.analysis.array_loading import (
+    TrapSites,
+    background_subtracted_mean,
+    top_hat_image,
+)
 from pytweezer.analysis.trap_sites import default_geometry, fit_trap_sites
 from pytweezer.experiment.arguments import Bool, Integer, Number
 from pytweezer.experiment.optimisers import SEARCH, Fit
@@ -55,9 +59,6 @@ class FindTrapSites(Fit, LoadTweezers):
     default_columns = Integer(8, min=1, group="Default array")
     default_spacing = Number(5e-6, unit="um", scale=1e-6, min=0, group="Default array")
 
-    def saved_trap_sites(self, saved):
-        return None, ""  # it finds them
-
     def prepare(self) -> None:
         super().prepare()
         array = self.rig.get_array()
@@ -69,32 +70,36 @@ class FindTrapSites(Fit, LoadTweezers):
             )
         self.record("sites_from", "rig" if array else "default")
 
+    def saved_trap_sites(self, saved):
+        return None, ""  # it finds them
+
     def take_calibration_shots(self) -> tuple[list, list]:
         """``calibration_shots`` shots with the tweezers off in the background drop.
 
         Returns their first and second frames. With ``save_raw_images`` the
         frames are recorded as ``hamcam_images``, ``(shots, 2, height, width)``.
         """
-        stacks = np.array(
-            [
-                self.take_shot(
-                    BackgroundDrop=1, tTweezerSetVVA0=0.0, tTweezerSetVVA1=0.0
-                )
-                for _ in range(self.calibration_shots)
-            ]
-        )
+        stacks = []
+        for _ in range(self.calibration_shots):
+            mark = self.hamcam.start_shot({"rid": self.rid})
+            self.run_motmaster_sequence(
+                BackgroundDrop=1, tTweezerSetVVA0=0.0, tTweezerSetVVA1=0.0
+            )
+            stacks.append(self.hamcam.wait_frames(mark, 2))
+        stacks = np.array(stacks)
         if self.save_raw_images:
             self.record("hamcam_images", stacks)
         return list(stacks[:, 0]), list(stacks[:, 1])
 
     def fit(self) -> dict:
         firsts, backgrounds = self.take_calibration_shots()
-        average = an.tweezer_show_bg_subtracted(firsts, backgrounds, show=False)
+        average = background_subtracted_mean(firsts, backgrounds)
         self.record("calibration_image", average)
-        filtered = an.morphological_tophat_high_pass(
-            np.asarray(average, dtype=float), feature_size=self.feature_size
+        found = fit_trap_sites(
+            top_hat_image(average, self.feature_size),
+            self.geometry,
+            window_size=self.window_size,
         )
-        found = fit_trap_sites(filtered, self.geometry, window_size=self.window_size)
         self.record("roi_sites", found.sites, unit="px")
         self.record("scale", found.scale, unit="px/µm")
         self.record("angle", found.angle_deg, unit="deg")
@@ -103,21 +108,15 @@ class FindTrapSites(Fit, LoadTweezers):
         whole_pixels = {
             index: (round(y), round(x)) for index, (y, x) in enumerate(found.sites)
         }
-        _, _, threshold, fidelity = an.get_array_loading_statistics(
-            self.top_hat(firsts, self.feature_size),
-            whole_pixels,
-            threshold=self.initial_threshold,
-            window_size=self.window_size,
-            binning=60,
-            show_histogram=False,
-            threshold_detection=True,
-            verbose=False,
+        calibration_sites = TrapSites(
+            whole_pixels, self.window_size, self.feature_size, self.initial_threshold
         )
-        self.record("threshold", float(threshold), unit="photons")
-        self.record("calibration_fidelity", float(fidelity))
+        calibration = calibration_sites.fit_loading(firsts)
+        self.record("threshold", calibration.threshold, unit="photons")
+        self.record("calibration_fidelity", calibration.fidelity)
         return {
             "trap_sites": found.sites + self.roi_origin[::-1],
-            "trap_threshold": float(threshold),
+            "trap_threshold": calibration.threshold,
             "trap_window_size": self.window_size,
             "trap_feature_size": self.feature_size,
             "trap_geometry": self.geometry,

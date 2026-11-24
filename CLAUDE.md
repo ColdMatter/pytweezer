@@ -172,7 +172,7 @@ user which changes are breaking; don't go looking for notebooks they affect.
 - Name every branch for what it changes (e.g. `fix-copier-share-chmod`), including branches only Claude works on - never a session ID, date or `wip`/`tmp`
 - If a remote session is told to develop on a pre-assigned branch (e.g. `ccr-…`), you have my explicit permission to create and push a descriptively named branch instead, and to ignore the assigned name
 - A line `Depends on owner/repo#N` (or `#N`) in a PR description holds it until that PR merges or that issue closes
-- Commit and push as you go: after each coherent, tested step (e.g. one tab restyled), not in one batch at the end. Stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
+- When committing, stage only your own files, leaving unrelated changes (e.g. `.vscode/settings.json`) alone
 - `.vscode/settings.json` is shared by everyone who opens the repo. If a commit would include changes to it that the user didn't ask for (often a personal preference saved under the Settings UI's Workspace tab), warn the user and ask before committing them
 - **The main branch should always be deployable** - no broken code or failing tests allowed
 
@@ -192,6 +192,11 @@ entry when it opens, not whether it is running now (Device Status and the
 Devices tab say that). Filesystem-layout constants live in
 `pytweezer/configuration/paths.py`; the **root** `configuration/` directory is
 unrelated JSON data.
+
+A singular package is framework (`experiment/`, `analysis/`) and a plural one is
+what people edit day to day (`experiments/`, `optimisers/`, `analyses/`,
+`GUI/viewers/`, `GUI/default_analyses/`); `GUI/views/` is the exception, framework:
+the shared base drawings that applets and default-analysis views build on.
 
 Every managed process is launched the same way — `python <script> <name>`, where
 `name` is the CONFIG key that the script looks itself up under.

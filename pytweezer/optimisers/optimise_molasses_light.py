@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import ClassVar
 
 from pytweezer.experiment.arguments import Integer, Number
-from pytweezer.experiment.optimisers import SEARCH, BayesianOptimisation, Dimension
-from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
+from pytweezer.experiment.optimisers import SEARCH, Dimension
+from pytweezer.experiments.load_tweezers import LoadTweezers
+from pytweezer.optimisers.tweezer_optimisation import TweezerOptimisation
 
 #: ``(setting, script parameter, span)`` for both molasses stages' light.
 _MOLASSES_LIGHT = [
@@ -15,7 +16,7 @@ _MOLASSES_LIGHT = [
 ]
 
 
-class OptimiseMolassesLight(BayesianOptimisation, TweezerArrayMeasurement):
+class OptimiseMolassesLight(TweezerOptimisation, LoadTweezers):
     """Find the cooling and repump VCOs and VVAs of both molasses stages that recapture the most atoms after a drop.
 
     Scored as :class:`~pytweezer.optimisers.optimise_molasses_shims.OptimiseMolassesShims`:

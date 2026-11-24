@@ -17,12 +17,12 @@ class DemoResonance(Experiment):
     def prepare(self):
         self.rng = np.random.default_rng(self.noise_seed)
 
+    def run_point(self):
+        for name, value in self.measure().items():
+            self.record(name, value)
+
     def measure(self, *, detuning: float = 0.0, power: float = 1.0) -> dict[str, float]:
         lineshape = self.half_width**2 / (
             (detuning - self.centre) ** 2 + self.half_width**2
         )
         return {"counts": float(self.rng.poisson(self.peak_counts * power * lineshape))}
-
-    def run_point(self):
-        for name, value in self.measure().items():
-            self.record(name, value)

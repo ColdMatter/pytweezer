@@ -1,34 +1,25 @@
-"""Loading histograms and loading map of the tweezer array, from one result.
+"""The tweezer loading plots: histograms of the photons beside the array's loading map.
 
-Draws the ``(header, photons)`` pair that the live ``tweezer_loading``
-analysis publishes and :func:`pytweezer.analysis.tweezer_histogram.tweezer_histogram`
-returns for a file: what ``analysis.get_array_loading_statistics(show_histogram=True)``
-plots in the optimisation notebooks. The photon histogram of each site, the
-histogram of all sites with its two-Gaussian fit and occupancy threshold, and
-each site's loading probability at its place in the image, with a line
-beneath giving the mean loading, its spread over sites, the fidelity and the
-fit. The loading map's colour range can be dragged on its colour bar.
+Drawn by the live ``tweezer_loading`` viewer and by the Results-tab tweezer
+histogram view, from the same ``(header, photons)`` pair. This is what
+``analysis.get_array_loading_statistics(show_histogram=True)`` plots in the
+optimisation notebooks.
 """
 
 import numpy as np
 import pyqtgraph as pg
 from PyQt6 import QtWidgets
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QFont
 
 from pytweezer.GUI.theme import CURVE_COLORS, plot_title_style, style_plot
+from pytweezer.GUI.views.histogram import HistogramPlot
 
 TEXT_COLOUR = "#e6e6e6"
 DATA_COLOUR = CURVE_COLORS[7]
 BACKGROUND_COLOUR = CURVE_COLORS[0]
 SIGNAL_COLOUR = CURVE_COLORS[1]
 THRESHOLD_COLOUR = CURVE_COLORS[2]
-
-
-def _translucent(hexcode, alpha):
-    colour = QColor(hexcode)
-    colour.setAlpha(alpha)
-    return colour
 
 
 def _gaussian(x, mean, variance, weight):
@@ -65,28 +56,18 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
         win = pg.GraphicsLayoutWidget()
         layout.addWidget(win)
 
-        self.site_plot = win.addPlot()
-        self.total_plot = win.addPlot()
-        self.map_plot = win.addPlot()
+        self.site_plot = HistogramPlot("Each site", "photons")
+        self.total_plot = HistogramPlot("All sites", "photons")
+        self.map_plot = pg.PlotItem()
         self.plot_items = (self.site_plot, self.total_plot, self.map_plot)
-        for plot, title in zip(
-            self.plot_items, ("Each site", "All sites", "Loading probability")
-        ):
-            plot.setTitle(title, **plot_title_style())
-            style_plot(plot)
-        for plot in (self.site_plot, self.total_plot):
-            plot.showGrid(x=True, y=True, alpha=0.15)
-            plot.setLabel("bottom", "photons")
-            plot.setLabel("left", "probability density")
-            plot.getAxis("left").enableAutoSIPrefix(False)
+        for plot in self.plot_items:
+            win.addItem(plot)
+        self.map_plot.setTitle("Loading probability", **plot_title_style())
+        style_plot(self.map_plot)
 
         self.total_plot.addLegend(offset=(-10, 10))
-        self.total_data = self.total_plot.plot(
-            stepMode="center",
-            fillLevel=0,
-            brush=_translucent(DATA_COLOUR, 70),
-            pen=pg.mkPen(DATA_COLOUR, width=1),
-            name="data",
+        self.total_data = self.total_plot.add_histogram(
+            DATA_COLOUR, filled=True, alpha=70, name="data"
         )
         self.total_fit = self.total_plot.plot(
             pen=pg.mkPen(TEXT_COLOUR, width=2), name="fit"
@@ -163,30 +144,20 @@ class TweezerLoadingPlots(QtWidgets.QWidget):
 
         n_sites = photons.shape[1]
         if len(self.site_curves) != n_sites:
-            self.site_plot.clear()
+            self.site_plot.clear_histograms()
             self.site_curves = [
-                self.site_plot.plot(
-                    stepMode="center",
-                    pen=pg.mkPen(
-                        _translucent(CURVE_COLORS[i % len(CURVE_COLORS)], 150), width=1
-                    ),
+                self.site_plot.add_histogram(
+                    CURVE_COLORS[i % len(CURVE_COLORS)], alpha=150
                 )
                 for i in range(n_sites)
             ]
         site_bins = max(2, int(self.site_bins))
         for curve, site_photons in zip(self.site_curves, photons.T, strict=True):
-            density, edges = np.histogram(
-                site_photons, bins=site_bins, range=(low, high), density=True
-            )
-            curve.setData(edges, density)
+            HistogramPlot.draw(curve, site_photons, site_bins, (low, high))
 
-        density, edges = np.histogram(
-            photons.ravel(),
-            bins=max(2, int(self.bins)),
-            range=(low, high),
-            density=True,
+        HistogramPlot.draw(
+            self.total_data, photons.ravel(), max(2, int(self.bins)), (low, high)
         )
-        self.total_data.setData(edges, density)
 
         background, signal = head.get("background"), head.get("signal")
         if background and signal:

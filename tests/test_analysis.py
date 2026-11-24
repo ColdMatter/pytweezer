@@ -1,4 +1,4 @@
-"""Unit tests for the streaming analysis processes in ``pytweezer/analysis/``.
+"""Unit tests for the streaming analysis processes in ``pytweezer/analyses/live/``.
 
 An analysis's real ``__init__`` opens a :class:`Properties` connection and a
 pub/sub client, so constructing one here would need live hubs and would leave
@@ -97,7 +97,7 @@ def test_data_analysis_handles_header_only_messages():
 
 
 def test_image_stats_publishes_expected_statistics():
-    from pytweezer.analysis.image_stats import ImageStats
+    from pytweezer.analyses.live.image_stats import ImageStats
 
     stats_analysis = build(ImageStats)
     frame = np.array([[0, 2], [4, 6]], dtype=np.uint16)
@@ -116,7 +116,7 @@ def test_image_stats_publishes_expected_statistics():
 
 
 def test_image_selector_passes_only_the_chosen_image_of_each_shot():
-    from pytweezer.analysis.imageselector import ImageSelector
+    from pytweezer.analyses.live.imageselector import ImageSelector
 
     selector = build(ImageSelector, {"SelectedImage": 1})
     frame = np.ones((2, 2))
@@ -126,7 +126,7 @@ def test_image_selector_passes_only_the_chosen_image_of_each_shot():
 
 
 def test_data_average_publishes_the_mean_of_each_shots_frames():
-    from pytweezer.analysis.data_average import DataAverage
+    from pytweezer.analyses.live.data_average import DataAverage
 
     messages = iter(
         [
@@ -154,7 +154,7 @@ def test_data_average_publishes_the_mean_of_each_shots_frames():
 
 
 def test_image_stats_drops_empty_frame():
-    from pytweezer.analysis.image_stats import ImageStats
+    from pytweezer.analyses.live.image_stats import ImageStats
 
     stats_analysis = build(ImageStats)
     assert stats_analysis.process({}, np.zeros((0, 0))) is None
@@ -167,7 +167,7 @@ def test_image_stats_drops_empty_frame():
 
 
 def test_projections_sums_both_axes():
-    from pytweezer.analysis.projections import Projections
+    from pytweezer.analyses.live.projections import Projections
 
     proj = build(Projections)
     frame = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.uint8)
@@ -193,7 +193,7 @@ def gaussian_frame(shape, x0, y0, sigma, amplitude, offset=5.0, seed=0):
 
 
 def test_projections_ignores_non_2d_data():
-    from pytweezer.analysis.projections import Projections
+    from pytweezer.analyses.live.projections import Projections
 
     proj = build(Projections)
     assert proj.process({}, np.arange(5)) is None
@@ -201,7 +201,7 @@ def test_projections_ignores_non_2d_data():
 
 
 def test_projection_fit_curve_matches_sums_of_a_gaussian():
-    from pytweezer.analysis.projections import Projections
+    from pytweezer.analyses.live.projections import Projections
 
     resolution, origin = 2e-6, (30.0, 10.0)
     frame = gaussian_frame((60, 90), x0=40.0, y0=25.0, sigma=6.0, amplitude=200.0)
@@ -229,7 +229,7 @@ def test_projection_fit_curve_matches_sums_of_a_gaussian():
 
 
 def test_projection_of_a_flat_noisy_frame_publishes_no_fit_curve():
-    from pytweezer.analysis.projections import Projections
+    from pytweezer.analyses.live.projections import Projections
 
     frame = np.random.default_rng(3).poisson(1000.0, (60, 90)).astype(np.uint16)
 
@@ -250,7 +250,7 @@ def test_projection_of_a_flat_noisy_frame_publishes_no_fit_curve():
 
 
 def test_gaussian_fit_recovers_known_peak():
-    from pytweezer.analysis.gaussian_fit import GaussianFit, gaussian
+    from pytweezer.analyses.live.gaussian_fit import GaussianFit, gaussian
 
     fit = build(GaussianFit, {"method": "lsq"})
     x = np.linspace(0, 40, 200)
@@ -270,7 +270,7 @@ def test_gaussian_fit_recovers_known_peak():
 
 
 def test_roi_slice_crops_and_shifts_offset():
-    from pytweezer.analysis.roi_slice import RoiSlice
+    from pytweezer.analyses.live.roi_slice import RoiSlice
 
     roi = build(
         RoiSlice,
@@ -322,7 +322,7 @@ def patterned_frame(shot):
 
 
 def loading_window(frames, shots=100):
-    from pytweezer.analysis.tweezer_loading import LoadingStatistics
+    from pytweezer.analyses.live.tweezer_loading import LoadingStatistics
 
     statistics = LoadingStatistics()
     for frame in frames:
@@ -450,8 +450,11 @@ def saved_sites(**changes):
 
 
 def loading_analysis(monkeypatch, saved, **properties):
-    from pytweezer.analysis import tweezer_loading
-    from pytweezer.analysis.tweezer_loading import LoadingStatistics, TweezerLoading
+    from pytweezer.analyses.live import tweezer_loading
+    from pytweezer.analyses.live.tweezer_loading import (
+        LoadingStatistics,
+        TweezerLoading,
+    )
 
     monkeypatch.setattr(tweezer_loading, "get_saved_parameters", lambda: saved)
     analysis = build(TweezerLoading, {"rig": ""} | properties)
@@ -498,7 +501,10 @@ def test_tweezer_loading_publishes_no_photons_for_sites_outside_the_frame(
 
 
 def test_tweezer_loading_ignores_the_second_image_of_a_shot():
-    from pytweezer.analysis.tweezer_loading import LoadingStatistics, TweezerLoading
+    from pytweezer.analyses.live.tweezer_loading import (
+        LoadingStatistics,
+        TweezerLoading,
+    )
 
     analysis = build(TweezerLoading, {"image_index": 0})
     analysis.statistics = LoadingStatistics()
@@ -510,7 +516,7 @@ def test_tweezer_loading_ignores_the_second_image_of_a_shot():
 
 
 def test_tweezer_loading_restarts_the_window_when_the_frame_size_changes():
-    from pytweezer.analysis.tweezer_loading import LoadingStatistics
+    from pytweezer.analyses.live.tweezer_loading import LoadingStatistics
 
     statistics = LoadingStatistics()
     for shot in range(5):
@@ -561,7 +567,7 @@ def unreachable_rig(name, timeout):
 def test_tweezer_loading_says_whether_the_sites_fit_the_array_on_the_rig(
     monkeypatch, get_rig, match
 ):
-    from pytweezer.analysis import tweezer_loading
+    from pytweezer.analyses.live import tweezer_loading
 
     monkeypatch.setattr(tweezer_loading, "get_device", get_rig)
     analysis = loading_analysis(monkeypatch, saved_sites(), rig="Rb Rearrangement Rig")
@@ -595,8 +601,8 @@ def test_tweezer_loading_starts_afresh_when_a_new_task_sends_frames(monkeypatch)
 
 
 def counts_analysis(monkeypatch, saved, **properties):
-    from pytweezer.analysis import tweezer_counts
-    from pytweezer.analysis.tweezer_counts import TweezerCounts
+    from pytweezer.analyses.live import tweezer_counts
+    from pytweezer.analyses.live.tweezer_counts import TweezerCounts
 
     monkeypatch.setattr(tweezer_counts, "get_saved_parameters", lambda: saved)
     return build(TweezerCounts, properties)
@@ -656,8 +662,8 @@ def test_tweezer_counts_publishes_nan_counts_without_saved_sites(monkeypatch):
 
 
 def occupancy_counts_analysis(monkeypatch, saved):
-    from pytweezer.analysis import tweezer_occupancy_counts
-    from pytweezer.analysis.tweezer_occupancy_counts import TweezerOccupancyCounts
+    from pytweezer.analyses.live import tweezer_occupancy_counts
+    from pytweezer.analyses.live.tweezer_occupancy_counts import TweezerOccupancyCounts
 
     monkeypatch.setattr(tweezer_occupancy_counts, "get_saved_parameters", lambda: saved)
     return build(TweezerOccupancyCounts)
@@ -734,7 +740,8 @@ def test_tweezer_occupancy_counts_publishes_nan_counts_without_saved_sites(
 
 
 def test_cloud_fit_analysis_publishes_fit_fields_with_geometry():
-    from pytweezer.analysis.cloud_fit import FIELDS, CloudFitAnalysis
+    from pytweezer.analyses.live.cloud_fit import CloudFitAnalysis
+    from pytweezer.analysis.cloud_fit import FIELDS
 
     resolution, origin = 3e-6, (20.0, 40.0)
     frame = gaussian_frame((80, 100), x0=55.0, y0=30.0, sigma=7.0, amplitude=300.0)
@@ -761,7 +768,8 @@ def test_cloud_fit_analysis_publishes_fit_fields_with_geometry():
 
 
 def test_cloud_fit_analysis_publishes_nan_for_a_frame_with_no_cloud():
-    from pytweezer.analysis.cloud_fit import FIELDS, CloudFitAnalysis
+    from pytweezer.analyses.live.cloud_fit import CloudFitAnalysis
+    from pytweezer.analysis.cloud_fit import FIELDS
 
     frame = np.random.default_rng(3).poisson(100.0, (80, 100)).astype(np.uint16)
     analysis = build(CloudFitAnalysis)
@@ -773,8 +781,8 @@ def test_cloud_fit_analysis_publishes_nan_for_a_frame_with_no_cloud():
 
 
 def test_offset_without_a_scale_places_pixels_from_the_crop_origin():
-    from pytweezer.analysis.cloud_fit import CloudFitAnalysis
-    from pytweezer.analysis.projections import Projections
+    from pytweezer.analyses.live.cloud_fit import CloudFitAnalysis
+    from pytweezer.analyses.live.projections import Projections
 
     frame = gaussian_frame((60, 90), x0=40.0, y0=25.0, sigma=6.0, amplitude=200.0)
     head = {"_offset": [30.0, 10.0]}
@@ -794,7 +802,7 @@ def test_offset_without_a_scale_places_pixels_from_the_crop_origin():
 
 
 def test_cloud_fit_analysis_reports_pixels_without_a_scale():
-    from pytweezer.analysis.cloud_fit import CloudFitAnalysis
+    from pytweezer.analyses.live.cloud_fit import CloudFitAnalysis
 
     analysis = build(CloudFitAnalysis)
     analysis.process(
@@ -816,7 +824,7 @@ def test_cloud_fit_analysis_reports_pixels_without_a_scale():
     ids=["nan", "single-pixel", "empty"],
 )
 def test_cloud_fit_analysis_survives_a_bad_frame(frame):
-    from pytweezer.analysis.cloud_fit import CloudFitAnalysis
+    from pytweezer.analyses.live.cloud_fit import CloudFitAnalysis
 
     analysis = build(CloudFitAnalysis)
     assert analysis.process({"rid": 1, "index": 0}, frame) is None
@@ -827,7 +835,7 @@ def test_cloud_fit_analysis_survives_a_bad_frame(frame):
 
 
 def test_cloud_fit_analysis_ignores_non_2d_data():
-    from pytweezer.analysis.cloud_fit import CloudFitAnalysis
+    from pytweezer.analyses.live.cloud_fit import CloudFitAnalysis
 
     analysis = build(CloudFitAnalysis)
     assert analysis.process({}, np.ones((2, 3, 4))) is None
@@ -840,7 +848,7 @@ def test_cloud_fit_analysis_ignores_non_2d_data():
 
 
 def test_background_frame_is_held_not_published():
-    from pytweezer.analysis.shot_background import ShotBackground
+    from pytweezer.analyses.live.shot_background import ShotBackground
 
     analysis = build(ShotBackground)
     background = np.full((4, 5), 20, dtype=np.uint16)
@@ -850,7 +858,7 @@ def test_background_frame_is_held_not_published():
 
 
 def test_background_subtraction_is_signed_float():
-    from pytweezer.analysis.shot_background import ShotBackground
+    from pytweezer.analyses.live.shot_background import ShotBackground
 
     analysis = build(ShotBackground)
     analysis.process({"rid": 1, "background": True}, np.full((4, 5), 20, np.uint16))
@@ -865,7 +873,7 @@ def test_background_subtraction_is_signed_float():
 
 
 def test_frames_of_one_background_shot_are_averaged():
-    from pytweezer.analysis.shot_background import ShotBackground
+    from pytweezer.analyses.live.shot_background import ShotBackground
 
     analysis = build(ShotBackground)
     for level in (10, 30):
@@ -879,7 +887,7 @@ def test_frames_of_one_background_shot_are_averaged():
 
 
 def test_new_background_replaces_the_one_of_an_earlier_rid():
-    from pytweezer.analysis.shot_background import ShotBackground
+    from pytweezer.analyses.live.shot_background import ShotBackground
 
     analysis = build(ShotBackground)
     analysis.process({"rid": 1, "background": True}, np.full((2, 2), 10, np.uint16))
@@ -891,7 +899,7 @@ def test_new_background_replaces_the_one_of_an_earlier_rid():
 
 
 def test_each_stream_keeps_its_own_background():
-    from pytweezer.analysis.shot_background import ShotBackground
+    from pytweezer.analyses.live.shot_background import ShotBackground
 
     analysis = build(ShotBackground)
     for stream, level in (("CamA", 10), ("CamB", 100)):
@@ -913,7 +921,7 @@ def test_each_stream_keeps_its_own_background():
     ("rid", "shape"), [(2, (4, 5)), (1, (5, 4))], ids=["other-rid", "other-shape"]
 )
 def test_mismatched_background_passes_frame_through(rid, shape):
-    from pytweezer.analysis.shot_background import ShotBackground
+    from pytweezer.analyses.live.shot_background import ShotBackground
 
     analysis = build(ShotBackground)
     analysis.process({"rid": 1, "background": True}, np.full((4, 5), 20, np.uint16))

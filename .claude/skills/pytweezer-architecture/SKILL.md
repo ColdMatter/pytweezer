@@ -181,6 +181,17 @@ auto-forwarded to the database. The Experiment Manager does write a `runs` row
 per run and a `points` row per scan point there, so readings can be joined to
 runs; see `docs/notes/database.md`.
 
+## Singular is framework, plural is what you edit
+
+In the package tree a singular folder is framework and shared maths, and a
+plural one is what people edit day to day. `experiment/` (framework) and
+`experiments/`; `analysis/` (framework, shared maths, no Qt) and `analyses/`
+(`live/` Analysis Manager scripts, `default/` Results-tab calculations);
+`optimisers/`; and in the GUI, `viewers/` (applets) and `default_analyses/`
+(Results-tab views). `GUI/views/` is the exception: it is framework, the shared
+base drawings those applets and views are built on. The Analysis Manager reads
+`paths.live_analyses_path`, i.e. `pytweezer/analyses/live/`.
+
 ## Where to go next
 
 | Task | Go to |
@@ -189,7 +200,7 @@ runs; see `docs/notes/database.md`.
 | GUI shell, panels, tabs, teardown | `pytweezer-gui-internals` skill |
 | Add a driver for new hardware | `add-device-driver` skill |
 | Add a live viewer window | `add-applet` skill |
-| Add a streaming analysis | `add-analysis-script` skill |
+| Add a streaming (live) or Results-tab (default) analysis | `add-analysis-script` skill |
 | Record a value in the database | `add-logger` skill |
 | Experiments, the Experiment Manager, its queue and results | `add-experiment` skill |
 | Run/screenshot the GUI | `run-pytweezer` skill |

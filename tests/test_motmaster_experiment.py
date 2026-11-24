@@ -165,7 +165,7 @@ def test_a_script_parameter_named_like_an_attribute_leaves_the_attribute_alone(r
 def test_overrides_beat_the_form(rig):
     class Override(Single):
         def run_point(self):
-            self.run_sequences(tDelay1=7, bField=2)
+            self.run_motmaster_sequence(tDelay1=7, bField=2)
 
     run_local(Override, bField=1)
     sent = goes(rig, "rb")[0]
