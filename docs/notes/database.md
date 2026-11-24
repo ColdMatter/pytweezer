@@ -57,15 +57,16 @@ versions its current Windows build supports before choosing the version.
    directory):
 
    ```
-   host  pytweezer  pytweezer  10.59.3.0/24  scram-sha-256
+   host  pytweezer  pytweezer  10.59.0.0/16  scram-sha-256
    ```
 
    Check that `listen_addresses = '*'` is set in `postgresql.conf`, restart the
-   service, and open the port to the lab subnet in an administrator PowerShell:
+   service, and open the port to the lab network (10.59.x.x) in an
+   administrator PowerShell:
 
    ```powershell
    New-NetFirewallRule -DisplayName "PostgreSQL (lab)" -Direction Inbound `
-     -Protocol TCP -LocalPort 5432 -RemoteAddress 10.59.3.0/24 -Action Allow
+     -Protocol TCP -LocalPort 5432 -RemoteAddress 10.59.0.0/16 -Action Allow
    ```
 
 5. **Every lab PC**: set the connection string, so the password stays out of
@@ -99,12 +100,12 @@ versions its current Windows build supports before choosing the version.
       ```
 
       Anonymous viewing is only acceptable because Grafana is reachable from
-      the lab subnet alone. Don't expose port 3000 any wider.
-   5. Open the port to the lab subnet, then restart the Grafana service:
+      the lab network (10.59.x.x) alone. Don't expose port 3000 any wider.
+   5. Open the port to the lab network, then restart the Grafana service:
 
       ```powershell
       New-NetFirewallRule -DisplayName "Grafana (lab)" -Direction Inbound `
-        -Protocol TCP -LocalPort 3000 -RemoteAddress 10.59.3.0/24 -Action Allow
+        -Protocol TCP -LocalPort 3000 -RemoteAddress 10.59.0.0/16 -Action Allow
       ```
 
    The GUI expects Grafana at `http://<server PC>:3000`. If it lives
