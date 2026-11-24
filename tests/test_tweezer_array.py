@@ -9,6 +9,7 @@ from pytweezer.experiment import ListAxis, Scan, motmaster, optimisers, run_loca
 from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiments import load_tweezers
 from pytweezer.experiments.load_tweezers import LoadTweezers, LoadTweezersMOTImage
+from pytweezer.experiments.trap_frequency import TrapFrequencyScan
 from pytweezer.experiments.tweezer_array_measurement import TweezerArrayMeasurement
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
 from pytweezer.optimisers.optimise_molasses_light import OptimiseMolassesLight
@@ -720,3 +721,29 @@ def test_a_failed_shot_ends_the_cameras_shots_and_leaves_them_live(rig, cls):
 def test_mot_image_variant_records_the_rb_mass(rig):
     measurement = run_local(LoadTweezersMOTImage)
     assert measurement.constants["cloud_mass_amu"] == pytest.approx(86.909)
+
+
+def test_a_trap_frequency_scan_modulates_at_the_vcf_voltage_of_each_frequency(rig):
+    scan = Scan(
+        axes=[ListAxis(argument="modulation_frequency", values=[10e3, 155e3, 300e3])]
+    )
+    measurement = run_local(TrapFrequencyScan, scan)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    sent = [
+        (go["TweezerModulation"], go["tTweezerModulationVCF"], go["BackgroundDrop"])
+        for go in rig.goes
+    ]
+    assert sent == [(1, -10.0, 0), (1, 0.0, 0), (1, 10.0, 0)]
+    assert all(go["tDelay2"] == 2000 for go in rig.goes)
+    np.testing.assert_allclose(
+        measurement.results["modulation_voltage"], [-10.0, 0.0, 10.0]
+    )
+    assert "survival" in measurement.results
+
+
+def test_a_trap_frequency_scan_refuses_a_frequency_outside_the_vcos_range(rig):
+    measurement = run_local(TrapFrequencyScan, modulation_frequency=400e3)
+    assert measurement.status == "failed"
+    assert "outside the VCO's range" in measurement.attrs["error"]
+    assert not rig.goes
