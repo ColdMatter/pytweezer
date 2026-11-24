@@ -316,3 +316,45 @@ def test_an_untrusted_fit_draws_no_fit_curve(projection_monitor):
     data, fit = monitor.projection_curves["cloud_x"]
     assert data.getData()[1] == pytest.approx(trusted)
     assert fit.getData()[0] is None or len(fit.getData()[0]) == 0
+
+
+@pytest.fixture
+def background_monitor(qapp, monkeypatch):
+    from pytweezer.GUI.viewers.background_monitor import BackgroundMonitor
+
+    fake_hubs(monkeypatch)
+    return BackgroundMonitor("Test Background Monitor")
+
+
+def shown(monitor):
+    return monitor.image_item.image
+
+
+def test_stored_background_is_subtracted_from_later_frames(background_monitor):
+    feed_frame(background_monitor, np.full((4, 5), 20, np.uint16), {})
+    background_monitor.store_background()
+    np.testing.assert_array_equal(shown(background_monitor), np.zeros((4, 5)))
+
+    feed_frame(background_monitor, np.full((4, 5), 15, np.uint16), {})
+
+    np.testing.assert_array_equal(shown(background_monitor), np.full((4, 5), -5.0))
+
+
+def test_clearing_the_background_shows_the_raw_frame_again(background_monitor):
+    feed_frame(background_monitor, np.full((4, 5), 20.0), {})
+    background_monitor.store_background()
+    feed_frame(background_monitor, np.full((4, 5), 30.0), {})
+
+    background_monitor.clear_background()
+
+    np.testing.assert_array_equal(shown(background_monitor), np.full((4, 5), 30.0))
+
+
+def test_a_frame_of_another_shape_is_shown_raw_and_says_so(background_monitor):
+    feed_frame(background_monitor, np.full((4, 5), 20.0), {})
+    background_monitor.store_background()
+
+    feed_frame(background_monitor, np.full((6, 6), 7.0), {})
+
+    np.testing.assert_array_equal(shown(background_monitor), np.full((6, 6), 7.0))
+    assert "raw frame" in background_monitor.status.toPlainText()

@@ -44,6 +44,11 @@ DEFAULT_APPLETS = [
         "description": "Image Monitor with the x and y sums, and their Gaussian fits, above and left of the image",
     },
     {
+        "name": "Background Monitor",
+        "script": "pytweezer/GUI/viewers/background_monitor.py",
+        "description": "Image Monitor that subtracts a background stored from its context menu",
+    },
+    {
         "name": "Scalar History",
         "script": "pytweezer/GUI/viewers/scalar_history.py",
         "description": "Rolling history of a scalar from a data stream header",

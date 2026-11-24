@@ -323,17 +323,21 @@ class ImageDisplay(Applet):
             msg, head, imgdata = self.imgstream.recv()
             if self.image_index != -1 and head["index"] != self.image_index:
                 continue
-            self._autoscaling_frame = True
-            try:
-                self.image_item.setImage(imgdata, autoLevels=bool(self._autoscale))
-            finally:
-                self._autoscaling_frame = False
-            self.image_item.resetTransform()
-            self.image_item.setRect(frame_rect(head, imgdata.shape))
-            self.imgdata = imgdata
-            self.image_head = head
+            self.show_frame(head, imgdata)
         self.update_mask()
         self.update_overlays()
+
+    def show_frame(self, head: dict, imgdata: np.ndarray) -> None:
+        """Draw one received frame."""
+        self._autoscaling_frame = True
+        try:
+            self.image_item.setImage(imgdata, autoLevels=bool(self._autoscale))
+        finally:
+            self._autoscaling_frame = False
+        self.image_item.resetTransform()
+        self.image_item.setRect(frame_rect(head, imgdata.shape))
+        self.imgdata = imgdata
+        self.image_head = head
 
     def update_mask(self):
         while self.maskstream.has_new_data():
