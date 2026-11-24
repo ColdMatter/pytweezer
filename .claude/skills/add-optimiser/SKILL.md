@@ -1,6 +1,6 @@
 ---
 name: add-optimiser
-description: Write, run and accept pytweezer optimisers — StagedScan, BayesianOptimisation and Fit classes in pytweezer/optimisers/ (mixins in pytweezer/experiment/optimisers.py) that run a measurement experiment and propose new saved-parameter values, accepted by hand in the Optimisers tab. Use whenever the user wants to write, add or change an optimiser or calibration search, find the best value of something ("find the best imaging detuning", "optimise the molasses shims", "fit the trap sites"), work on FindTrapSites, OptimiseTweezerImaging or OptimiseMolassesShims, accept or discard an optimiser run's proposals, or work on the Optimisers tab (pytweezer/GUI/optimisers.py) — even if they only describe the search without saying "optimiser". For the measurement experiment it runs, and for saved parameters themselves, use add-experiment.
+description: Write, run and accept pytweezer optimisers — StagedScan, BayesianOptimisation and Fit classes in pytweezer/optimisers/ (mixins in pytweezer/experiment/optimisers.py) that run a measurement experiment and propose new saved-parameter values, accepted by hand in the Optimisers tab. Use whenever the user wants to write, add or change an optimiser or calibration search, find the best value of something ("find the best imaging detuning", "scan the resonance and keep the best"), accept or discard an optimiser run's proposals, or work on the Optimisers tab (pytweezer/GUI/optimisers.py) — even if they only describe the search without saying "optimiser". For the measurement experiment it runs, and for saved parameters themselves, use add-experiment; for the tweezer optimisers (FindTrapSites, OptimiseTweezerImaging, the molasses and MOT ones) also use tweezer-array.
 ---
 
 # Optimisers
@@ -13,15 +13,13 @@ everything in the add-experiment skill (arguments, devices, recording, the
 queue, files, saved parameters) applies; this skill covers what an optimiser
 adds. Device-free examples: `DemoStagedScan`/`DemoBayesian` in
 `optimisers/demo_staged_scan.py`/`demo_bayesian.py` (over
-`experiments/demo_resonance.py`); real ones `optimisers/find_trap_sites.py`,
-`optimise_tweezer_imaging.py`, `optimise_molasses_shims.py`.
+`experiments/demo_resonance.py`); the real ones are tweezer-array's.
 
 ## Search optimisers
 
 The measurement provides `measure(**settings) -> dict[str, float]`, every
 setting a keyword with a default (an early `StagedScan` stage passes only the
-settings scanned so far; the tweezer ones take `None` as "keep the saved
-value"); put the mixin first:
+settings scanned so far); put the mixin first:
 
 ```python
 class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
@@ -128,61 +126,10 @@ fit view draws the results `calibration_image` and `roi_sites`
   `proposals`, `accept_proposals`, `changed_summary`, `live_task_using`; keep
   accept behaviour there, not in the tab, so any other caller shares it.
 
-## The Rb tweezer optimisers
+## Tweezer optimisers
 
-The measurements they run (`SlmTweezerArray`, `LoadTweezers`) are described
-under "Tweezer array measurements" in add-experiment. The Bayesian ones are
-`(TweezerOptimisation, LoadTweezers)`: `TweezerOptimisation`
-(`optimisers/tweezer_optimisation.py`) adds `shots`, `score_batch()` and a
-generic `measure()`, and refuses to run without accepted trap sites. `measure()`
-passes each setting to its dimension's `save_as` script parameter (`None` keeps
-the saved value) and takes the drop from `drop`: a class attribute naming the
-argument that holds the drop duration (`tDropDuration`), or `None` (the
-default) for `BackgroundDrop=0`. Only `OptimiseTweezerImaging` overrides
-`measure()`, because one setting sets two script parameters. Every evaluation
-takes two images; loading and fidelity come from the first. It scores each
-batch through `TrapSites` (`analysis/array_loading.py`): `LoadTweezers.trap_sites` holds the
-accepted sites with their window, feature size and threshold, and `score_batch`
-only calls its `counts`, `fit_loading` and `survival`, never inline maths.
+`FindTrapSites`, `TweezerOptimisation` and the tweezer-scored optimisers
+(imaging, molasses shims and light, MOT light, their `…MinTime` variants) are
+in the tweezer-array skill.
 
-- `FindTrapSites` (`Fit`) takes `calibration_shots` with no drop, fits the
-  rig's array geometry (or a `default_rows` × `default_columns` grid) to the
-  top-hat filtered (`top_hat_image`) mean of their first images
-  (`analysis/trap_sites.py`), fits the occupancy threshold with a `TrapSites`,
-  and proposes `TRAP_SITE_KEYS`: `trap_sites` (sensor pixels, `(y, x)`), `trap_threshold`,
-  `trap_window_size`, `trap_feature_size`, `trap_geometry`. Tweezer
-  measurements refuse to run when the saved `trap_geometry` is not the rig's
-  current array, so rerun it after changing the array.
-- Their objectives are penalty forms, computed by `objective_of(scores,
-  settings)` from `loading`, `survival` and `fidelity`, all measured by
-  `score_batch()`, with `shortfall_penalty` (10) times each shortfall below a
-  threshold (`loading_threshold` 0.55, `survival_threshold` 0.8).
-- The MOT and molasses optimisers come in pairs in one module: the bare one
-  searches at the saved time; its `…MinTime` subclass adds the time as a
-  whole-number dimension (`load_time`, or `MOLASSES_TIME` from
-  `tweezer_optimisation.py`) and scores `shortness(time, bounds)` less the
-  penalties, so it proposes the shortest time that meets the thresholds, as a
-  saved parameter that `LoadTweezers` then uses on every run. A shortfall of
-  1/`shortfall_penalty` costs as much as the whole time range, so at 10 the
-  threshold is soft; a near-hard one needs a larger penalty (e.g. 100).
-- `OptimiseTweezerImaging` is Bayesian with span dimensions around the saved
-  `tImgCoolVCO`/`tImgCoolVVA`, no drop, scored `fidelity_weight` (0.5) ×
-  fidelity + (1 − weight) × survival. It overrides `measure()` to set both
-  imaging stages' VCO or VVA (`tImgCoolVCO1/2`).
-- `OptimiseMolassesShims` has span dimensions around
-  `tMolassesShim{X,Y,Z}ccValue` (limited to the card's ±10 V), with
-  `drop = "drop_duration"`, scored by survival less the loading penalty.
-  `OptimiseMolassesShimsMinTime` adds `molasses_time` (`tMolassesDuration`,
-  1–20) and penalises both shortfalls.
-- `OptimiseMolassesLight`/`OptimiseMolassesLightMinTime` search both molasses
-  stages' light (`tMol{Cool,Rep}{VCO,VVA}{1,2}`, eight dimensions), scored
-  like the shims pair.
-- `OptimiseMOTLight` searches the MOT-loading cooling and repump VCOs and VVAs
-  (`tMOTLoad{Cool,Rep}{VCO,VVA}`, limited to 0–10 V) for the best `loading`,
-  with no drop. `OptimiseMOTLightMinTime` adds `load_time` for the shortest
-  load that reaches `loading_threshold`; its `MOT_LOAD_TIME` script parameter
-  name and limits are placeholders (FIXME in the module).
-
-Tests: `tests/test_optimisers.py`,
-`tests/test_tweezer_array.py`, `tests/test_trap_sites.py`,
-`tests/test_saved_parameters.py`; the tab in `tests/test_experiment_gui.py`.
+Tests: `tests/test_optimisers.py`, `tests/test_saved_parameters.py`; the tab in `tests/test_experiment_gui.py`.

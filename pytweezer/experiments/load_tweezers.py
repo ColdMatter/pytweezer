@@ -83,7 +83,7 @@ class LoadTweezers(MotMasterExperiment):
 
     ``signal_counts`` is the summed first frame minus the summed second.
     :meth:`prepare` also loads the accepted trap sites (see
-    :meth:`saved_trap_sites`) and records them in this ROI's pixels as
+    :meth:`get_trap_site_positions`) and records them in this ROI's pixels as
     ``trap_sites``, with the ``trap_window_size``, ``trap_feature_size`` and
     occupancy ``threshold`` they are scored with. With them, each point records
     whether each site was occupied in each frame (``first_occupied``,

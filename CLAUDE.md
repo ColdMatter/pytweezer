@@ -229,6 +229,7 @@ Load a skill when you need more than that:
 | Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Writing or accepting an optimiser (`StagedScan`, `BayesianOptimisation`, `Fit`), the Optimisers tab | `add-optimiser` |
+| The Rb tweezer array: SLM array, `LoadTweezers`, trap sites, `FindTrapSites`, the tweezer-scored optimisers | `tweezer-array` |
 | Saving a camera's frames with pycaf MOTMaster runs from a lab-book notebook (`PycafCamera`), MOTMaster zips | `notebook-rig` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 | Writing, reviewing or deleting tests | `write-tests` |
