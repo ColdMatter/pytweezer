@@ -73,6 +73,10 @@ point.
   `LoadTweezers` itself never touches the ORCA.
 - `LoadTweezersNImages` runs the multiple-images script and records nothing;
   its frames are only broadcast live.
+- `TrapFrequencyScan` (`experiments/trap_frequency.py`) modulates the tweezers
+  between the two images at `modulation_frequency` (via the VCO voltage
+  `tTweezerModulationVCF`, recorded as `modulation_voltage`); scan it and plot
+  `survival` for parametric-heating dips.
 
 `analyses = ("tweezer_histogram", "tweezer_photon_histogram")` for the Results
 tab (`analyses/default/tweezer_histogram.py`); they read `first_counts`/
