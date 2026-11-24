@@ -32,7 +32,13 @@ class OptimiseMOTLightMinTime(OptimiseMOTLight):
     dimensions: ClassVar[list[Dimension]] = [
         *OptimiseMOTLight.dimensions,
         # FIXME: placeholder limits, in the script's units, to check with the load time
-        Dimension("load_time", save_as=MOT_LOAD_TIME, low=10, high=500, whole=True),
+        Dimension(
+            "tMOTLoadingDuration",
+            save_as=MOT_LOAD_TIME,
+            low=5000,
+            high=30000,
+            whole=True,
+        ),
     ]
     loading_threshold = Number(0.55, min=0, max=1, group=SEARCH)
     shortfall_penalty = Number(10, min=0, group=SEARCH)
