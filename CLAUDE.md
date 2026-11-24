@@ -146,6 +146,23 @@ run `uv run ruff check .` and `uv run ruff format --check .` before pushing.
   easier to spot than one buried under fifty lines of explanation.
 
 
+### Code people edit day to day
+
+The physicists who edit experiments, optimisers, analyses and applets know
+Python from data analysis, not Qt, threading or networking. Their code should
+read plainly, with that machinery out of sight in framework code underneath.
+
+- In experiments and optimisers, the core methods (`prepare`, `run_point`,
+  `finish`, and `measure`/`fit` in optimisers) read as a plain sequence of
+  physics steps. Fiddly blocks such as camera set-up go into well-named
+  helpers. A helper may be more involved, as long as its name or comments make
+  clear what it does.
+- Don't make a method readable by burying it: a one-line `run_point` that
+  calls a 60-line `_do_everything()` hides the steps rather than showing them.
+- Numerical work (filtering, summing at sites, threshold fits, survival) is a
+  function imported from `analysis/`, never written inline in an experiment.
+
+
 ### Logging
 
 - Use `get_logger(name)` from `pytweezer/logging_utils.py`, never bare
