@@ -7,7 +7,8 @@ import pytest
 
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera, SimulatedImagEMX2Camera
 from pytweezer.drivers.ni_cards import NICards, SimulatedNICards
-from pytweezer.drivers.orca import ORCACamera, SimulatedORCACamera
+from pytweezer.drivers.orca_fusion import ORCAFusionCamera, SimulatedORCAFusionCamera
+from pytweezer.drivers.orca_r2 import ORCAR2Camera, SimulatedORCAR2Camera
 from pytweezer.drivers.slm import SLM, SimulatedSLM
 from pytweezer.servers.simulated_device import public_methods, simulate
 
@@ -86,7 +87,8 @@ def test_simulate_defaults_and_exclude():
     "real, simulated",
     [
         (ImagEMX2Camera, SimulatedImagEMX2Camera),
-        (ORCACamera, SimulatedORCACamera),
+        (ORCAR2Camera, SimulatedORCAR2Camera),
+        (ORCAFusionCamera, SimulatedORCAFusionCamera),
         (SLM, SimulatedSLM),
         (NICards, SimulatedNICards),
     ],

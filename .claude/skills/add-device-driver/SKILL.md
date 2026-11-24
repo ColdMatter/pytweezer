@@ -41,7 +41,7 @@ bug in your driver. Verify in simulation instead.
 **Cameras** subclass `Camera` from `pytweezer/drivers/camera_base.py`. That base
 already owns image-stream broadcasting, TIFF autosave, the acquisition loop, and
 the connect/close lifecycle. Your driver is a thin shim implementing the
-abstract hooks. Follow `pytweezer/drivers/orca.py` as the shortest example.
+abstract hooks. Follow `pytweezer/drivers/orca_r2.py` as the shortest example.
 
 **Everything else** is a plain class with no required base. Public methods become
 RPC methods; that's the whole contract. Follow `pytweezer/drivers/slm.py`.
@@ -104,22 +104,32 @@ one overrides `_sensor_shape()`. Limits only the hardware knows come from
 `_control_limits()`, by control name, read with the sensor size: `binning`
 gets `{"choices": [1, 2, 4]}` for a camera that takes only those bin factors
 (the DCAM drivers, from pylablib's probe; the Camera applet shows a
-drop-down) or `{"maximum": n}` (ThorCam); `frame_rate` (`FRAME_RATE`, the
-internal trigger's rate) gets its range. `None` marks a control the camera
-lacks (a DCAM model without `internal_frame_interval`): `controls()` leaves it
-out and `apply_controls()` refuses it. A driver that can
-read each frame's camera-clock time overrides `_read_range_timed`; the live
+drop-down) or `{"maximum": n}` (ThorCam). `None` marks a control the camera
+lacks (the ORCA-Fusion without `defect_correct_mode`): `controls()` leaves it
+out and `apply_controls()` refuses it.
+
+No camera has a frame-rate control: the internal trigger runs free. Every
+camera offers a `"software"` trigger source and `SOFTWARE_TRIGGER_RATE`; while
+live on that source the base sends `trigger()` every 1/rate seconds from a
+sleeping thread, so a driver implements only `trigger()` (one software
+trigger). A camera whose SDK has no software trigger mode builds it from
+its internal trigger taking one frame per trigger, as the ThorCam does.
+
+A driver that can read each frame's camera-clock time overrides `_read_range_timed`; the live
 broadcast then adds it as `camera_timestamp`. `snap()` takes one frame from a
 stopped camera. A driver that watches the sensor temperature sets
 `self._temperature_monitor` to a `TemperatureMonitor`; `sensor_temperature()`
 then serves its last reading without touching the hardware or taking `_lock`.
 
 The Thorlabs cameras are `thorcam.ThorCam`; `tweezermonitorcam.ThorCam` is it with
-another default serial number. The Hamamatsu DCAM cameras (ImagEM X2, ORCA) subclass `HamamatsuCamera`
+another default serial number. The Hamamatsu DCAM cameras (ImagEM X2 EMCCD, ORCA-R2 CCD, ORCA-Fusion BT sCMOS) subclass `HamamatsuCamera`
 (`hamamatsu.py`), which holds everything they share: connecting, the common
 setters, the ROI and trigger controls, timestamps and the temperature monitor.
 A new one sets `model_prefix`, `image_prefix`, `default_timeout` and `CONTROLS`,
 and adds only its own setters and the extra keys in `_read_control_values()`.
+A constructor argument of its own (the ORCA-Fusion's `global_reset`) means
+redeclaring the whole signature: the device server picks CONFIG keys by
+parameter name, so `**kwargs` would drop them all.
 
 **Match the base class signatures exactly.** `setup_acquisition(self, nframes,
 mode="sequence")` takes both, and the base `arm()` calls it; a camera with no
@@ -172,8 +182,8 @@ Add to `CONFIG["Devices"]` in `pytweezer/configuration/config.py`:
 ```python
 "ORCA": {
     "run_at_startup": True,
-    "class": "pytweezer.drivers.orca:ORCACamera",
-    "sim_class": "pytweezer.drivers.orca:SimulatedORCACamera",
+    "class": "pytweezer.drivers.orca_r2:ORCAR2Camera",
+    "sim_class": "pytweezer.drivers.orca_r2:SimulatedORCAR2Camera",
     "teardown": "close",
     "host": MACHINES["ph-bonesaw"]["address"],
     "port": get_next_port(),

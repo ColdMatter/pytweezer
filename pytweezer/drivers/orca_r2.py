@@ -1,8 +1,8 @@
 from pytweezer.drivers.camera_base import (
     BINNING,
     EXPOSURE,
-    FRAME_RATE,
     ROI,
+    SOFTWARE_TRIGGER_RATE,
     TRIGGER_POLARITY,
     Control,
     gain,
@@ -12,13 +12,11 @@ from pytweezer.drivers.camera_base import (
 from pytweezer.drivers.hamamatsu import EXPOSURE_MODE, HamamatsuCamera
 
 
-class ORCACamera(HamamatsuCamera):
-    """dcam shim for the Hamamatsu ORCA-R2, adding its readout-speed and
-    contrast-gain controls. Arguments are those of :class:`HamamatsuCamera`;
-    with no ``serial_number`` the only connected ORCA-R2 is opened.
-
-    It also runs the ORCA-Fusion BT, opened by serial number; that camera has no
-    contrast gain, so :meth:`set_gain` fails on it.
+class ORCAR2Camera(HamamatsuCamera):
+    """dcam shim for the Hamamatsu ORCA-R2 (an interline CCD), adding its
+    readout-speed and contrast-gain controls. Arguments are those of
+    :class:`HamamatsuCamera`; with no ``serial_number`` the only connected
+    ORCA-R2 is opened.
     """
 
     image_prefix = "ORCA"
@@ -27,10 +25,10 @@ class ORCACamera(HamamatsuCamera):
 
     CONTROLS = (
         EXPOSURE,
-        FRAME_RATE,
         EXPOSURE_MODE,
         trigger_source(("int", "ext", "software")),
         TRIGGER_POLARITY,
+        SOFTWARE_TRIGGER_RATE,
         gain("Contrast gain", "integer", minimum=0),
         Control("readout_speed", "Readout speed", "Readout", "integer", 1, minimum=1),
         BINNING,
@@ -56,4 +54,4 @@ class ORCACamera(HamamatsuCamera):
             self._keep(gain=int(self._read_attribute("contrast_gain")))
 
 
-SimulatedORCACamera = simulated_camera_for(ORCACamera)
+SimulatedORCAR2Camera = simulated_camera_for(ORCAR2Camera)
