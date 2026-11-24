@@ -28,7 +28,7 @@ class OptimiseMolassesLight(TweezerOptimisation, LoadTweezers):
     objective = "score"
     drop = "drop_duration"
     dimensions: ClassVar[list[Dimension]] = [
-        Dimension(setting, span=span, save_as=parameter, limits=(0, 10))
+        Dimension(setting, span=span, save_as=parameter, limits=(0, 5))
         for setting, parameter, span in _MOLASSES_LIGHT
     ]
     n_calls = Integer(80, min=1, group=SEARCH)

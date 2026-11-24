@@ -17,8 +17,8 @@ class OptimiseTweezerImaging(TweezerOptimisation, LoadTweezers):
 
     objective = "score"
     dimensions: ClassVar[list[Dimension]] = [
-        Dimension("imaging_vco", span=0.5, save_as="tImgCoolVCO"),
-        Dimension("imaging_vva", span=0.2, save_as="tImgCoolVVA"),
+        Dimension("imaging_vco", span=0.5, save_as="tImgCoolVCO", limits=(0, 5)),
+        Dimension("imaging_vva", span=0.2, save_as="tImgCoolVVA", limits=(0, 5)),
     ]
     n_initial = Integer(10, min=1, group=SEARCH)
     fidelity_weight = Number(0.5, min=0, max=1, group=SEARCH)

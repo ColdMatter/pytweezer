@@ -38,7 +38,10 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   records its `search_bounds`. `Dimension(..., whole=True)` asks only whole
   numbers (for an Int32 script parameter; a range holding fewer than two raises
   `ValueError` at `prepare()`). `Dimension(..., limits=(low, high))` clips
-  either kind of range to what the hardware takes (an analog output's ±10 V);
+  either kind of range to what the hardware takes - the channel's range in
+  EDMSuite's `RbTweezerHardware.cs`, e.g. 0-5 V for the Rb cooling/repump
+  VCOs and VVAs; a value outside it fails the whole run in MOTMaster with
+  DAQmx -200561;
   a range wholly outside them raises `ValueError` at `prepare()`. Duplicate
   settings or `save_as`, a bad `goal`, `low >= high`, neither bounds nor span,
   a non-positive span, or a span with bounds raise `TypeError` when the class

@@ -16,10 +16,10 @@ class OptimiseMOTLight(TweezerOptimisation, LoadTweezers):
 
     objective = "loading"
     dimensions: ClassVar[list[Dimension]] = [
-        Dimension("cool_vco", span=0.5, save_as="tMOTLoadCoolVCO", limits=(0, 10)),
-        Dimension("cool_vva", span=0.2, save_as="tMOTLoadCoolVVA", limits=(0, 10)),
-        Dimension("rep_vco", span=0.5, save_as="tMOTLoadRepVCO", limits=(0, 10)),
-        Dimension("rep_vva", span=0.2, save_as="tMOTLoadRepVVA", limits=(0, 10)),
+        Dimension("cool_vco", span=0.5, save_as="tMOTLoadCoolVCO", limits=(0, 5)),
+        Dimension("cool_vva", span=0.2, save_as="tMOTLoadCoolVVA", limits=(0, 5)),
+        Dimension("rep_vco", span=0.5, save_as="tMOTLoadRepVCO", limits=(0, 5)),
+        Dimension("rep_vva", span=0.2, save_as="tMOTLoadRepVVA", limits=(0, 5)),
     ]
     n_calls = Integer(40, min=1, group=SEARCH)
     n_initial = Integer(10, min=1, group=SEARCH)

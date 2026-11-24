@@ -112,15 +112,15 @@ batch) and `survival` (against the accepted threshold).
   dimension (`load_time`, or `MOLASSES_TIME`) and scores
   `shortness(time, bounds)` less the penalties, proposing the shortest time
   that meets the thresholds.
-- `OptimiseTweezerImaging`: spans around saved `tImgCoolVCO`/`tImgCoolVVA`, no
+- `OptimiseTweezerImaging`: spans around saved `tImgCoolVCO`/`tImgCoolVVA` (0–5 V), no
   drop, scored `fidelity_weight` (0.5) × fidelity + the rest × survival.
   Overrides `measure()` because one setting sets both imaging stages
   (`tImgCoolVCO1/2`).
 - `OptimiseMolassesShims`: spans around `tMolassesShim{X,Y,Z}ccValue` (limits
   ±10 V), `drop = "drop_duration"`, survival less the loading penalty.
 - `OptimiseMolassesLight`: both molasses stages' light,
-  `tMol{Cool,Rep}{VCO,VVA}{1,2}` (eight dimensions), scored like the shims.
-- `OptimiseMOTLight`: MOT-loading `tMOTLoad{Cool,Rep}{VCO,VVA}` (0–10 V) for
+  `tMol{Cool,Rep}{VCO,VVA}{1,2}` (eight dimensions, 0–5 V), scored like the shims.
+- `OptimiseMOTLight`: MOT-loading `tMOTLoad{Cool,Rep}{VCO,VVA}` (0–5 V) for
   the best `loading`, no drop. Its MinTime variant's `MOT_LOAD_TIME` name and
   limits are placeholders (FIXME in the module).
 
