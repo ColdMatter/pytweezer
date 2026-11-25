@@ -265,7 +265,7 @@ ndim) that must return `None` rather than raise, and any property that changes
 behaviour. Run:
 
 ```bash
-uv run pytest tests/ -q
+uv run pytest tests/test_<your_analysis>.py -q   # only the files you touched
 ```
 
 ## Turning it on

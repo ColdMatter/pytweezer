@@ -96,8 +96,8 @@ build-backend = "setuptools.build_meta"
 # tests/ imports its own helpers as `tests.*`; the editable install only exposes
 # pytweezer and bin.
 pythonpath = ["."]
-# Tests run in parallel (pytest-xdist); add -n0 to run in one process, e.g. for pdb.
-addopts = "-n auto"
+# Tests run in one process: starting xdist workers costs more than it saves on
+# the few files a change touches. CI passes -n auto for the whole suite.
 
 [tool.ruff]
 target-version = "py311"

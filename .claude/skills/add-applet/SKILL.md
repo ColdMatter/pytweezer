@@ -225,7 +225,7 @@ follow it.
 The synthetic messages are generic frames and `[coords, values]` traces, so a
 viewer of one analysis's own output (Tweezer Loading) draws nothing; test its
 drawing on that analysis's header, as `tests/test_tweezer_loading_plots.py`
-does. Then run `uv run pytest tests/ -q`.
+does. Then run the test files you touched, e.g. `uv run pytest tests/test_<viewer>.py -q`.
 
 ## Register it
 

@@ -179,7 +179,7 @@ def test_simulated_chamber_pressure_is_storable(build):
 
 Test what bites: the reading-to-fields mapping, the degenerate case (no channels,
 sensor returning nothing) returning `None` rather than raising, and `close()`
-releasing both the source and the writer. Then `uv run pytest tests/ -q`.
+releasing both the source and the writer. Then run the test files you touched, e.g. `uv run pytest tests/test_<logger>.py -q`.
 
 ## Turning it on
 

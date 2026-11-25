@@ -43,15 +43,17 @@ rearrangement-optimisation-RnD is a stripped-down branch for optimisation of twe
 This project uses uv; the venv is `.venv` in the repo root, on the Python in
 `.python-version`.
 Code is linted and formatted with ruff, configured in `pyproject.toml`.
-There is a pytest suite under `tests/` — run it after
-touching code it covers, and add cases there instead of writing one-off
+There is a pytest suite under `tests/` — after touching code it covers, run
+only the test files for the affected system (`uv run pytest tests/test_camera.py -q`),
+never the whole suite: these are lab PCs running the experiment, and CI runs
+the full suite on push. Add cases there instead of writing one-off
 verification scripts when the change fits its scope.
 `.github/workflows/tests.yml` runs the suite (against a scratch TimescaleDB) on
 every push to main and every PR.
 
 ```bash
 uv sync                         # install deps, rebuild the C++ extensions and console scripts
-uv run pytest tests/ -q         # run the test suite, in parallel (add -n0 for one process, e.g. pdb)
+uv run pytest tests/test_x.py -q  # run one area's tests (add -n 4 to spread a big run over 4 workers)
 uv run python <script>.py       # run any script inside the venv
 ```
 
