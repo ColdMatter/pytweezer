@@ -5,13 +5,15 @@ Modulating the trap depth at ``2 ν / n`` heats atoms out of a trap of frequency
 radial and axial motion and their subharmonics. The radial ``2 ν_r`` is the
 highest-frequency dip that is still one of the most pronounced, since the axial
 frequency is lower and the subharmonics are weaker: :func:`trap_frequency`
-fits a Gaussian to every dip, takes the highest-frequency one at least
-``min_relative_depth`` as prominent as the deepest, and halves its centre.
+fits a Gaussian to each dip alone, then all of them together on one baseline,
+takes the highest-frequency dip at least ``min_relative_depth`` as prominent as
+the deepest, and halves its centre from the joint fit.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import pairwise
 
 import numpy as np
 from scipy.optimize import curve_fit
@@ -30,9 +32,10 @@ MIN_PROMINENCE = 0.1
 class DipFit:
     """One survival dip; frequencies in Hz.
 
-    ``curve`` is the fitted Gaussian dip as ``(baseline, depth, centre, sigma)``,
-    ``None`` when ``centre_hz`` is the lowest point of the dip instead;
-    ``fit_range_hz`` is the span of the points fitted.
+    ``curve`` is the Gaussian fitted to this dip alone, as ``(baseline, depth,
+    centre, sigma)``, and ``fit_range_hz`` the span of the points it fitted.
+    ``centre_hz`` comes from the joint fit of every dip if ``joint``, else from
+    ``curve``, else it is the dip's lowest point.
     """
 
     prominence: float
@@ -40,7 +43,12 @@ class DipFit:
     centre_err_hz: float = np.nan
     curve: tuple[float, float, float, float] | None = None
     fit_range_hz: tuple[float, float] | None = None
+    joint: bool = False
     message: str = ""
+
+    @property
+    def fitted(self) -> bool:
+        return self.joint or self.curve is not None
 
     @property
     def trap_hz(self) -> float:
@@ -58,6 +66,8 @@ class TrapFrequencyFit:
 
     ``dips`` are the detected dips in order of frequency, each fitted, and
     ``chosen`` indexes the one taken as ``2 ν_r`` (``None`` when there is none).
+    ``joint_curve`` is the :func:`gaussian_dips` parameters of all the dips
+    fitted to the whole spectrum together, ``None`` if that fit failed.
     """
 
     frequency: np.ndarray
@@ -65,6 +75,7 @@ class TrapFrequencyFit:
     error: np.ndarray
     dips: list[DipFit] = field(default_factory=list)
     chosen: int | None = None
+    joint_curve: tuple[float, ...] | None = None
     message: str = ""
 
     @property
@@ -90,6 +101,14 @@ class TrapFrequencyFit:
 
 def gaussian_dip(f, baseline, depth, centre, sigma):
     return baseline - depth * np.exp(-((f - centre) ** 2) / (2 * sigma**2))
+
+
+def gaussian_dips(f, baseline, *dips):
+    """One baseline minus a Gaussian for each ``(depth, centre, sigma)`` in ``dips``."""
+    return baseline + sum(
+        gaussian_dip(f, 0.0, depth, centre, sigma)
+        for depth, centre, sigma in np.reshape(dips, (-1, 3))
+    )
 
 
 def needed_results(measurement: Measurement) -> list[str]:
@@ -173,6 +192,16 @@ def trap_frequency(
         fit_dip(result.frequency, result.survival, result.error, indices, n, prominence)
         for n, prominence in enumerate(prominences)
     ]
+    joint = fit_all_dips(result.frequency, result.survival, result.error, result.dips)
+    if joint is not None:
+        result.joint_curve, joint_errors = joint
+        for dip, centre, centre_err in zip(
+            result.dips, result.joint_curve[2::3], joint_errors[2::3]
+        ):
+            if np.isfinite(centre_err):
+                dip.centre_hz, dip.centre_err_hz = centre, centre_err
+                dip.joint = True
+                dip.message = "joint Gaussian fit of every dip"
     candidates = np.flatnonzero(prominences >= min_relative_depth * prominences.max())
     result.chosen = int(candidates[np.argmax(result.frequency[indices[candidates]])])
     result.message = result.radial_dip.message
@@ -228,3 +257,41 @@ def fit_dip(
     dip.centre_err_hz = centre_err
     dip.message = "Gaussian fit to the dip"
     return dip
+
+
+def fit_all_dips(
+    f: np.ndarray, p: np.ndarray, error: np.ndarray, dips: list[DipFit]
+) -> tuple[tuple[float, ...], tuple[float, ...]] | None:
+    """Fit one baseline and a Gaussian per dip to the whole spectrum at once.
+
+    Starts from each dip's own fit, or its lowest point if it had none. Each
+    centre is kept between the midpoints to its neighbouring dips, so the
+    Gaussians cannot swap or merge. Returns the :func:`gaussian_dips`
+    parameters and their errors, or ``None`` if the fit fails.
+    """
+    step = np.median(np.diff(f))
+    centres = [dip.centre_hz for dip in dips]
+    edges = [f[0], *((a + b) / 2 for a, b in pairwise(centres)), f[-1]]
+    start, lower, upper = [np.nanmax(p)], [0.0], [1.5]
+    for dip, (low, high) in zip(dips, pairwise(edges)):
+        depth, centre, sigma = (
+            dip.curve[1:] if dip.curve else (dip.prominence, dip.centre_hz, step)
+        )
+        start += [depth, centre, sigma]
+        lower += [0.0, low, step / 4]
+        upper += [1.5, high, f[-1] - f[0]]
+    weighted = np.isfinite(error).all() and (error > 0).all()
+    try:
+        parameters, covariance = curve_fit(
+            gaussian_dips,
+            f,
+            p,
+            p0=np.clip(start, lower, upper),
+            sigma=error if weighted else None,
+            absolute_sigma=weighted,
+            bounds=(lower, upper),
+        )
+    except (RuntimeError, ValueError):
+        return None
+    errors = np.sqrt(np.diag(covariance))
+    return tuple(map(float, parameters)), tuple(map(float, errors))

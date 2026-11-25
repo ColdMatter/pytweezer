@@ -55,7 +55,7 @@ def test_the_radial_frequency_is_half_the_highest_pronounced_dip(tmp_path, occup
     fit = trap_frequency(spectrum_file(tmp_path, occupancy), "x")
 
     assert fit.success, fit.message
-    assert fit.radial_dip.curve is not None
+    assert fit.radial_dip.joint
     assert fit.radial_hz == pytest.approx(RADIAL_HZ, rel=0.02)
     assert abs(fit.radial_hz - RADIAL_HZ) < 4 * fit.radial_err_hz
     assert len(fit.dips) >= 3
@@ -64,14 +64,29 @@ def test_the_radial_frequency_is_half_the_highest_pronounced_dip(tmp_path, occup
 def test_every_dip_is_found_and_fitted_where_wide_enough(tmp_path):
     fit = trap_frequency(spectrum_file(tmp_path), "x")
 
-    centres = {round(dip.centre_hz / 5e3) * 5e3: dip for dip in fit.dips}
-    assert set(centres) == {15e3, 30e3, 50e3, 95e3}
-    # 15 and 30 kHz are three points apart: too few to fit either.
+    expected = np.array([15e3, 30e3, RADIAL_HZ, 2 * RADIAL_HZ])
+    centres = {
+        expected[np.argmin(abs(expected - dip.centre_hz))]: dip for dip in fit.dips
+    }
+    assert set(centres) == set(expected)
+    # 15 and 30 kHz are three points apart: too few to fit either alone.
     assert centres[30e3].curve is None
-    assert centres[50e3].centre_hz == pytest.approx(RADIAL_HZ, rel=0.02)
-    assert centres[50e3].curve is not None
+    assert centres[RADIAL_HZ].centre_hz == pytest.approx(RADIAL_HZ, rel=0.02)
+    assert centres[RADIAL_HZ].curve is not None
     assert fit.radial_dip not in fit.other_dips
     assert len(fit.other_dips) == len(fit.dips) - 1
+
+
+def test_the_joint_fit_shares_one_baseline_across_every_dip(tmp_path):
+    fit = trap_frequency(spectrum_file(tmp_path), "x")
+
+    baseline, *dips = fit.joint_curve
+    depths, centres, _ = np.reshape(dips, (-1, 3)).T
+    assert baseline == pytest.approx(BASELINE, abs=0.05)
+    # Including the 15 and 30 kHz dips too close together to fit one by one.
+    assert centres == pytest.approx([15e3, 30e3, RADIAL_HZ, 2 * RADIAL_HZ], rel=0.15)
+    # The 5 kHz step barely samples the narrow low-frequency dips' depths.
+    assert depths[2:] == pytest.approx([0.35, 0.55], abs=0.05)
 
 
 def test_a_dip_above_the_radial_one_is_taken_once_deep_enough(tmp_path):
@@ -108,3 +123,6 @@ def test_the_view_shows_the_radial_frequency_and_lists_every_dip(qapp, tmp_path)
     assert len(view.readout.text().splitlines()) >= 5
     assert len(view.dip_items) >= 6
     assert len(view.points.getData()[0]) == len(FREQUENCIES_HZ)
+    joint_khz, _ = view.joint_fit.getData()
+    assert joint_khz[0] == pytest.approx(FREQUENCIES_HZ[0] / 1e3)
+    assert joint_khz[-1] == pytest.approx(FREQUENCIES_HZ[-1] / 1e3)

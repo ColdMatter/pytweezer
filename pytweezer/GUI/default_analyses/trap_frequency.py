@@ -15,6 +15,7 @@ from pytweezer.analyses.default.trap_frequency import (
     FREQUENCY_ARGUMENT,
     OCCUPANCY,
     gaussian_dip,
+    gaussian_dips,
     needed_results,
     trap_frequency,
 )
@@ -29,13 +30,15 @@ DATA_COLOUR = CURVE_COLORS[2]
 OTHER_DIP_PEN = pg.mkPen("#8d8e99", width=1, style=Qt.PenStyle.DashLine)
 OTHER_FIT_PEN = pg.mkPen("#8d8e99", width=PLOT_LINE_WIDTH)
 RESONANCE_PEN = pg.mkPen("#5b8def", width=PLOT_LINE_WIDTH)
+JOINT_FIT_PEN = pg.mkPen(CURVE_COLORS[1], width=1)
 
 
 class TrapFrequencyView(ComputedAnalysisView):
     """Survival against modulation frequency, its dips, and the radial trap frequency.
 
     Every detected dip is marked and fitted; the one taken as ``2 ν_r`` is in
-    the accent colour. Frequencies are shown in kHz.
+    the accent colour. A joint fit of every dip with one shared baseline is
+    drawn across the whole scan. Frequencies are shown in kHz.
     """
 
     def __init__(self, parent=None):
@@ -75,10 +78,11 @@ class TrapFrequencyView(ComputedAnalysisView):
         self.plot.setLabel("left", "survival")
         for axis in ("left", "bottom"):
             self.plot.getAxis(axis).enableAutoSIPrefix(False)
+        self.joint_fit = self.plot.plot([], [], pen=JOINT_FIT_PEN)
         self.points = self.plot.plot(
             [],
             [],
-            pen=pg.mkPen(DATA_COLOUR, width=1),
+            pen=None,
             symbol="o",
             symbolSize=PLOT_SYMBOL_SIZE,
             symbolBrush=DATA_COLOUR,
@@ -147,6 +151,7 @@ class TrapFrequencyView(ComputedAnalysisView):
         if result is None:
             self.readout.setText("")
             self.points.setData([], [])
+            self.joint_fit.setData([], [])
             self.errors.setData(x=np.empty(0), y=np.empty(0), height=np.empty(0))
             return
         f_khz = result.frequency / KHZ
@@ -154,6 +159,13 @@ class TrapFrequencyView(ComputedAnalysisView):
         self.errors.setData(
             x=f_khz, y=result.survival, height=2 * np.nan_to_num(result.error)
         )
+        if result.joint_curve is None:
+            self.joint_fit.setData([], [])
+        else:
+            dense = np.linspace(result.frequency[0], result.frequency[-1], 1000)
+            self.joint_fit.setData(
+                dense / KHZ, gaussian_dips(dense, *result.joint_curve)
+            )
         for index, dip in enumerate(result.dips):
             chosen = index == result.chosen
             self._add_dip_item(
@@ -192,7 +204,7 @@ class TrapFrequencyView(ComputedAnalysisView):
         for other in others:
             centre = format_value(other.centre_hz, other.centre_err_hz, 1 / KHZ)
             half = format_value(other.trap_hz, other.trap_err_hz, 1 / KHZ)
-            fitted = "" if other.curve is not None else "    (lowest point, not fitted)"
+            fitted = "" if other.fitted else "    (lowest point, not fitted)"
             lines.append(f"  {centre:>18} kHz  {half:>18} kHz{fitted}")
         return "\n".join(lines)
 
