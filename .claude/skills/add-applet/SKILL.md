@@ -8,8 +8,8 @@ description: Create a new pytweezer applet — a live viewer window under pytwee
 An applet is one local process that subscribes to streams and draws them.
 `pytweezer/GUI/applet.py` owns the machinery (Properties connection, title,
 geometry, theme, poll timer, subscription/configure dialogs), so an applet is
-**one `Applet` subclass** in a new file under `pytweezer/GUI/viewers/`, plus a
-launcher entry.
+**one `Applet` subclass** in a new file under `pytweezer/GUI/viewers/`, ending
+in `run_applet(<Class>, default_name="<Name>")`.
 
 There is no CONFIG entry. The Applet Launcher runs `python <script> <name>`;
 `name` is the window title, the Properties namespace and the launcher label, so
@@ -227,13 +227,18 @@ viewer of one analysis's own output (Tweezer Loading) draws nothing; test its
 drawing on that analysis's header, as `tests/test_tweezer_loading_plots.py`
 does. Then run the test files you touched, e.g. `uv run pytest tests/test_<viewer>.py -q`.
 
-## Register it
+## Making it available
 
-Add a `{"name", "script", "description"}` entry to `DEFAULT_APPLETS` in
-`pytweezer/GUI/applet_launcher.py`, `script` relative like the existing entries
-(`"pytweezer/GUI/viewers/atom_count.py"`). This seeds Properties `"Applets"` only on a *first* run; on a machine with
-applets already configured the user adds it with the Applets tab's **add**
-button. Tell them so.
+Nothing to register. The Applets tab's **template** list rereads
+`pytweezer/GUI/viewers/` whenever it is opened and offers every script there
+that calls `run_applet`, named by its `default_name="..."`, so a new viewer
+shows up in a running GUI. The user adds it with the template list and the
+**add** button. Tell them so.
+
+Do **not** add a new viewer to `DEFAULT_APPLETS` in
+`pytweezer/GUI/applet_launcher.py`: that list is the starting catalogue a
+fresh PC gets, and only goes in front of the others in the template list.
+Add one only when the user asks for it to be a default applet.
 
 ## Module docstring
 
