@@ -7,8 +7,7 @@ from pytweezer.experiment.optimisers import SEARCH, Dimension, shortfall, shortn
 from pytweezer.experiments.load_tweezers import LoadTweezers
 from pytweezer.optimisers.tweezer_optimisation import TweezerOptimisation
 
-#: FIXME: placeholder, replace with the script's parameter name
-MOT_LOAD_TIME = "tMOTLoadTime"
+MOT_LOAD_TIME = "tMOTLoadingDuration"
 
 
 class OptimiseMOTLight(TweezerOptimisation, LoadTweezers):
@@ -32,13 +31,7 @@ class OptimiseMOTLightMinTime(OptimiseMOTLight):
     dimensions: ClassVar[list[Dimension]] = [
         *OptimiseMOTLight.dimensions,
         # FIXME: placeholder limits, in the script's units, to check with the load time
-        Dimension(
-            "tMOTLoadingDuration",
-            save_as=MOT_LOAD_TIME,
-            low=5000,
-            high=30000,
-            whole=True,
-        ),
+        Dimension("load_time", save_as=MOT_LOAD_TIME, low=5000, high=30000, whole=True),
     ]
     loading_threshold = Number(0.55, min=0, max=1, group=SEARCH)
     shortfall_penalty = Number(10, min=0, group=SEARCH)

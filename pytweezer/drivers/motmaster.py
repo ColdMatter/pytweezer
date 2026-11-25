@@ -823,6 +823,7 @@ SIMULATED_SCRIPT_PARAMETERS: dict[str, dict[str, Any]] = {
         "BackgroundDrop": 0,
         "tDelay2": 100,
         "tDropDuration": 4,
+        "tMOTLoadingDuration": 10000,
         "tMolassesDuration": 1,
         "TweezerModulation": 0,
         "tTweezerModulationVCF": 0.0,

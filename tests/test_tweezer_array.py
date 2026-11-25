@@ -64,9 +64,7 @@ class FakeSequencer:
     def set_trigger_mode(self, value): ...
 
     def get_params(self):
-        return dict(SIMULATED_SCRIPT_PARAMETERS["RbTweezerBasic2026_2"]) | {
-            "tMOTLoadTime": 100
-        }
+        return dict(SIMULATED_SCRIPT_PARAMETERS["RbTweezerBasic2026_2"])
 
     def start_motmaster_experiment(self, parameters):
         if self.fail:
