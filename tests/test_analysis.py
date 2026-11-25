@@ -1031,48 +1031,37 @@ def feed_run(analysis, frames, **tags):
 @pytest.mark.parametrize(
     "skip, crop", [(0, []), (2, []), (1, [1, 5, 2, 6])], ids=["all", "skip", "crop"]
 )
-def test_recapture_rate_matches_the_notebook_at_the_end_of_a_run(skip, crop):
+def test_recapture_rate_of_each_shot_is_the_notebooks_for_that_shot_alone(skip, crop):
     from pytweezer.analyses.live.recapture_rate import RecaptureRate
 
-    frames = recapture_run(10)
+    frames = recapture_run(5)
     analysis = build(RecaptureRate, {"skip": skip, "crop": crop})
     feed_run(analysis, frames, pycaf_run=1.0)
 
-    rate, rate_err = notebook_recapture_rate(frames.astype(float), skip, crop or None)
-    head, _, _ = analysis.dataq.sent[-1]
-    assert len(analysis.dataq.sent) == 10 - skip
-    assert head["shots"] == 10 - skip
-    assert head["recapture_rate"] == pytest.approx(rate)
-    assert head["recapture_rate_err"] == pytest.approx(rate_err)
-    assert head["pycaf_run"] == 1.0
+    expected = [
+        notebook_recapture_rate(
+            frames[3 * shot : 3 * shot + 3].astype(float), 0, crop or None
+        )[0]
+        for shot in range(skip, 5)
+    ]
+    heads = [head for head, _, _ in analysis.dataq.sent]
+    assert [head["shot"] for head in heads] == list(range(skip, 5))
+    assert [head["recapture_rate"] for head in heads] == pytest.approx(expected)
+    assert all(head["pycaf_run"] == 1.0 for head in heads)
 
 
-def test_recapture_rate_images_are_the_mean_first_and_second_less_background():
+def test_recapture_rate_image_is_the_shots_first_and_second_less_its_background():
     from pytweezer.analyses.live.recapture_rate import RecaptureRate
 
-    frames = recapture_run(4).astype(float)
+    first, second, background = recapture_run(1).astype(float)
     analysis = build(RecaptureRate)
-    for index, frame in enumerate(frames):
+    for index, frame in enumerate((first, second, background)):
         result = analysis.process({"index": index, "pycaf_run": 1.0}, frame)
 
     _, image = result
-    background = frames[2::3].mean(axis=0)
-    np.testing.assert_allclose(image[:, :7], frames[0::3].mean(axis=0) - background)
-    np.testing.assert_allclose(image[:, 7:], frames[1::3].mean(axis=0) - background)
-
-
-def test_recapture_rate_starts_afresh_for_each_run():
-    from pytweezer.analyses.live.recapture_rate import RecaptureRate
-
-    analysis = build(RecaptureRate)
-    feed_run(analysis, recapture_run(5, seed=1), pycaf_run=1.0)
-    second_run = recapture_run(3, seed=2)
-    feed_run(analysis, second_run, pycaf_run=2.0)
-
-    rate, _ = notebook_recapture_rate(second_run.astype(float), 0)
-    head, _, _ = analysis.dataq.sent[-1]
-    assert head["shots"] == 3
-    assert head["recapture_rate"] == pytest.approx(rate)
+    np.testing.assert_allclose(
+        image, np.hstack([first - background, second - background])
+    )
 
 
 def test_recapture_rate_leaves_out_a_shot_missing_a_frame():
@@ -1084,11 +1073,19 @@ def test_recapture_rate_leaves_out_a_shot_missing_a_frame():
         if index != 4:  # second shot's recaptured frame
             analysis.process({"index": index, "pycaf_run": 1.0}, frame)
 
-    complete = np.delete(frames, [3, 4, 5], axis=0).astype(float)
-    rate, _ = notebook_recapture_rate(complete, 0)
-    head, _, _ = analysis.dataq.sent[-1]
-    assert head["shots"] == 2
-    assert head["recapture_rate"] == pytest.approx(rate)
+    assert [head["shot"] for head, _, _ in analysis.dataq.sent] == [0, 2]
+
+
+def test_recapture_rate_does_not_pair_frames_of_different_runs():
+    from pytweezer.analyses.live.recapture_rate import RecaptureRate
+
+    first, second, background = recapture_run(1)
+    analysis = build(RecaptureRate)
+    analysis.process({"index": 0, "pycaf_run": 1.0}, first)
+    analysis.process({"index": 1, "pycaf_run": 1.0}, second)
+    analysis.process({"index": 2, "pycaf_run": 2.0}, background)
+
+    assert analysis.dataq.sent == []
 
 
 def test_recapture_rate_ignores_frames_not_tagged_with_a_run():
