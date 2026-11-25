@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
-import time
-
 import numpy as np
 
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.orca import ORCACamera
 from pytweezer.experiment import Device, Number
-from pytweezer.experiment.arguments import Argument, collect
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.experiments.load_tweezers import (
     hamcam_roi_argument,
     set_up_hamcam,
 )
 from pytweezer.experiments.slm_tweezer_array import SlmArray
-
-HOLOGRAM_QUALITY = ("uniformity", "min_max_ratio", "mse")
 
 
 class MergeCaFTweezer(SlmArray, MotMasterExperiment):
@@ -56,7 +51,6 @@ class MergeCaFTweezer(SlmArray, MotMasterExperiment):
     def prepare(self) -> None:
         super().prepare()
         self.read_slm_settings()
-        self.written_slm_settings = None
         set_up_hamcam(
             self.hamcam,
             self.hamcam_gain,
@@ -70,7 +64,7 @@ class MergeCaFTweezer(SlmArray, MotMasterExperiment):
         self.set_up_cafmot_cam()
 
     def run_point(self) -> None:
-        self.update_slm_array()
+        self.update_slm_array(self.slm_settle_time)
         hamcam_mark = self.hamcam.start_shot({"rid": self.rid})
         cafmot_mark = self.cafmot_cam.start_shot({"rid": self.rid})
         self.run_motmaster_sequence()
@@ -94,16 +88,6 @@ class MergeCaFTweezer(SlmArray, MotMasterExperiment):
         self.cafmot_cam.set_trigger_source("ext")
         self.cafmot_cam.start_live()
 
-    def update_slm_array(self) -> None:
-        """Write the mask if the SLM arguments differ from the last one written, and record its quality."""
-        settings = {name: getattr(self, name) for name in collect(SlmArray, Argument)}
-        if settings != self.written_slm_settings:
-            self.hologram = self.write_slm_array()
-            self.written_slm_settings = settings
-            time.sleep(self.slm_settle_time)
-        for name in HOLOGRAM_QUALITY:
-            self.record(name, self.hologram[name])
-
     def record_frame(self, camera: str, frames) -> None:
         image = np.asarray(frames)[0]
         self.record(f"{camera}_image", image)
@@ -124,7 +108,7 @@ class MergeCaFTweezerHamCamBackground(MergeCaFTweezer):
     )
 
     def run_point(self) -> None:
-        self.update_slm_array()
+        self.update_slm_array(self.slm_settle_time)
         hamcam_mark = self.hamcam.start_shot({"rid": self.rid})
         cafmot_mark = self.cafmot_cam.start_shot({"rid": self.rid})
         self.run_motmaster_sequence()
