@@ -57,14 +57,14 @@ def placement(grid_x_um: np.ndarray, grid_y_um: np.ndarray) -> dict:
     }
 
 
-class SlmTweezerArray(Experiment):
-    """Put an NxM tweezer array on the Rb SLM, one optimised phase mask per point.
+class SlmArray:
+    """The arguments and steps that put an NxM tweezer array on the Rb SLM, for experiments to mix in.
 
     See :mod:`pytweezer.helper_scripts.array_hologram` for how the mask is made.
     The optics come from saved parameters: the blaze, Fresnel lens and pupil
     through saved-backed arguments, and the generator, Zernike correction and
     depth envelope (:data:`~pytweezer.helper_scripts.array_hologram.SAVED_KEYS`)
-    directly; :meth:`prepare` records the last two sets as
+    directly; :meth:`read_slm_settings` records the last two sets as
     ``generator_settings`` and ``envelope``.
     """
 
@@ -109,9 +109,8 @@ class SlmTweezerArray(Experiment):
         tooltip="spread of the initial trap phases",
     )
 
-    sleep_time = Number(1, unit="s")
-
-    def prepare(self) -> None:
+    def read_slm_settings(self) -> None:
+        """Read and record the saved generator settings and envelope; call it in ``prepare``."""
         saved = get_saved_parameters()
         missing = sorted(set(array_hologram.SAVED_KEYS) - set(saved))
         if missing:
@@ -122,7 +121,8 @@ class SlmTweezerArray(Experiment):
         self.record("envelope", self.envelope)
         self.stream = ImageClient("slm")
 
-    def run_point(self) -> None:
+    def write_slm_array(self) -> dict:
+        """Compute this point's mask, write it to the SLM, broadcast it and return the rig's hologram."""
         blaze_um = (self.blaze_x * 1e6, self.blaze_y * 1e6)
         hologram = self.rig.make_array(
             rows=self.rows,
@@ -141,10 +141,7 @@ class SlmTweezerArray(Experiment):
             phase_randomness=self.phase_randomness,
         )
         self.broadcast(hologram, blaze_um)
-        self.record("phasemask", hologram["mask"])
-        for name in ("uniformity", "min_max_ratio", "mse"):
-            self.record(name, hologram[name])
-        time.sleep(self.sleep_time)
+        return hologram
 
     def broadcast(self, hologram: dict, blaze_um: tuple[float, float]) -> None:
         grid_x_um = np.asarray(hologram["grid_x_um"]) + blaze_um[0]
@@ -180,3 +177,19 @@ class SlmTweezerArray(Experiment):
             mask,
             channel="_phasemask",
         )
+
+
+class SlmTweezerArray(SlmArray, Experiment):
+    """Put an NxM tweezer array on the Rb SLM, one optimised phase mask per point."""
+
+    sleep_time = Number(1, unit="s")
+
+    def prepare(self) -> None:
+        self.read_slm_settings()
+
+    def run_point(self) -> None:
+        hologram = self.write_slm_array()
+        self.record("phasemask", hologram["mask"])
+        for name in ("uniformity", "min_max_ratio", "mse"):
+            self.record(name, hologram[name])
+        time.sleep(self.sleep_time)

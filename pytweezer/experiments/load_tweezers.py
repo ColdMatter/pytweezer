@@ -53,7 +53,7 @@ TRAP_SITE_KEYS = (
 )
 
 
-def _roi_argument(default: int, *, size: bool) -> Integer:
+def hamcam_roi_argument(default: int, *, size: bool) -> Integer:
     return Integer(
         default,
         min=1 if size else 0,
@@ -63,6 +63,26 @@ def _roi_argument(default: int, *, size: bool) -> Integer:
         "before the first point, so it cannot be scanned",
         scannable=False,
     )
+
+
+def set_up_hamcam(
+    hamcam: ImagEMX2Camera, gain: float, roi: tuple[int, int, int, int]
+) -> tuple[int, int]:
+    """Put the HamCam in external exposure with EM gain, binning 1 and ``roi`` (x0, width, y0, height), live.
+
+    Returns:
+        The ROI's origin ``(x0, y0)`` as the camera set it, which may be rounded.
+    """
+    hamcam.stop_live()
+    hamcam.set_binning(1)
+    origin = tuple(hamcam.set_roi(*roi))
+    hamcam.set_trigger_source("ext")
+    hamcam.set_external_exposure_mode()
+    hamcam.enable_em_gain(True)
+    hamcam.enable_direct_em_gain(True)
+    hamcam.set_gain(gain)
+    hamcam.start_live()
+    return origin
 
 
 class LoadTweezers(MotMasterExperiment):
@@ -121,10 +141,10 @@ class LoadTweezers(MotMasterExperiment):
         tooltip="EM-gain sensitivity of the HamCam, set once before the first point",
         scannable=False,
     )
-    hamcam_roi_x0 = _roi_argument(110, size=False)
-    hamcam_roi_width = _roi_argument(256, size=True)
-    hamcam_roi_y0 = _roi_argument(220, size=False)
-    hamcam_roi_height = _roi_argument(256, size=True)
+    hamcam_roi_x0 = hamcam_roi_argument(110, size=False)
+    hamcam_roi_width = hamcam_roi_argument(256, size=True)
+    hamcam_roi_y0 = hamcam_roi_argument(220, size=False)
+    hamcam_roi_height = hamcam_roi_argument(256, size=True)
     save_raw_images = Bool(
         True,
         group="Camera",
@@ -159,22 +179,16 @@ class LoadTweezers(MotMasterExperiment):
 
     def set_up_hamcam(self) -> None:
         """Put the HamCam in external exposure with EM gain, binning 1 and the chosen ROI, live."""
-        self.hamcam.stop_live()
-        self.hamcam.set_binning(1)
-        self.roi_origin = tuple(
-            self.hamcam.set_roi(
+        self.roi_origin = set_up_hamcam(
+            self.hamcam,
+            self.hamcam_gain,
+            (
                 self.hamcam_roi_x0,
                 self.hamcam_roi_width,
                 self.hamcam_roi_y0,
                 self.hamcam_roi_height,
-            )
+            ),
         )
-        self.hamcam.set_trigger_source("ext")
-        self.hamcam.set_external_exposure_mode()
-        self.hamcam.enable_em_gain(True)
-        self.hamcam.enable_direct_em_gain(True)
-        self.hamcam.set_gain(self.hamcam_gain)
-        self.hamcam.start_live()
 
     def read_trap_sites(self) -> None:
         """Load the accepted trap sites into ``trap_sites`` and record them, or record why there are none."""

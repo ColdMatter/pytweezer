@@ -141,7 +141,7 @@ script=..., linked=True)`; every parameter of both machines, including
 task: `prepare()` sets it and `close_devices()` releases it, even after a
 failure. While linked the Rb MOTMaster refuses its own `SetScriptPath`/`Go`;
 an Rb-only task takes back a hand-ticked link, failing only if a linked run is
-in progress. Minimal example: `experiments/linked_scope_test.py`; MOTMaster
+in progress. Minimal example: `experiments/linked_scope_test.py`; with cameras and the SLM, `experiments/merge_caf_tweezer.py`; MOTMaster
 side: EDMSuite's `motmaster-linked-mode` skill.
 
 ## Cameras and cloud fits
