@@ -8,6 +8,7 @@ import tifffile
 
 from pytweezer.drivers import thorcam, tweezermonitorcam
 from pytweezer.drivers.camera_base import Camera, SimulatedCamera
+from pytweezer.drivers.camera_catalogue import camera_driver
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.orca import ORCACamera
 
@@ -233,3 +234,7 @@ def test_setup_acquisition_passes_the_mode_only_to_cameras_that_have_one(cls):
     driver = _driver(cls)
     driver.setup_acquisition(2, mode="snap")
     assert driver._backend.calls["setup"] == SETUPS[cls][1]
+
+
+def test_catalogue_loads_the_hamcam_driver():
+    assert camera_driver("Rb HamCam") is ImagEMX2Camera
