@@ -991,3 +991,110 @@ def test_bg_subtract_output_stream_is_prefixed_so_input_subscribers_miss_it():
 
     assert output_stream("HamCam") == "bg_subtract_HamCam"
     assert not output_stream("HamCam").startswith("HamCam")
+
+
+# --------------------------------------------------------------------------- #
+# recapture_rate
+# --------------------------------------------------------------------------- #
+
+
+def notebook_recapture_rate(images, skip, crop=None):
+    """``get_recapture_rate_three_image`` from the CaF notebooks, for one zip."""
+    bg = images[skip * 3 + 2 :: 3].mean(axis=0)
+    first_im = images[skip * 3 :: 3] - bg
+    second_im = images[skip * 3 + 1 :: 3] - bg
+    if crop is not None:
+        x1, x2, y1, y2 = crop
+        first_im = first_im[:, x1:x2, y1:y2]
+        second_im = second_im[:, x1:x2, y1:y2]
+    rate = second_im.sum(axis=(1, 2)) / first_im.sum(axis=(1, 2))
+    return rate.mean(), rate.std() / np.sqrt(len(rate))
+
+
+def recapture_run(shots, seed=0):
+    rng = np.random.default_rng(seed)
+    frames = []
+    for _ in range(shots):
+        background = rng.poisson(100, (6, 7))
+        cloud = np.zeros((6, 7))
+        cloud[2:4, 3:5] = rng.uniform(200, 400)
+        recaptured = cloud * rng.uniform(0.3, 0.7)
+        frames += [background + cloud, background + recaptured, background]
+    return np.array(frames, dtype=np.uint16)
+
+
+def feed_run(analysis, frames, **tags):
+    for index, frame in enumerate(frames):
+        analysis.process({"index": index, **tags}, frame)
+
+
+@pytest.mark.parametrize(
+    "skip, crop", [(0, []), (2, []), (1, [1, 5, 2, 6])], ids=["all", "skip", "crop"]
+)
+def test_recapture_rate_matches_the_notebook_at_the_end_of_a_run(skip, crop):
+    from pytweezer.analyses.live.recapture_rate import RecaptureRate
+
+    frames = recapture_run(10)
+    analysis = build(RecaptureRate, {"skip": skip, "crop": crop})
+    feed_run(analysis, frames, pycaf_run=1.0)
+
+    rate, rate_err = notebook_recapture_rate(frames.astype(float), skip, crop or None)
+    head, _, _ = analysis.dataq.sent[-1]
+    assert len(analysis.dataq.sent) == 10 - skip
+    assert head["shots"] == 10 - skip
+    assert head["recapture_rate"] == pytest.approx(rate)
+    assert head["recapture_rate_err"] == pytest.approx(rate_err)
+    assert head["pycaf_run"] == 1.0
+
+
+def test_recapture_rate_images_are_the_mean_first_and_second_less_background():
+    from pytweezer.analyses.live.recapture_rate import RecaptureRate
+
+    frames = recapture_run(4).astype(float)
+    analysis = build(RecaptureRate)
+    for index, frame in enumerate(frames):
+        result = analysis.process({"index": index, "pycaf_run": 1.0}, frame)
+
+    _, image = result
+    background = frames[2::3].mean(axis=0)
+    np.testing.assert_allclose(image[:, :7], frames[0::3].mean(axis=0) - background)
+    np.testing.assert_allclose(image[:, 7:], frames[1::3].mean(axis=0) - background)
+
+
+def test_recapture_rate_starts_afresh_for_each_run():
+    from pytweezer.analyses.live.recapture_rate import RecaptureRate
+
+    analysis = build(RecaptureRate)
+    feed_run(analysis, recapture_run(5, seed=1), pycaf_run=1.0)
+    second_run = recapture_run(3, seed=2)
+    feed_run(analysis, second_run, pycaf_run=2.0)
+
+    rate, _ = notebook_recapture_rate(second_run.astype(float), 0)
+    head, _, _ = analysis.dataq.sent[-1]
+    assert head["shots"] == 3
+    assert head["recapture_rate"] == pytest.approx(rate)
+
+
+def test_recapture_rate_leaves_out_a_shot_missing_a_frame():
+    from pytweezer.analyses.live.recapture_rate import RecaptureRate
+
+    frames = recapture_run(3)
+    analysis = build(RecaptureRate)
+    for index, frame in enumerate(frames):
+        if index != 4:  # second shot's recaptured frame
+            analysis.process({"index": index, "pycaf_run": 1.0}, frame)
+
+    complete = np.delete(frames, [3, 4, 5], axis=0).astype(float)
+    rate, _ = notebook_recapture_rate(complete, 0)
+    head, _, _ = analysis.dataq.sent[-1]
+    assert head["shots"] == 2
+    assert head["recapture_rate"] == pytest.approx(rate)
+
+
+def test_recapture_rate_ignores_frames_not_tagged_with_a_run():
+    from pytweezer.analyses.live.recapture_rate import RecaptureRate
+
+    analysis = build(RecaptureRate)
+    feed_run(analysis, recapture_run(2))
+
+    assert analysis.dataq.sent == []
