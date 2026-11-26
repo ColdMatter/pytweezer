@@ -195,6 +195,7 @@ class Rearrangement(Coordinator):
 
         self._array = None
         self._array_mask = None
+        self._array_hologram = None
         self._array_generator = None
         self._array_settings = None
 
@@ -277,7 +278,8 @@ class Rearrangement(Coordinator):
         :func:`~pytweezer.helper_scripts.array_hologram.envelope` for
         ``generator_settings`` and ``envelope`` (``None`` leaves the traps
         unweighted). Returns its result: the mask, the trap positions and
-        weights, and the optimisation's final uniformity, min/max ratio and error.
+        weights, the optimisation's final uniformity, min/max ratio and error, and
+        their ``convergence`` per iteration.
         """
         self._require_gpu()
         settings = {
@@ -320,10 +322,16 @@ class Rearrangement(Coordinator):
             spacing_um=float(spacing_um),
             angle_deg=float(angle_deg),
         )
+        self._array_hologram = {
+            **hologram,
+            "blaze_um": tuple(blaze_um),
+            "slm_pitch_um": float(generator_settings["slm_pitch_um"]),
+        }
         return hologram
 
     def _remember_array(self, mask, *, x_um, y_um, weights, **geometry) -> None:
         self._array_mask = np.array(mask, dtype=np.uint8)
+        self._array_hologram = None
         self._array = {
             "sites": len(x_um),
             "x_um": [float(x) for x in x_um],
@@ -348,6 +356,16 @@ class Rearrangement(Coordinator):
         ):
             return None
         return dict(self._array)
+
+    def get_array_hologram(self) -> dict | None:
+        """What :meth:`make_array` returned for the array on the SLM, plus the ``blaze_um`` and ``slm_pitch_um`` it was made with.
+
+        ``None`` when :meth:`get_array` is, or when the array came from
+        :meth:`initialise` rather than :meth:`make_array`.
+        """
+        if self._array_hologram is None or self.get_array() is None:
+            return None
+        return dict(self._array_hologram)
 
     # ------------------------------------------------------------------ #
     # Initialise

@@ -5,7 +5,6 @@ import pytest
 
 from pytweezer.coordinators import rearrangement
 from pytweezer.experiments import slm_tweezer_array
-from pytweezer.experiments.slm_tweezer_array import placement, render_target
 from pytweezer.helper_scripts import array_hologram
 from pytweezer.helper_scripts.array_hologram import (
     envelope,
@@ -65,33 +64,6 @@ def test_envelope_weights_match_the_notebook_calibration_in_array_coordinates():
     weights = envelope_weights(envelope(SAVED), x_n + 40 + dx, y_n - 8 + dy)
 
     np.testing.assert_allclose(weights, notebook, rtol=1e-9)
-
-
-@pytest.mark.parametrize("x_um, y_um", [(0.0, 0.0), (12.3, -4.7), (-50.05, 31.9)])
-def test_target_spot_lands_where_its_header_places_it(x_um, y_um):
-    grid_x_um, grid_y_um = focal_grid(np.array([x_um]), np.array([y_um]), 0.25, 5.0)
-    image = render_target(
-        np.array([x_um]), np.array([y_um]), np.array([1.0]), 1.0, grid_x_um, grid_y_um
-    )
-    header = placement(grid_x_um, grid_y_um)
-
-    row, column = np.unravel_index(np.argmax(image), image.shape)
-    (offset_x, offset_y), (pixel_x_m, pixel_y_m) = (
-        header["_offset"],
-        header["_imgresolution"],
-    )
-    assert (offset_x + column + 0.5) * pixel_x_m * 1e6 == pytest.approx(x_um, abs=0.13)
-    assert (offset_y + row + 0.5) * pixel_y_m * 1e6 == pytest.approx(y_um, abs=0.13)
-
-
-def test_each_trap_is_drawn_at_its_weight():
-    x_um = np.array([-10.0, 0.0, 10.0])
-    weights = np.array([0.2, 0.5, 1.0])
-    grid_x_um, grid_y_um = focal_grid(x_um, np.zeros(3), 0.1, 5.0)
-    image = render_target(x_um, np.zeros(3), weights, 1.0, grid_x_um, grid_y_um)
-
-    columns = np.round((x_um - grid_x_um[0]) / 0.1).astype(int)
-    np.testing.assert_allclose(image.max(axis=0)[columns], weights, rtol=1e-2)
 
 
 @pytest.fixture
@@ -164,6 +136,7 @@ class RecordingRig:
             "uniformity": 0.9,
             "min_max_ratio": 0.8,
             "mse": 0.01,
+            "convergence": np.ones((3, array["iterations"])),
         }
 
     def close_rpc(self):
@@ -183,12 +156,13 @@ def rig_and_streams(monkeypatch):
     monkeypatch.setattr(
         "pytweezer.experiment.experiment._get_device", lambda name, timeout: rig
     )
-    monkeypatch.setattr(
-        "pytweezer.servers.clients.ImageClient.send",
-        lambda self, header, data, channel="", **_: sent.__setitem__(
-            self.name + channel, data
-        ),
-    )
+    for client in ("ImageClient", "DataClient"):
+        monkeypatch.setattr(
+            f"pytweezer.servers.clients.{client}.send",
+            lambda self, header, data, channel="", **_: sent.__setitem__(
+                self.name + channel, data
+            ),
+        )
     return rig, sent
 
 
@@ -222,10 +196,10 @@ def test_mask_the_rig_made_is_the_one_recorded_and_broadcast(rig_and_streams):
     mask = np.full((1024, 1024), 1, dtype=np.uint8)
     np.testing.assert_array_equal(measurement.results["phasemask"][0], mask)
     np.testing.assert_array_equal(sent["slm_phasemask"], mask)
-    assert sent["slm_target"].ndim == 2
+    assert sent["slm_convergence"].shape == (3, 5)
 
 
-def test_target_and_simulated_trap_plane_are_sent_on_the_same_grid(rig_and_streams):
+def test_simulated_trap_plane_and_top_down_view_are_sent(rig_and_streams):
     from pytweezer.experiment import run_local
     from pytweezer.experiments.slm_tweezer_array import SlmTweezerArray
 
@@ -236,7 +210,7 @@ def test_target_and_simulated_trap_plane_are_sent_on_the_same_grid(rig_and_strea
     )
 
     assert measurement.status == "completed", measurement.attrs.get("error")
-    assert sent["slm_target"].shape == sent["slm_simulated"].shape
+    assert sent["slm_simulated"].shape == (120, 160)
     assert sent["slm_top_down"].shape == (41, 160)
 
 

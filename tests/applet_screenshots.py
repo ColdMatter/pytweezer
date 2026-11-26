@@ -24,6 +24,7 @@ from PyQt6 import QtCore, QtTest, QtWidgets
 
 from pytweezer.GUI import applet as applet_module
 from pytweezer.GUI.theme import apply_theme
+from pytweezer.helper_scripts.array_hologram import CONVERGENCE
 
 WINDOW_SIZE = (1000, 700)
 SEED = 20260101
@@ -192,12 +193,20 @@ def slm_messages():
         for col in range(8, 64, 16):
             spots += np.exp(-((rows - row) ** 2 + (cols - col) ** 2) / 8.0)
     phase = (rows * 3.0 + cols * 5.0 + 40 * np.sin(cols / 6.0)) % 256.0
+    iteration = np.arange(200.0)
+    convergence = np.vstack(
+        [
+            0.98 - 0.5 * np.exp(-iteration / 20),
+            0.95 - 0.7 * np.exp(-iteration / 30),
+            1e-6 + 1e-3 * np.exp(-iteration / 15),
+        ]
+    )
     head = {"_imgresolution": [1e-6, 1e-6], "_offset": [0, 0]}
     return [
-        ("slm_target", dict(head), (spots > 0.5).astype(float)),
         ("slm_simulated", dict(head), spots),
         ("slm_top_down", {}, spots[::2, :] ** 0.5),
         ("slm_phasemask", {}, phase),
+        ("slm_convergence", {"curves": list(CONVERGENCE)}, convergence),
     ]
 
 

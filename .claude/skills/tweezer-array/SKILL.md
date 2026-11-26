@@ -15,13 +15,14 @@ add-optimiser.
 
 1. **`SlmTweezerArray`** (`experiments/slm_tweezer_array.py`) puts a
    rectangular array on the SLM through `Rb Rearrangement Rig`
-   (`rig.make_array(...)`, one mask per point) and broadcasts target,
-   simulated intensity and mask for the SLM Monitor applet. Its optics are
+   (`rig.make_array(...)`, one mask per point) and broadcasts the simulated
+   intensity, mask and optimisation convergence for the SLM Monitor applet. Its optics are
    `slm_*` saved parameters (SI): blaze, Fresnel lens and pupil as saved-backed
    arguments; generator, Zernike rows `[index, coefficient]` and depth envelope
    from `array_hologram.SAVED_KEYS`. The rig remembers the array:
    `rig.get_array()` gives `sites`, `x_um`, `y_um` (`None` if the rig didn't
-   write the mask).
+   write the mask), and `rig.get_array_hologram()` the whole `make_array`
+   result, which the SLM Monitor shows when it opens.
    Its arguments and mask step are the `SlmArray` mixin (`read_slm_settings`,
    `write_slm_array`, and `update_slm_array`, which rewrites the mask only when
    an SLM argument changes). `LoadTweezersSlmArray` mixes it into

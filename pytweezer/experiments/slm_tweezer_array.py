@@ -1,11 +1,14 @@
 """Put a rectangular tweezer array on the Rb SLM through the rearrangement rig, and show it.
 
 The rig computes the mask, writes it to the SLM and remembers the array, so
-analyses and later experiments can ask it what is there. Each point broadcasts
-on the image hub, for the SLM Monitor applet: the requested trap intensities
-(``slm_target``), the simulated intensity in the trap plane
-(``slm_simulated``) and viewed top-down, summed over y with z running along the
-rows (``slm_top_down``), and the 8-bit mask on the SLM (``slm_phasemask``).
+analyses and later experiments can ask it what is there. Each new mask is
+broadcast for the SLM Monitor applet: on the image hub, the simulated
+intensity in the trap plane (``slm_simulated``) and viewed top-down, summed
+over y with z running along the rows (``slm_top_down``), and the 8-bit mask on
+the SLM (``slm_phasemask``); on the data hub, how the weight optimisation
+converged (``slm_convergence``: one row per
+:data:`~pytweezer.helper_scripts.array_hologram.CONVERGENCE` quantity, one
+column per iteration, the names in the header's ``curves``).
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from pytweezer.experiment import Bool, Device, Experiment, Integer, Number
 from pytweezer.experiment.arguments import Argument, collect
 from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.helper_scripts import array_hologram
-from pytweezer.servers import ImageClient
+from pytweezer.servers import DataClient, ImageClient
 
 if TYPE_CHECKING:
     # Imports cupy where it is installed, so only for the annotation.
@@ -29,27 +32,6 @@ if TYPE_CHECKING:
 
 #: What the rig's hologram says about the mask's quality, recorded per point.
 HOLOGRAM_QUALITY = ("uniformity", "min_max_ratio", "mse")
-
-
-def render_target(
-    x_um: np.ndarray,
-    y_um: np.ndarray,
-    weights: np.ndarray,
-    spot_sigma_um: float,
-    grid_x_um: np.ndarray,
-    grid_y_um: np.ndarray,
-) -> np.ndarray:
-    """Draw each trap as a Gaussian spot of peak ``weight`` on a grid of pixel centres.
-
-    Returns:
-        The image, row index along y.
-    """
-    # A Gaussian spot is separable, so the image is a (ny, N) @ (N, nx) product.
-    two_sigma2 = 2 * spot_sigma_um**2
-    x_profiles = np.exp(-((grid_x_um[None, :] - x_um[:, None]) ** 2) / two_sigma2)
-    y_profiles = np.exp(-((grid_y_um[None, :] - y_um[:, None]) ** 2) / two_sigma2)
-    image = (y_profiles * weights[:, None]).T @ x_profiles
-    return image.astype(np.float32)
 
 
 def array_summary(hologram: dict, blaze_m: tuple[float, float]) -> dict:
@@ -69,16 +51,6 @@ def array_summary(hologram: dict, blaze_m: tuple[float, float]) -> dict:
         "simulated_trap_plane": np.round(
             np.asarray(hologram["simulated_trap_plane"], float), 4
         ).tolist(),
-    }
-
-
-def placement(grid_x_um: np.ndarray, grid_y_um: np.ndarray) -> dict:
-    """Image-header keys that place an image whose pixel centres are the grids, in metres."""
-    pixel_x_um = grid_x_um[1] - grid_x_um[0]
-    pixel_y_um = grid_y_um[1] - grid_y_um[0]
-    return {
-        "_imgresolution": [pixel_x_um * 1e-6, pixel_y_um * 1e-6],
-        "_offset": [grid_x_um[0] / pixel_x_um - 0.5, grid_y_um[0] / pixel_y_um - 0.5],
     }
 
 
@@ -145,6 +117,7 @@ class SlmArray:
         self.record("generator_settings", self.generator_settings)
         self.record("envelope", self.envelope)
         self.stream = ImageClient("slm")
+        self.convergence_stream = DataClient("slm")
         self._slm_arrays = []
 
     def write_slm_array(self) -> dict:
@@ -200,38 +173,17 @@ class SlmArray:
             self.record("slm_arrays", {"arrays": arrays})
 
     def broadcast(self, hologram: dict, blaze_um: tuple[float, float]) -> None:
-        grid_x_um = np.asarray(hologram["grid_x_um"]) + blaze_um[0]
-        grid_y_um = np.asarray(hologram["grid_y_um"]) + blaze_um[1]
-        weights = np.asarray(hologram["weights"])
-        target = render_target(
-            np.asarray(hologram["x_um"]) + blaze_um[0],
-            np.asarray(hologram["y_um"]) + blaze_um[1],
-            weights / weights.max(),
-            hologram["focal_pixel_um"],
-            grid_x_um,
-            grid_y_um,
+        images = array_hologram.monitor_images(
+            hologram, blaze_um, self.generator_settings["slm_pitch_um"]
         )
-        trap_plane = placement(grid_x_um, grid_y_um)
-        top_down = placement(grid_x_um, np.asarray(hologram["grid_z_um"]))
-        for channel, image, header in (
-            ("_target", target, trap_plane),
-            ("_simulated", hologram["simulated_trap_plane"], trap_plane),
-            ("_top_down", hologram["simulated_top_down"], top_down),
-        ):
+        for channel, (header, image) in images.items():
             self.stream.send(
                 {"point": self.point.index, **header}, image, channel=channel
             )
-        mask = hologram["mask"]
-        pitch_m = self.generator_settings["slm_pitch_um"] * 1e-6
-        ny, nx = mask.shape
-        self.stream.send(
-            {
-                "point": self.point.index,
-                "_imgresolution": [pitch_m, pitch_m],
-                "_offset": [-nx / 2, -ny / 2],
-            },
-            mask,
-            channel="_phasemask",
+        self.convergence_stream.send(
+            {"point": self.point.index, "curves": list(array_hologram.CONVERGENCE)},
+            hologram["convergence"],
+            channel="_convergence",
         )
 
 

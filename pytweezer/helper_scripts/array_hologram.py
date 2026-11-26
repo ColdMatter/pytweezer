@@ -20,6 +20,9 @@ OVERSAMPLING = 4
 #: The top-down view spans this many depths of focus either side of the
 #: trap plane, in planes a quarter of one apart.
 DEPTHS_OF_FOCUS = 6
+#: The rows of an :func:`array_hologram`'s ``convergence``: each quantity per
+#: iteration of the weight optimisation.
+CONVERGENCE = ("uniformity", "min_max_ratio", "mse")
 
 #: Saved parameter (SI) -> generator keyword, and the factor to the generator's unit.
 GENERATOR_PARAMETERS = {
@@ -248,4 +251,46 @@ def array_hologram(
         "uniformity": float(uniformity[-1]),
         "min_max_ratio": float(min_max[-1]),
         "mse": float(mse[-1]),
+        "convergence": np.vstack([uniformity, min_max, mse]).astype(float),
+    }
+
+
+def placement(grid_x_um: np.ndarray, grid_y_um: np.ndarray) -> dict:
+    """Image-header keys that place an image whose pixel centres are the grids, in metres."""
+    pixel_x_um = grid_x_um[1] - grid_x_um[0]
+    pixel_y_um = grid_y_um[1] - grid_y_um[0]
+    return {
+        "_imgresolution": [pixel_x_um * 1e-6, pixel_y_um * 1e-6],
+        "_offset": [grid_x_um[0] / pixel_x_um - 0.5, grid_y_um[0] / pixel_y_um - 0.5],
+    }
+
+
+def monitor_images(
+    hologram: dict, blaze_um: tuple[float, float], slm_pitch_um: float
+) -> dict[str, tuple[dict, np.ndarray]]:
+    """The SLM Monitor's images of an :func:`array_hologram` result, as ``{channel: (header, image)}``.
+
+    The channels are ``_simulated`` (the simulated trap plane), ``_top_down``
+    (the simulated intensity summed over y, z along the rows) and
+    ``_phasemask`` (the 8-bit mask on the SLM). Headers place the images in
+    metres, the trap plane blaze included.
+    """
+    grid_x_um = np.asarray(hologram["grid_x_um"]) + blaze_um[0]
+    grid_y_um = np.asarray(hologram["grid_y_um"]) + blaze_um[1]
+    mask = np.asarray(hologram["mask"])
+    pitch_m = slm_pitch_um * 1e-6
+    ny, nx = mask.shape
+    return {
+        "_simulated": (
+            placement(grid_x_um, grid_y_um),
+            np.asarray(hologram["simulated_trap_plane"]),
+        ),
+        "_top_down": (
+            placement(grid_x_um, np.asarray(hologram["grid_z_um"])),
+            np.asarray(hologram["simulated_top_down"]),
+        ),
+        "_phasemask": (
+            {"_imgresolution": [pitch_m, pitch_m], "_offset": [-nx / 2, -ny / 2]},
+            mask,
+        ),
     }
