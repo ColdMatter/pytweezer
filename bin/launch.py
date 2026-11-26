@@ -2,7 +2,7 @@
 
 Imports nothing from ``pytweezer`` at module level: ``server_main`` has to mark
 the process as a server session before anything reads the configuration, which
-then simulates if this is not the server PC (see ``SERVER_ROLE_ENV`` in
+then simulates if this is not the server PC (see ``SIMULATING`` in
 ``pytweezer/configuration/config.py``). Every process the GUI starts inherits
 the mark, so the whole session simulates together.
 """

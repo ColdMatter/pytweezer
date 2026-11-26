@@ -68,11 +68,9 @@ get_next_port = lambda: int(next(port_iterator))
 #: ``PYTWEEZER_SIMULATION=1`` (the tests set it; set it to simulate on the server
 #: PC), or if it is part of a ``pytweezer-server`` session (``PYTWEEZER_ROLE=server``)
 #: on any PC but SERVER_PC. Processes inherit both from whoever started them.
-SIMULATION_ENV = "PYTWEEZER_SIMULATION"
-SERVER_ROLE_ENV = "PYTWEEZER_ROLE"
 ON_SERVER_PC = socket.gethostname().lower() == SERVER_PC.lower()
-SIMULATING = os.environ.get(SIMULATION_ENV) == "1" or (
-    os.environ.get(SERVER_ROLE_ENV) == "server" and not ON_SERVER_PC
+SIMULATING = os.environ.get("PYTWEEZER_SIMULATION") == "1" or (
+    os.environ.get("PYTWEEZER_ROLE") == "server" and not ON_SERVER_PC
 )
 SERVER_HOST = LOCALHOST if SIMULATING else MACHINES[SERVER_PC]["address"]
 
