@@ -100,7 +100,7 @@ def main(out_dir, rid, centre=None):
         mean = frames[focal_mm == f].mean(0)
         crop = mean[cy - CROP : cy + CROP + 1, cx - CROP : cx + CROP + 1]
         ax = fig.add_subplot(grid[0, j])
-        ax.imshow(crop - np.median(crop), cmap="viridis", vmin=-150, vmax=900)
+        ax.imshow(crop - np.median(crop), cmap="viridis", vmin=-400, vmax=1200)
         ax.set_title(
             f"{f} mm", fontsize=9, fontweight="bold" if f == brightest else "normal"
         )

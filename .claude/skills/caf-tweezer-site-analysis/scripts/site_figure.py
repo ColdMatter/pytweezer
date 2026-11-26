@@ -91,9 +91,8 @@ def main(out_dir: str, rid: int) -> None:
 
     ax = fig.add_subplot(grid[0, 1])
     shown = wide.mean_image - np.median(wide.mean_image)
-    image = ax.imshow(
-        shown, cmap="viridis", vmin=-150, vmax=max(350, np.percentile(shown, 99.9))
-    )
+    low, high = np.percentile(shown, [1, 99.7])
+    image = ax.imshow(shown, cmap="viridis", vmin=low, vmax=high)
     for k, (y, x) in enumerate(wide.sites):
         ax.add_patch(Circle((x, y), APERTURE, fill=False, ec="r", lw=1))
         ax.text(x + 4.5, y - 4.5, labels[k], color="r", fontsize=9)
