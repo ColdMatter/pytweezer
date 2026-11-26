@@ -229,7 +229,8 @@ Load a skill when you need more than that:
 | GUI shell, tabs, panels, process tiles, teardown | `pytweezer-gui-internals` |
 | How a panel should look, read and behave (layout, styling, wording) | `pytweezer-gui-design` |
 | Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
-| Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
+| Writing an `Experiment`, the Experiment Manager's internals | `add-experiment` |
+| Running/queuing experiments (`submit`/`run_local`, recipes), reading measurement files, saved parameters | `run-experiments` |
 | Writing or accepting an optimiser (`StagedScan`, `BayesianOptimisation`, `Fit`), the Optimisers tab | `add-optimiser` |
 | The Rb tweezer array: SLM array, `LoadTweezers`, trap sites, `FindTrapSites`, the tweezer-scored optimisers | `tweezer-array` |
 | Analysing a CaF tweezer run (`MergeCaFTweezer…`): light at the sites, Fresnel scans, on/off controls | `caf-tweezer-site-analysis` |

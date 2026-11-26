@@ -9,7 +9,7 @@ Lab-book notebooks (`Box\Working folder\cafmot\datasync\ipython_notebooks\...`)
 run on **ph-bonesaw** in the `caftweeznb` uv venv
 (`C:\Users\cafmot\.venvs\caftweeznb`), which installs pytweezer by a git pin to
 `main`. They fire MOTMaster through pycaf's `Experiment`; pytweezer only adds
-cameras. Nothing here goes through the queue (that is `add-experiment`), so the
+cameras. Nothing here goes through the queue (that is `run-experiments`), so the
 Experiment Manager's device reservations don't cover it: don't run a notebook
 scan while a queued task uses the same hardware.
 
