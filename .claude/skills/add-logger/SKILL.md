@@ -1,6 +1,6 @@
 ---
 name: add-logger
-description: Write a new database logger for pytweezer — a Logger subclass in pytweezer/loggers/ that owns its data source, plus its LOGGER_REGISTRY factory and CONFIG["Loggers"] entry. Use this whenever the user wants to add, create, write, or register a logger, or wants a value recorded/tracked/monitored/trended over time in the database (Postgres/TimescaleDB, or "Influx" from older habits) — a laser power, temperature, pressure, lock error, ADC voltage, flow rate, magnetic field — or asks how to get a reading into the database, Grafana, or the Loggers tab, or to add an entry to CONFIG["Loggers"]. Applies even when the user only names the sensor and the quantity ("log the chamber pressure every 10 seconds") without saying "logger" or "database". This is for durable time-series metrics, not live pub/sub stream processing.
+description: Write a new database logger for pytweezer — a Logger subclass in pytweezer/loggers/ that owns its data source, plus the CONFIG["Loggers"] entry that names it as "class". Use this whenever the user wants to add, create, write, or register a logger, or wants a value recorded/tracked/monitored/trended over time in the database (Postgres/TimescaleDB, or "Influx" from older habits) — a laser power, temperature, pressure, lock error, ADC voltage, flow rate, magnetic field — or asks how to get a reading into the database, Grafana, or the Loggers tab, or to add an entry to CONFIG["Loggers"]. Applies even when the user only names the sensor and the quantity ("log the chamber pressure every 10 seconds") without saying "logger" or "database". This is for durable time-series metrics, not live pub/sub stream processing.
 ---
 
 # Adding a database logger to pytweezer
@@ -8,11 +8,13 @@ description: Write a new database logger for pytweezer — a Logger subclass in 
 A logger is a small background process that reads a source it owns and writes
 numbers into the `readings` table on an interval. `pytweezer/loggers/base.py` owns the
 polling loop, the writing and the teardown, so writing one means **a class with
-`setup` and `read`**, plus two lines of wiring:
+`setup` and `read`**, plus a config entry. Loggers follow the device model
+without being devices:
 
-1. a `Logger` subclass in `pytweezer/loggers/<name>_logger.py`
-2. a factory in `LOGGER_REGISTRY` (`pytweezer/servers/logger_server.py`)
-3. an entry in `CONFIG["Loggers"]` (`pytweezer/configuration/config.py`)
+1. a `Logger` subclass in `pytweezer/loggers/<name>_logger.py` (the type, like a
+   driver)
+2. an entry in `CONFIG["Loggers"]` (`pytweezer/configuration/config.py`) naming
+   it as `"class"` (an instance; nothing is registered anywhere)
 
 **A logger owns its data source** — it opens the DAQ, serial port or socket
 itself. To log a value off a device that already has a driver and an RPC server,
@@ -107,27 +109,12 @@ An iterable of `(measurement, fields)` or `(measurement, fields, tags)`, or
 
 ## Wiring it up
 
-In `pytweezer/servers/logger_server.py`, a factory plus one registry entry — the
-import goes *inside* the factory so a missing dependency can't break importing
-the launcher every other logger needs:
-
-```python
-def _make_chamber_pressure(name, conf):
-    from pytweezer.loggers.chamber_pressure_logger import ChamberPressureLogger
-
-    return ChamberPressureLogger(name, conf)
-
-
-LOGGER_REGISTRY = {"ni_adc": _make_ni_adc, "chamber_pressure": _make_chamber_pressure}
-```
-
-Then the config entry under `CONFIG["Loggers"]`:
+The config entry under `CONFIG["Loggers"]`:
 
 ```python
 "Chamber Pressure Logger": {
     "run_at_startup": False,
-    "script": "../pytweezer/servers/logger_server.py",
-    "logger": "chamber_pressure",
+    "class": "pytweezer.loggers.chamber_pressure_logger:ChamberPressureLogger",
     "host": SERVER_HOST,
     "interval": 10.0,
     "simulate": SIMULATING,
@@ -137,11 +124,12 @@ Then the config entry under `CONFIG["Loggers"]`:
 },
 ```
 
-- **`script`** is that exact path for every logger and is **not optional** — the
-  Loggers tab indexes it with no default, so omitting it raises `KeyError` while
-  the tab builds and takes out *every* logger row, not just yours.
-- **`logger`** must match the registry key; **`host`** is `SERVER_HOST` (loggers
-  run next to the database); **`simulate`** is the `SIMULATING` flag, not a literal.
+- **`class`** is `"module.path:ClassName"`, imported by
+  `pytweezer/servers/logger_server.py` when the logger starts, so a missing
+  vendor library only stops that one logger. There is **no `script`**: every
+  logger runs `logger_server.py` (`LOGGER_SERVER_SCRIPT` in `paths.py`).
+- **`host`** is `SERVER_HOST` (loggers run next to the database); **`simulate`**
+  is the `SIMULATING` flag, not a literal.
 - **No `port`** — a logger binds nothing; its row is statused by polling the
   subprocess, not by probing a socket.
 - `run_at_startup: True` auto-starts it with the server GUI; leave it `False` until the
@@ -158,14 +146,14 @@ The connection string lives in `DATABASE["dsn"]` (overridable with
 `PYTWEEZER_DB_DSN`); `DBWriter` reads it itself.
 
 A *new instance* of an existing logger type needs no code — just a second config
-entry pointing at the same `"logger"` key.
+entry naming the same `"class"`.
 
 ## Verify it
 
 The bundled checker builds the logger as production would, with simulation
 forced on and the database replaced by a recorder, does one dry `read()`, and reports
-what would actually have been stored — flagging the silent failures: an
-unregistered `"logger"`, a missing `script`, config keys nothing reads, fields
+what would actually have been stored — flagging the silent failures: a
+`"class"` that doesn't import as a `Logger`, config keys nothing reads, fields
 the writer would drop, a `read()` shape the loop can't unpack, a `close()` that
 forgets the writer.
 
@@ -191,7 +179,7 @@ def test_simulated_chamber_pressure_is_storable(build):
 
 Test what bites: the reading-to-fields mapping, the degenerate case (no channels,
 sensor returning nothing) returning `None` rather than raising, and `close()`
-releasing both the source and the writer. Then `uv run pytest tests/ -q`.
+releasing both the source and the writer. Then run the test files you touched, e.g. `uv run pytest tests/test_<logger>.py -q`.
 
 ## Turning it on
 

@@ -1,11 +1,14 @@
 import argparse
 import os
+import re
 import subprocess
 import sys
 
 from PyQt6 import QtCore, QtWidgets
 from PyQt6.QtCore import Qt
 
+from pytweezer.configuration.paths import viewers_path
+from pytweezer.GUI.components import RefreshingComboBox
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.GUI.theme import apply_dot_style, apply_label_style
 from pytweezer.logging_utils import get_logger
@@ -17,6 +20,8 @@ logger = get_logger("Applet Launcher")
 RUNNING_STATES = ("running", "up")
 
 
+# The catalogue a fresh PC starts with. Other viewers need no entry here:
+# applet_templates finds them.
 DEFAULT_APPLETS = [
     {
         "name": "Image Monitor",
@@ -44,6 +49,11 @@ DEFAULT_APPLETS = [
         "description": "Image Monitor with the x and y sums, and their Gaussian fits, above and left of the image",
     },
     {
+        "name": "Background Monitor",
+        "script": "pytweezer/GUI/viewers/background_monitor.py",
+        "description": "Image Monitor that subtracts a background stored from its context menu",
+    },
+    {
         "name": "Scalar History",
         "script": "pytweezer/GUI/viewers/scalar_history.py",
         "description": "Rolling history of a scalar from a data stream header",
@@ -66,6 +76,38 @@ DEFAULT_APPLETS = [
 ]
 
 
+_DEFAULT_NAME = re.compile(r"""default_name=["']([^"']+)["']""")
+
+
+def applet_templates(viewers_dir=viewers_path):
+    """``DEFAULT_APPLETS``, then every other script in ``viewers_dir`` that calls
+    ``run_applet``, named by its ``default_name`` (or its file name)."""
+    templates = list(DEFAULT_APPLETS)
+    listed = {entry["script"] for entry in templates}
+    try:
+        filenames = sorted(os.listdir(viewers_dir))
+    except OSError:
+        return templates
+    for filename in filenames:
+        if not filename.endswith(".py"):
+            continue
+        path = os.path.join(viewers_dir, filename)
+        script = os.path.relpath(path, tweezerpath).replace(os.sep, "/")
+        if script in listed:
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+        except OSError:
+            continue
+        if "run_applet(" not in text:
+            continue
+        match = _DEFAULT_NAME.search(text)
+        name = match.group(1) if match else filename[:-3].replace("_", " ").title()
+        templates.append({"name": name, "script": script})
+    return templates
+
+
 class AddAppletWidget(QtWidgets.QWidget):
     def __init__(self, launcher, parent=None):
         super().__init__(parent)
@@ -81,10 +123,9 @@ class AddAppletWidget(QtWidgets.QWidget):
         layout.addWidget(self.name_edit)
 
         layout.addWidget(QtWidgets.QLabel("template"))
-        self.template_combo = QtWidgets.QComboBox()
-        self.template_combo.addItem("Custom")
-        for entry in self.launcher.templates:
-            self.template_combo.addItem(entry["name"], entry)
+        self.template_combo = RefreshingComboBox()
+        self.refresh_templates()
+        self.template_combo.opening.connect(self.refresh_templates)
         self.template_combo.currentIndexChanged.connect(self.apply_template)
         layout.addWidget(self.template_combo)
 
@@ -93,6 +134,21 @@ class AddAppletWidget(QtWidgets.QWidget):
         layout.addWidget(self.script_edit)
 
         self.setLayout(layout)
+
+    def refresh_templates(self):
+        """Refill the templates from disk, keeping the chosen one if it is still there."""
+        current = self.template_combo.currentData()
+        self.template_combo.blockSignals(True)
+        self.template_combo.clear()
+        self.template_combo.addItem("Custom")
+        for entry in applet_templates():
+            self.template_combo.addItem(entry["name"], entry)
+        if current is not None:
+            for index in range(1, self.template_combo.count()):
+                if self.template_combo.itemData(index)["script"] == current["script"]:
+                    self.template_combo.setCurrentIndex(index)
+                    break
+        self.template_combo.blockSignals(False)
 
     def apply_template(self, index):
         if index <= 0:
@@ -243,10 +299,6 @@ class AppletLauncher(BWidget):
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.refresh_status)
         self.timer.start()
-
-    @property
-    def templates(self):
-        return list(DEFAULT_APPLETS)
 
     def _load_applets(self):
         data = self._props.get("Applets", {})

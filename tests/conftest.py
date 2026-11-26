@@ -9,6 +9,10 @@ import os
 import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# The suite's linear algebra is all small matrices, where a BLAS thread pool per
+# process only spins: one thread is faster, and keeps xdist workers off each other.
+for _blas_threads in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_blas_threads, "1")
 # Set before any pytweezer import, and inherited by the subprocesses tests start,
 # so test log records stay out of the lab's log stream and log files.
 os.environ["PYTWEEZER_LOG_PUBLISH"] = "0"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from pytweezer.configuration.config import load_class
 from pytweezer.drivers.camera_base import Camera
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import device_server
@@ -19,7 +20,7 @@ def camera_names() -> list[str]:
         if not path:
             continue
         try:
-            driver = device_server._load(path)
+            driver = load_class(path)
         except Exception:
             logger.warning(
                 "Cannot import the driver of %r", address.name, exc_info=True
@@ -37,7 +38,7 @@ def camera_conf(name: str) -> dict:
 
 def camera_driver(name: str) -> type[Camera]:
     """The real driver class of camera ``name``, even when it runs simulated."""
-    return device_server._load(camera_conf(name)["class"])
+    return load_class(camera_conf(name)["class"])
 
 
 def camera_key(name: str) -> str:

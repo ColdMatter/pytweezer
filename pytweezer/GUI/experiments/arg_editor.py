@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDateTimeEdit,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -21,6 +22,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QToolButton,
@@ -390,7 +392,11 @@ class ArgumentRow(QtCore.QObject):
 
 
 class ArgumentEditor(QWidget):
-    """Edit and submit one experiment."""
+    """Edit and submit one experiment.
+
+    The title and the Submit row stay put; the arguments and settings scroll
+    between them.
+    """
 
     submit_requested = QtCore.pyqtSignal(object)
     last_requested = QtCore.pyqtSignal(str, str)
@@ -434,10 +440,22 @@ class ArgumentEditor(QWidget):
         layout.addLayout(title_row)
         layout.addWidget(self.doc)
 
+        body = QWidget()
+        body.setObjectName("EditorBody")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(10)
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("EditorScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setWidget(body)
+        layout.addWidget(self.scroll, 1)
+
         self.arguments_box = QWidget()
         self.arguments_layout = QVBoxLayout(self.arguments_box)
         self.arguments_layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.arguments_box)
+        body_layout.addWidget(self.arguments_box)
 
         settings = QHBoxLayout()
         settings.setSpacing(10)
@@ -499,7 +517,8 @@ class ArgumentEditor(QWidget):
         queue_form.addRow("Label", self.label)
         queue_form.addRow(self.start_at_enabled, self.start_at)
         settings.addWidget(queue_box, 1)
-        layout.addLayout(settings)
+        body_layout.addLayout(settings)
+        body_layout.addStretch(1)
 
         buttons = QHBoxLayout()
         self.defaults_button = QPushButton("Defaults")
@@ -544,7 +563,6 @@ class ArgumentEditor(QWidget):
         self.error.setObjectName("StatusLabel")
         self.error.setWordWrap(True)
         layout.addWidget(self.error)
-        layout.addStretch(1)
         self._set_enabled(False)
 
     def _set_enabled(self, enabled):

@@ -27,7 +27,12 @@ from PyQt6.QtWidgets import (
 
 from pytweezer.configuration.config import get_config
 from pytweezer.configuration.paths import icon_path, live_analyses_path
-from pytweezer.GUI.components import Region, set_state, status_icon
+from pytweezer.GUI.components import (
+    RefreshingComboBox,
+    Region,
+    set_state,
+    status_icon,
+)
 from pytweezer.GUI.property_editor import PropEdit
 from pytweezer.GUI.pytweezerQt import BWidget
 from pytweezer.logging_utils import get_logger
@@ -191,13 +196,14 @@ class AddFilterSheet(Region):
             parent,
         )
         self._stream_source = stream_source
-        self.scripts_by_category = self._scan_scripts(analysisdir)
+        self._analysisdir = analysisdir
 
         self.name = QLineEdit()
         self.name.setPlaceholderText("e.g. tweezer atoms")
         self.category = QComboBox()
         self.category.addItems(["Image", "Data"])
-        self.script = QComboBox()
+        self.script = RefreshingComboBox()
+        self.script.opening.connect(self.update_scripts)
         self.stream = QComboBox()
         self.add_button = QPushButton("Add filter")
         self.add_button.setObjectName("PrimaryButton")
@@ -277,10 +283,14 @@ class AddFilterSheet(Region):
         return by_category
 
     def update_scripts(self, _category=None):
-        self.script.clear()
-        self.script.addItems(
-            self.scripts_by_category.get(self.category.currentText(), [])
-        )
+        """Reread the script folder, keeping the chosen script if it is still there."""
+        scripts = self._scan_scripts(self._analysisdir)[self.category.currentText()]
+        current = self.script.currentText()
+        if scripts != [self.script.itemText(i) for i in range(self.script.count())]:
+            self.script.clear()
+            self.script.addItems(scripts)
+            if current in scripts:
+                self.script.setCurrentText(current)
         self._update_enabled()
 
     def update_streams(self, _category=None):
@@ -401,6 +411,7 @@ class AnalysisManager(BWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self.refresh_snapshot()
+        self.add_sheet.update_scripts()
         self.add_sheet.update_streams()
 
     def _show_status(self, text, state=""):

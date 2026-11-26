@@ -269,11 +269,15 @@ class ImageApplet(Applet):
             msg, head, imgdata = self.imgstream.recv()
             if self.image_index != -1 and head["index"] != self.image_index:
                 continue
-            levels = None if self._autoscale else self.view.levels()
-            self.view.set_units("px" if frame_geometry(head)[0] is None else "m")
-            self.view.show_image(imgdata, head, levels=levels)
+            self.show_frame(head, imgdata)
         self.update_mask()
         self.update_overlays()
+
+    def show_frame(self, head: dict, imgdata: np.ndarray) -> None:
+        """Draw one received frame."""
+        levels = None if self._autoscale else self.view.levels()
+        self.view.set_units("px" if frame_geometry(head)[0] is None else "m")
+        self.view.show_image(imgdata, head, levels=levels)
 
     def update_mask(self):
         while self.maskstream.has_new_data():

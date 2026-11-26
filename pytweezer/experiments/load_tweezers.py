@@ -13,6 +13,7 @@ from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.experiment.arguments import Bool, Device, Integer, Number
 from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
+from pytweezer.experiments.slm_tweezer_array import SlmArray
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers.device_client import get_device_config
 
@@ -53,7 +54,7 @@ TRAP_SITE_KEYS = (
 )
 
 
-def _roi_argument(default: int, *, size: bool) -> Integer:
+def hamcam_roi_argument(default: int, *, size: bool) -> Integer:
     return Integer(
         default,
         min=1 if size else 0,
@@ -63,6 +64,26 @@ def _roi_argument(default: int, *, size: bool) -> Integer:
         "before the first point, so it cannot be scanned",
         scannable=False,
     )
+
+
+def set_up_hamcam(
+    hamcam: ImagEMX2Camera, gain: float, roi: tuple[int, int, int, int]
+) -> tuple[int, int]:
+    """Put the HamCam in external exposure with EM gain, binning 1 and ``roi`` (x0, width, y0, height), live.
+
+    Returns:
+        The ROI's origin ``(x0, y0)`` as the camera set it, which may be rounded.
+    """
+    hamcam.stop_live()
+    hamcam.set_binning(1)
+    origin = tuple(hamcam.set_roi(*roi))
+    hamcam.set_trigger_source("ext")
+    hamcam.set_external_exposure_mode()
+    hamcam.enable_em_gain(True)
+    hamcam.enable_direct_em_gain(True)
+    hamcam.set_gain(gain)
+    hamcam.start_live()
+    return origin
 
 
 class LoadTweezers(MotMasterExperiment):
@@ -83,7 +104,7 @@ class LoadTweezers(MotMasterExperiment):
 
     ``signal_counts`` is the summed first frame minus the summed second.
     :meth:`prepare` also loads the accepted trap sites (see
-    :meth:`saved_trap_sites`) and records them in this ROI's pixels as
+    :meth:`get_trap_site_positions`) and records them in this ROI's pixels as
     ``trap_sites``, with the ``trap_window_size``, ``trap_feature_size`` and
     occupancy ``threshold`` they are scored with. With them, each point records
     whether each site was occupied in each frame (``first_occupied``,
@@ -121,10 +142,10 @@ class LoadTweezers(MotMasterExperiment):
         tooltip="EM-gain sensitivity of the HamCam, set once before the first point",
         scannable=False,
     )
-    hamcam_roi_x0 = _roi_argument(110, size=False)
-    hamcam_roi_width = _roi_argument(256, size=True)
-    hamcam_roi_y0 = _roi_argument(220, size=False)
-    hamcam_roi_height = _roi_argument(256, size=True)
+    hamcam_roi_x0 = hamcam_roi_argument(110, size=False)
+    hamcam_roi_width = hamcam_roi_argument(256, size=True)
+    hamcam_roi_y0 = hamcam_roi_argument(220, size=False)
+    hamcam_roi_height = hamcam_roi_argument(256, size=True)
     save_raw_images = Bool(
         True,
         group="Camera",
@@ -141,46 +162,7 @@ class LoadTweezers(MotMasterExperiment):
     def prepare(self) -> None:
         super().prepare()
         self.set_up_hamcam()
-        self.load_trap_sites()
-
-    def set_up_hamcam(self) -> None:
-        """Put the HamCam in external exposure with EM gain, binning 1 and the chosen ROI, live."""
-        self.hamcam.stop_live()
-        self.hamcam.set_binning(1)
-        self.roi_origin = tuple(
-            self.hamcam.set_roi(
-                self.hamcam_roi_x0,
-                self.hamcam_roi_width,
-                self.hamcam_roi_y0,
-                self.hamcam_roi_height,
-            )
-        )
-        self.hamcam.set_trigger_source("ext")
-        self.hamcam.set_external_exposure_mode()
-        self.hamcam.enable_em_gain(True)
-        self.hamcam.enable_direct_em_gain(True)
-        self.hamcam.set_gain(self.hamcam_gain)
-        self.hamcam.start_live()
-
-    def load_trap_sites(self) -> None:
-        """Load the accepted trap sites into ``trap_sites`` and record them, or record why there are none."""
-        # Fetched only for sequence bindings, so not with the overrides off.
-        saved = self.saved_parameters or get_saved_parameters()
-        self.trap_sites, self.no_trap_sites_reason = self.saved_trap_sites(saved)
-        if self.trap_sites is None:
-            if not self.no_trap_sites_reason:
-                return
-            if not self.save_raw_images:
-                raise RuntimeError(
-                    "without raw images only the site occupancy is recorded, "
-                    f"which needs trap sites: {self.no_trap_sites_reason}"
-                )
-            logger.info("Recording no trap sites: %s", self.no_trap_sites_reason)
-            return
-        self.record("trap_sites", np.array(list(self.trap_sites.positions.values())))
-        self.record("trap_window_size", self.trap_sites.window_size, unit="px")
-        self.record("trap_feature_size", self.trap_sites.feature_size, unit="px")
-        self.record("threshold", self.trap_sites.threshold, unit="photons")
+        self.read_trap_sites()
 
     def run_point(self) -> None:
         mark = self.hamcam.start_shot({"rid": self.rid})
@@ -195,6 +177,39 @@ class LoadTweezers(MotMasterExperiment):
 
         finally:
             super().finish()
+
+    def set_up_hamcam(self) -> None:
+        """Put the HamCam in external exposure with EM gain, binning 1 and the chosen ROI, live."""
+        self.roi_origin = set_up_hamcam(
+            self.hamcam,
+            self.hamcam_gain,
+            (
+                self.hamcam_roi_x0,
+                self.hamcam_roi_width,
+                self.hamcam_roi_y0,
+                self.hamcam_roi_height,
+            ),
+        )
+
+    def read_trap_sites(self) -> None:
+        """Load the accepted trap sites into ``trap_sites`` and record them, or record why there are none."""
+        # Fetched only for sequence bindings, so not with the overrides off.
+        saved = self.saved_parameters or get_saved_parameters()
+        self.trap_sites, self.no_trap_sites_reason = self.get_trap_site_positions(saved)
+        if self.trap_sites is None:
+            if not self.no_trap_sites_reason:
+                return
+            if not self.save_raw_images:
+                raise RuntimeError(
+                    "without raw images only the site occupancy is recorded, "
+                    f"which needs trap sites: {self.no_trap_sites_reason}"
+                )
+            logger.info("Recording no trap sites: %s", self.no_trap_sites_reason)
+            return
+        self.record("trap_sites", np.array(list(self.trap_sites.positions.values())))
+        self.record("trap_window_size", self.trap_sites.window_size, unit="px")
+        self.record("trap_feature_size", self.trap_sites.feature_size, unit="px")
+        self.record("threshold", self.trap_sites.threshold, unit="photons")
 
     def record_data(self, frames: np.ndarray) -> None:
         """Record the frames, signal and per-site results of one shot's two HamCam ``frames``."""
@@ -219,7 +234,7 @@ class LoadTweezers(MotMasterExperiment):
             self.record("first_counts", first_counts, unit="counts")
             self.record("second_counts", second_counts, unit="counts")
 
-    def saved_trap_sites(self, saved: dict) -> tuple[TrapSites | None, str]:
+    def get_trap_site_positions(self, saved: dict) -> tuple[TrapSites | None, str]:
         """The accepted trap sites in ``saved``, placed in whole pixels of this ROI; or ``None`` and why.
 
         An empty reason means the experiment wants none. Sites fitted to another
@@ -265,6 +280,30 @@ class LoadTweezers(MotMasterExperiment):
             int(saved["trap_feature_size"]),
             float(saved["trap_threshold"]),
         ), ""
+
+
+class LoadTweezersSlmArray(SlmArray, LoadTweezers):
+    """:class:`LoadTweezers` that puts the tweezer array on the SLM first.
+
+    The mask is written before the first point and again whenever an SLM
+    argument changes, so the array and the Fresnel lens can be scanned; each
+    write waits ``slm_settle_time``. Every point also records the quality of
+    the mask on the SLM (``uniformity``, ``min_max_ratio``, ``mse``).
+
+    The trap sites are checked against the array the rig had before this task
+    wrote its own, and are the ones fitted by the last accepted
+    ``FindTrapSites``: after changing the array, run that again.
+    """
+
+    slm_settle_time = Number(1, unit="s", min=0, group="Array")
+
+    def prepare(self) -> None:
+        super().prepare()
+        self.read_slm_settings()
+
+    def run_point(self) -> None:
+        self.update_slm_array(self.slm_settle_time)
+        super().run_point()
 
 
 class LoadTweezersNImages(LoadTweezers):

@@ -3,21 +3,23 @@ from __future__ import annotations
 from typing import ClassVar
 
 from pytweezer.experiment.arguments import Integer, Number
-from pytweezer.experiment.optimisers import SEARCH, Dimension
+from pytweezer.experiment.optimisers import SEARCH, Dimension, shortfall, shortness
 from pytweezer.experiments.load_tweezers import LoadTweezers
-from pytweezer.optimisers.tweezer_optimisation import TweezerOptimisation
+from pytweezer.optimisers.tweezer_optimisation import (
+    MOLASSES_TIME,
+    TweezerOptimisation,
+)
 
 
 class OptimiseMolassesShims(TweezerOptimisation, LoadTweezers):
-    """Find the molasses shim currents that recapture the most atoms after a drop.
+    """Find the shim currents that give the best drop survival while loading stays above its threshold.
 
     Each evaluation drops the atoms for ``drop_duration`` between the two
-    images. Below ``loading_floor`` the score is the loading; above it, the
-    floor plus the recapture probability, so every setting that loads the
-    array outscores every one that does not, and among those the coldest wins.
+    images, after the saved molasses time.
     """
 
     objective = "score"
+    drop = "drop_duration"
     # The shims are analog outputs, in volts, of a +-10 V card.
     dimensions: ClassVar[list[Dimension]] = [
         Dimension(
@@ -32,33 +34,36 @@ class OptimiseMolassesShims(TweezerOptimisation, LoadTweezers):
     ]
     n_calls = Integer(50, min=1, group=SEARCH)
     n_initial = Integer(10, min=1, group=SEARCH)
-    loading_floor = Number(0.5, min=0, max=1, group=SEARCH)
+    loading_threshold = Number(0.55, min=0, max=1, group=SEARCH)
+    shortfall_penalty = Number(10, min=0, group=SEARCH)
     drop_duration = Integer(
         3, min=0, group="Analysis", tooltip="the script's tDropDuration"
     )
 
-    def measure(
-        self,
-        *,
-        shim_x: float | None = None,
-        shim_y: float | None = None,
-        shim_z: float | None = None,
-    ) -> dict[str, float]:
-        """Score the molasses shims; ``None`` keeps a saved value."""
-        shims = {
-            parameter: value
-            for parameter, value in (
-                ("tMolassesShimXccValue", shim_x),
-                ("tMolassesShimYccValue", shim_y),
-                ("tMolassesShimZccValue", shim_z),
-            )
-            if value is not None
-        }
-        return self.score_batch(
-            BackgroundDrop=1, tDropDuration=self.drop_duration, **shims
+    def objective_of(
+        self, scores: dict[str, float], settings: dict[str, float]
+    ) -> float:
+        return scores["survival"] - self.shortfall_penalty * shortfall(
+            scores["loading"], self.loading_threshold
         )
 
-    def objective_of(self, results: dict[str, float]) -> float:
-        if results["loading"] < self.loading_floor:
-            return results["loading"]
-        return self.loading_floor + results["survival"]
+
+class OptimiseMolassesShimsMinTime(OptimiseMolassesShims):
+    """Find the shortest molasses, with the shim currents, that keeps loading and drop survival above their thresholds."""
+
+    dimensions: ClassVar[list[Dimension]] = [
+        *OptimiseMolassesShims.dimensions,
+        MOLASSES_TIME,
+    ]
+    survival_threshold = Number(0.8, min=0, max=1, group=SEARCH)
+
+    def objective_of(
+        self, scores: dict[str, float], settings: dict[str, float]
+    ) -> float:
+        return (
+            shortness(settings["molasses_time"], self.bounds["molasses_time"])
+            - self.shortfall_penalty
+            * shortfall(scores["loading"], self.loading_threshold)
+            - self.shortfall_penalty
+            * shortfall(scores["survival"], self.survival_threshold)
+        )

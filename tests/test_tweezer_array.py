@@ -9,10 +9,21 @@ from pytweezer.experiment import ListAxis, Scan, motmaster, optimisers, run_loca
 from pytweezer.experiment.client import ManagerUnavailable
 from pytweezer.experiments import load_tweezers
 from pytweezer.experiments.load_tweezers import LoadTweezers, LoadTweezersMOTImage
+from pytweezer.experiments.trap_frequency import TrapFrequencyScan
 from pytweezer.optimisers.find_trap_sites import FindTrapSites
-from pytweezer.optimisers.optimise_molasses_light import OptimiseMolassesLight
-from pytweezer.optimisers.optimise_molasses_shims import OptimiseMolassesShims
-from pytweezer.optimisers.optimise_mot_light import OptimiseMOTLight
+from pytweezer.optimisers.optimise_molasses_light import (
+    OptimiseMolassesLight,
+    OptimiseMolassesLightMinTime,
+)
+from pytweezer.optimisers.optimise_molasses_shims import (
+    OptimiseMolassesShims,
+    OptimiseMolassesShimsMinTime,
+)
+from pytweezer.optimisers.optimise_mot_light import (
+    MOT_LOAD_TIME,
+    OptimiseMOTLight,
+    OptimiseMOTLightMinTime,
+)
 from pytweezer.optimisers.optimise_tweezer_imaging import OptimiseTweezerImaging
 
 #: The default 8x8, 5 µm grid at 2 px/µm, in the pixels of the camera's ROI.
@@ -86,7 +97,7 @@ class RecordingCamera:
 
 
 class FakeHamCam(RecordingCamera):
-    """Images the array twice per shot; turning the tweezers off empties the second frame."""
+    """Images the array twice per shot."""
 
     def __init__(self, sequencer):
         super().__init__()
@@ -115,10 +126,7 @@ class FakeHamCam(RecordingCamera):
 
     def wait_frames(self, mark, n):
         loaded = self.rng.random(len(SITES)) < LOADING
-        if self.sequencer.goes[-1].get("tTweezerSetVVA0") == 0.0:
-            kept = np.zeros(len(SITES), dtype=bool)
-        else:
-            kept = loaded & (self.rng.random(len(SITES)) < SURVIVAL)
+        kept = loaded & (self.rng.random(len(SITES)) < SURVIVAL)
         return self._frame(loaded), self._frame(kept)
 
 
@@ -251,13 +259,14 @@ def test_find_trap_sites_keeps_the_rigs_order_of_its_array(rig):
     assert measurement.constants["sites_from"] == "rig"
 
 
-def test_find_trap_sites_takes_its_shots_with_the_tweezers_off_in_the_background_drop(
-    rig,
-):
+TWEEZER_VVAS = ("tTweezerSetVVA0", "tTweezerSetVVA1")
+
+
+def test_find_trap_sites_takes_its_shots_without_a_drop(rig):
     run_local(FindTrapSites, calibration_shots=30)
     assert len(rig.goes) == 30
-    assert all(go["BackgroundDrop"] == 1 for go in rig.goes)
-    assert all(go["tTweezerSetVVA0"] == go["tTweezerSetVVA1"] == 0.0 for go in rig.goes)
+    assert all(go["BackgroundDrop"] == 0 for go in rig.goes)
+    assert not any(name in go for go in rig.goes for name in TWEEZER_VVAS)
 
 
 def test_measurements_record_the_saved_sites_in_their_roi(rig):
@@ -357,28 +366,6 @@ def test_each_evaluation_images_both_times_at_its_settings(rig):
             assert (go["tImgCoolVVA1"], go["tImgCoolVVA2"]) == (vva, vva)
 
 
-@pytest.mark.parametrize(
-    ("fidelity_floor", "expected"),
-    [(0.9, "survival"), (1.0, "0.8 fidelity")],
-)
-def test_the_score_is_survival_only_above_the_fidelity_floor(
-    rig, fidelity_floor, expected
-):
-    measurement = run_local(
-        OptimiseTweezerImaging,
-        **FAST,
-        n_calls=1,
-        n_initial=1,
-        fidelity_floor=fidelity_floor,
-    )
-    results = measurement.results
-    score = {
-        "survival": results["survival"][0],
-        "0.8 fidelity": 0.8 * results["fidelity"][0],
-    }
-    assert results["objective"][0] == pytest.approx(score[expected])
-
-
 def test_each_molasses_evaluation_runs_at_its_shims(rig):
     measurement = run_local(OptimiseMolassesShims, **FAST, n_calls=2, n_initial=2)
     assert measurement.status == "completed", measurement.attrs["error"]
@@ -433,27 +420,60 @@ def test_each_light_evaluation_runs_at_its_settings(rig, cls, sent_as):
             assert {parameter: go[parameter] for parameter in expected} == expected
 
 
-@pytest.mark.parametrize("cls", [OptimiseMolassesShims, OptimiseMolassesLight])
 @pytest.mark.parametrize(
-    ("loading_floor", "expected"),
-    [(0.5, "floor plus recapture"), (0.9, "loading")],
+    ("cls", "setting", "parameter"),
+    [
+        (OptimiseMOTLightMinTime, "load_time", MOT_LOAD_TIME),
+        (OptimiseMolassesShimsMinTime, "molasses_time", "tMolassesDuration"),
+        (OptimiseMolassesLightMinTime, "molasses_time", "tMolassesDuration"),
+    ],
 )
-def test_the_molasses_score_counts_recapture_only_once_the_array_loads(
-    rig, cls, loading_floor, expected
-):
-    measurement = run_local(
-        cls,
-        **FAST,
-        n_calls=1,
-        n_initial=1,
-        loading_floor=loading_floor,
-    )
-    results = measurement.results
-    score = {
-        "floor plus recapture": loading_floor + results["survival"][0],
-        "loading": results["loading"][0],
-    }
-    assert results["objective"][0] == pytest.approx(score[expected])
+def test_each_min_time_evaluation_runs_at_its_whole_time(rig, cls, setting, parameter):
+    measurement = run_local(cls, **FAST, n_calls=2, n_initial=2)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    for point in range(2):
+        time = measurement.results[setting][point]
+        assert time == round(time)
+        for go in rig.goes[point * FAST["shots"] : (point + 1) * FAST["shots"]]:
+            assert go[parameter] == time
+
+
+def test_mot_scores_shorter_loads_higher_once_loading_clears_the_threshold():
+    optimiser = OptimiseMOTLightMinTime()
+    optimiser.bounds = {"load_time": (10, 500)}
+
+    def score(load_time, loading):
+        return optimiser.objective_of({"loading": loading}, {"load_time": load_time})
+
+    assert score(10, 0.6) > score(500, 0.6)
+    assert score(10, 0.40) < score(500, 0.55)
+
+
+@pytest.mark.parametrize("cls", [OptimiseMolassesShims, OptimiseMolassesLight])
+def test_molasses_scores_survival_less_any_loading_shortfall(cls):
+    optimiser = cls()
+
+    def score(loading, survival):
+        return optimiser.objective_of({"loading": loading, "survival": survival}, {})
+
+    assert score(0.55, 0.9) - score(0.55, 0.8) == pytest.approx(0.1)
+    assert score(0.55, 0.8) - score(0.45, 0.8) == pytest.approx(1)
+
+
+@pytest.mark.parametrize(
+    "cls", [OptimiseMolassesShimsMinTime, OptimiseMolassesLightMinTime]
+)
+def test_min_time_molasses_penalises_each_shortfall(cls):
+    optimiser = cls()
+    optimiser.bounds = {"molasses_time": (1, 20)}
+    settings = {"molasses_time": 5}
+
+    def score(loading, survival):
+        scores = {"loading": loading, "survival": survival}
+        return optimiser.objective_of(scores, settings)
+
+    assert score(0.55, 0.8) - score(0.45, 0.8) == pytest.approx(1)
+    assert score(0.55, 0.8) - score(0.55, 0.7) == pytest.approx(1)
 
 
 def window_sums(frames, window_size=5):
@@ -711,3 +731,29 @@ def test_a_failed_shot_ends_the_cameras_shots_and_leaves_them_live(rig, cls):
 def test_mot_image_variant_records_the_rb_mass(rig):
     measurement = run_local(LoadTweezersMOTImage)
     assert measurement.constants["cloud_mass_amu"] == pytest.approx(86.909)
+
+
+def test_a_trap_frequency_scan_modulates_at_the_vcf_voltage_of_each_frequency(rig):
+    scan = Scan(
+        axes=[ListAxis(argument="modulation_frequency", values=[10e3, 155e3, 300e3])]
+    )
+    measurement = run_local(TrapFrequencyScan, scan)
+
+    assert measurement.status == "completed", measurement.attrs.get("error")
+    sent = [
+        (go["TweezerModulation"], go["tTweezerModulationVCF"], go["BackgroundDrop"])
+        for go in rig.goes
+    ]
+    assert sent == [(1, -10.0, 0), (1, 0.0, 0), (1, 10.0, 0)]
+    assert all(go["tDelay2"] == 2000 for go in rig.goes)
+    np.testing.assert_allclose(
+        measurement.results["modulation_voltage"], [-10.0, 0.0, 10.0]
+    )
+    assert "survival" in measurement.results
+
+
+def test_a_trap_frequency_scan_refuses_a_frequency_outside_the_vcos_range(rig):
+    measurement = run_local(TrapFrequencyScan, modulation_frequency=400e3)
+    assert measurement.status == "failed"
+    assert "outside the VCO's range" in measurement.attrs["error"]
+    assert not rig.goes

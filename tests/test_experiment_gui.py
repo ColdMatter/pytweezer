@@ -560,6 +560,69 @@ def test_queue_view_selects_nothing_when_the_selected_task_disappears(qapp):
     assert not view.buttons["delete"].isEnabled()
 
 
+def test_terminate_acts_on_the_selected_task_else_the_newest_running(qapp):
+    view = QueueView()
+    older = task(7, "running", pipeline="a", t_start="2026-10-07T12:00:00+01:00")
+    newer = task(5, "paused", pipeline="b", t_start="2026-10-07T12:05:00+01:00")
+    actions = []
+    view.action_requested.connect(lambda *action: actions.append(action))
+    view.set_snapshot(
+        {
+            "running": [older, newer],
+            "queue": [task(9, "queued")],
+            "history": [task(3, "completed")],
+        }
+    )
+
+    view.buttons["terminate"].click()
+    view.table.selectRow(1)  # RID 7
+    view.buttons["terminate"].click()
+    view.table.selectRow(2)  # RID 9, waiting: cancelled
+    view.buttons["terminate"].click()
+    assert actions == [
+        ("terminate", {"rid": 5}),
+        ("terminate", {"rid": 7}),
+        ("delete", {"rid": 9}),
+    ]
+    view.table.selectRow(3)  # finished: nothing to stop
+    assert not view.buttons["terminate"].isEnabled()
+
+    view.set_snapshot({"running": [{**newer, "requested": "terminate"}]})
+    assert not view.buttons["terminate"].isEnabled()
+    view.set_snapshot({"running": []})
+    assert not view.buttons["terminate"].isEnabled()
+
+
+def test_queue_keys_pause_terminate_and_abort(qapp, monkeypatch):
+    view = QueueView()
+    monkeypatch.setattr(view, "confirm", lambda question: True)
+    actions = []
+    view.action_requested.connect(lambda *action: actions.append(action))
+    running = task(7, "running", t_start="2026-10-07T12:00:00+01:00")
+    view.set_snapshot({"running": [running], "queue": [task(9, "queued")]})
+    view.show()
+    view.activateWindow()
+    assert QTest.qWaitForWindowActive(view)  # shortcuts fire only in the active window
+    view.table.setFocus()
+
+    def press(key, modifier=QtCore.Qt.KeyboardModifier.NoModifier):
+        QTest.keyClick(view.table, key, modifier)
+
+    press(QtCore.Qt.Key.Key_Space)
+    view.set_snapshot({"running": [{**running, "status": "paused"}]})
+    press(QtCore.Qt.Key.Key_Space)
+    press(QtCore.Qt.Key.Key_Delete)
+    press(QtCore.Qt.Key.Key_Delete, QtCore.Qt.KeyboardModifier.ShiftModifier)
+    assert actions == [
+        (command, {"rid": 7}) for command in ("pause", "resume", "terminate", "abort")
+    ]
+
+
+def test_submit_row_stays_out_of_the_scrolled_arguments(editor):
+    assert not editor.scroll.isAncestorOf(editor.submit_button)
+    assert editor.scroll.isAncestorOf(editor.arguments_box)
+
+
 def test_panel_submits_and_forwards_actions(qapp):
     client, feed = FakeClient(), FakeFeed()
     panel = ExperimentsPanel(client=client, feed=feed)

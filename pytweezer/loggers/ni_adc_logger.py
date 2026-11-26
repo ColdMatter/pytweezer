@@ -10,8 +10,7 @@ Config entry shape (``CONFIG["Loggers"][name]``)::
 
     {
         "run_at_startup": True,
-        "script": "../pytweezer/servers/logger_server.py",
-        "logger": "ni_adc",
+        "class": "pytweezer.loggers.ni_adc_logger:NIADCLogger",
         "host": SERVER_HOST,
         "interval": 1.0,
         "simulate": SIMULATING,             # True -> no hardware, fake readings
@@ -21,7 +20,7 @@ Config entry shape (``CONFIG["Loggers"][name]``)::
     }
 
 To add another owns-its-device logger, copy this class, override ``setup``/
-``read``/``close``, and register it in ``logger_server.LOGGER_REGISTRY``.
+``read``/``close``, and name it as ``"class"`` in its config entry.
 """
 
 import math

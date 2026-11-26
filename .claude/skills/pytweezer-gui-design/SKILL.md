@@ -144,7 +144,7 @@ Palette (extend with these; don't introduce near-duplicates):
 - **`QScrollArea.setWidget()` turns on `autoFillBackground`,** so the scrolled
   content paints the window colour inside a region. Give the scroll area and
   its widget object names and a `background: transparent` rule (see
-  `#EditorScroll`, `#ArgumentEditor`). Plain `QWidget` containers are already
+  `#EditorScroll`, `#EditorBody`). Plain `QWidget` containers are already
   transparent. `QGroupBox`, `QStackedWidget` and `QCheckBox` need the rule
   inside regions.
 - **`ResizeToContents` packs cells edge to edge.** Add `::item` padding for that

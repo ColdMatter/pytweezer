@@ -5,38 +5,29 @@ description: Create a new pytweezer applet — a live viewer window under pytwee
 
 # Adding an applet to pytweezer
 
-An applet is one small local process that subscribes to streams and draws them.
-`pytweezer/GUI/applet.py` owns the process machinery — Properties connection,
-window title and icon, geometry, theme, poll timer, the subscription/configure
-dialogs — so writing an applet means writing **one `Applet` subclass** in a new
-file under `pytweezer/GUI/viewers/`, then pointing a launcher entry at it.
+An applet is one local process that subscribes to streams and draws them.
+`pytweezer/GUI/applet.py` owns the machinery (Properties connection, title,
+geometry, theme, poll timer, subscription/configure dialogs), so an applet is
+**one `Applet` subclass** in a new file under `pytweezer/GUI/viewers/`, ending
+in `run_applet(<Class>, default_name="<Name>")`.
 
-There is no config category to edit. The Applet Launcher runs
-`python <script> <name>`, where `name` is the window title, the Properties
-namespace, and the launcher label at once. Two entries running the same script
-under different names are fully independent instances.
-
-The launcher keeps the applet catalogue in Properties under the `"Applets"` key
-(`{name: {"script", "description"}}`), so every PC sees the same list; *which*
-applets are running is per-machine and lives in local `QSettings` instead.
-Relative `script` paths resolve against `tweezerpath`.
+There is no CONFIG entry. The Applet Launcher runs `python <script> <name>`;
+`name` is the window title, the Properties namespace and the launcher label, so
+two entries running the same script under different names are independent
+instances. The catalogue lives in Properties under `"Applets"`
+(`{name: {"script", "description"}}`, relative scripts resolve against
+`tweezerpath`); which applets are running is per-machine, in `QSettings`.
 
 ## First check it is an applet
 
-Applets **display**; they never compute a derived quantity and never publish.
-If the request needs a new number that nothing currently streams — a centre of
-mass, a fit, an atom count, a running average — that number belongs in an
-analysis process (use the `add-analysis-script` skill), and the applet only
-plots what the analysis publishes. Splitting it this way is what lets several
-people watch the same derived quantity from different PCs.
-
-An applet that finds itself calling `client.send()` has taken on an analysis's
-job. The preview script warns when it sees this.
+Applets **display**; they never compute a derived quantity and never publish. A
+new number nothing streams yet (centre of mass, fit, atom count, running
+average) belongs in an analysis (`add-analysis-script` skill); the applet plots
+what it publishes. An applet calling `client.send()` is doing an analysis's job.
 
 The one exception: an applet may **drive the one device it is about**, as the
-Camera applet sets up a camera and stores the values it took as saved
-parameters. Make every device call through a single worker-thread link (like
-`CameraLink` in `viewers/camera_applet.py`), so the GUI never waits on RPC, and
+Camera applet does. Make every device call through a single worker-thread link
+(`CameraLink` in `viewers/camera_applet.py`) so the GUI never waits on RPC, and
 go read-only while an Experiment Manager task holds the device (follow
 `ExperimentFeed`, as the Camera applet does).
 
@@ -44,8 +35,8 @@ go read-only while an Experiment Manager task holds the device (follow
 
 ```python
 class AtomCount(Applet):
-    stream_category = "Data"  # "Data" or "Image" — which catalog the
-    poll_interval = 50  #   subscription editor lists
+    stream_category = "Data"  # "Data" or "Image": which catalogue the subscription editor lists
+    poll_interval = 50
     default_size = (520, 300)
 
     _threshold = PropertyAttribute("threshold", 0.5)
@@ -68,26 +59,21 @@ if __name__ == "__main__":
     run_applet(AtomCount, default_name="Atom Count")
 ```
 
-Keep both entry points: `main(name)` for tooling that imports the module, and
-the `__main__` guard for the launcher and the command line.
+Keep both entry points: `main(name)` for tooling that imports the module, the
+`__main__` guard for the launcher.
 
-`poll_interval` is a repaint budget, not a data rate — nothing is lost between
-polls because messages queue. The image viewers and Live Plot use 10 ms because
-they redraw one cheap item; 50–100 ms is kinder for anything that rebuilds a plot
-(Scalar History, SLM Monitor, Tweezer Loading), and the display still looks live.
+`poll_interval` is a repaint budget, not a data rate: messages queue between
+polls. 10 ms suits viewers that redraw one cheap item (image viewers, Live
+Plot); use 50–100 ms for anything that rebuilds a plot.
 
-## Reading a stream without losing or crashing on messages
+## Reading a stream safely
 
-Four things about the transport decide whether an applet survives contact with a
-real stream. All four have bitten the existing viewers.
+Each of these has bitten an existing viewer.
 
-**`recv()` returns a variable-length tuple.** `(channel, header)` for a
-header-only message, `(channel, header, array)` when an array follows, and
-`None` on timeout. Analyses publish scalars as header-only messages, so
-unpacking three values unconditionally raises `ValueError` the moment someone
-points your applet at a scalar stream. Length-check against what you actually
-need — an applet that draws an array requires three, one that reads a header
-field is happy with two:
+**`recv()` returns a variable-length tuple**: `(channel, header)`,
+`(channel, header, array)`, or `None` on timeout. Analyses publish scalars
+header-only, so an unconditional three-way unpack raises `ValueError` on a
+scalar stream. Check the length you need:
 
 ```python
 message = self.stream.recv()
@@ -98,91 +84,75 @@ channel, head, array = message
 message = self.stream.recv()
 if message is None or len(message) < 2:  # reading a header field
     continue
-channel, head = message[0], message[1]  # tolerate a trailing array
+channel, head = message[0], message[1]
 ```
 
-**Drain the queue with `while`, not `if`, and don't wait.** One `recv()` per
-poll falls behind a stream faster than it arrives and never catches up — the
-display drifts further into the past the longer it runs. `poll` is already paced
-by its timer, so check with a zero timeout: the default 1 ms wait lasts a whole
-timer tick (~16 ms) on Windows, stalling the window's event loop on every poll.
+**Drain with `while`, and don't wait.** One `recv()` per poll falls ever further
+behind. Use a zero timeout: the default 1 ms lasts a whole timer tick (~16 ms)
+on Windows and stalls the event loop every poll.
 
 ```python
 while self.stream.has_new_data(timeout_ms=0):
     ...
 ```
 
-**`update_subscriptions` must unsubscribe first, then rebuild the view.**
-`Applet` calls it once straight after `init_gui` (so `init_gui` need not
-subscribe; some applets, e.g. `CameraApplet`, still do, which is harmless as
-subscribing is idempotent), then every time a dialog closes, so leaving old
-subscriptions attached silently accumulates them, and leaving old curves in the
-plot leaves ghosts of streams the user just removed. Unsubscribe, clear,
-re-subscribe, recreate.
+**`update_subscriptions` unsubscribes first, then rebuilds the view.** `Applet`
+calls it once straight after `init_gui` (so `init_gui` need not subscribe), then
+every time a dialog closes; otherwise subscriptions accumulate and removed
+streams leave ghost curves. Unsubscribe, clear, re-subscribe, recreate.
 
-**Skip `"--None--"`.** That is the placeholder an unconfigured stream list
-carries. Subscribing to it is harmless, but creating a curve or a row for it puts
-a fake entry in front of the user.
+**Skip `"--None--"`**, the placeholder of an unconfigured stream list; don't
+create a curve or row for it.
 
-Header keys are all optional — use `head.get(...)`. A camera frame
-(`Camera.broadcast_image` in `drivers/camera_base.py`) carries `timestamp`,
-`index` (the frame's number as read: its place in the shot when an experiment
-reads a shot, counting up from the acquisition start when broadcast live),
-`roi_x0`/`roi_y0` (the sensor pixel of the frame's corner), `binning` (sensor
-pixels per frame pixel, per side), `camera_timestamp` (the camera's own clock,
-in seconds, on live frames from a driver that gives one), and `rid` when the
-experiment that read it passes one (`LoadTweezers` does). The pair `_offset`/`_imgresolution` (pixel origin and metres
-per pixel) is set by some publishers (`roi_slice.py`, `experiments/slm_tweezer_array.py`)
-and not others.
-If you scale an image by `_imgresolution`, keep the axis labels honest — an image
-drawn in metres inside a view ranged in pixels shrinks into the corner and looks
-like a broken applet.
+**`poll` must not raise.** It runs from a QTimer and an exception can take the
+window down. Guard the shape you need and skip anything else.
 
-Give every stream client a distinct name (`DataClient(self.name + "_left")`).
-The name is the publish channel, and two clients sharing one are indistinguishable
-on the hub.
+Give every stream client a distinct name (`DataClient(self.name + "_left")`):
+the name is the publish channel.
 
-Finally, **`poll` must not raise.** It runs from a QTimer; an exception there
-escapes into the Qt loop and, depending on the message, can take the window with
-it. Guard the shape you require and skip anything else.
+Header keys are all optional; use `head.get(...)`. A camera frame
+(`Camera.broadcast_image` in `drivers/camera_base.py`) carries `roi_x0`/`roi_y0`
+(sensor pixel of the frame's corner) and `binning`, plus whatever the reader
+adds: `timestamp`, `index` (place in the shot, or count since acquisition start
+when live), `camera_timestamp` on live frames where the driver has one, and
+`rid` when the experiment passes one. `_offset`/`_imgresolution` (origin in
+binned pixels, metres per pixel) appear only from cameras with `object_pixel_m`
+configured and from `experiments/slm_tweezer_array.py`. If you scale by
+`_imgresolution`, range and label the axes in metres too, or the image shrinks
+into a corner.
 
 ## Experiment results, saved parameters and trap sites
 
-Not everything worth viewing is a stream:
-
 - **Experiment results.** `ExperimentFeed` (`GUI/experiments/feed.py`) mirrors
-  the Experiment Manager's state on its own Qt timer. `point_received` carries
-  each point a running task measures (`{"rid", "index", "values", "scalars",
-  ...}`); points measured before the window opened are in `held_points()`, to
-  take once, on the first `queue_changed`. Close the feed in `closeEvent`. To let
-  the user pick result names rather than streams, pass them as
-  `open_subscription_editor(streamkey=..., choices=[...])`. `viewers/live_plot.py`
-  does all of this.
+  the manager's state on its own Qt timer. `point_received` carries each point
+  measured (`{"rid", "index", "values", "scalars", ...}`); points from before
+  the window opened are in `held_points()`, taken once on the first
+  `queue_changed`. Close the feed in `closeEvent`. To let the user pick result
+  names, use `open_subscription_editor(streamkey=..., choices=[...])`.
+  `viewers/live_plot.py` does all of this.
 - **Saved parameters.** `get_saved_parameters()` (`experiment/client.py`) is an
-  RPC to the manager: call it at start-up and again when the feed's snapshot
-  carries a new `saved_parameters_version`, never per poll, and catch
+  RPC: call it at start-up and when the feed snapshot's
+  `saved_parameters_version` changes, never per poll, and catch
   `ManagerUnavailable`/`ManagerError` so a missing manager leaves the window up.
-- **Trap sites** (`trap_sites`) are saved as full-sensor `(y, x)` pixels. Place
-  them in a frame with `analysis/trap_sites.to_roi(sites, head.get("roi_y0", 0),
-  head.get("roi_x0", 0))`, or they sit off the atoms whenever the camera reads an
-  ROI. The Image Monitor draws frames row-major, row 0 at the top and x along the
-  columns, as the Optimisers tab and the notebooks do, so a subclass of
-  `ImageApplet` gets that for free.
+- **Trap sites** (`trap_sites`) are full-sensor `(y, x)` pixels. Place them with
+  `analysis/trap_sites.to_roi(sites, head.get("roi_y0", 0), head.get("roi_x0", 0))`
+  or they sit off the atoms whenever the camera reads an ROI. The Image Monitor
+  draws row-major (row 0 at top, x along columns), matching the Optimisers tab
+  and notebooks; subclasses of `ImageApplet` inherit that.
 
-## Drawings: `GUI/views/`, specialisations, and who imports whom
+## Where drawing code lives
 
-A **base view** is a general-purpose widget that shows what it is handed and
-knows nothing of streams, Properties, devices or the archive. Base drawings
-belong in `pytweezer/GUI/views/`: `HistogramPlot` (`histogram.py`), `ImageView`
-(`image.py`: image, colour bar, ROIs, side plots, overlay paths), `LinePlot`
-(`line_plot.py`) and `TweezerLoadingPlots` (`tweezer_loading.py`).
+`pytweezer/GUI/views/` holds base views that show what they are handed and know
+nothing of streams, Properties or devices: `ImageView` (`image.py`: image,
+colour bar, mask, ROIs, side plots, overlay paths), `LinePlot` (`line_plot.py`),
+`HistogramPlot` (`histogram.py`) and `TweezerLoadingPlots`
+(`tweezer_loading.py`).
 
-The framework applet bases wire streams to those views: `ImageApplet`
-(`GUI/image_applet.py`) holds an `ImageView` as `self.view`, and
-`LivePlotApplet` (`GUI/live_plot_applet.py`) is the grid of plots. An image
-applet subclasses `ImageApplet` and draws through `self.view`; a data-plot
-applet subclasses `LivePlotApplet` or builds its own `Applet` around a
-`LinePlot`.
+The framework applet bases wire streams to those views. `ImageApplet`
+(`GUI/image_applet.py`) holds an `ImageView` as `self.view`; `LivePlotApplet`
+(`GUI/live_plot_applet.py`) is the grid of plots. An image applet subclasses
+`ImageApplet` and draws through `self.view`; a data-plot applet subclasses
+`LivePlotApplet` or builds its own `Applet` around a `LinePlot`.
 
 An applet may subclass another applet to add a small feature or specialisation
 on top of it: the Background Monitor is the Image Monitor plus a stored
@@ -191,99 +161,67 @@ of its parent's behaviour, don't subclass it. Build both on the framework base
 and share the common drawing through `GUI/views/` (or the common wiring through
 a framework base), rather than layering one applet's overrides on another's.
 
-A **specialisation** (an image with trap sites marked, a histogram with a fit
-and a threshold) stays in the applet or default-analysis view that uses it, and
-moves to `GUI/views/` once a second panel needs it. `TweezerLoadingPlots` in
-`GUI/views/tweezer_loading.py` is the shared example: the Tweezer Loading applet
-and that tab's histogram view both draw it, so the two cannot drift apart.
-
-Applets (`GUI/viewers/`) and default-analysis views
-(`GUI/default_analyses/`) never import from one another; share through
+A specialisation (image with trap sites, histogram with a fit) stays in its
+applet until a second panel needs it, then moves to `GUI/views/`
+(`TweezerLoadingPlots`). Applets (`GUI/viewers/`) and default-analysis views
+(`GUI/default_analyses/`) never import from each other; share through
 `GUI/views/`.
 
 ## Properties are the user's knobs
 
-Anything the user might retune without editing code — a threshold, a history
-length, a colormap, an axis range — is a `PropertyAttribute` with a default:
-
-```python
-_history = PropertyAttribute("history", 200)
-```
-
-Reading `self._history` is cheap (a local dict the Properties thread keeps in
-sync) and the user can change it live from the **configure** dialog. Reading a
-property also writes its default back, which is what makes the knob appear in
-that dialog in the first place — so a property nobody has touched still shows up
-with its default, ready to edit.
+Anything the user might retune without editing code (threshold, history length,
+colormap, axis range) is a `PropertyAttribute` with a default:
+`_history = PropertyAttribute("history", 200)`. Reading it is cheap and also
+writes the default back, which is what makes it appear in the configure dialog.
 
 ## Making it look right
 
-The theme is handled: `run_applet` calls `apply_theme`, which applies the shared
-dark stylesheet and the pyqtgraph background/foreground defaults. An applet is
-its own process and inherits nothing from the main GUI, so this is the only thing
-standing between your window and the platform's default light grey. Never set a
-stylesheet or a literal hex colour in an applet — take colours from
-`pytweezer/GUI/theme.py` so every window in the lab keeps matching.
+`run_applet` calls `apply_theme` (stylesheet and pyqtgraph defaults). Never set
+a stylesheet, a literal hex colour or `pg.setConfigOptions` in an applet; take
+colours from `pytweezer/GUI/theme.py`. See `pytweezer-gui-design` for the wider
+rules. For an applet:
 
-What is left to you is the composition:
+- **One applet, one job.** Extra instances are free.
+- **Let the display fill the window**: `setContentsMargins(0, 0, 0, 0)` on the
+  outer layout.
+- **Put `subscriptions` and `configure` in the view-box context menu** with
+  the view's `add_menu_action(text, slot)`.
+- **Colour curves with `self.stream_color(stream, index)`**: it cycles the
+  shared palette and honours a per-stream colour the user set.
+- **Label axes with units**; `plot.addLegend()` once there are several curves.
+- **Monospace numeric readouts** (`QFont("Consolas")` or
+  `setStyleHint(QFont.Monospace)`), or live digits jitter.
+- **`default_size`** fits the content on first run; geometry is remembered after.
 
-- **One applet, one job.** A window that shows one thing well beats a window
-  with three panels and a toolbar. Extra instances are free — the user adds
-  another launcher entry.
-- **Let the display fill the window.** `layout.setContentsMargins(0, 0, 0, 0)`
-  on the outer layout. A plot framed in 11 px of background is 11 px of data the
-  user did not get.
-- **Wire up `subscriptions` and `configure` in the view-box context menu**
-  with the view's `add_menu_action(text, slot)`.
-- **Colour curves with `self.stream_color(stream, index)`.** It cycles the
-  shared palette so several streams are distinguishable immediately, while still
-  honouring a per-stream colour the user has set. Hardcoding a pen colour means
-  every curve on the plot is the same one.
-- **Label axes with units**, and use `plot.addLegend()` once there is more than
-  one curve.
-- **For numeric readouts, use a monospace font** (`QFont("Consolas")`, or
-  `setStyleHint(QFont.Monospace)`). Proportional digits change width as the value
-  changes, so a live number visibly jitters and is hard to read at a glance.
-- **`default_size`** should fit the content without the user resizing on first
-  run; geometry is remembered after that.
+A `HistogramLUTItem` owns its image's lookup table: `image_item.setLookupTable`
+is silently discarded and the image renders grey. Use
+`ImageView.set_colour_map(name)`, which sets it on the histogram.
 
-Two pyqtgraph traps worth knowing:
+## Fit overlays and linked plots
 
-- A `HistogramLUTItem` **takes ownership of its image's lookup table**. Calling
-  `image_item.setLookupTable(...)` alongside one is silently discarded and the
-  image renders greyscale. `ImageView.set_colour_map(name)`
-  sets it on the histogram for you; use it rather than touching the image's
-  lookup table.
-- `pg.setConfigOptions` is global and already set by `apply_theme`. Re-setting
-  `background`/`foreground` in an applet only puts it out of step with the rest.
+The Image Monitor draws a cloud fit over the image with no new code: list the
+fit's data stream (from `analyses/live/cloud_fit.py`, header fields
+`analysis/cloud_fit.FIELDS` in the image's plot coordinates) in
+`overlaystreams`; `n_contours` sets the ellipse count. Reuse
+`overlay_paths(head, n)` from `GUI/image_applet.py` in any viewer that
+shows a fit (`[]` for a failed fit). Image and fit share a frame through the
+header's `_offset`/`_imgresolution` (`analysis/cloud_fit.frame_geometry`).
 
-## Fit overlays and the projections monitor
-
-The Image Monitor (`ImageApplet`) draws a fit on top of the image from a *data* stream, with no new viewer code:
-list the fit's stream in `overlaystreams` (the `CloudFitAnalysis` in `analyses/live/cloud_fit.py`
-publishes one; its header carries `cloud_fit.FIELDS`: `x0`, `y0`, `sigma_major`, `sigma_minor`,
-`angle`, ... in the image's plot coordinates) and `n_contours` sets how many ellipses are drawn.
-`overlay_paths(head, n)` in `GUI/image_applet.py` turns such a header into the ellipses (`[]`
-for a failed fit); reuse it for any viewer that shows a fit. Image and fit must share a frame: the
-fit runs on the frame the image shows, so both use the header's `_offset`/`_imgresolution`
-(`cloud_fit.frame_geometry`).
-
-`viewers/image_plot_monitor.py` is the pattern for "image plus something linked to its axes": a
-subclass of `ImageApplet` that adds a `projectionstreams` category (names of `projections.py`
-analyses; rows 0-1 of each 3xN message are the profile, row 2 its fit curve), draws the sums above
-and left of the image (`self.view.add_side_plot("top")` / `("left")`, which link their axes to
-the image). Subclass `ImageApplet` like this rather than copying the Image Monitor: extend
-`init_gui` after calling `super().init_gui()`, keep its row-major drawing. To put a widget beside
-or under the image, insert it through `panel_layout` or `image_layout`. A persisted ROI is a
-`pytweezer.GUI.zmq_roi.zmq_ROI` created by the applet and passed to `self.view.add_roi`; the
+To extend an image applet, subclass `ImageApplet` (or, for a small addition,
+the applet itself) rather than copying it: extend `init_gui` after
+`super().init_gui()`, override `show_frame(head, imgdata)` to change what each
+frame draws (as `viewers/background_monitor.py` does), add plots linked to the
+image's axes with `self.view.add_side_plot("top")`/`("left")` (as
+`viewers/image_plot_monitor.py` does), and insert widgets beside or under the
+image through `panel_layout`/`image_layout`. A persisted ROI is a
+`GUI/zmq_roi.zmq_ROI` the applet creates and passes to `self.view.add_roi`; the
 view never touches Properties.
 
 ## Preview it before you call it done
 
-`scripts/preview_applet.py` builds the applet against fake Properties and fake
-streams, feeds it synthetic frames or traces on a timer, and saves a PNG. No
-hubs, no hardware, and nothing appears on the user's screen — it paints
-off-screen via `WA_DontShowOnScreen` rather than mapping a window.
+`scripts/preview_applet.py` builds the applet against fake Properties and
+streams, feeds synthetic frames or traces, and saves a PNG off-screen (nothing
+appears on the user's display; no hubs or hardware).
 
 ```bash
 uv run python .claude/skills/add-applet/scripts/preview_applet.py \
@@ -291,124 +229,64 @@ uv run python .claude/skills/add-applet/scripts/preview_applet.py \
     --prop 'datastreams=["Atom_number","Background"]'
 ```
 
-`--prop KEY=JSON` seeds properties (repeatable) — this is how you drive the
-applet into the configuration you want to see. Then **read the PNG** and judge
-it: is anything cut off, is the data legible, is the window mostly data or
-mostly chrome, are two curves the same colour?
+`--prop KEY=JSON` (repeatable) seeds properties. **Read the PNG**: anything cut
+off, data illegible, mostly chrome, two curves the same colour?
 
-The printed summary is the functional half. `subscribed` empty means
-`update_subscriptions` never ran or read the wrong key. `consumed 0` means the
-window built but `poll` is not reading. Messages `left unread` means you are
-draining with `if` instead of `while`. A `published` line means the applet is
-sending, which an applet should not do.
+The printed summary: empty `subscribed` means `update_subscriptions` never ran
+or read the wrong key; `consumed 0` means `poll` isn't reading; messages
+`left unread` means draining with `if`; a `published` line means the applet
+sends, which it must not.
 
-Two runs worth doing on anything that consumes data streams:
+Also run anything that consumes data streams with `--scalars` (header-only
+messages; surfaces the unpack bug as a traceback) and `--physical` (headers with
+`_offset`/`_imgresolution`). For other sources, `--points` emits an experiment
+point per tick on every `ExperimentFeed`, `--saved KEY=JSON` seeds
+`get_saved_parameters` (e.g. `--saved 'trap_sites=[[40,60],[40,80]]'`), and
+`--roi X0,Y0` moves the frames' ROI origin, so a site overlay can be seen to
+follow it.
 
-```bash
-# header-only messages, as an analysis publishes scalars
-... preview_applet.py <script> --prop '...' --scalars
-# headers carrying _offset/_imgresolution, so coordinates are in metres
-... preview_applet.py <script> --prop '...' --physical
-```
+The synthetic messages are generic frames and `[coords, values]` traces, so a
+viewer of one analysis's own output (Tweezer Loading) draws nothing; test its
+drawing on that analysis's header, as `tests/test_tweezer_loading_plots.py`
+does. Then run the test files you touched, e.g. `uv run pytest tests/test_<viewer>.py -q`.
 
-The first is how the `recv()` unpack bug surfaces — a traceback rather than a
-picture. Iterate on the code and re-run until the screenshot is something you
-would be happy to put on a lab monitor.
+## Making it available
 
-For the sources beyond streams, `--points` emits a synthetic experiment point per tick on
-every `ExperimentFeed`, `--saved KEY=JSON` seeds what `get_saved_parameters`
-returns, and `--roi X0,Y0` moves the image frames' ROI origin, so a site overlay
-can be seen to follow it:
+Nothing to register. The Applets tab's **template** list rereads
+`pytweezer/GUI/viewers/` whenever it is opened and offers every script there
+that calls `run_applet`, named by its `default_name="..."`, so a new viewer
+shows up in a running GUI. The user adds it with the template list and the
+**add** button. Tell them so.
 
-```bash
-... preview_applet.py pytweezer/GUI/viewers/tweezer_monitor.py \
-    --prop 'imagestreams=["Tweezer_cam"]' --roi 20,10 \
-    --saved 'trap_sites=[[40,60],[40,80],[60,60]]' --saved trap_window_size=7
-```
+Do **not** add a new viewer to `DEFAULT_APPLETS` in
+`pytweezer/GUI/applet_launcher.py`: that list is the starting catalogue a
+fresh PC gets, and only goes in front of the others in the template list.
+Add one only when the user asks for it to be a default applet.
 
-The synthetic messages are generic frames and `[coords, values]` traces. A viewer
-of one analysis's own output (Tweezer Loading) draws nothing from them; test the drawing on that analysis's header instead, as
-`tests/test_tweezer_loading_plots.py` does.
+## Module docstring
 
-Then run the suite, which covers the framework the applet sits on:
+For a labmate who has never seen the applet: what it displays, what it expects
+on its streams, and a `Properties:` list. Model it on
+`viewers/scalar_history.py`.
 
-```bash
-uv run pytest tests/ -q
-```
+## Reference viewers (`pytweezer/GUI/viewers/`)
 
-## Register it
+- `scalar_history.py`: the smallest complete applet; correct drain and unpack.
+- `live_plot.py`: a `LivePlotApplet`, a grid of plots, each with its own
+  subscriptions under its key in `plots`, including experiment results from
+  `ExperimentFeed`. `stacked_plotter.py` re-lays it out by overriding `arrange`.
+- `tweezer_loading.py`: a thin applet around a shared `GUI/views/` widget.
+- `tweezer_monitor.py`: an `ImageApplet` drawing saved trap sites.
+- `slm_monitor.py`: four `ImageView`s in a grid, in metres when the header
+  says so.
+- `image_monitor.py`: `ImageDisplay`, a bare `ImageApplet` (image, histogram
+  LUT, ROIs (`CameraROI`), `DataSidebar`, a mask stream on its own
+  `streamkey`, fit overlays).
+- `background_monitor.py`: the Image Monitor plus a stored background, by
+  overriding `show_frame`; the pattern for a small specialisation of an applet.
+- `image_plot_monitor.py`: an `ImageApplet` plus x/y sums (`projectionstreams`)
+  in side plots linked to its axes.
+- `camera_applet.py`: an `ImageApplet` with camera settings inserted via
+  `panel_layout` / `image_layout`; the device-driving pattern above.
 
-Add an entry to `DEFAULT_APPLETS` in `pytweezer/GUI/applet_launcher.py` so it is
-offered as a template in the **Applets** tab:
-
-```python
-{
-    "name": "Atom Count",
-    "script": "pytweezer/GUI/viewers/atom_count.py",
-    "description": "Rolling history of the atom number",
-},
-```
-
-The list seeds the Properties `"Applets"` key only on a *first* run, so on a
-machine that already has applets configured the user adds the row through the
-tab's **add** button. Say so rather than implying the entry alone makes it
-appear.
-
-## Document it in the module docstring
-
-The docstring is what a labmate reads before running your applet. State what it
-displays, what it expects on its streams, and what the configure dialog lets
-them set:
-
-```python
-"""Rolling history of a scalar published in a data stream's header.
-
-Subscribes to the streams named in ``datastreams`` and plots the header field
-named by ``field`` against arrival order, keeping the last ``history`` points.
-Point it at an analysis that publishes scalars (``image_stats.py``,
-``gaussian_fit.py``).
-
-Properties:
-    *   datastreams: ([str]) input data streams.
-    *   field: (str) header key to plot.
-    *   history: (int) number of points kept.
-"""
-```
-
-Write it for someone who has never seen this task — what the applet is for and
-the constraints that would otherwise cost them an afternoon, not a narration of
-what was built or why.
-
-## Reference viewers
-
-- `viewers/scalar_history.py` — the smallest complete applet: a header field
-  from each data stream, correct drain and unpack handling.
-- `viewers/live_plot.py` — a `LivePlotApplet`: a grid of plots (context menu → *add plot*), each
-  with its own subscriptions under its key in `plots`: a curve per data
-  stream's array, a rolling history per chosen header field, and markers per
-  experiment result from `ExperimentFeed`.
-- `viewers/stacked_plotter.py` — a `LivePlotApplet` in one column with x axes
-  linked, by overriding its `arrange` hook; the pattern for another layout of
-  the same plots.
-- `viewers/tweezer_loading.py` — a thin applet around a shared view (`views/tweezer_loading.py`).
-- `viewers/tweezer_monitor.py` — subclasses `ImageApplet` to draw the saved
-  trap sites over each frame by its ROI origin.
-- `viewers/slm_monitor.py` — four image streams in a grid, each with its own
-  subscription, in metres when the header says so.
-- `viewers/image_monitor.py` — `ImageDisplay`, a bare `ImageApplet` subclass (the
-  launcher's Image Monitor; `ImageApplet` lives in `GUI/image_applet.py`): image stream, colormap + histogram LUT, ROIs
-  (`CameraROI`: right-click copies one as a sensor-pixel camera ROI), and
-  a data panel below the image (`DataSidebar`: the latest message of each
-  subscribed data stream, one block per stream; on by default); shows a second
-  stream category (masks) on its own `streamkey`, and cloud-fit contour ellipses
-  from `overlaystreams` (`overlay_paths`).
-- `viewers/image_plot_monitor.py` — an `ImageApplet` plus the x and y sums
-  (`projectionstreams`) in plots above and left of the image, linked to its
-  axes; the example to copy for multiple linked plots in one window.
-- `viewers/camera_applet.py` — an `ImageApplet` with a camera's settings
-  (`viewers/camera_sidebar.py`) inserted left of the image through
-  `ImageApplet.panel_layout`, and a readout under the image through
-  `image_layout`; it calls the camera over RPC on one worker thread
-  (`CameraLink`) and follows `ExperimentFeed` to go read-only while a task
-  holds the camera, or may (until the manager's state has arrived).
-
+`viewers/archive/` holds retired viewers: not models.

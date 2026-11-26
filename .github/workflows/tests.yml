@@ -47,7 +47,7 @@ jobs:
         run: uv sync
 
       - name: Run tests
-        run: uv run pytest tests/ -q -rs
+        run: uv run pytest tests/ -q -rs -n auto
 
       # Catches whatever reached the branch without the pre-commit hook.
       - name: Lint

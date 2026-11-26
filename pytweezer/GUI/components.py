@@ -8,7 +8,14 @@ object names and dynamic properties the stylesheet keys on. See the
 import math
 
 from PyQt6 import QtCore, QtGui
-from PyQt6.QtWidgets import QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QDoubleSpinBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QVBoxLayout,
+)
 
 from pytweezer.GUI.theme import state_style
 
@@ -89,3 +96,14 @@ class CompactDoubleSpinBox(QDoubleSpinBox):
             decimals = max(0, min(decimals, significant))
         text = f"{value:.{decimals}f}"
         return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+class RefreshingComboBox(QComboBox):
+    """Emits ``opening`` just before its list drops down, so it can be refilled
+    from disk and offer files added since the GUI started."""
+
+    opening = QtCore.pyqtSignal()
+
+    def showPopup(self):
+        self.opening.emit()
+        super().showPopup()

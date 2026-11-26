@@ -55,6 +55,7 @@ pytweezer-db-backfill = "pytweezer.database.backfill:main"
 [dependency-groups]
 dev = [
     "pre-commit>=4.7,<5",
+    "pytest-xdist>=3.8,<4",
 ]
 docs = [
     "sphinx",
@@ -95,6 +96,8 @@ build-backend = "setuptools.build_meta"
 # tests/ imports its own helpers as `tests.*`; the editable install only exposes
 # pytweezer and bin.
 pythonpath = ["."]
+# Tests run in one process: starting xdist workers costs more than it saves on
+# the few files a change touches. CI passes -n auto for the whole suite.
 
 [tool.ruff]
 target-version = "py311"

@@ -43,15 +43,17 @@ rearrangement-optimisation-RnD is a stripped-down branch for optimisation of twe
 This project uses uv; the venv is `.venv` in the repo root, on the Python in
 `.python-version`.
 Code is linted and formatted with ruff, configured in `pyproject.toml`.
-There is a pytest suite under `tests/` — run it after
-touching code it covers, and add cases there instead of writing one-off
+There is a pytest suite under `tests/` — after touching code it covers, run
+only the test files for the affected system (`uv run pytest tests/test_camera.py -q`),
+never the whole suite: these are lab PCs running the experiment, and CI runs
+the full suite on push. Add cases there instead of writing one-off
 verification scripts when the change fits its scope.
 `.github/workflows/tests.yml` runs the suite (against a scratch TimescaleDB) on
 every push to main and every PR.
 
 ```bash
 uv sync                         # install deps, rebuild the C++ extensions and console scripts
-uv run pytest tests/ -q         # run the test suite
+uv run pytest tests/test_x.py -q  # run one area's tests (add -n 4 to spread a big run over 4 workers)
 uv run python <script>.py       # run any script inside the venv
 ```
 
@@ -146,6 +148,23 @@ run `uv run ruff check .` and `uv run ruff format --check .` before pushing.
   easier to spot than one buried under fifty lines of explanation.
 
 
+### Code people edit day to day
+
+The physicists who edit experiments, optimisers, analyses and applets know
+Python from data analysis, not Qt, threading or networking. Their code should
+read plainly, with that machinery out of sight in framework code underneath.
+
+- In experiments and optimisers, the core methods (`prepare`, `run_point`,
+  `finish`, and `measure`/`fit` in optimisers) read as a plain sequence of
+  physics steps. Fiddly blocks such as camera set-up go into well-named
+  helpers. A helper may be more involved, as long as its name or comments make
+  clear what it does.
+- Don't make a method readable by burying it: a one-line `run_point` that
+  calls a 60-line `_do_everything()` hides the steps rather than showing them.
+- Numerical work (filtering, summing at sites, threshold fits, survival) is a
+  function imported from `analysis/`, never written inline in an experiment.
+
+
 ### Logging
 
 - Use `get_logger(name)` from `pytweezer/logging_utils.py`, never bare
@@ -212,6 +231,7 @@ Load a skill when you need more than that:
 | Adding a driver / applet / analysis / database logger | `add-device-driver`, `add-applet`, `add-analysis-script`, `add-logger` |
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Writing or accepting an optimiser (`StagedScan`, `BayesianOptimisation`, `Fit`), the Optimisers tab | `add-optimiser` |
+| The Rb tweezer array: SLM array, `LoadTweezers`, trap sites, `FindTrapSites`, the tweezer-scored optimisers | `tweezer-array` |
 | Saving a camera's frames with pycaf MOTMaster runs from a lab-book notebook (`PycafCamera`), MOTMaster zips | `notebook-rig` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 | Writing, reviewing or deleting tests | `write-tests` |

@@ -22,6 +22,7 @@ from pytweezer.experiment.optimisers import (
     Fit,
     Stage,
     StagedScan,
+    shortness,
 )
 from pytweezer.experiment.runner import open_writer, run_points
 from pytweezer.experiment.scan import Point
@@ -323,6 +324,27 @@ def test_a_dimension_is_never_searched_beyond_its_limits(monkeypatch):
     assert np.all(m.results["detuning"] <= 2.0)
 
 
+class WholePower(DemoBayesian):
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("detuning", low=0.0, high=2.0, save_as="demo_resonance"),
+        Dimension("power", low=1, high=9, save_as="demo_power", whole=True),
+    ]
+
+
+def test_a_whole_dimension_is_only_ever_asked_at_whole_values():
+    m = run_local(WholePower, n_calls=8, n_initial=4)
+    assert m.status == "completed", m.attrs["error"]
+    assert np.all(m.results["power"] == np.round(m.results["power"]))
+    assert np.all((m.results["power"] >= 1) & (m.results["power"] <= 9))
+    assert float(m.constants["proposed.demo_power"]).is_integer()
+
+
+def test_a_whole_dimension_without_two_whole_numbers_is_refused():
+    m = run_local(WholePower, power_low=1.2, power_high=1.8)
+    assert m.status == "failed"
+    assert "power" in m.attrs["error"]
+
+
 class LowestCounts(DemoBayesian):
     goal = "min"
 
@@ -529,3 +551,21 @@ def test_the_schema_gives_a_fits_proposals_with_their_units_and_group():
         "group": "Demo",
         "applies": False,
     }
+
+
+class ShortnessOfX(DemoBayesian):
+    dimensions: ClassVar[list[Dimension]] = [
+        Dimension("x", low=0.0, high=10.0, save_as="demo_resonance"),
+    ]
+
+    def measure(self, **settings):
+        return {"counts": 0.0}
+
+    def objective_of(self, results, settings):
+        return shortness(settings["x"], self.bounds["x"])
+
+
+def test_a_bayesian_objective_sees_the_settings_it_scores():
+    m = run_local(ShortnessOfX, n_calls=5, n_initial=3)
+    assert m.status == "completed", m.attrs["error"]
+    assert np.allclose(m.results["objective"], 1 - m.results["x"] / 10)

@@ -372,3 +372,45 @@ def test_axes_are_labelled_in_the_units_the_frame_is_placed_in(monitor, head, un
 
     assert monitor.view.plot.getAxis("bottom").labelUnits == units
     assert monitor.view.plot.getAxis("left").labelUnits == units
+
+
+@pytest.fixture
+def background_monitor(qapp, monkeypatch):
+    from pytweezer.GUI.viewers.background_monitor import BackgroundMonitor
+
+    fake_hubs(monkeypatch)
+    return BackgroundMonitor("Test Background Monitor")
+
+
+def shown(monitor):
+    return monitor.view.image_item.image
+
+
+def test_stored_background_is_subtracted_from_later_frames(background_monitor):
+    feed_frame(background_monitor, np.full((4, 5), 20, np.uint16), {})
+    background_monitor.store_background()
+    np.testing.assert_array_equal(shown(background_monitor), np.zeros((4, 5)))
+
+    feed_frame(background_monitor, np.full((4, 5), 15, np.uint16), {})
+
+    np.testing.assert_array_equal(shown(background_monitor), np.full((4, 5), -5.0))
+
+
+def test_clearing_the_background_shows_the_raw_frame_again(background_monitor):
+    feed_frame(background_monitor, np.full((4, 5), 20.0), {})
+    background_monitor.store_background()
+    feed_frame(background_monitor, np.full((4, 5), 30.0), {})
+
+    background_monitor.clear_background()
+
+    np.testing.assert_array_equal(shown(background_monitor), np.full((4, 5), 30.0))
+
+
+def test_a_frame_of_another_shape_is_shown_raw_and_says_so(background_monitor):
+    feed_frame(background_monitor, np.full((4, 5), 20.0), {})
+    background_monitor.store_background()
+
+    feed_frame(background_monitor, np.full((6, 6), 7.0), {})
+
+    np.testing.assert_array_equal(shown(background_monitor), np.full((6, 6), 7.0))
+    assert "raw frame" in background_monitor.status.toPlainText()

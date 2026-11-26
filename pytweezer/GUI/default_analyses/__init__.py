@@ -7,6 +7,6 @@ it in ``Experiment.analyses``. To add one, write its calculation there, its
 view here and merge its entries into :data:`ANALYSES`.
 """
 
-from pytweezer.GUI.default_analyses import cloud, tweezer_histogram
+from pytweezer.GUI.default_analyses import cloud, trap_frequency, tweezer_histogram
 
-ANALYSES = tweezer_histogram.ANALYSES | cloud.ANALYSES
+ANALYSES = tweezer_histogram.ANALYSES | cloud.ANALYSES | trap_frequency.ANALYSES

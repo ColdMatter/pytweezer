@@ -1,3 +1,4 @@
+import importlib
 import os
 import socket
 
@@ -373,15 +374,16 @@ CONFIG = {
             "teardown": "close",
         },
     },
-    # Background database loggers. Each entry runs pytweezer/servers/logger_server.py,
-    # which builds the Logger subclass named by "logger" and polls it on "interval".
+    # Background database loggers. Like devices, each entry names its Logger
+    # subclass as "class" (a "module.path:ClassName" string); every entry runs
+    # pytweezer/servers/logger_server.py, which builds that class and polls it on
+    # "interval".
     # This is opt-in: nothing reaches the database unless a logger (or explicit
     # DBWriter/log() call) writes it.
     "Loggers": {
         "NI ADC Logger": {
             "run_at_startup": False,
-            "script": "../pytweezer/servers/logger_server.py",
-            "logger": "ni_adc",
+            "class": "pytweezer.loggers.ni_adc_logger:NIADCLogger",
             "host": SERVER_HOST,
             "interval": 1.0,
             "simulate": SIMULATING,
@@ -421,6 +423,14 @@ CONFIG = {
         },
     },
 }
+
+
+def load_class(path):
+    """Import and return the object named by a ``"module.path:ClassName"`` string."""
+    module_name, _, attr = path.partition(":")
+    if not attr:
+        raise ValueError(f"Class path {path!r} must be 'module.path:ClassName'")
+    return getattr(importlib.import_module(module_name), attr)
 
 
 def get_config():

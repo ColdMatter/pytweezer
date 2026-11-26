@@ -8,9 +8,8 @@ the base :meth:`run` loop handles the polling cadence, writing, and teardown.
 For a source that pushes data rather than being polled (e.g. a ZMQ subscription),
 override :meth:`run` directly instead of :meth:`read`.
 
-Loggers are launched exactly like devices — see
-``pytweezer/servers/logger_server.py`` and the ``CONFIG["Loggers"]`` config
-category. Nothing reaches the database unless a Logger (or an explicit
+A ``CONFIG["Loggers"]`` entry names its subclass as ``"class"``, and
+``pytweezer/servers/logger_server.py`` builds and runs it. Nothing reaches the database unless a Logger (or an explicit
 :class:`~pytweezer.database.writer.DBWriter` call) puts it there.
 """
 

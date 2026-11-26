@@ -32,8 +32,9 @@ data.
 Every managed process is started the same way: `python <script> <name>`, where
 `name` is the `CONFIG` key the script looks itself up under. Devices are all
 launched through the one generic server in
-{mod}`pytweezer.servers.device_server`; loggers through
-{mod}`pytweezer.servers.logger_server`.
+{mod}`pytweezer.servers.device_server`, and loggers through
+{mod}`pytweezer.servers.logger_server`; their entries name no script, only the
+`"class"` to build.
 
 ## Messaging fabric
 

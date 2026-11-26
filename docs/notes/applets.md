@@ -47,6 +47,7 @@ pytweezer/GUI/views/                    base drawings, no streams or Properties
 
 pytweezer/GUI/viewers/                   (the applet scripts themselves)
 ├── image_monitor.py       ImageDisplay(ImageApplet)
+├── background_monitor.py  BackgroundMonitor(ImageDisplay)  Image Monitor minus a stored background
 ├── image_plot_monitor.py  ImageProjectionDisplay(ImageApplet)  image + linked sum plots
 ├── camera_applet.py       CameraApplet(ImageApplet)
 ├── tweezer_monitor.py     TweezerDisplay(ImageApplet)

@@ -44,7 +44,6 @@ individually addressable: ``get_device("RbHamCam")``.
 
 import argparse
 import asyncio
-import importlib
 import inspect
 import reprlib
 import signal
@@ -54,7 +53,7 @@ from dataclasses import dataclass
 from sipyco.pc_rpc import Server
 from sipyco.tools import SignalHandler
 
-from pytweezer.configuration.config import get_config
+from pytweezer.configuration.config import get_config, load_class
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("device server")
@@ -186,12 +185,12 @@ def _backend_class(name, conf):
     if conf.get("simulate", False):
         sim_path = conf.get("sim_class")
         if sim_path:
-            return _load(sim_path)
+            return load_class(sim_path)
         # No hand-written simulated class: generate a stand-in from the real one.
         from pytweezer.servers.simulated_device import default_simulated
 
-        return default_simulated(_load(_require_class(name, conf)))
-    return _load(_require_class(name, conf))
+        return default_simulated(load_class(_require_class(name, conf)))
+    return load_class(_require_class(name, conf))
 
 
 def _require_class(name, conf):
@@ -202,14 +201,6 @@ def _require_class(name, conf):
             "string naming its backend"
         )
     return path
-
-
-def _load(path):
-    """Import and return the object named by a ``"module.path:attr"`` string."""
-    module_name, _, attr = path.partition(":")
-    if not attr:
-        raise ValueError(f"Backend path {path!r} must be 'module.path:ClassName'")
-    return getattr(importlib.import_module(module_name), attr)
 
 
 def _config_kwargs(cls, conf):
@@ -455,7 +446,7 @@ class _CompositeRig:
             )
             return
         try:
-            coordinator = _load(path)(dict(self._roles), self.conf)
+            coordinator = load_class(path)(dict(self._roles), self.conf)
             _check_target_callable(self.name, self.coordinator_name, coordinator)
         except Exception:
             logger.exception(

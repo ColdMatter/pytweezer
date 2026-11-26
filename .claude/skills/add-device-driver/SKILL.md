@@ -221,7 +221,7 @@ uv run python .claude/skills/add-device-driver/scripts/check_device.py "ORCA"
 `write-tests` skill. Run:
 
 ```bash
-uv run pytest tests/ -q
+uv run pytest tests/test_simulate_decorator.py -q   # plus any test file you added
 ```
 
 Static checks are the goal here; don't launch real servers or hardware to prove
