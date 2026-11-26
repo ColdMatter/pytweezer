@@ -13,6 +13,12 @@ about 0.5σ per site per shot for a resolved 2×2 array. So the analysis never
 searches for spots; it measures at **predicted** positions and judges the
 result against the same measurement at empty positions of the same frames.
 
+**Everything the analysis needs is in the run's h5 file and this skill:** the
+frames, the arguments, the SLM array and the site calibration. The other
+repositories don't come into it. Read the MOTMaster script in EDMSuite
+(`MERGE.CaFTweezer…`) only when the user asks about the sequence itself,
+such as trigger timing or what a script parameter does.
+
 ## Start here
 
 1. Summarise the run and compare it with the previous one, to see what
