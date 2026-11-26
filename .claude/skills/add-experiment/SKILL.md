@@ -122,10 +122,6 @@ class Tof(MotMasterExperiment):
   first `Go` if only scanned) with a "did you mean" hint. They live in
   `self.extra_values`; a declared argument wins over a script parameter of the
   same name. Unselected ones keep the script's defaults and aren't recorded.
-- `script_from="script"` instead of `script=` takes the script from a
-  `scannable=False` `Choice`; `self.script_name()` is the one the task runs.
-  `RbMotMasterRunner` offers every script in the Rb folder and records each
-  ticked camera's frames.
 - `saved=(...)` binds script parameters to saved parameters: a bare name for
   the key of that name, `{parameter: key}` for another. They are read once in
   `prepare()` (unreachable manager: `RuntimeError`; missing key: `KeyError`),
