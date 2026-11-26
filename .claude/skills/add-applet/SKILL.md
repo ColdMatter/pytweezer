@@ -182,8 +182,14 @@ The framework applet bases wire streams to those views: `ImageApplet`
 `LivePlotApplet` (`GUI/live_plot_applet.py`) is the grid of plots. An image
 applet subclasses `ImageApplet` and draws through `self.view`; a data-plot
 applet subclasses `LivePlotApplet` or builds its own `Applet` around a
-`LinePlot`. No applet inherits from another applet: applets inherit only
-framework classes (`Applet`, `ImageApplet`, `LivePlotApplet`).
+`LinePlot`.
+
+An applet may subclass another applet to add a small feature or specialisation
+on top of it: the Background Monitor is the Image Monitor plus a stored
+background subtracted from each frame. When the new applet would override much
+of its parent's behaviour, don't subclass it. Build both on the framework base
+and share the common drawing through `GUI/views/` (or the common wiring through
+a framework base), rather than layering one applet's overrides on another's.
 
 A **specialisation** (an image with trap sites marked, a histogram with a fit
 and a threshold) stays in the applet or default-analysis view that uses it, and
