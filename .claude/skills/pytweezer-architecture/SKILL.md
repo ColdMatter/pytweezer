@@ -203,7 +203,8 @@ base drawings those applets and views are built on. The Analysis Manager reads
 | Add a live viewer window | `add-applet` skill |
 | Add a streaming (live) or Results-tab (default) analysis | `add-analysis-script` skill |
 | Record a value in the database | `add-logger` skill |
-| Experiments, the Experiment Manager, its queue and results | `add-experiment` skill |
+| Writing experiments, the Experiment Manager's internals | `add-experiment` skill |
+| Running and queuing experiments, reading results, saved parameters | `run-experiments` skill |
 | Run/screenshot the GUI | `run-pytweezer` skill |
 
 Each of those skills is self-contained — the conventions and constraints that

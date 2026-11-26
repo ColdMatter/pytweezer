@@ -1,6 +1,6 @@
 ---
 name: add-experiment
-description: Write, run, queue and read back pytweezer experiments — an Experiment subclass in pytweezer/experiments/ with declared arguments and devices, run per scan point by the Experiment Manager (or in-process with run_local), saving one h5 file per measurement — and the saved parameters they read. Use whenever the user wants to write, add or change an experiment or measurement sequence (a scan, a MOTMaster sequence plus camera readout, a calibration), submit or queue one from a notebook (submit/wait), scan an argument, record data from a run, load a measurement file, read or set saved parameters, give an experiment a Results-tab analysis, or work on the Experiment Manager, its workers, pipelines, device reservations or queue, or the Experiments/Results/Saved parameters tabs — even if they only describe the physics ("scan the load time and count atoms") without saying "experiment". For the Rb tweezer-array experiments themselves also use tweezer-array.
+description: Write pytweezer experiments — an Experiment subclass in pytweezer/experiments/ with declared arguments and devices, run per scan point by the Experiment Manager, saving one h5 file per measurement. Use whenever the user wants to write, add or change an experiment or measurement sequence (a scan, a MOTMaster sequence plus camera readout, a calibration), choose what it records, bind arguments or script parameters to saved parameters, give an experiment a Results-tab analysis, or work on the Experiment Manager itself — its workers, pipelines, device reservations, queue, file layout — or the code of the Experiments/Results/Saved parameters tabs, even if they only describe the physics ("an experiment that scans the load time and counts atoms") without saying "experiment". To run, queue or read back existing experiments use run-experiments; for the Rb tweezer-array experiments themselves also use tweezer-array.
 ---
 
 # Experiments
@@ -122,10 +122,6 @@ class Tof(MotMasterExperiment):
   first `Go` if only scanned) with a "did you mean" hint. They live in
   `self.extra_values`; a declared argument wins over a script parameter of the
   same name. Unselected ones keep the script's defaults and aren't recorded.
-- `script_from="script"` instead of `script=` takes the script from a
-  `scannable=False` `Choice`; `self.script_name()` is the one the task runs.
-  `RbMotMasterRunner` offers every script in the Rb folder and records each
-  ticked camera's frames.
 - `saved=(...)` binds script parameters to saved parameters: a bare name for
   the key of that name, `{parameter: key}` for another. They are read once in
   `prepare()` (unreachable manager: `RuntimeError`; missing key: `KeyError`),
@@ -191,84 +187,11 @@ seconds; MOTMaster: 10 µs ticks) and needs `cloud_mass_amu`; the tweezer
 histograms, `trap_frequency` and `caf_tweezer_sites` are in tweezer-array. Analyses are disabled until the measurement
 finishes; an unknown name is listed disabled.
 
-## Running
+## Saved parameters in an experiment
 
-GUI: **Experiments** tab → pick the class, edit, tick "Scan" per argument,
-Submit. **Results** lists files as they appear, quick-plots a scalar against a
-scan axis (live from the manager's published points while running), and
-"Resubmit" reloads a run's arguments.
+Saved parameters are named calibrated values shared by every PC (reading and
+setting them is run-experiments). In an experiment:
 
-```python
-from pytweezer.experiment import LinearAxis, ListAxis, Scan, run_local
-from pytweezer.experiment.archive import fetch_measurement
-from pytweezer.experiment.client import ExperimentManagerClient, submit, wait
-
-scan = Scan(
-    axes=[LinearAxis(argument="load_time", start=0, stop=2e-3, n=21)],
-    repetitions=3,
-    order="shuffle",  # nested | snake | shuffle; repeat="scan" repeats the grid
-)
-rid = submit(LoadingCurve, scan, shots=2, label="after realignment", pipeline="main")
-task = wait(rid)  # Task: status, error, h5_path
-m = fetch_measurement(rid)  # any PC; results=[...] to load a subset
-m.results["atom_number"], m.points["load_time"], m.arguments, m.constants
-
-m = run_local(LoadingCurve, scan)  # in-process, no queue, in memory
-m.status, m.attrs["error"]  # a failure is recorded, not raised
-```
-
-- `submit` needs a class the manager can import — **not one defined in a
-  notebook**; use `run_local` for those (`path=` keeps a file). `submit` is
-  refused at once if the class isn't in the manager's catalogue (one for
-  `pytweezer.experiments`, one for `pytweezer.optimisers`), its module fails
-  to import, or its devices can't be reserved (`ReservationError`; `run_local`
-  raises the same). While the catalogue is being read the task queues and
-  resolves later.
-- `ExperimentManagerClient` (`experiment/client.py`) has the queue controls
-  (pause, resume, terminate, abort, hold, release, delete, set_priority), the
-  catalogues, recipes and saved parameters.
-
-For analysis, `Dataset` reads a file by rid (or path) on any PC:
-
-```python
-from pytweezer.experiment import Dataset
-
-ds = Dataset(rid)  # root=... for another data dir, results=[...] for a subset
-ds.summarise()  # same text as the Results tab's metadata pane
-df = ds.get_data()  # "dataframe" (default) | "dict" | "array"
-ax = ds.plot_scan("atom_number")  # mean ± SEM over repetitions, stamped with the git commit
-```
-
-Rows are the points run, in run order: `index`, `repetition`, scanned
-arguments, `t_start`, `t_end`, then results (SI). The DataFrame drops array
-results; `get_dict` stacks them.
-
-## Recipes and saved parameters
-
-A **recipe** is a named, saved form (arguments, scan, priority, label,
-pipeline) in `{data_root}/recipes.json`, shared by every PC: the Experiments
-tab's **Recipes** / **Save as recipe…**, or `save_recipe(Class, name, scan,
-**args, overwrite=False)`, `submit_recipe(Class, name, **overrides)`,
-`recipes(Class)`, `delete_recipe(Class, name)` from `experiment.client`. It
-stores every argument except those its scan sweeps (an override may not fix a
-scanned one); one naming an argument the experiment no longer declares is
-refused until re-saved from the form.
-
-**Saved parameters** are named calibrated values (float, int, bool, string or
-numeric array) in `{data_root}/saved_parameters.json`, every change logged to
-`saved_parameters_log.jsonl` (`experiment/saved_parameters.py`):
-
-```python
-from pytweezer.experiment.client import get_saved_parameter, get_saved_parameters, saved_parameter_history, set_saved_parameters
-
-get_saved_parameter("tImgCoolVCO")  # KeyError names close matches; get_saved_parameters() for all
-set_saved_parameters({"level": 0.3}, "realigned the probe")  # all or none; reason and user logged
-set_saved_parameters({"new_key": 1.0}, "first calibration", create=True, group="MOT", unit="V")
-saved_parameter_history("level", limit=10)  # newest first; rid= for one run's
-```
-
-- Unknown keys are refused unless `create=True`; a key keeps its type (int
-  accepted for float), an array its dimensions and every axis past the first.
 - **Never read one into an argument default**
   (`Number(get_saved_parameter(...))`): that is read at import, and recipes and
   prefilled forms then pin it, silently overriding later recalibrations. Read
@@ -277,9 +200,7 @@ saved_parameter_history("level", limit=10)  # newest first; rid= for one run's
   the task starts, then takes the saved value (a missing key fails the task).
   A value from the form, request, recipe or scan wins; the file's
   `saved_arguments` lists the ones that took saved values.
-- The **Saved parameters** tab edits values with a reason and shows history.
-  Keys are created only by `create=True`, an accepted `Fit`, or
-  `import_parameters_json(path)`. A simulating manager keeps its own set.
+- MOTMaster script parameters bind to them with `saved=` (above).
 
 ## Files and the manager
 
@@ -290,6 +211,8 @@ another PC. **Read [manager.md](manager.md) before working on** the file
 layout, `data_root`, the copier, the results archive, the database rows, or
 the manager itself: its published state, pipelines, device reservations,
 terminate/abort, worker adoption and simulation.
+
+Running one (including `run_local`) and reading it back is run-experiments.
 
 Tests: `tests/test_experiment_*.py`, `test_motmaster_experiment.py`,
 `test_saved_parameters.py`; more in [manager.md](manager.md).

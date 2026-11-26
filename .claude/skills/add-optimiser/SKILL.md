@@ -1,6 +1,6 @@
 ---
 name: add-optimiser
-description: Write, run and accept pytweezer optimisers — StagedScan, BayesianOptimisation and Fit classes in pytweezer/optimisers/ (mixins in pytweezer/experiment/optimisers.py) that run a measurement experiment and propose new saved-parameter values, accepted by hand in the Optimisers tab. Use whenever the user wants to write, add or change an optimiser or calibration search, find the best value of something ("find the best imaging detuning", "scan the resonance and keep the best"), accept or discard an optimiser run's proposals, or work on the Optimisers tab (pytweezer/GUI/optimisers.py) — even if they only describe the search without saying "optimiser". For the measurement experiment it runs, and for saved parameters themselves, use add-experiment; for the tweezer optimisers (FindTrapSites, OptimiseTweezerImaging, the molasses and MOT ones) also use tweezer-array.
+description: Write, run and accept pytweezer optimisers — StagedScan, BayesianOptimisation and Fit classes in pytweezer/optimisers/ (mixins in pytweezer/experiment/optimisers.py) that run a measurement experiment and propose new saved-parameter values, accepted by hand in the Optimisers tab. Use whenever the user wants to write, add or change an optimiser or calibration search, find the best value of something ("find the best imaging detuning", "scan the resonance and keep the best"), accept or discard an optimiser run's proposals, or work on the Optimisers tab (pytweezer/GUI/optimisers.py) — even if they only describe the search without saying "optimiser". For the measurement experiment it runs use add-experiment, and for saved parameters themselves run-experiments; for the tweezer optimisers (FindTrapSites, OptimiseTweezerImaging, the molasses and MOT ones) also use tweezer-array.
 ---
 
 # Optimisers
@@ -9,8 +9,8 @@ An optimiser is a class in a module under `pytweezer/optimisers/`, built on a
 mixin from `pytweezer/experiment/optimisers.py`; it runs a *measurement
 experiment* to propose saved-parameter values; nothing is saved until someone
 accepts them in the **Optimisers** tab. It is an `Experiment` subclass, so
-everything in the add-experiment skill (arguments, devices, recording, the
-queue, files, saved parameters) applies; this skill covers what an optimiser
+everything in the add-experiment skill (arguments, devices, recording, files)
+and run-experiments (the queue, saved parameters) applies; this skill covers what an optimiser
 adds. Device-free examples: `DemoStagedScan`/`DemoBayesian` in
 `optimisers/demo_staged_scan.py`/`demo_bayesian.py` (over
 `experiments/demo_resonance.py`); the real ones are tweezer-array's.
