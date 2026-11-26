@@ -8,7 +8,7 @@ import numpy as np
 
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.orca import ORCACamera
-from pytweezer.experiment import Device, Integer, Number
+from pytweezer.experiment import Choice, Device, Number
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.experiments.load_tweezers import (
     hamcam_roi_argument,
@@ -56,9 +56,8 @@ class MergeCaFTweezer(SlmArray, MotMasterExperiment):
         tooltip="EM-gain sensitivity of the HamCam, set once before the first point",
         scannable=False,
     )
-    hamcam_binning = Integer(
-        1,
-        min=1,
+    hamcam_binning = Choice(
+        [1, 2, 4],  # the bin factors the HamCam's DCAM offers
         group="Camera",
         tooltip="Sensor pixels binned per side on the HamCam, set once before the first point",
         scannable=False,

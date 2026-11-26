@@ -195,18 +195,23 @@ class Bool(Argument):
 
 
 class Choice(Argument):
+    """One of a fixed list of strings or integers, the first by default."""
+
     kind = "choice"
 
-    def __init__(self, options: list[str], default: str | None = None, **kwargs):
+    def __init__(
+        self, options: list[str] | list[int], default: str | int | None = None, **kwargs
+    ):
         if not options:
             raise ValueError("Choice needs at least one option")
         self.options = list(options)
         super().__init__(self.options[0] if default is None else default, **kwargs)
 
-    def coerce(self, value: Any) -> str:
-        if value not in self.options:
+    def coerce(self, value: Any) -> str | int:
+        if isinstance(value, bool) or value not in self.options:
             raise self._fail(value, f"is not one of {self.options!r}")
-        return value
+        # The option itself, so a numpy integer from an h5 round trip comes back an int.
+        return self.options[self.options.index(value)]
 
     def to_schema(self) -> dict[str, Any]:
         return super().to_schema() | {"options": self.options}

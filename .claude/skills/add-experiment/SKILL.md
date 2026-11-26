@@ -45,7 +45,9 @@ class LoadingCurve(Experiment):
   down in the order it runs. This applies to every class under `experiments/`
   and `optimisers/`, including a subclass that overrides only some of the three.
 - **Arguments are class attributes** (`Number`, `Integer`, `Bool`, `Choice`,
-  `Text`; `experiment/arguments.py`). Values are SI; `unit`/`scale` only set
+  `Text`; `experiment/arguments.py`). `Choice` takes strings or integers: a
+  setting a device allows only certain values of (a camera's bin factors) is a
+  `Choice` of those, not an `Integer`. Values are SI; `unit`/`scale` only set
   the display (`Number(5e6, unit="MHz", scale=1e6)` shows "5 MHz"); `group=`
   and `tooltip=` lay out the form. `scannable=False` marks an argument that
   must be one value for the whole task (something `prepare()` depends on);

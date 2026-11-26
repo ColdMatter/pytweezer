@@ -81,7 +81,7 @@ point.
   `use_motmaster_parameter_overrides=False` sends none of them, but the trap
   sites are still read.
 - HamCam set-up (`set_up_hamcam`): binning 1 in LoadTweezers (sites are in
-  sensor pixels; MergeCaFTweezer takes `hamcam_binning`), ROI `hamcam_roi_x0/_y0/_width/_height` (unbinned) and `hamcam_gain`
+  sensor pixels; MergeCaFTweezer takes `hamcam_binning`, a Choice of 1, 2, 4), ROI `hamcam_roi_x0/_y0/_width/_height` (unbinned) and `hamcam_gain`
   (EM-gain sensitivity) are `scannable=False`.
 - Per point: `signal_counts`; with sites, `first_occupied`/`second_occupied`
   (bool per site), `loading`, imaging `survival` (NaN if nothing loaded), and

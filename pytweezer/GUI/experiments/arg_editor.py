@@ -93,7 +93,7 @@ class ValueField(QWidget):
             widget.toggled.connect(self.changed)
         elif self.kind == "choice":
             widget = QComboBox()
-            widget.addItems(schema["options"])
+            widget.addItems([str(option) for option in schema["options"]])
             widget.currentTextChanged.connect(self.changed)
         elif self.kind == "motmaster_script":
             # Typed names count once committed, so a half-typed one is never
@@ -136,7 +136,7 @@ class ValueField(QWidget):
         if self.kind == "bool":
             return self.widget.isChecked()
         if self.kind == "choice":
-            return self.widget.currentText()
+            return self.schema["options"][self.widget.currentIndex()]
         if self.kind == "motmaster_script":
             return self.widget.currentText().strip()
         return self.widget.text()
@@ -150,10 +150,11 @@ class ValueField(QWidget):
             self.widget.setValue(int(value))
         elif self.kind == "bool":
             self.widget.setChecked(bool(value))
-        elif self.kind in ("choice", "motmaster_script"):
+        elif self.kind == "choice":
+            self.widget.setCurrentIndex(self.schema["options"].index(value))
+        elif self.kind == "motmaster_script":
             self.widget.setCurrentText(value)
-            if self.kind == "motmaster_script":
-                self.changed.emit()
+            self.changed.emit()
         else:
             self.widget.setText(value)
 
@@ -233,8 +234,11 @@ def parse_list(text, schema):
             if item.lower() not in ("true", "false", "1", "0"):
                 raise ValueError(f"{item!r} is not true or false")
             values.append(item.lower() in ("true", "1"))
-        elif kind == "choice" and item not in schema["options"]:
-            raise ValueError(f"{item!r} is not one of {schema['options']}")
+        elif kind == "choice":
+            by_text = {str(option): option for option in schema["options"]}
+            if item not in by_text:
+                raise ValueError(f"{item!r} is not one of {schema['options']}")
+            values.append(by_text[item])
         else:
             values.append(item)
     if kind in ("number", "integer"):
