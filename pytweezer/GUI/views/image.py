@@ -269,6 +269,10 @@ class ImageView(QtWidgets.QWidget):
             raise ValueError(f"side is 'top' or 'left', not {side!r}")
         return side_plot
 
+    def set_title(self, text: str | None) -> None:
+        """Show ``text`` above the image, or no title for ``None``."""
+        self.plot.setTitle(text)
+
     def add_menu_action(self, text: str, slot, checkable: bool = False) -> QAction:
         """Add ``text`` to the plot's right-click menu, calling ``slot`` (with the state if ``checkable``)."""
         action = self.plot.getViewBox().menu.addAction(text)

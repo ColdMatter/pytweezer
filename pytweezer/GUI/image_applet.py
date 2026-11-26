@@ -21,6 +21,11 @@ and the Optimisers tab. Pixel column ``c``, row ``r`` of a frame sits at
 units are pixels; without ``_offset``, ``origin = (0, 0)``.
 Rows therefore run down the screen with +y.
 
+**start averaging** in the context menu draws the mean of the frames received
+since, in place of the latest; the title says how many it holds, and **stop
+averaging** goes back to single frames. A frame of a different shape (a new
+camera ROI, say) starts the mean again.
+
 Properties:
     *   imagestreams: ([str]) image streams to draw.
     *   maskstreams: ([str]) image streams drawn over the frame as a mask.
@@ -33,7 +38,11 @@ Properties:
         histogram's levels, which also turns autoscale off.
     *   show_sidebar: (bool) the data panel below the image: the latest message
         of each stream in ``sidebarstreams``.
+    *   average_frames: (int) while averaging, the mean of only the latest this
+        many frames; 0 averages every frame since *start averaging*.
 """
+
+from collections import deque
 
 import numpy as np
 import pyqtgraph as pg
@@ -109,6 +118,40 @@ def camera_roi(
     )
 
 
+class FrameAverage:
+    """The mean of the frames added since it began, or of only the latest ``window`` of them.
+
+    Adding a frame of another shape, or changing ``window``, starts it again.
+    """
+
+    def __init__(self):
+        self.window = 0
+        self.frames: deque[np.ndarray] = deque()
+        self.total = None
+        self.count = 0
+
+    def add(self, frame, window: int) -> np.ndarray:
+        """The mean including ``frame``."""
+        frame = np.asarray(frame, dtype=np.float64)
+        if (
+            self.total is None
+            or frame.shape != self.total.shape
+            or window != self.window
+        ):
+            self.window = window
+            self.frames.clear()
+            self.total = np.zeros_like(frame)
+            self.count = 0
+        self.total += frame
+        self.count += 1
+        if window > 0:
+            self.frames.append(frame)
+            if len(self.frames) > window:
+                self.total -= self.frames.popleft()
+                self.count -= 1
+        return self.total / self.count
+
+
 class CameraROI(zmq_ROI):
     """A :class:`zmq_ROI` whose context menu copies it as a camera ROI of the frame ``view`` shows."""
 
@@ -174,10 +217,13 @@ class ImageApplet(Applet):
     _show_sidebar = PropertyAttribute("show_sidebar", True)
     _autoscale = PropertyAttribute("autoscale", True)
     _manual_levels = PropertyAttribute("manual_levels", [])
+    _average_frames = PropertyAttribute("average_frames", 0)
 
     def init_gui(self):
         self.imDataDict = {}
         self.image_index = -1
+        self.average: FrameAverage | None = None
+        self.last_frame = None
 
         self.panel_layout = QHBoxLayout()
         self.panel_layout.setContentsMargins(0, 0, 0, 0)
@@ -215,6 +261,9 @@ class ImageApplet(Applet):
         with QtCore.QSignalBlocker(self.autoscale_action):
             self.autoscale_action.setChecked(bool(self._autoscale))
         self.set_autoscale(bool(self._autoscale))
+        self.average_action = self.view.add_menu_action(
+            "start averaging", self.toggle_averaging
+        )
         self.view.add_menu_action(
             "subscriptions", lambda: self.open_subscription_editor()
         )
@@ -238,6 +287,19 @@ class ImageApplet(Applet):
         """Dragging the histogram's levels is a manual scale: record it and stop autoscaling."""
         self._manual_levels = [low, high]
         self.autoscale_action.setChecked(False)
+
+    def toggle_averaging(self):
+        """Start drawing the mean of the frames from now on, or go back to single frames."""
+        if self.average is None:
+            self.average = FrameAverage()
+            self.average_action.setText("stop averaging")
+            self.view.set_title("averaging: waiting for a frame")
+        else:
+            self.average = None
+            self.average_action.setText("start averaging")
+            self.view.set_title(None)
+            if self.last_frame is not None:
+                self.show_frame(*self.last_frame)
 
     def toggle_sidebar(self):
         show = not self.sidebar.isVisible()
@@ -269,6 +331,10 @@ class ImageApplet(Applet):
             msg, head, imgdata = self.imgstream.recv()
             if self.image_index != -1 and head["index"] != self.image_index:
                 continue
+            self.last_frame = (head, imgdata)
+            if self.average is not None:
+                imgdata = self.average.add(imgdata, int(self._average_frames))
+                self.view.set_title(f"mean of {self.average.count} frames")
             self.show_frame(head, imgdata)
         self.update_mask()
         self.update_overlays()

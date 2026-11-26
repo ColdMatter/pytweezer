@@ -215,7 +215,9 @@ image's axes with `self.view.add_side_plot("top")`/`("left")` (as
 `viewers/image_plot_monitor.py` does), and insert widgets beside or under the
 image through `panel_layout`/`image_layout`. A persisted ROI is a
 `GUI/zmq_roi.zmq_ROI` the applet creates and passes to `self.view.add_roi`; the
-view never touches Properties.
+view never touches Properties. Every `ImageApplet` has **start averaging** in
+its context menu: `poll` passes `show_frame` the running mean (`FrameAverage`)
+in place of each frame, so an override of `show_frame` sees the mean too.
 
 ## Preview it before you call it done
 

@@ -65,6 +65,9 @@ The sites are predicted from four inputs, all recorded in the file:
 The mapping is `geometry_to_pixels` (`analysis/trap_sites.py`). On the HamCam,
 2.14 px per µm: a 2 µm array is unresolved (sites ~4 px apart, PSF σ ≈ 3 px),
 6 µm gives 12.8 px, 8 µm gives 17 px. Sites closer than two aperture radii (8 px by default) are merged into one.
+The **CaF Tweezer Monitor** applet (`GUI/viewers/caf_tweezer_monitor.py`) draws
+the same predicted sites live on the HamCam stream, from the rig's current
+array and the saved calibration.
 
 - The CaF map is **separate from Rb's `trap_*` calibration**: the CaF imaging
   differs, and Rb's FindTrapSites centre is about 40 px from where the CaF

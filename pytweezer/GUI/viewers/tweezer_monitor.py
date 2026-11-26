@@ -48,12 +48,12 @@ def sites_from_saved(saved: dict) -> tuple[np.ndarray | None, int, str]:
 
 
 class SiteOverlay:
-    """Squares, optional index labels and a message, drawn over an image in ``plot``."""
+    """Markers ``size`` pixels across (``symbol``: ``"s"`` squares, ``"o"`` circles), optional index labels and a message, drawn over an image in ``plot``."""
 
-    def __init__(self, plot):
+    def __init__(self, plot, symbol: str = "s"):
         self.plot = plot
         self.squares = pg.ScatterPlotItem(
-            symbol="s", pxMode=False, brush=None, pen=pg.mkPen(SITE_COLOUR, width=1)
+            symbol=symbol, pxMode=False, brush=None, pen=pg.mkPen(SITE_COLOUR, width=1)
         )
         plot.addItem(self.squares)
         self.labels: list[pg.TextItem] = []
@@ -101,11 +101,14 @@ class SiteOverlay:
 class TweezerDisplay(ImageApplet):
     """The Image Monitor with the accepted trap sites drawn over each frame."""
 
+    #: The marker drawn at each site, as :class:`SiteOverlay` takes it.
+    site_symbol = "s"
+
     _show_site_labels = PropertyAttribute("show_site_labels", False)
 
     def init_gui(self):
         super().init_gui()
-        self.overlay = SiteOverlay(self.view.plot)
+        self.overlay = SiteOverlay(self.view.plot, self.site_symbol)
         self._saved_version = None
         self._placed = None
         self.feed = ExperimentFeed()
