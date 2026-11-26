@@ -232,6 +232,7 @@ Load a skill when you need more than that:
 | Writing/queuing an `Experiment`, `submit`/`run_local`, the queue manager | `add-experiment` |
 | Writing or accepting an optimiser (`StagedScan`, `BayesianOptimisation`, `Fit`), the Optimisers tab | `add-optimiser` |
 | The Rb tweezer array: SLM array, `LoadTweezers`, trap sites, `FindTrapSites`, the tweezer-scored optimisers | `tweezer-array` |
+| Analysing a CaF tweezer run (`MergeCaFTweezer…`): light at the sites, Fresnel scans, on/off controls | `caf-tweezer-site-analysis` |
 | Saving a camera's frames with pycaf MOTMaster runs from a lab-book notebook (`PycafCamera`), MOTMaster zips | `notebook-rig` |
 | Running or screenshotting the GUI | `run-pytweezer` |
 | Writing, reviewing or deleting tests | `write-tests` |
