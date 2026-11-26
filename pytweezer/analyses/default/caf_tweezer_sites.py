@@ -1,9 +1,8 @@
 """Light at the tweezer sites of a ``MergeCaFTweezer`` file: ``caf_tweezer_sites``.
 
 The sites are the SLM array the file recorded (``slm_arrays``, with each
-point's ``slm_array``) placed on the HamCam by the run's ``site_*`` arguments,
-the ROI origin the camera set (``hamcam_roi_origin``) and its
-``hamcam_binning``. Traps whose
+point's ``slm_array``) placed on the HamCam by the run's ``site_*`` arguments
+and the ROI origin the camera set (``hamcam_roi_origin``). Traps whose
 apertures would overlap are one site, at their mean position, since their light
 can't be told apart. Each shot's ``hamcam_image``, less its
 ``hamcam_background`` when the file has one, is scored at the sites against
@@ -28,14 +27,13 @@ ARRAY_INDEX = "slm_array"
 ARRAYS = "slm_arrays"
 ROI_ORIGIN = "hamcam_roi_origin"
 CALIBRATION = ("site_centre_x", "site_centre_y", "site_scale", "site_angle")
-BINNING = "hamcam_binning"
 #: Score above which a shot counts as showing light at a site.
 BRIGHT_Z = 3.0
 
 
 @dataclass(frozen=True)
 class SiteSettings:
-    """Which shots to analyse and the photometry's radii in frame (binned) pixels.
+    """Which shots to analyse and the photometry's radii in pixels.
 
     Attributes:
         group: Index into :func:`point_groups`; ``None`` for every point.
@@ -130,10 +128,7 @@ def site_positions(measurement: Measurement, array: dict) -> np.ndarray:
         arguments["site_centre_y"],
     )
     x0, y0 = np.asarray(measurement.constants[ROI_ORIGIN], float)
-    # Files from before the argument existed were unbinned.
-    binning = measurement.arguments.get(BINNING) or 1
-    # Binned pixel j spans sensor pixels j*binning .. (j+1)*binning - 1 from the origin.
-    return (sensor - [y0, x0] - (binning - 1) / 2) / binning
+    return sensor - [y0, x0]
 
 
 def caf_tweezer_sites(measurement: Measurement, settings: SiteSettings) -> SiteAnalysis:

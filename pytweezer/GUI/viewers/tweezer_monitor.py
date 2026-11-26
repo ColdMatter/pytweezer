@@ -4,8 +4,8 @@ The Image Monitor, plus the trap sites accepted from ``FindTrapSites``: each is
 drawn as a square the summing window across (``trap_window_size``), so it is
 plain at a glance whether the sites sit on the atoms. Subscribe it to the
 tweezer camera's image stream. The sites are kept in full-sensor pixels and
-placed in each frame by the ROI origin and binning in its header (``roi_x0``/``roi_y0``,
-0 when missing; ``binning``, 1 when missing). They are read from the saved parameters when the viewer starts
+placed in each frame by the ROI origin in its header (``roi_x0``/``roi_y0``; 0
+when missing). They are read from the saved parameters when the viewer starts
 and again whenever the Experiment Manager says they changed; until some are
 accepted, a line on the image says so.
 
@@ -67,16 +67,14 @@ class SiteOverlay:
         self.message.setText(message)
 
     def place(self, image_item, head: dict, labels: bool = False) -> None:
-        """Put a square on each site's pixel of the frame ``image_item`` shows, read from ``head``'s ROI and binning."""
+        """Put a square on each site's pixel of the frame ``image_item`` shows, read from ``head``'s ROI."""
         for label in self.labels:
             self.plot.removeItem(label)
         self.labels = []
         if self.sites is None:
             self.squares.clear()
             return
-        binning = head.get("binning", 1)
         sites = to_roi(self.sites, head.get("roi_y0", 0), head.get("roi_x0", 0))
-        sites = (np.asarray(sites, float) - (binning - 1) / 2) / binning
         # Through the image's own transform, so squares follow however the
         # frame is placed and scaled: row-major puts data[row, col] at local
         # (col, row), and pixel centres are at +0.5.

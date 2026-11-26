@@ -114,14 +114,6 @@ class FakeHamCam(RecordingCamera):
         return self.roi_origin
 
     roi_origin = (ROI_ORIGIN[1], ROI_ORIGIN[0])
-    binning = 1
-
-    def set_binning(self, binning):
-        self.calls.append(("set_binning", (binning,)))
-        self.binning = binning
-
-    def frame_geometry(self):
-        return self.binning, self.roi_origin
 
     def _frame(self, occupied):
         atoms = np.tensordot(occupied, self.spots, axes=1)

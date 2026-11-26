@@ -67,25 +67,15 @@ def hamcam_roi_argument(default: int, *, size: bool) -> Integer:
 
 
 def set_up_hamcam(
-    hamcam: ImagEMX2Camera,
-    gain: float,
-    roi: tuple[int, int, int, int],
-    binning: int = 1,
+    hamcam: ImagEMX2Camera, gain: float, roi: tuple[int, int, int, int]
 ) -> tuple[int, int]:
-    """Put the HamCam in external exposure with EM gain, ``binning`` and ``roi`` (x0, width, y0, height), live.
+    """Put the HamCam in external exposure with EM gain, binning 1 and ``roi`` (x0, width, y0, height), live.
 
     Returns:
-        The ROI's origin ``(x0, y0)`` in sensor pixels as the camera set it, which may be rounded.
-
-    Raises:
-        ValueError: If the camera does not take ``binning``.
+        The ROI's origin ``(x0, y0)`` as the camera set it, which may be rounded.
     """
     hamcam.stop_live()
-    hamcam.set_binning(binning)
-    # DCAM rounds an unsupported bin factor down rather than refusing it.
-    taken, _ = hamcam.frame_geometry()
-    if taken != binning:
-        raise ValueError(f"the HamCam cannot bin by {binning} (it took {taken})")
+    hamcam.set_binning(1)
     origin = tuple(hamcam.set_roi(*roi))
     hamcam.set_trigger_source("ext")
     hamcam.set_external_exposure_mode()

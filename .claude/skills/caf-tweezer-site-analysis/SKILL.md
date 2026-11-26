@@ -61,7 +61,6 @@ The sites are predicted from four inputs, all recorded in the file:
 | µm → sensor pixels: scale, rotation, x mirrored | arguments `site_scale`, `site_angle` | saved `caf_hamcam_px_per_m` (2.139e6), `caf_hamcam_angle` (−3.0°) |
 | Sensor pixel of the blaze spot (array centre) | arguments `site_centre_x`, `site_centre_y` | saved `caf_hamcam_centre_x/_y` |
 | ROI origin the camera actually set | constant `hamcam_roi_origin`, `(x0, y0)` | `set_up_hamcam` return value |
-| Sensor pixels binned per side | argument `hamcam_binning` (1 when absent) | the form; `set_up_hamcam` fails if the camera won't take it |
 
 The mapping is `geometry_to_pixels` (`analysis/trap_sites.py`). On the HamCam,
 2.14 px per µm: a 2 µm array is unresolved (sites ~4 px apart, PSF σ ≈ 3 px),
