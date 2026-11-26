@@ -10,7 +10,6 @@ import sys
 import matplotlib
 import numpy as np
 from matplotlib.patches import Circle
-from scipy import ndimage
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -91,8 +90,7 @@ def main(out_dir: str, rid: int) -> None:
     )
 
     ax = fig.add_subplot(grid[0, 1])
-    shown = ndimage.gaussian_filter(wide.mean_image, 1.5)
-    shown -= np.median(shown)
+    shown = wide.mean_image - np.median(wide.mean_image)
     image = ax.imshow(
         shown, cmap="viridis", vmin=-150, vmax=max(350, np.percentile(shown, 99.9))
     )
@@ -102,8 +100,7 @@ def main(out_dir: str, rid: int) -> None:
     fig.colorbar(image, ax=ax, label="counts above median")
     frames_label = "image − background" if wide.background_subtracted else "image"
     ax.set_title(
-        f"mean {frames_label} ({wide.shots} shots, smoothed 1.5 px)\n"
-        "red: predicted sites",
+        f"mean {frames_label} ({wide.shots} shots)\nred: predicted sites",
         fontsize=10,
     )
 
@@ -119,7 +116,7 @@ def main(out_dir: str, rid: int) -> None:
     for y, x in wide.sites - centre:
         ax.add_patch(Circle((x, y), APERTURE, fill=False, ec="r", lw=0.8))
     fig.colorbar(image, ax=ax, label="counts above median")
-    ax.set_title("array region, unsmoothed\n(px from array centre)", fontsize=10)
+    ax.set_title("array region\n(px from array centre)", fontsize=10)
 
     ax = fig.add_subplot(grid[1, :2])
     bins = np.linspace(-5, 10, 61)

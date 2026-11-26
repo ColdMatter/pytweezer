@@ -13,7 +13,7 @@ import sys
 
 import matplotlib
 import numpy as np
-from scipy import ndimage, optimize
+from scipy import optimize
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -97,7 +97,7 @@ def main(out_dir, rid, centre=None):
     )
     cx, cy = int(np.rint(x0)), int(np.rint(y0))
     for j, f in enumerate(steps):
-        mean = ndimage.gaussian_filter(frames[focal_mm == f].mean(0), 1.0)
+        mean = frames[focal_mm == f].mean(0)
         crop = mean[cy - CROP : cy + CROP + 1, cx - CROP : cx + CROP + 1]
         ax = fig.add_subplot(grid[0, j])
         ax.imshow(crop - np.median(crop), cmap="viridis", vmin=-150, vmax=900)
@@ -141,7 +141,7 @@ def main(out_dir, rid, centre=None):
         va="top",
     )
     fig.suptitle(
-        f"rid {rid}: tweezer spot per Fresnel focal length (mean image − background, smoothed 1 px)",
+        f"rid {rid}: tweezer spot per Fresnel focal length (mean image − background)",
         fontsize=11,
         y=0.98,
     )

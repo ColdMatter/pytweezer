@@ -8,7 +8,6 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
@@ -20,7 +19,6 @@ from PyQt6.QtWidgets import (
 
 from pytweezer.analyses.default.caf_tweezer_sites import (
     BRIGHT_Z,
-    SMOOTHING_PX,
     SiteAnalysis,
     SiteSettings,
     caf_tweezer_sites,
@@ -101,17 +99,8 @@ class CafTweezerSitesView(ComputedAnalysisView):
                 controls.addSpacing(12)
             controls.addWidget(QLabel(text))
             controls.addWidget(widget)
-        self.smooth = QCheckBox(f"Smooth image ({SMOOTHING_PX:g} px)")
-        self.smooth.setChecked(True)
-        self.smooth.setToolTip(
-            "Draw the mean frame smoothed so faint sites show; the scores use the raw frames"
-        )
-        controls.addSpacing(12)
-        controls.addWidget(self.smooth)
         controls.addStretch(1)
         self.shots_from.currentIndexChanged.connect(self.recompute)
-        self.smooth.toggled.connect(self._redraw_frame)
-        self._result = None
 
         self.trap_plot, self.trap_image = image_plot("x", "y", "µm")
         self.trap_image.setColorMap(pg.colormap.get("magma"))
@@ -192,7 +181,6 @@ class CafTweezerSitesView(ComputedAnalysisView):
         return caf_tweezer_sites(loaded, settings), settings
 
     def show_result(self, result):
-        self._result = result
         for plot, item in self._overlays:
             plot.removeItem(item)
         self._overlays = []
@@ -226,17 +214,9 @@ class CafTweezerSitesView(ComputedAnalysisView):
             )
             self._label(self.trap_plot, str(k), x, y)
 
-    def _redraw_frame(self) -> None:
-        if self._result is not None:
-            self._draw_frame_image(self._result[0])
-
-    def _draw_frame_image(self, a: SiteAnalysis) -> None:
-        image = a.smoothed_image if self.smooth.isChecked() else a.mean_image
-        low, high = np.percentile(image, [1, 99.7])
-        self.frame_image.setImage(image, levels=(low, high))
-
     def _show_frame(self, a: SiteAnalysis, s: SiteSettings) -> None:
-        self._draw_frame_image(a)
+        low, high = np.percentile(a.mean_image, [1, 99.7])
+        self.frame_image.setImage(a.mean_image, levels=(low, high))
         frames = "image − background" if a.background_subtracted else "image"
         self.frame_plot.setTitle(f"Mean {frames}, {a.shots} shots")
         for k, (y, x) in enumerate(a.sites):
