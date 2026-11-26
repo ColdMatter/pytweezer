@@ -43,10 +43,9 @@ class AtomCount(Applet):
 
     def init_gui(self):  # once: build widgets, make stream clients
         ...
-        self.update_subscriptions()
 
-    def update_subscriptions(self):  # after either dialog closes
-        ...
+    def update_subscriptions(self):  # once after init_gui, then after
+        ...  #                          either dialog closes
 
     def poll(self):  # every poll_interval ms
         ...
@@ -97,7 +96,8 @@ while self.stream.has_new_data(timeout_ms=0):
     ...
 ```
 
-**`update_subscriptions` unsubscribes first, then rebuilds the view.** It runs
+**`update_subscriptions` unsubscribes first, then rebuilds the view.** `Applet`
+calls it once straight after `init_gui` (so `init_gui` need not subscribe), then
 every time a dialog closes; otherwise subscriptions accumulate and removed
 streams leave ghost curves. Unsubscribe, clear, re-subscribe, recreate.
 
@@ -138,13 +138,29 @@ into a corner.
   `analysis/trap_sites.to_roi(sites, head.get("roi_y0", 0), head.get("roi_x0", 0))`
   or they sit off the atoms whenever the camera reads an ROI. The Image Monitor
   draws row-major (row 0 at top, x along columns), matching the Optimisers tab
-  and notebooks; subclasses inherit that.
+  and notebooks; subclasses of `ImageApplet` inherit that.
 
 ## Where drawing code lives
 
 `pytweezer/GUI/views/` holds base views that show what they are handed and know
-nothing of streams, Properties or devices (`HistogramPlot`); the image and line
-plot drawing still sit in `viewers/image_monitor.py` and `viewers/live_plot.py`.
+nothing of streams, Properties or devices: `ImageView` (`image.py`: image,
+colour bar, mask, ROIs, side plots, overlay paths), `LinePlot` (`line_plot.py`),
+`HistogramPlot` (`histogram.py`) and `TweezerLoadingPlots`
+(`tweezer_loading.py`).
+
+The framework applet bases wire streams to those views. `ImageApplet`
+(`GUI/image_applet.py`) holds an `ImageView` as `self.view`; `LivePlotApplet`
+(`GUI/live_plot_applet.py`) is the grid of plots. An image applet subclasses
+`ImageApplet` and draws through `self.view`; a data-plot applet subclasses
+`LivePlotApplet` or builds its own `Applet` around a `LinePlot`.
+
+An applet may subclass another applet to add a small feature or specialisation
+on top of it: the Background Monitor is the Image Monitor plus a stored
+background subtracted from each frame. When the new applet would override much
+of its parent's behaviour, don't subclass it. Build both on the framework base
+and share the common drawing through `GUI/views/` (or the common wiring through
+a framework base), rather than layering one applet's overrides on another's.
+
 A specialisation (image with trap sites, histogram with a fit) stays in its
 applet until a second panel needs it, then moves to `GUI/views/`
 (`TweezerLoadingPlots`). Applets (`GUI/viewers/`) and default-analysis views
@@ -168,8 +184,8 @@ rules. For an applet:
 - **One applet, one job.** Extra instances are free.
 - **Let the display fill the window**: `setContentsMargins(0, 0, 0, 0)` on the
   outer layout.
-- **Put `subscriptions` and `configure` in the view-box context menu**
-  (`vb.menu.addAction("subscriptions")`).
+- **Put `subscriptions` and `configure` in the view-box context menu** with
+  the view's `add_menu_action(text, slot)`.
 - **Colour curves with `self.stream_color(stream, index)`**: it cycles the
   shared palette and honours a per-stream colour the user set.
 - **Label axes with units**; `plot.addLegend()` once there are several curves.
@@ -179,7 +195,7 @@ rules. For an applet:
 
 A `HistogramLUTItem` owns its image's lookup table: `image_item.setLookupTable`
 is silently discarded and the image renders grey. Use
-`lut.gradient.setColorMap(cmap)`.
+`ImageView.set_colour_map(name)`, which sets it on the histogram.
 
 ## Fit overlays and linked plots
 
@@ -187,12 +203,19 @@ The Image Monitor draws a cloud fit over the image with no new code: list the
 fit's data stream (from `analyses/live/cloud_fit.py`, header fields
 `analysis/cloud_fit.FIELDS` in the image's plot coordinates) in
 `overlaystreams`; `n_contours` sets the ellipse count. Reuse
-`overlay_paths(head, n)` from `viewers/image_monitor.py` in any viewer that
+`overlay_paths(head, n)` from `GUI/image_applet.py` in any viewer that
 shows a fit (`[]` for a failed fit). Image and fit share a frame through the
 header's `_offset`/`_imgresolution` (`analysis/cloud_fit.frame_geometry`).
 
-To extend the Image Monitor, subclass `ImageDisplay` and override its hooks, as
-`viewers/image_plot_monitor.py` does; don't copy it.
+To extend an image applet, subclass `ImageApplet` (or, for a small addition,
+the applet itself) rather than copying it: extend `init_gui` after
+`super().init_gui()`, override `show_frame(head, imgdata)` to change what each
+frame draws (as `viewers/background_monitor.py` does), add plots linked to the
+image's axes with `self.view.add_side_plot("top")`/`("left")` (as
+`viewers/image_plot_monitor.py` does), and insert widgets beside or under the
+image through `panel_layout`/`image_layout`. A persisted ROI is a
+`GUI/zmq_roi.zmq_ROI` the applet creates and passes to `self.view.add_roi`; the
+view never touches Properties.
 
 ## Preview it before you call it done
 
@@ -249,20 +272,21 @@ on its streams, and a `Properties:` list. Model it on
 ## Reference viewers (`pytweezer/GUI/viewers/`)
 
 - `scalar_history.py`: the smallest complete applet; correct drain and unpack.
-- `live_plot.py`: a grid of plots, each with its own subscriptions under its key
-  in `plots`, including experiment results from `ExperimentFeed`.
-  `stacked_plotter.py` re-lays it out by overriding `arrange`.
+- `live_plot.py`: a `LivePlotApplet`, a grid of plots, each with its own
+  subscriptions under its key in `plots`, including experiment results from
+  `ExperimentFeed`. `stacked_plotter.py` re-lays it out by overriding `arrange`.
 - `tweezer_loading.py`: a thin applet around a shared `GUI/views/` widget.
-- `tweezer_monitor.py`: Image Monitor subclass drawing saved trap sites.
-- `slm_monitor.py`: four image streams in a grid, in metres when the header
+- `tweezer_monitor.py`: an `ImageApplet` drawing saved trap sites.
+- `slm_monitor.py`: four `ImageView`s in a grid, in metres when the header
   says so.
-- `image_monitor.py`: image, histogram LUT, ROIs (`CameraROI`), `DataSidebar`,
-  a mask stream on its own `streamkey`, fit overlays.
-- `image_plot_monitor.py`: Image Monitor plus x/y sums (`projectionstreams`)
-  in plots linked to its axes.
-- `camera_applet.py`: Image Monitor with camera settings inserted via
-  `ImageDisplay.panel_layout` / `image_layout`; the device-driving pattern
-  above.
+- `image_monitor.py`: `ImageDisplay`, a bare `ImageApplet` (image, histogram
+  LUT, ROIs (`CameraROI`), `DataSidebar`, a mask stream on its own
+  `streamkey`, fit overlays).
+- `background_monitor.py`: the Image Monitor plus a stored background, by
+  overriding `show_frame`; the pattern for a small specialisation of an applet.
+- `image_plot_monitor.py`: an `ImageApplet` plus x/y sums (`projectionstreams`)
+  in side plots linked to its axes.
+- `camera_applet.py`: an `ImageApplet` with camera settings inserted via
+  `panel_layout` / `image_layout`; the device-driving pattern above.
 
-`viewers/archive/` holds retired viewers: not models, though the image viewers
-still import `zmq_ROI` from there.
+`viewers/archive/` holds retired viewers: not models.

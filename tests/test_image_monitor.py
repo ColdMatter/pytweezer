@@ -1,14 +1,13 @@
 import numpy as np
 import pyqtgraph as pg
 import pytest
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtWidgets
 
 from pytweezer.analyses.live.roi_slice import RoiSlice
 from pytweezer.analysis.cloud_fit import fit_cloud
-from pytweezer.GUI import applet
+from pytweezer.GUI import applet, image_applet, zmq_roi
+from pytweezer.GUI.image_applet import camera_roi, overlay_paths
 from pytweezer.GUI.viewers import data_sidebar, image_monitor, image_plot_monitor
-from pytweezer.GUI.viewers.archive import zmq_ROI
-from pytweezer.GUI.viewers.image_monitor import camera_roi, overlay_paths
 
 HEAD = {"roi_x0": 100, "roi_y0": 40, "binning": 2}
 
@@ -86,9 +85,9 @@ class FakeStream:
 def fake_hubs(monkeypatch):
     for module, name, fake in [
         (applet, "Properties", FakeProps),
-        (zmq_ROI, "Properties", FakeProps),
-        (image_monitor, "ImageClient", FakeStream),
-        (image_monitor, "DataClient", FakeStream),
+        (zmq_roi, "Properties", FakeProps),
+        (image_applet, "ImageClient", FakeStream),
+        (image_applet, "DataClient", FakeStream),
         (data_sidebar, "DataClient", FakeStream),
     ]:
         monkeypatch.setattr(module, name, fake)
@@ -148,15 +147,33 @@ def test_frame_pixels_sit_at_their_physical_coordinates(monitor, head):
     origin_x, origin_y = head.get("_offset", (0, 0))
 
     for row, col in [(0, 0), (63, 0), (0, 47), (30, 20)]:
-        placed = monitor.image_item.mapToParent(QtCore.QPointF(col + 0.5, row + 0.5))
+        placed = monitor.view.image_item.mapToParent(
+            QtCore.QPointF(col + 0.5, row + 0.5)
+        )
         assert placed.x() == pytest.approx((origin_x + col + 0.5) * res_x)
         assert placed.y() == pytest.approx((origin_y + row + 0.5) * res_y)
 
 
 def test_image_monitor_draws_row_zero_at_the_top_with_its_data_panel_on(monitor):
-    assert monitor.plot.getViewBox().yInverted()
-    assert monitor.image_item.axisOrder == "row-major"
+    assert monitor.view.plot.getViewBox().yInverted()
+    assert monitor.view.image_item.axisOrder == "row-major"
     assert not monitor.sidebar.isHidden()
+
+
+def test_saved_manual_levels_apply_to_the_first_frame(qapp, monkeypatch):
+    fake_hubs(monkeypatch)
+
+    class SeededProps(FakeProps):
+        def __init__(self, name=""):
+            super().__init__(name)
+            self.values |= {"autoscale": False, "manual_levels": [10, 20]}
+
+    monkeypatch.setattr(applet, "Properties", SeededProps)
+    monitor = image_monitor.ImageDisplay("Test Monitor")
+
+    feed_frame(monitor, np.arange(64.0 * 48).reshape(64, 48), {})
+
+    assert monitor.view.levels() == (10, 20)
 
 
 def test_the_data_panel_is_never_shown_as_a_window_while_the_monitor_builds(
@@ -187,12 +204,15 @@ def test_overlay_follows_the_cloud_tilt_in_the_plot(monitor):
     rows, cols = np.indices(frame.shape)
     weights = (frame - frame.min()).ravel()
     points = [
-        monitor.image_item.mapToParent(QtCore.QPointF(c + 0.5, r + 0.5))
+        monitor.view.image_item.mapToParent(QtCore.QPointF(c + 0.5, r + 0.5))
         for r, c in zip(rows.ravel(), cols.ravel())
     ]
     pixels = np.array([[p.x(), p.y()] for p in points])
     cloud_axis = major_axis_angle(pixels, weights)
-    outline = np.array(monitor.overlay_curves["cloud_fit"][3].getData())
+    curves = [
+        item for item in monitor.view.plot.items if isinstance(item, pg.PlotCurveItem)
+    ]
+    outline = np.array(curves[3].getData())
     assert major_axis_angle(outline.T, np.ones(outline.shape[1])) == pytest.approx(
         cloud_axis, abs=0.02
     )
@@ -227,8 +247,8 @@ def test_a_roi_over_pixels_is_cropped_from_the_same_pixels_by_roi_slice(monitor)
     shape = (64, 48)
     feed_frame(monitor, np.zeros(shape), BINNED)
     # Rows 10-29 and columns 5-20, inset so the pixel edges are not on a rounding boundary.
-    top_left = monitor.image_item.mapToParent(QtCore.QPointF(5.2, 10.2))
-    bottom_right = monitor.image_item.mapToParent(QtCore.QPointF(20.8, 29.8))
+    top_left = monitor.view.image_item.mapToParent(QtCore.QPointF(5.2, 10.2))
+    bottom_right = monitor.view.image_item.mapToParent(QtCore.QPointF(20.8, 29.8))
     bounds = RoiSlice._pixel_bounds(
         (top_left.x(), top_left.y()),
         (bottom_right.x() - top_left.x(), bottom_right.y() - top_left.y()),
@@ -258,6 +278,10 @@ def projection_monitor(qapp, monkeypatch):
 
     monkeypatch.setattr(applet, "Properties", SeededProps)
     return image_plot_monitor.ImageProjectionDisplay("Test Projections")
+
+
+def test_saved_projection_streams_subscribe_at_start(projection_monitor):
+    assert set(projection_monitor.projection_curves) == {"cloud_x", "cloud_y"}
 
 
 def test_projection_monitor_builds_and_draws_both_profiles(projection_monitor):
@@ -292,10 +316,10 @@ def test_projection_monitor_builds_and_draws_both_profiles(projection_monitor):
 def test_projection_plots_share_the_images_axes(projection_monitor):
     monitor = projection_monitor
     assert monitor.top_plot.getViewBox().linkedView(pg.ViewBox.XAxis) is (
-        monitor.plot.getViewBox()
+        monitor.view.plot.getViewBox()
     )
     assert monitor.left_plot.getViewBox().linkedView(pg.ViewBox.YAxis) is (
-        monitor.plot.getViewBox()
+        monitor.view.plot.getViewBox()
     )
     assert monitor.left_plot.getViewBox().yInverted()
 
@@ -318,6 +342,38 @@ def test_an_untrusted_fit_draws_no_fit_curve(projection_monitor):
     assert fit.getData()[0] is None or len(fit.getData()[0]) == 0
 
 
+def test_the_view_follows_the_frames_without_a_mask_stream(qapp, monkeypatch):
+    fake_hubs(monkeypatch)
+
+    class NoRoiProps(FakeProps):
+        def __init__(self, name=""):
+            super().__init__(name)
+            self.values["ROIs"] = []
+
+    monkeypatch.setattr(applet, "Properties", NoRoiProps)
+    monitor = image_monitor.ImageDisplay("Test Monitor")
+    monitor.resize(600, 500)
+    monitor.show()
+    feed_frame(monitor, np.zeros((64, 48)), BINNED)
+    QtWidgets.QApplication.processEvents()
+
+    x_range, y_range = monitor.view.plot.getViewBox().viewRange()
+
+    assert x_range[1] < 1e-3
+    assert y_range[1] < 1e-3
+
+
+@pytest.mark.parametrize(
+    ("head", "units"), [(BINNED, "m"), ({"_offset": [10, 20]}, "px"), ({}, "px")]
+)
+def test_axes_are_labelled_in_the_units_the_frame_is_placed_in(monitor, head, units):
+    feed_frame(monitor, np.zeros((64, 48)), BINNED)
+    feed_frame(monitor, np.zeros((64, 48)), head)
+
+    assert monitor.view.plot.getAxis("bottom").labelUnits == units
+    assert monitor.view.plot.getAxis("left").labelUnits == units
+
+
 @pytest.fixture
 def background_monitor(qapp, monkeypatch):
     from pytweezer.GUI.viewers.background_monitor import BackgroundMonitor
@@ -327,7 +383,7 @@ def background_monitor(qapp, monkeypatch):
 
 
 def shown(monitor):
-    return monitor.image_item.image
+    return monitor.view.image_item.image
 
 
 def test_stored_background_is_subtracted_from_later_frames(background_monitor):

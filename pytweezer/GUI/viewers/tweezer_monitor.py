@@ -25,8 +25,8 @@ from pytweezer.experiment.client import (
 )
 from pytweezer.GUI.applet import run_applet
 from pytweezer.GUI.experiments.feed import ExperimentFeed
+from pytweezer.GUI.image_applet import ImageApplet
 from pytweezer.GUI.theme import CURVE_COLORS
-from pytweezer.GUI.viewers.image_monitor import ImageDisplay
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import PropertyAttribute
 
@@ -98,14 +98,14 @@ class SiteOverlay:
                 self.labels.append(label)
 
 
-class TweezerDisplay(ImageDisplay):
+class TweezerDisplay(ImageApplet):
     """The Image Monitor with the accepted trap sites drawn over each frame."""
 
     _show_site_labels = PropertyAttribute("show_site_labels", False)
 
     def init_gui(self):
         super().init_gui()
-        self.overlay = SiteOverlay(self.plot)
+        self.overlay = SiteOverlay(self.view.plot)
         self._saved_version = None
         self._placed = None
         self.feed = ExperimentFeed()
@@ -129,10 +129,10 @@ class TweezerDisplay(ImageDisplay):
 
     def poll(self):
         super().poll()
-        head = getattr(self, "image_head", None)
+        head = self.view.frame()[1]
         labels = bool(self._show_site_labels)
         if head is not None and self._placed != (id(head), labels):
-            self.overlay.place(self.image_item, head, labels=labels)
+            self.overlay.place(self.view.image_item, head, labels=labels)
             self._placed = (id(head), labels)
 
     def closeEvent(self, event):

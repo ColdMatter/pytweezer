@@ -2,8 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Prerequisite:** Phase 1 (`docs/superpowers/plans/2026-11-23-framework-split-phase-1.md`)
-has merged, so `GUI/views/` and `HistogramPlot` already exist.
+**Prerequisite:** Phase 1 (`docs/superpowers/plans/2026-11-23-framework-split-phase-1.md`, PR #71).
+This work goes on the branch `applet-views`, stacked on PR #71, so `GUI/views/` and `HistogramPlot` already exist; its PR says `Depends on #71`.
 
 **Goal:** Separate the applets' drawing from their wiring. The image viewer
 and the line plot become base views in `GUI/views/`. No applet inherits from
@@ -376,7 +376,7 @@ another applet any more. Every applet looks and behaves exactly as before.
   launch `pytweezer-server` offscreen, open each applet from the applet
   launcher, and screenshot it. Each must start without error.
 - [ ] **Step 5: Commit** only these docs and skills, then push to
-  `claude/code-restructuring-clarity-c889qv`.
+  `applet-views` (`git push -u origin applet-views`).
 - [ ] **Step 6: Report** to the user:
   - the screenshot comparisons;
   - the dead code left in place (listed in Global Constraints);

@@ -36,12 +36,26 @@ pytweezer/GUI/applet.py                 (base class + entry-point helper)
 │   └── open_config_editor()                      shared "configure" dialog
 └── run_applet(applet_cls, default_name)   theme + parse <name> argv + Qt loop
 
+pytweezer/GUI/image_applet.py           ImageApplet(Applet)      image (stream_category="Image"); holds self.view
+pytweezer/GUI/live_plot_applet.py       LivePlotApplet(Applet)   data  (stream_category="Data"); grid of PlotPanels
+pytweezer/GUI/zmq_roi.py                zmq_ROI                  ROI persisted to Properties
+pytweezer/GUI/views/                    base drawings, no streams or Properties
+├── image.py           ImageView        image, colour bar, ROIs, side plots, overlay paths
+├── line_plot.py       LinePlot
+├── histogram.py       HistogramPlot
+└── tweezer_loading.py TweezerLoadingPlots
+
 pytweezer/GUI/viewers/                   (the applet scripts themselves)
-├── image_monitor.py       ImageDisplay(Applet)      image  (stream_category="Image")
-├── image_plot_monitor.py  ImageProjectionDisplay(ImageDisplay)  image + linked sum plots
-├── live_plot.py           LivePlot(Applet)          data   (stream_category="Data")
-└── scalar_history.py      ScalarHistory(Applet)     data, one header field vs shot
-      (viewers/archive/ holds retired/experimental viewers — ignore them)
+├── image_monitor.py       ImageDisplay(ImageApplet)
+├── background_monitor.py  BackgroundMonitor(ImageDisplay)  Image Monitor minus a stored background
+├── image_plot_monitor.py  ImageProjectionDisplay(ImageApplet)  image + linked sum plots
+├── camera_applet.py       CameraApplet(ImageApplet)
+├── tweezer_monitor.py     TweezerDisplay(ImageApplet)
+├── live_plot.py           LivePlot(LivePlotApplet)
+├── stacked_plotter.py     StackedPlotter(LivePlotApplet)
+├── scalar_history.py      ScalarHistory(Applet)     data, one header field vs shot
+├── tweezer_loading.py     TweezerLoadingViewer(Applet)
+└── slm_monitor.py         SlmMonitor(Applet)
 
 pytweezer/GUI/applet_launcher.py         (the manager panel)
 └── AppletLauncher(BWidget)   add/start/stop/restart applet subprocesses;
@@ -75,7 +89,7 @@ A subclass describes only *what* it shows, by overriding a few hooks:
 |---|---|---|
 | `init_gui(self)` | once, after props + title are ready | build widgets, create stream clients, wire menu actions |
 | `poll(self)` | every `poll_interval` ms | pull new stream data (`has_new_data()` / `recv()`) and update the display |
-| `update_subscriptions(self)` | after either dialog closes | unsubscribe + re-subscribe the stream clients from the current property list |
+| `update_subscriptions(self)` | once straight after `init_gui`, then after either dialog closes | unsubscribe + re-subscribe the stream clients from the current property list |
 
 Class attributes tune behavior:
 
@@ -100,7 +114,6 @@ class MyPlot(Applet):
     def init_gui(self):
         self.stream = DataClient(self.name)
         ...  # build widgets; wire menu -> self.open_subscription_editor / self.open_config_editor
-        self.update_subscriptions()
 
     def update_subscriptions(self):
         self.stream.unsubscribe()

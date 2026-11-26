@@ -16,8 +16,8 @@ same scanned argument.
 from PyQt6 import QtWidgets
 
 from pytweezer.GUI.applet import run_applet
+from pytweezer.GUI.live_plot_applet import LivePlotApplet
 from pytweezer.GUI.theme import PLOT_SEPARATOR
-from pytweezer.GUI.viewers.live_plot import LivePlot
 from pytweezer.servers import PropertyAttribute
 
 # Fixed so the plots' left edges, and with them their x axes, line up whatever
@@ -28,7 +28,7 @@ Y_AXIS_WIDTH = 70
 SPACING = 6
 
 
-class StackedPlotter(LivePlot):
+class StackedPlotter(LivePlotApplet):
     """The Live Plot in one column, with every plot's x axis linked to the top one's."""
 
     default_size = (800, 700)
@@ -41,10 +41,10 @@ class StackedPlotter(LivePlot):
             line.deleteLater()
         self.separators = []
         self.grid.setSpacing(SPACING)
-        top = self.panels[keys[0]].plot
+        top = self.panels[keys[0]].view
         for index, key in enumerate(keys):
             panel = self.panels[key]
-            self.grid.addWidget(panel.widget, 2 * index, 0)
+            self.grid.addWidget(panel.view, 2 * index, 0)
             if index:
                 line = QtWidgets.QFrame()
                 line.setFixedHeight(2)
@@ -53,10 +53,10 @@ class StackedPlotter(LivePlot):
                 self.separators.append(line)
             # Each plot starts one colour further along the palette.
             panel.colour_offset = index
-            panel.plot.setXLink(None if index == 0 else top)
-            panel.plot.getAxis("left").setWidth(Y_AXIS_WIDTH)
+            panel.view.link_x(None if index == 0 else top)
+            panel.view.set_y_axis_width(Y_AXIS_WIDTH)
             panel.show_x_label = index == len(keys) - 1
-            panel.plot.getAxis("bottom").setStyle(showValues=panel.show_x_label)
+            panel.view.show_x_values(panel.show_x_label)
 
 
 def main(name):

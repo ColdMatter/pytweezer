@@ -13,7 +13,7 @@ SAVED = {"trap_sites": SITES + [100, 50], "trap_window_size": 5}
 
 
 def image_view(shape=(64, 48)):
-    """An ImageItem placed as ImageDisplay places a camera frame."""
+    """An ImageItem placed as ImageView places a camera frame."""
     plot = pg.PlotItem()
     image = pg.ImageItem(np.zeros(shape), axisOrder="row-major")
     image.setRect(QtCore.QRectF(0, 0, shape[1], shape[0]))

@@ -53,8 +53,6 @@ class TweezerLoadingViewer(Applet):
             )
             menu.addAction("configure").triggered.connect(self.open_config_editor)
 
-        self.update_subscriptions()
-
     def update_subscriptions(self):
         """Re-read the properties and redraw the last message against them."""
         self.stream.unsubscribe()

@@ -51,8 +51,11 @@ class Applet(QtWidgets.QWidget):
     * the shared "subscriptions" and "configure" context-menu dialogs.
 
     Subclasses typically set :attr:`stream_category`, build their widgets in
-    :meth:`init_gui`, refresh subscriptions in :meth:`update_subscriptions`, and
-    pull fresh stream data in :meth:`poll`.
+    :meth:`init_gui`, subscribe in :meth:`update_subscriptions`, and pull fresh
+    stream data in :meth:`poll`. The first subscription is made by a call to
+    :meth:`update_subscriptions` straight after :meth:`init_gui` returns, so
+    :meth:`init_gui` need not subscribe (subscribing there too is harmless:
+    it is idempotent).
     """
 
     #: ``"Image"`` or ``"Data"`` — which stream catalog the subscription editor
@@ -78,6 +81,7 @@ class Applet(QtWidgets.QWidget):
         self._restore_geometry()
 
         self.init_gui()
+        self.update_subscriptions()
 
         if self.poll_interval:
             self._timer = QtCore.QTimer(self)
@@ -97,9 +101,10 @@ class Applet(QtWidgets.QWidget):
     def update_subscriptions(self):
         """Re-apply the stream subscriptions from Properties.
 
-        Called automatically after the subscription or configure dialog closes
-        (property edits may have changed the stream list). Override to
-        unsubscribe/re-subscribe the applet's stream clients."""
+        Called once after :meth:`init_gui`, and again after the subscription or
+        configure dialog closes (property edits may have changed the stream
+        list). Override to unsubscribe/re-subscribe the applet's stream
+        clients."""
 
     def sizeHint(self):
         return QtCore.QSize(*self.default_size)

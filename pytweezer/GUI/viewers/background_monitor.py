@@ -27,10 +27,9 @@ class BackgroundMonitor(ImageDisplay):
         self.raw_frame = None
         super().init_gui()
         self.status = pg.TextItem(color=PLOT_TEXT, anchor=(0, 0))
-        self.status.setParentItem(self.plot.getViewBox())
-        menu = self.plot.getViewBox().menu
-        menu.addAction("store background").triggered.connect(self.store_background)
-        menu.addAction("clear background").triggered.connect(self.clear_background)
+        self.status.setParentItem(self.view.plot.getViewBox())
+        self.view.add_menu_action("store background", self.store_background)
+        self.view.add_menu_action("clear background", self.clear_background)
 
     def store_background(self):
         if self.raw_frame is not None:
@@ -43,7 +42,8 @@ class BackgroundMonitor(ImageDisplay):
 
     def redraw(self):
         if self.raw_frame is not None:
-            self.show_frame(self.image_head, self.raw_frame)
+            _, head = self.view.frame()
+            self.show_frame(head, self.raw_frame)
 
     def show_frame(self, head, imgdata):
         self.raw_frame = np.asarray(imgdata, dtype=np.float64)
