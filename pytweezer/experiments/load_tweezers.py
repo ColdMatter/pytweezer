@@ -13,6 +13,7 @@ from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.experiment.arguments import Bool, Device, Integer, Number
 from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
+from pytweezer.experiments.slm_tweezer_array import SlmArray
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers.device_client import get_device_config
 
@@ -279,6 +280,30 @@ class LoadTweezers(MotMasterExperiment):
             int(saved["trap_feature_size"]),
             float(saved["trap_threshold"]),
         ), ""
+
+
+class LoadTweezersSlmArray(SlmArray, LoadTweezers):
+    """:class:`LoadTweezers` that puts the tweezer array on the SLM first.
+
+    The mask is written before the first point and again whenever an SLM
+    argument changes, so the array and the Fresnel lens can be scanned; each
+    write waits ``slm_settle_time``. Every point also records the quality of
+    the mask on the SLM (``uniformity``, ``min_max_ratio``, ``mse``).
+
+    The trap sites are checked against the array the rig had before this task
+    wrote its own, and are the ones fitted by the last accepted
+    ``FindTrapSites``: after changing the array, run that again.
+    """
+
+    slm_settle_time = Number(1, unit="s", min=0, group="Array")
+
+    def prepare(self) -> None:
+        super().prepare()
+        self.read_slm_settings()
+
+    def run_point(self) -> None:
+        self.update_slm_array(self.slm_settle_time)
+        super().run_point()
 
 
 class LoadTweezersNImages(LoadTweezers):

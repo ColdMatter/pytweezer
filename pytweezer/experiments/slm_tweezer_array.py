@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pytweezer.experiment import Bool, Device, Experiment, Integer, Number
+from pytweezer.experiment.arguments import Argument, collect
 from pytweezer.experiment.client import get_saved_parameters
 from pytweezer.helper_scripts import array_hologram
 from pytweezer.servers import ImageClient
@@ -24,6 +25,10 @@ from pytweezer.servers import ImageClient
 if TYPE_CHECKING:
     # Imports cupy where it is installed, so only for the annotation.
     from pytweezer.coordinators.rearrangement import Rearrangement
+
+
+#: What the rig's hologram says about the mask's quality, recorded per point.
+HOLOGRAM_QUALITY = ("uniformity", "min_max_ratio", "mse")
 
 
 def render_target(
@@ -143,6 +148,19 @@ class SlmArray:
         self.broadcast(hologram, blaze_um)
         return hologram
 
+    def update_slm_array(self, settle_time: float) -> None:
+        """Write the mask if the SLM arguments differ from the last one this task wrote, and record its quality.
+
+        Each write waits ``settle_time`` seconds before returning.
+        """
+        settings = {name: getattr(self, name) for name in collect(SlmArray, Argument)}
+        if settings != getattr(self, "_written_slm_settings", None):
+            self._slm_hologram = self.write_slm_array()
+            self._written_slm_settings = settings
+            time.sleep(settle_time)
+        for name in HOLOGRAM_QUALITY:
+            self.record(name, self._slm_hologram[name])
+
     def broadcast(self, hologram: dict, blaze_um: tuple[float, float]) -> None:
         grid_x_um = np.asarray(hologram["grid_x_um"]) + blaze_um[0]
         grid_y_um = np.asarray(hologram["grid_y_um"]) + blaze_um[1]
@@ -190,6 +208,6 @@ class SlmTweezerArray(SlmArray, Experiment):
     def run_point(self) -> None:
         hologram = self.write_slm_array()
         self.record("phasemask", hologram["mask"])
-        for name in ("uniformity", "min_max_ratio", "mse"):
+        for name in HOLOGRAM_QUALITY:
             self.record(name, hologram[name])
         time.sleep(self.sleep_time)

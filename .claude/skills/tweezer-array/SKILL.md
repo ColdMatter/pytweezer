@@ -23,10 +23,13 @@ add-optimiser.
    `rig.get_array()` gives `sites`, `x_um`, `y_um` (`None` if the rig didn't
    write the mask).
    Its arguments and mask step are the `SlmArray` mixin (`read_slm_settings`,
-   `write_slm_array`), also mixed into `MergeCaFTweezer`
-   (`experiments/merge_caf_tweezer.py`): it rewrites the mask only when an SLM
-   argument changes, runs `MERGE.CaFTweezer` linked on the CaF MOTMaster and
-   records one HamCam and one CaFMOT Cam frame per shot. The HamCam set-up is
+   `write_slm_array`, and `update_slm_array`, which rewrites the mask only when
+   an SLM argument changes). `LoadTweezersSlmArray` mixes it into
+   `LoadTweezers`; `MergeCaFTweezer` (`experiments/merge_caf_tweezer.py`) into
+   one that runs `MERGE.CaFTweezer` linked on the CaF MOTMaster and
+   records one HamCam and one CaFMOT Cam frame per shot;
+   `MergeCaFTweezerHamCamBackground` runs MERGE.CaFTweezerHamCamBackground and
+   also records a HamCam background frame. The HamCam set-up is
    the function `set_up_hamcam` in `load_tweezers.py`.
 2. **`FindTrapSites`** (`optimisers/find_trap_sites.py`, a `Fit` over
    `LoadTweezers`) fits the array on the camera and proposes the trap-site
