@@ -312,7 +312,7 @@ def _bring_to_front(win):
 def server_main():
     """Run the server GUI; use ``bin.launch.server_main`` as the entry point so
     that a session off the server PC simulates."""
-    if config.SIMULATION_FORCED:
+    if config.SIMULATING and not config.ON_SERVER_PC:
         logger.warning(
             "Not on the server PC (%s): this session runs in SIMULATION mode",
             config.SERVER_PC,

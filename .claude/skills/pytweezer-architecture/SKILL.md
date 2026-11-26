@@ -33,13 +33,14 @@ host to do it (see the `pytweezer-gui-internals` skill).
 - `MACHINES` — hostname → `{"address", "user", "repo", "os", "launcher"}`, one
   per lab PC; a `"host"` entry is `MACHINES[name]["address"]`. `machine_name(address)`
   is the reverse lookup, `this_pc_address()` this PC's address, `LOCALHOST` the
-  loopback. `SERVER_PC` names the server PC. `SERVER_HOST`
-  resolves from the `SIMULATING`/`LOCAL` flags at the top of the file (both
-  `False` → the real `PH-BEAST`; either `True` binds everything to localhost).
+  loopback. `SERVER_PC` names the server PC. `SERVER_HOST` is the real
+  `PH-BEAST` unless `SIMULATING`, which binds everything to localhost.
+  `SIMULATING` is set by `PYTWEEZER_SIMULATION=1` (the tests set it; set it to
+  simulate on `PH-BEAST`) or by the server role below.
 - **`pytweezer-server` simulates anywhere but `SERVER_PC`.** Its entry point
   (`bin/launch.py`) sets `PYTWEEZER_ROLE=server` before anything imports the
-  config; `config.py` then forces `SIMULATING` (`SIMULATION_FORCED`) when the
-  hostname isn't `SERVER_PC`. Every process the GUI starts inherits the
+  config; `config.py` then sets `SIMULATING` when the hostname isn't
+  `SERVER_PC` (`ON_SERVER_PC`). Every process the GUI starts inherits the
   variable, so hubs, device servers and the Experiment Manager all simulate
   together. Clients and standalone device servers on lab PCs are unaffected.
   Because `pytweezer/__init__` imports `pytweezer.servers` (and so the config),

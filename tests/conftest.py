@@ -17,8 +17,9 @@ for _blas_threads in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREAD
 # so test log records stay out of the lab's log stream and log files.
 os.environ["PYTWEEZER_LOG_PUBLISH"] = "0"
 os.environ["PYTWEEZER_LOG_DIR"] = tempfile.mkdtemp(prefix="pytweezer-test-logs-")
-# Every stream client is then simulated: it reaches only a hub on loopback, under
-# "sim."-prefixed stream names, so no test can publish on the lab's streams.
+# Every test process simulates (config.SIMULATING): simulated devices, and stream
+# clients that reach only a hub on loopback under "sim."-prefixed names, so no
+# test can publish on the lab's streams.
 os.environ["PYTWEEZER_SIMULATION"] = "1"
 
 import pytest

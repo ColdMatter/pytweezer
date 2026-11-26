@@ -63,21 +63,18 @@ port_iterator = iter(range(7278, 99999))
 get_next_port = lambda: int(next(port_iterator))
 
 
-SIMULATING = False  # set to True to run in simulation mode (no real devices, no real cameras, etc.)
-LOCAL = False
-
-#: Set to "server" by ``pytweezer-server`` and inherited by every process it starts.
+#: A simulating process has simulated devices, hubs on this PC and "sim."-prefixed
+#: stream names, so nothing it does reaches the lab. It simulates if
+#: ``PYTWEEZER_SIMULATION=1`` (the tests set it; set it to simulate on the server
+#: PC), or if it is part of a ``pytweezer-server`` session (``PYTWEEZER_ROLE=server``)
+#: on any PC but SERVER_PC. Processes inherit both from whoever started them.
+SIMULATION_ENV = "PYTWEEZER_SIMULATION"
 SERVER_ROLE_ENV = "PYTWEEZER_ROLE"
-#: A server session anywhere but SERVER_PC must not bind the lab's addresses or
-#: drive real hardware, so it simulates whatever SIMULATING says.
-SIMULATION_FORCED = (
-    os.environ.get(SERVER_ROLE_ENV) == "server"
-    and socket.gethostname().lower() != SERVER_PC.lower()
+ON_SERVER_PC = socket.gethostname().lower() == SERVER_PC.lower()
+SIMULATING = os.environ.get(SIMULATION_ENV) == "1" or (
+    os.environ.get(SERVER_ROLE_ENV) == "server" and not ON_SERVER_PC
 )
-SIMULATING = SIMULATING or SIMULATION_FORCED
-SERVER_HOST = (
-    MACHINES[SERVER_PC]["address"] if (not SIMULATING and not LOCAL) else LOCALHOST
-)
+SERVER_HOST = LOCALHOST if SIMULATING else MACHINES[SERVER_PC]["address"]
 
 # Postgres + TimescaleDB holding monitor readings and experiment runs. Set
 # PYTWEEZER_DB_DSN to keep a real password out of the repository.

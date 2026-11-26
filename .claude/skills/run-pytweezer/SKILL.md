@@ -67,8 +67,7 @@ shows the real MotMaster / camera status feed. Off-network, rows show
 `subprocess.Popen` every active hub, device server and the Experiment Manager
 *on construction*. Like `pytweezer-server` itself, it marks the session
 (`PYTWEEZER_ROLE=server`) before importing anything, so on any machine other
-than `SERVER_PC` (`PH-BEAST`) the whole session runs in simulation on localhost,
-whatever `SIMULATING` says. On `PH-BEAST` it starts the real servers, so don't
+than `SERVER_PC` (`PH-BEAST`) the whole session runs in simulation on localhost. On `PH-BEAST` it starts the real servers, so don't
 run it there while the experiment is live. The driver closes the window before
 exiting so the children it started are stopped.
 

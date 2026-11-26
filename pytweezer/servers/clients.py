@@ -39,7 +39,6 @@ Classes
 
 import ipaddress
 import json
-import os
 import socket
 import threading
 from collections.abc import Iterator
@@ -58,9 +57,6 @@ logger = get_logger(__name__)
 
 #: Put in front of every stream name a simulated client sends or subscribes to.
 SIMULATED_STREAM_PREFIX = "sim."
-#: ``"1"`` makes this process, and every process it starts, a simulation; the
-#: test suite sets it.
-SIMULATION_ENV = "PYTWEEZER_SIMULATION"
 
 _simulations = 0
 _simulations_lock = threading.Lock()
@@ -81,9 +77,7 @@ def simulation() -> Iterator[None]:
 
 def in_simulation() -> bool:
     """Whether stream clients created now are simulated."""
-    return (
-        config.SIMULATING or os.environ.get(SIMULATION_ENV) == "1" or _simulations > 0
-    )
+    return config.SIMULATING or _simulations > 0
 
 
 def _is_loopback(host: str) -> bool:
@@ -111,8 +105,8 @@ class GenericClient:
     hub on this PC's loopback, and every stream name it sends or subscribes to
     carries :data:`SIMULATED_STREAM_PREFIX`, which :meth:`recv` strips again.
     A client is simulated if made with ``simulated=True`` (as a simulated
-    camera's are), or while :func:`in_simulation`: in a simulation session,
-    in a process with ``PYTWEEZER_SIMULATION=1``, or inside :func:`simulation`.
+    camera's are), or while :func:`in_simulation`: in a simulating process
+    (``config.SIMULATING``) or inside :func:`simulation`.
     """
 
     _hub = None

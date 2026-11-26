@@ -21,7 +21,6 @@ from pytweezer.configuration import config
 c = config.CONFIG
 print(json.dumps({
     "simulating": config.SIMULATING,
-    "forced": config.SIMULATION_FORCED,
     "server_host": config.SERVER_HOST,
     "manager_simulate": c["Servers"]["Experiment Manager"]["simulate"],
     "manager_host": c["Servers"]["Experiment Manager"]["host"],
@@ -31,7 +30,12 @@ print(json.dumps({
 
 
 def probe(role=None, hostname=None):
-    env = {k: v for k, v in os.environ.items() if k != "PYTWEEZER_ROLE"}
+    # The suite itself simulates (PYTWEEZER_SIMULATION); each case decides afresh.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PYTWEEZER_ROLE", "PYTWEEZER_SIMULATION")
+    }
     if role is not None:
         env["PYTWEEZER_ROLE"] = role
     args = [sys.executable, "-c", PROBE] + ([hostname] if hostname else [])
@@ -49,7 +53,7 @@ def probe(role=None, hostname=None):
 )
 def test_only_a_server_session_off_the_server_pc_simulates(role, hostname, simulates):
     state = probe(role, hostname)
-    assert state["simulating"] is state["forced"] is simulates
+    assert state["simulating"] is simulates
     if simulates:
         assert state["manager_simulate"] and state["device_simulate"]
         assert state["server_host"] == state["manager_host"] == "127.0.0.1"
