@@ -2,9 +2,11 @@
 
 The sites are the SLM array the file recorded (``slm_arrays``, with each
 point's ``slm_array``) placed on the HamCam by the run's ``site_*`` arguments
-and the ROI origin the camera set (``hamcam_roi_origin``). Each shot's
-``hamcam_image``, less its ``hamcam_background`` when the file has one, is
-scored at those sites against empty positions of the same frame
+and the ROI origin the camera set (``hamcam_roi_origin``). Traps whose
+apertures would overlap are one site, at their mean position, since their light
+can't be told apart. Each shot's ``hamcam_image``, less its
+``hamcam_background`` when the file has one, is scored at the sites against
+empty positions of the same frame
 (:mod:`pytweezer.analysis.site_photometry`). Files from before these were
 recorded can't be analysed.
 """
@@ -16,7 +18,7 @@ import numpy as np
 from scipy import ndimage
 
 from pytweezer.analyses.default.tweezer_histogram import point_groups
-from pytweezer.analysis.site_photometry import score_sites
+from pytweezer.analysis.site_photometry import merge_overlapping, score_sites
 from pytweezer.analysis.trap_sites import geometry_to_pixels
 from pytweezer.experiment.storage import Measurement
 
@@ -59,6 +61,7 @@ class SiteAnalysis:
         mean_image: Mean analysed frame, ``(H, W)``.
         smoothed_image: ``mean_image`` smoothed by :data:`SMOOTHING_PX`.
         sites: ``(sites, 2)`` positions in the frame, ``(y, x)`` pixels.
+        site_traps: For each site, the indices into ``traps_um`` of the traps it holds.
         counts: ``(shots, sites)`` signal at each site, counts.
         z: ``(shots, sites)`` score at each site.
         empty_z: Scores at every empty position of every shot, flat.
@@ -76,6 +79,7 @@ class SiteAnalysis:
     mean_image: np.ndarray
     smoothed_image: np.ndarray
     sites: np.ndarray
+    site_traps: tuple[tuple[int, ...], ...]
     counts: np.ndarray
     z: np.ndarray
     empty_z: np.ndarray
@@ -110,6 +114,11 @@ def needed_results(measurement: Measurement) -> list[str]:
     if BACKGROUND in measurement.result_shapes:
         names.append(BACKGROUND)
     return names
+
+
+def site_label(traps: tuple[int, ...]) -> str:
+    """A site's name from the traps it holds: ``"2"``, or ``"0+1+2+3"`` for merged traps."""
+    return "+".join(str(trap) for trap in traps)
 
 
 def site_positions(measurement: Measurement, array: dict) -> np.ndarray:
@@ -162,7 +171,9 @@ def caf_tweezer_sites(measurement: Measurement, settings: SiteSettings) -> SiteA
     subtracted = BACKGROUND in measurement.results
     if subtracted:
         frames = frames - np.asarray(measurement.results[BACKGROUND][mask], float)
-    sites = site_positions(measurement, array)
+    sites, site_traps = merge_overlapping(
+        site_positions(measurement, array), settings.aperture
+    )
     scores = score_sites(
         frames, sites, settings.aperture, settings.ring_inner, settings.ring_outer
     )
@@ -178,6 +189,7 @@ def caf_tweezer_sites(measurement: Measurement, settings: SiteSettings) -> SiteA
         mean_image=mean_image,
         smoothed_image=ndimage.gaussian_filter(mean_image, SMOOTHING_PX),
         sites=sites,
+        site_traps=tuple(site_traps),
         counts=scores.counts,
         z=scores.z,
         empty_z=scores.empty_z.ravel(),

@@ -26,6 +26,7 @@ from pytweezer.analyses.default.caf_tweezer_sites import (
     caf_tweezer_sites,
     missing,
     needed_results,
+    site_label,
 )
 from pytweezer.analyses.default.tweezer_histogram import point_groups
 from pytweezer.GUI.components import CompactDoubleSpinBox
@@ -223,7 +224,7 @@ class CafTweezerSitesView(ComputedAnalysisView):
                     [x], [y], symbol="+", size=14, pen=TRAP_PEN, brush=None
                 ),
             )
-            self._label(self.trap_plot, k, x, y)
+            self._label(self.trap_plot, str(k), x, y)
 
     def _redraw_frame(self) -> None:
         if self._result is not None:
@@ -249,12 +250,17 @@ class CafTweezerSitesView(ComputedAnalysisView):
                 self._overlay(
                     self.frame_plot, pg.PlotCurveItem(*circle(cx, cy, radius), pen=pen)
                 )
-            self._label(self.frame_plot, k, cx + s.aperture, cy - s.aperture)
+            self._label(
+                self.frame_plot,
+                site_label(a.site_traps[k]),
+                cx + s.aperture,
+                cy - s.aperture,
+            )
 
-    def _label(self, plot, k, x, y):
-        text = pg.TextItem(str(k), color=PLOT_TEXT, anchor=(0, 1))
-        text.setPos(x, y)
-        self._overlay(plot, text)
+    def _label(self, plot, text, x, y):
+        item = pg.TextItem(text, color=PLOT_TEXT, anchor=(0, 1))
+        item.setPos(x, y)
+        self._overlay(plot, item)
 
     def _show_scores(self, a: SiteAnalysis) -> None:
         top = max(6.0, float(np.ceil(a.z.max())) + 1) if a.z.size else 6.0
@@ -277,7 +283,7 @@ class CafTweezerSitesView(ComputedAnalysisView):
                 counts,
                 stepMode="center",
                 pen=pg.mkPen(colour, width=PLOT_LINE_WIDTH),
-                name=f"site {k}",
+                name=f"site {site_label(a.site_traps[k])}",
             )
         self.score_plot.addItem(pg.InfiniteLine(BRIGHT_Z, pen=RING_PEN))
 
@@ -285,23 +291,34 @@ class CafTweezerSitesView(ComputedAnalysisView):
         combined = a.combined
         observed = combined.mean()
         n_sets = len(a.combined_chance)
+        one_site = len(a.sites) == 1
         if n_sets:
             reached = int((a.combined_chance >= observed).sum())
+            drawn = (
+                "empty positions"
+                if one_site
+                else f"sets of {len(a.sites)} empty positions"
+            )
             chance = (
-                f"{reached} of {n_sets} random sets of {len(a.sites)} empty positions "
-                f"reach it; they scatter by {a.combined_chance.std():.2f}"
+                f"{reached} of {n_sets} random {drawn} reach it; "
+                f"they scatter by {a.combined_chance.std():.2f}"
             )
         else:
             chance = "too few empty positions to judge it"
+        subject = (
+            "The one site (overlapping traps merged)"
+            if one_site
+            else "All sites together"
+        )
         self.summary.setText(
-            f"All sites together: z = {mean_and_error(combined)} per shot ({chance}).\n"
+            f"{subject}: z = {mean_and_error(combined)} per shot ({chance}).\n"
             f"Frame median {mean_and_error(a.offset, 0)} counts. By chance a site has "
             f"{a.bright_by_chance:.2f} of {a.shots} shots above z = {BRIGHT_Z:g}."
         )
         self.table.setRowCount(len(a.sites))
         for k, (y, x) in enumerate(a.sites):
             cells = (
-                str(k),
+                site_label(a.site_traps[k]),
                 f"{x:.1f}",
                 f"{y:.1f}",
                 mean_and_error(a.counts[:, k], 0),

@@ -51,6 +51,34 @@ class SiteScores:
         return sums.mean(axis=0)
 
 
+def merge_overlapping(
+    sites: np.ndarray, aperture: float
+) -> tuple[np.ndarray, list[tuple[int, ...]]]:
+    """Sites whose apertures overlap, chained, as one site at their mean position.
+
+    Returns:
+        The ``(merged, 2)`` positions, and for each the indices into ``sites``
+        of the sites it holds, in order.
+    """
+    sites = np.asarray(sites, dtype=float).reshape(-1, 2)
+    group = list(range(len(sites)))
+
+    def root(i):
+        while group[i] != i:
+            i = group[i]
+        return i
+
+    for i in range(len(sites)):
+        for j in range(i + 1, len(sites)):
+            if np.hypot(*(sites[i] - sites[j])) < 2 * aperture:
+                group[root(j)] = root(i)
+    members: dict[int, list[int]] = {}
+    for i in range(len(sites)):
+        members.setdefault(root(i), []).append(i)
+    held = [tuple(indices) for indices in members.values()]
+    return np.array([sites[list(indices)].mean(axis=0) for indices in held]), held
+
+
 def disc(radius: float) -> np.ndarray:
     """A 0/1 kernel of the pixels within ``radius`` of its centre pixel."""
     r = int(np.floor(radius))

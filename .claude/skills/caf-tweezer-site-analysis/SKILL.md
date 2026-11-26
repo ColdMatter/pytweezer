@@ -64,7 +64,7 @@ The sites are predicted from four inputs, all recorded in the file:
 
 The mapping is `geometry_to_pixels` (`analysis/trap_sites.py`). On the HamCam,
 2.14 px per µm: a 2 µm array is unresolved (sites ~4 px apart, PSF σ ≈ 3 px),
-6 µm gives 12.8 px, 8 µm gives 17 px.
+6 µm gives 12.8 px, 8 µm gives 17 px. Sites closer than two aperture radii (8 px by default) are merged into one.
 
 - The CaF map is **separate from Rb's `trap_*` calibration**: the CaF imaging
   differs, and Rb's FindTrapSites centre is about 40 px from where the CaF
@@ -102,10 +102,11 @@ Choices that matter:
 
 - **Spacing ≤ 6 µm: also use the ring 5–8 px.** The 8–12 px ring reaches the
   neighbours' light and understates the sites. Report both.
-- **2 µm array:** the four apertures overlap, so the per-site numbers are not
-  independent. Also score one aperture at the array centre
-  (`score_sites(frames, centre[None])`), which compares directly with earlier
-  2 µm runs (z ≈ 2.4 per shot in rid 993 at 1125 mm).
+- **Overlapping sites are one site.** Traps closer than two aperture radii
+  (`merge_overlapping`) are scored as a single site at their mean position,
+  labelled e.g. `0+1+2+3`: their light can't be told apart. A 2×2 at 2 µm is one
+  site at the array centre (z ≈ 2.4 per shot in rid 993 at 1125 mm). Widening
+  the aperture can merge the sites of a resolved array.
 - **Never pick the aperture position from the data** (a peak search or a fitted
   centre): it biases the score up. If a centre must come from data, fit it on
   half the shots and score the other half.

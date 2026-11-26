@@ -20,8 +20,8 @@ from pytweezer.analyses.default.caf_tweezer_sites import (
     caf_tweezer_sites,
     missing,
     needed_results,
+    site_label,
 )
-from pytweezer.analysis.site_photometry import score_sites
 from pytweezer.experiment.archive import fetch_measurement
 
 APERTURE = 4
@@ -43,11 +43,8 @@ def main(out_dir: str, rid: int) -> None:
     wide = caf_tweezer_sites(m, SiteSettings())
     tight = caf_tweezer_sites(m, SiteSettings(ring_inner=5, ring_outer=8))
 
-    frames = np.asarray(m.results["hamcam_image"], float)
-    if "hamcam_background" in m.results:
-        frames = frames - np.asarray(m.results["hamcam_background"], float)
     centre = wide.sites.mean(axis=0)
-    at_centre = score_sites(frames, centre[None]).z[:, 0]
+    labels = [site_label(traps) for traps in wide.site_traps]
 
     rows, columns, spacing_um = (
         int(args["rows"]),
@@ -62,8 +59,8 @@ def main(out_dir: str, rid: int) -> None:
     origin_x, origin_y = np.asarray(m.constants["hamcam_roi_origin"], float)
     print(
         f"array centre: frame px (x {centre[1]:.1f}, y {centre[0]:.1f}), sensor px "
-        f"(x {centre[1] + origin_x:.1f}, y {centre[0] + origin_y:.1f}): "
-        f"z {at_centre.mean():.2f} ± {standard_error(at_centre):.2f}"
+        f"(x {centre[1] + origin_x:.1f}, y {centre[0] + origin_y:.1f}); "
+        f"sites {labels} (overlapping traps merged)"
     )
     for label, r in (("8-12", wide), ("5-8", tight)):
         reached = int((r.combined_chance >= r.combined.mean()).sum())
@@ -101,7 +98,7 @@ def main(out_dir: str, rid: int) -> None:
     )
     for k, (y, x) in enumerate(wide.sites):
         ax.add_patch(Circle((x, y), APERTURE, fill=False, ec="r", lw=1))
-        ax.text(x + 4.5, y - 4.5, str(k), color="r", fontsize=9)
+        ax.text(x + 4.5, y - 4.5, labels[k], color="r", fontsize=9)
     fig.colorbar(image, ax=ax, label="counts above median")
     frames_label = "image − background" if wide.background_subtracted else "image"
     ax.set_title(
@@ -136,18 +133,13 @@ def main(out_dir: str, rid: int) -> None:
     )
     for k in range(wide.z.shape[1]):
         ax.hist(
-            wide.z[:, k], bins, density=True, histtype="step", lw=1.6, label=f"site {k}"
+            wide.z[:, k],
+            bins,
+            density=True,
+            histtype="step",
+            lw=1.6,
+            label=f"site {labels[k]}",
         )
-    ax.hist(
-        at_centre,
-        bins,
-        density=True,
-        histtype="step",
-        lw=2,
-        color="k",
-        ls="--",
-        label="array centre",
-    )
     ax.axvline(3, ls=":", c="k", lw=0.8)
     ax.set_xlabel("aperture signal / noise (z)")
     ax.set_ylabel("density")
@@ -172,7 +164,7 @@ def main(out_dir: str, rid: int) -> None:
         )
     ax.axhline(0, c="k", lw=0.6)
     ax.set_xticks(index)
-    ax.set_xticklabels([f"site {k}" for k in index])
+    ax.set_xticklabels([f"site {label}" for label in labels])
     ax.set_ylabel("mean z per shot")
     ax.set_title(
         f"all sites combined: {wide.combined.mean():.2f} ± {standard_error(wide.combined):.2f} "
