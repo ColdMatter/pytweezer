@@ -949,41 +949,52 @@ def bg_subtract(props=None):
 def test_bg_subtract_publishes_signal_minus_background_once_both_arrive():
     analysis = bg_subtract()
 
-    assert analysis.process({"rid": 1}, np.full((2, 3), 10, np.uint16)) is None
-    head, data = analysis.process({"rid": 1}, np.full((2, 3), 25, np.uint16))
+    assert (
+        analysis.process({"rid": 1, "index": 0}, np.full((2, 3), 10, np.uint16)) is None
+    )
+    head, data = analysis.process(
+        {"rid": 1, "index": 1}, np.full((2, 3), 25, np.uint16)
+    )
 
     assert data.dtype == np.float64
     np.testing.assert_array_equal(data, np.full((2, 3), -15.0))
 
 
-def test_bg_subtract_counts_frames_per_rid_not_from_the_header_index():
+def test_bg_subtract_publishes_every_shot_of_a_run():
     analysis = bg_subtract()
 
-    analysis.process({"rid": 1, "index": 57}, np.full((2, 2), 10.0))
-    _, data = analysis.process({"rid": 1, "index": 58}, np.full((2, 2), 4.0))
+    analysis.process({"rid": 1, "index": 0}, np.full((2, 2), 10.0))
+    _, first = analysis.process({"rid": 1, "index": 1}, np.full((2, 2), 4.0))
+    analysis.process({"rid": 1, "index": 0}, np.full((2, 2), 20.0))
+    _, second = analysis.process({"rid": 1, "index": 1}, np.full((2, 2), 5.0))
 
-    np.testing.assert_array_equal(data, np.full((2, 2), 6.0))
+    np.testing.assert_array_equal(first, np.full((2, 2), 6.0))
+    np.testing.assert_array_equal(second, np.full((2, 2), 15.0))
+
+
+def test_bg_subtract_ignores_untagged_live_frames():
+    analysis = bg_subtract()
+
+    assert analysis.process({"index": 0}, np.full((2, 2), 10.0)) is None
+    assert analysis.process({"index": 1}, np.full((2, 2), 4.0)) is None
 
 
 def test_bg_subtract_uses_the_configured_positions():
     analysis = bg_subtract({"signal_index": 2, "background_index": 0})
 
-    assert analysis.process({"rid": 1}, np.full((2, 2), 5.0)) is None
-    assert analysis.process({"rid": 1}, np.full((2, 2), 99.0)) is None
-    _, data = analysis.process({"rid": 1}, np.full((2, 2), 12.0))
+    assert analysis.process({"rid": 1, "index": 0}, np.full((2, 2), 5.0)) is None
+    assert analysis.process({"rid": 1, "index": 1}, np.full((2, 2), 99.0)) is None
+    _, data = analysis.process({"rid": 1, "index": 2}, np.full((2, 2), 12.0))
 
     np.testing.assert_array_equal(data, np.full((2, 2), 7.0))
-    assert analysis.process({"rid": 1}, np.full((2, 2), 1.0)) is None
+    assert analysis.process({"rid": 1, "index": 3}, np.full((2, 2), 1.0)) is None
 
 
-def test_bg_subtract_new_rid_restarts_the_count():
+def test_bg_subtract_new_rid_restarts_the_shot():
     analysis = bg_subtract()
 
-    analysis.process({"rid": 1}, np.full((2, 2), 10.0))
-    assert analysis.process({"rid": 2}, np.full((2, 2), 8.0)) is None
-    _, data = analysis.process({"rid": 2}, np.full((2, 2), 3.0))
-
-    np.testing.assert_array_equal(data, np.full((2, 2), 5.0))
+    analysis.process({"rid": 1, "index": 0}, np.full((2, 2), 10.0))
+    assert analysis.process({"rid": 2, "index": 1}, np.full((2, 2), 8.0)) is None
 
 
 def test_bg_subtract_output_stream_is_prefixed_so_input_subscribers_miss_it():

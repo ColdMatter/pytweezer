@@ -10,14 +10,15 @@ Output:
 
 Properties:
     *   imagestreams: ([str]) input image streams.
-    *   signal_index: (int) position of the signal frame within a run.
-    *   background_index: (int) position of the background frame within a run.
+    *   signal_index: (int) ``index`` of the signal frame within a shot.
+    *   background_index: (int) ``index`` of the background frame within a shot.
 
-A frame's position is the number of frames of its stream received before it with
-the same ``rid``, counting from 0; a frame with a new ``rid`` restarts the count
-and discards whatever was held from the previous run. The header's own ``index``
-is not used, since a live-broadcasting camera counts it from the start of
-acquisition. Frames at any other position are ignored. The output name is
+Only frames an experiment's shot tagged (``Camera.start_shot``, which adds the
+``rid`` and numbers ``index`` from 0 within the shot) are used; untagged live
+frames number ``index`` from the start of acquisition and are ignored. A frame
+whose ``index`` does not exceed the previous one's, or whose ``rid`` differs,
+starts a new shot and discards whatever was held from the last. Frames at any
+other ``index`` are ignored. The output name is
 prefixed rather than suffixed because subscriptions match topic prefixes:
 ``<stream>_bg_subtract`` would reach every subscriber of ``<stream>``, this
 process included.
@@ -41,7 +42,7 @@ class BgSubtract(ImageAnalysis):
     _signal_index = PropertyAttribute("signal_index", 0)
     _background_index = PropertyAttribute("background_index", 1)
 
-    # stream -> (rid, frames received in this rid, {position: (head, frame)});
+    # stream -> (rid, index of the last frame, {index: (head, frame)});
     # replaced on each change.
     _held = MappingProxyType({})
 
@@ -56,14 +57,18 @@ class BgSubtract(ImageAnalysis):
         background_index = int(self._background_index)
         stream = self.current_stream
         rid = head.get("rid")
+        if rid is None:
+            return None
+        index = int(head["index"])
 
         held = self._held.get(stream)
-        if held is None or held[0] != rid:
-            held = (rid, 0, {})
-        _, index, frames = held
+        if held is None or held[0] != rid or index <= held[1]:
+            frames = {}
+        else:
+            frames = held[2]
         if index in (signal_index, background_index):
             frames = {**frames, index: (head, np.asarray(data, dtype=np.float64))}
-        self._held = {**self._held, stream: (rid, index + 1, frames)}
+        self._held = {**self._held, stream: (rid, index, frames)}
 
         if index in (signal_index, background_index) and len(frames) == len(
             {signal_index, background_index}
