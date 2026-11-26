@@ -257,6 +257,9 @@ class Camera(ABC):
     #: Pixel value at which a live frame counts as saturated (see
     #: :meth:`saturated_frames_since`); ``None`` leaves saturation unwatched.
     saturation_level: int | None = None
+    #: A simulated camera's frames never reach the lab's image streams
+    #: (see :class:`~pytweezer.servers.clients.GenericClient`).
+    simulated = False
 
     def __init__(
         self,
@@ -279,7 +282,9 @@ class Camera(ABC):
         self.object_pixel_m = object_pixel_m
         self.timeout = timeout
         self.stream_name = stream_name
-        self.image_client = ImageClient(stream_name) if stream_name else None
+        self.image_client = (
+            ImageClient(stream_name, simulated=self.simulated) if stream_name else None
+        )
         self._stream_clients: dict[str, ImageClient] = {}
         # The live broadcast thread and RPC calls share the backend.
         self._lock = threading.RLock()
@@ -942,7 +947,7 @@ class Camera(ABC):
 
     def _client_for(self, stream: str) -> ImageClient:
         if stream not in self._stream_clients:
-            self._stream_clients[stream] = ImageClient(stream)
+            self._stream_clients[stream] = ImageClient(stream, simulated=self.simulated)
         return self._stream_clients[stream]
 
     @classmethod
@@ -970,6 +975,7 @@ class SimulatedCamera(Camera):
     While acquiring, frames "arrive" at :attr:`sim_frame_rate` per second.
     """
 
+    simulated = True
     sim_frame_rate: float = 5.0
     #: Sensor ``(width, height)`` the simulated camera reports.
     sim_sensor_size: tuple[int, int] = (512, 512)

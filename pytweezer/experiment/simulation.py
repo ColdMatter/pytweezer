@@ -5,12 +5,16 @@ built by the same :func:`~pytweezer.servers.device_server.build_spec` a device
 server uses, instead of an RPC client. No device servers or lab network are
 needed, so experiments run anywhere (e.g. on a laptop with ``SIMULATING``).
 Calls are plain Python, so values are not round-tripped through PYON as they
-would be over RPC.
+would be over RPC. Until :meth:`SimulatedDevices.close`, every stream client the
+process creates is simulated (:func:`~pytweezer.servers.clients.simulation`), so
+nothing the run publishes, from its devices or its own code, reaches the lab's
+streams.
 """
 
 from typing import Any
 
 from pytweezer.logging_utils import get_logger
+from pytweezer.servers.clients import simulation
 from pytweezer.servers.device_server import build_spec, resolve_address
 
 logger = get_logger("pytweezer.experiment.simulation")
@@ -33,6 +37,9 @@ class SimulatedDevices:
 
     def __init__(self) -> None:
         self._specs: dict[str, Any] = {}
+        self._simulation = simulation()
+        self._simulation.__enter__()
+        self._closed = False
 
     def get(self, name: str) -> Any:
         address = resolve_address(name)
@@ -65,3 +72,6 @@ class SimulatedDevices:
                     logger.warning(
                         "Error tearing down a simulated device", exc_info=True
                     )
+        if not self._closed:
+            self._closed = True
+            self._simulation.__exit__(None, None, None)

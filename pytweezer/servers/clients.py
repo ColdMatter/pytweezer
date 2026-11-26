@@ -37,14 +37,60 @@ Classes
 
 """
 
+import ipaddress
 import json
+import os
+import socket
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import numpy
 import numpy as np
 import zmq
 
+from pytweezer.configuration import config
 from pytweezer.configuration.config import get_config
+from pytweezer.logging_utils import get_logger
 from pytweezer.servers import zmqcontext
+
+logger = get_logger(__name__)
+
+#: Put in front of every stream name a simulated client sends or subscribes to.
+SIMULATED_STREAM_PREFIX = "sim."
+#: ``"1"`` makes this process, and every process it starts, a simulation; the
+#: test suite sets it.
+SIMULATION_ENV = "PYTWEEZER_SIMULATION"
+
+_simulations = 0
+_simulations_lock = threading.Lock()
+
+
+@contextmanager
+def simulation() -> Iterator[None]:
+    """Make every stream client created inside a simulated one (see :class:`GenericClient`)."""
+    global _simulations
+    with _simulations_lock:
+        _simulations += 1
+    try:
+        yield
+    finally:
+        with _simulations_lock:
+            _simulations -= 1
+
+
+def in_simulation() -> bool:
+    """Whether stream clients created now are simulated."""
+    return (
+        config.SIMULATING or os.environ.get(SIMULATION_ENV) == "1" or _simulations > 0
+    )
+
+
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(socket.gethostbyname(host)).is_loopback
+    except (OSError, ValueError):
+        return False
 
 
 class NpEncoder(json.JSONEncoder):
@@ -59,9 +105,21 @@ class NpEncoder(json.JSONEncoder):
 
 
 class GenericClient:
+    """Sends and receives on one hub, named by ``_hub`` in ``CONFIG["Servers"]``.
+
+    A simulated client can never reach the lab's streams: it connects only to a
+    hub on this PC's loopback, and every stream name it sends or subscribes to
+    carries :data:`SIMULATED_STREAM_PREFIX`, which :meth:`recv` strips again.
+    A client is simulated if made with ``simulated=True`` (as a simulated
+    camera's are), or while :func:`in_simulation`: in a simulation session,
+    in a process with ``PYTWEEZER_SIMULATION=1``, or inside :func:`simulation`.
+    """
+
     _hub = None
 
-    def __init__(self, name="noname", recvtimeout=1000, subscribe=None):
+    def __init__(
+        self, name="noname", recvtimeout=1000, subscribe=None, simulated=False
+    ):
         """send or receive data over balis ZMQ ports
         standardizes datatransfer and connects to sockets according to the central configuration
         Use this class for small (<10k) datasets this data will be logged stored etc,
@@ -72,8 +130,11 @@ class GenericClient:
                 used when sending data. The data will be published under a channel always starting with the  name
             recvtimeout(int):
                 time in ms the receive should wait for a timeout
+            simulated (bool):
+                make this client simulated whether or not the process is
         """
         self.name = name
+        self.simulated = simulated or in_simulation()
         self.subscriptions = []
         # initialize sockets
         self.pub_socket = zmqcontext.socket(zmq.PUB)
@@ -91,14 +152,29 @@ class GenericClient:
         conf = get_config()
         c = conf["Servers"][self._hub]
         host = c["host"]
-        pub_port = c["pub_port"]
-        sub_port = c["sub_port"]
+        if self.simulated and not _is_loopback(host):
+            # Unconnected, sends are dropped and nothing arrives.
+            logger.info(
+                "Simulated %s client %r left unconnected: %s is not on this PC",
+                self._hub,
+                self.name,
+                host,
+            )
+            return
         # In the xsub/xpub hub, publishers must connect to XSUB (sub_port)
         # and subscribers must connect to XPUB (pub_port).
-        publish_endpoint = f"tcp://{host}:{sub_port}"
-        subscribe_endpoint = f"tcp://{host}:{pub_port}"
-        self.pub_socket.connect(publish_endpoint)
-        self.sub_socket.connect(subscribe_endpoint)
+        self.pub_socket.connect(f"tcp://{host}:{c['sub_port']}")
+        self.sub_socket.connect(f"tcp://{host}:{c['pub_port']}")
+
+    def _topic(self, stream):
+        """``stream`` as it goes over the wire."""
+        return SIMULATED_STREAM_PREFIX + stream if self.simulated else stream
+
+    def _stream(self, topic):
+        """The stream name of a received ``topic``."""
+        if self.simulated:
+            return topic.removeprefix(SIMULATED_STREAM_PREFIX)
+        return topic
 
     def unsubscribe(self, channel=None):
         """unsubscribe from specific channel
@@ -108,9 +184,9 @@ class GenericClient:
         """
         if channel is None:
             for entry in self.subscriptions:
-                self.sub_socket.setsockopt_string(zmq.UNSUBSCRIBE, entry)
+                self.sub_socket.setsockopt_string(zmq.UNSUBSCRIBE, self._topic(entry))
         else:
-            self.sub_socket.setsockopt_string(zmq.UNSUBSCRIBE, channel)
+            self.sub_socket.setsockopt_string(zmq.UNSUBSCRIBE, self._topic(channel))
         # self.sub_socket.setsockopt_string(zmq.UNSUBSCRIBE, bytes(channel,'utf8'))
 
     def subscribe(self, channel):
@@ -123,11 +199,11 @@ class GenericClient:
                 you can alternatively give a list of channels
         """
         if type(channel) == str:
-            self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, channel)
+            self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, self._topic(channel))
             self.subscriptions.append(channel)
         elif type(channel) == list:
             for ch in channel:
-                self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, ch)
+                self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, self._topic(ch))
                 self.subscriptions.append(ch)
 
     def send(
@@ -146,9 +222,10 @@ class GenericClient:
                 see ZMQ send flags in the ZMQ doku
         """
         if prefix is None:
-            self.pub_socket.send_string(self.name + channel, flags | zmq.SNDMORE)
+            topic = self._topic(self.name + channel)
         else:
-            self.pub_socket.send_string(prefix + "." + channel, flags | zmq.SNDMORE)
+            topic = self._topic(prefix + "." + channel)
+        self.pub_socket.send_string(topic, flags | zmq.SNDMORE)
 
         if not isinstance(A, np.ndarray):
             return self.pub_socket.send_json(datadict, flags, cls=NpEncoder)
@@ -169,7 +246,7 @@ class GenericClient:
             track (bool): ZMQ recieving options (leave as defaults unless you RTFM of ZMQ)
         """
         try:
-            message = self.sub_socket.recv_string(flags=flags)
+            message = self._stream(self.sub_socket.recv_string(flags=flags))
             if self.sub_socket.getsockopt(zmq.RCVMORE):
                 dict_ = self.sub_socket.recv_json(flags=flags)
                 if not self.sub_socket.getsockopt(zmq.RCVMORE):
@@ -262,7 +339,9 @@ class ImageClient(DataClient):
             flags (int):
                 see ZMQ send flags in the ZMQ doku
         """
-        self.pub_socket.send_string(self.name + channel, flags | zmq.SNDMORE)
+        self.pub_socket.send_string(
+            self._topic(self.name + channel), flags | zmq.SNDMORE
+        )
 
         # recv() rebuilds the array in C order from the raw buffer.
         data = np.ascontiguousarray(data)
