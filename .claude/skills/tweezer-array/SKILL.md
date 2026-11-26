@@ -31,6 +31,18 @@ add-optimiser.
    `MergeCaFTweezerHamCamBackground` runs MERGE.CaFTweezerHamCamBackground and
    also records a HamCam background frame. The HamCam set-up is
    the function `set_up_hamcam` in `load_tweezers.py`.
+   `update_slm_array` records each point's `slm_array` (an index), and
+   `record_slm_arrays()` (in `finish`) the constant `slm_arrays`: per array
+   written, trap positions, weights, blaze and the simulated trap plane
+   (`array_summary`).
+   MergeCaFTweezer also records `hamcam_roi_origin` and has saved-backed
+   `site_*` arguments (`caf_hamcam_centre_x/_y`, `caf_hamcam_px_per_m`,
+   `caf_hamcam_angle`): the CaF imaging's own map from focal-plane µm to HamCam
+   sensor pixels (the `geometry_to_pixels` model), separate from Rb's `trap_*`.
+   Its Results-tab analysis `caf_tweezer_sites`
+   (`analyses/default/caf_tweezer_sites.py`) places the array's sites with them
+   and scores each shot's frame at the sites against empty positions
+   (`analysis/site_photometry.py`).
 2. **`FindTrapSites`** (`optimisers/find_trap_sites.py`, a `Fit` over
    `LoadTweezers`) fits the array on the camera and proposes the trap-site
    saved parameters. Rerun it after changing the array.

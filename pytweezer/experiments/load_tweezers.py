@@ -305,6 +305,12 @@ class LoadTweezersSlmArray(SlmArray, LoadTweezers):
         self.update_slm_array(self.slm_settle_time)
         super().run_point()
 
+    def finish(self) -> None:
+        try:
+            self.record_slm_arrays()
+        finally:
+            super().finish()
+
 
 class LoadTweezersNImages(LoadTweezers):
     """Load the tweezers and image them ``n_images`` times per point."""

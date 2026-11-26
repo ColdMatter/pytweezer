@@ -52,6 +52,26 @@ def render_target(
     return image.astype(np.float32)
 
 
+def array_summary(hologram: dict, blaze_m: tuple[float, float]) -> dict:
+    """What a file keeps of a rig hologram: trap positions and weights, and the simulated trap plane.
+
+    Positions are µm in the focal plane relative to the blaze spot, which is at
+    ``blaze_um``; ``simulated_trap_plane`` (row index along y, peak 1) has its
+    pixel centres at ``grid_x_um``/``grid_y_um``, also relative to the blaze spot.
+    """
+    return {
+        "x_um": np.asarray(hologram["x_um"], float).tolist(),
+        "y_um": np.asarray(hologram["y_um"], float).tolist(),
+        "weights": np.asarray(hologram["weights"], float).tolist(),
+        "blaze_um": [blaze_m[0] * 1e6, blaze_m[1] * 1e6],
+        "grid_x_um": np.asarray(hologram["grid_x_um"], float).tolist(),
+        "grid_y_um": np.asarray(hologram["grid_y_um"], float).tolist(),
+        "simulated_trap_plane": np.round(
+            np.asarray(hologram["simulated_trap_plane"], float), 4
+        ).tolist(),
+    }
+
+
 def placement(grid_x_um: np.ndarray, grid_y_um: np.ndarray) -> dict:
     """Image-header keys that place an image whose pixel centres are the grids, in metres."""
     pixel_x_um = grid_x_um[1] - grid_x_um[0]
@@ -125,6 +145,7 @@ class SlmArray:
         self.record("generator_settings", self.generator_settings)
         self.record("envelope", self.envelope)
         self.stream = ImageClient("slm")
+        self._slm_arrays = []
 
     def write_slm_array(self) -> dict:
         """Compute this point's mask, write it to the SLM, broadcast it and return the rig's hologram."""
@@ -151,15 +172,32 @@ class SlmArray:
     def update_slm_array(self, settle_time: float) -> None:
         """Write the mask if the SLM arguments differ from the last one this task wrote, and record its quality.
 
-        Each write waits ``settle_time`` seconds before returning.
+        Each write waits ``settle_time`` seconds before returning. Every point
+        records ``slm_array``, the index into :meth:`record_slm_arrays`'s list of
+        the array on the SLM.
         """
         settings = {name: getattr(self, name) for name in collect(SlmArray, Argument)}
         if settings != getattr(self, "_written_slm_settings", None):
             self._slm_hologram = self.write_slm_array()
             self._written_slm_settings = settings
+            self._slm_arrays.append(
+                array_summary(self._slm_hologram, (self.blaze_x, self.blaze_y))
+            )
             time.sleep(settle_time)
         for name in HOLOGRAM_QUALITY:
             self.record(name, self._slm_hologram[name])
+        self.record("slm_array", len(self._slm_arrays) - 1)
+
+    def record_slm_arrays(self) -> None:
+        """Record the arrays :meth:`update_slm_array` wrote as the constant ``slm_arrays``; call it in ``finish``.
+
+        ``slm_arrays["arrays"]`` lists, per array, its trap positions and the
+        simulated trap plane (see :func:`array_summary`). Nothing is recorded if
+        no array was written.
+        """
+        arrays = getattr(self, "_slm_arrays", [])
+        if arrays:
+            self.record("slm_arrays", {"arrays": arrays})
 
     def broadcast(self, hologram: dict, blaze_um: tuple[float, float]) -> None:
         grid_x_um = np.asarray(hologram["grid_x_um"]) + blaze_um[0]
