@@ -157,7 +157,7 @@ class MergeCaFTweezerHamCamBackground(MergeCaFTweezer):
     """
 
     caf = MotMaster(
-        "CaF MotMaster", script="MERGE.CaFTweezerHamCamBackground", linked=True
+        "CaF MotMaster", script="MERGE.CaFTweezerHamCamBackground_fallout", linked=True
     )
 
     def run_point(self) -> None:
