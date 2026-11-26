@@ -34,7 +34,7 @@ from pytweezer.experiments.rabi_demo import RabiDemo
 from pytweezer.GUI.experiments import queue_view
 from pytweezer.GUI.experiments.arg_editor import ArgumentEditor, parse_list
 from pytweezer.GUI.experiments.catalogue_view import CatalogueView
-from pytweezer.GUI.experiments.motmaster_params import ParameterFetcher
+from pytweezer.GUI.experiments.motmaster_params import DeviceFetcher
 from pytweezer.GUI.experiments.panel import ExperimentsPanel
 from pytweezer.GUI.experiments.queue_view import (
     COLUMNS,
@@ -1015,14 +1015,14 @@ def test_an_unreachable_sequencer_shows_the_error_and_a_retry(qapp):
 
 
 def test_a_threaded_fetch_is_delivered_on_the_gui_thread(qapp):
-    fetcher = ParameterFetcher(Source(PARAMETERS))
+    fetcher = DeviceFetcher(Source(PARAMETERS))
     delivered = []
     fetcher.fetched.connect(
         lambda *args: delivered.append((args, threading.current_thread()))
     )
     fetcher.request("Rb MotMaster", "RbTweezerBasic")
     assert until(lambda: delivered, qapp=qapp)
-    assert delivered[0][0] == ("Rb MotMaster", "RbTweezerBasic", PARAMETERS)
+    assert delivered[0][0] == (("Rb MotMaster", "RbTweezerBasic"), PARAMETERS)
     assert delivered[0][1] is threading.main_thread()
 
 

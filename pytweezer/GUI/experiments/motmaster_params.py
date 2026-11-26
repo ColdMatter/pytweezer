@@ -1,4 +1,4 @@
-"""Search-and-add boxes for MOTMaster script parameters in the argument editor."""
+"""Search-and-add boxes for MOTMaster script parameters, and the scripts on offer, in the argument editor."""
 
 import threading
 from collections.abc import Callable, Collection
@@ -27,47 +27,52 @@ def is_number(value: Any) -> bool:
 
 
 class DeviceParameterSource:
-    """Reads a script's parameters from its MOTMaster device (or the simulated one)."""
+    """Reads a script's parameters, and the scripts on offer, from a MOTMaster device (or the simulated one)."""
 
     def __init__(self, simulated: Callable[[], bool] = lambda: False) -> None:
         self._simulated = simulated
         self._simulated_devices = None
 
     def __call__(self, device: str, script: str) -> dict[str, Any]:
+        return self._ask(device, lambda client: client.script_parameters(script))
+
+    def scripts(self, device: str) -> list[str]:
+        return self._ask(device, lambda client: client.script_names())
+
+    def _ask(self, device: str, call: Callable[[Any], Any]) -> Any:
         if self._simulated():
             if self._simulated_devices is None:
                 from pytweezer.experiment.simulation import SimulatedDevices
 
                 self._simulated_devices = SimulatedDevices()
-            return self._simulated_devices.get(device).script_parameters(script)
+            return call(self._simulated_devices.get(device))
         from pytweezer.servers.device_client import get_device
 
         client = get_device(device, timeout=_DEVICE_TIMEOUT_S)
         try:
-            return client.script_parameters(script)
+            return call(client)
         finally:
             client.close_rpc()
 
 
-class ParameterFetcher(QtCore.QObject):
-    """Fetches script parameters off the GUI thread and caches them per (device, script)."""
+class DeviceFetcher(QtCore.QObject):
+    """Calls ``source(*key)`` off the GUI thread and caches each answer by ``key``."""
 
-    fetched = QtCore.pyqtSignal(str, str, object)
-    failed = QtCore.pyqtSignal(str, str, str)
+    fetched = QtCore.pyqtSignal(object, object)
+    failed = QtCore.pyqtSignal(object, str)
     _finished = QtCore.pyqtSignal(object, object, object)
 
-    def __init__(self, source: Callable[[str, str], dict], *, threaded: bool = True):
+    def __init__(self, source: Callable[..., Any], *, threaded: bool = True):
         super().__init__()
         self.source = source
         self.threaded = threaded
-        self.cache: dict[tuple[str, str], dict] = {}
-        self._pending: set[tuple[str, str]] = set()
+        self.cache: dict[tuple, Any] = {}
+        self._pending: set[tuple] = set()
         self._finished.connect(self._on_finished)
 
-    def request(self, device: str, script: str) -> None:
-        key = (device, script)
+    def request(self, *key: str) -> None:
         if key in self.cache:
-            self.fetched.emit(device, script, self.cache[key])
+            self.fetched.emit(key, self.cache[key])
         elif key not in self._pending:
             self._pending.add(key)
             if self.threaded:
@@ -75,7 +80,10 @@ class ParameterFetcher(QtCore.QObject):
             else:
                 self._run(key)
 
-    def _run(self, key: tuple[str, str]) -> None:
+    def forget(self, *key: str) -> None:
+        self.cache.pop(key, None)
+
+    def _run(self, key: tuple) -> None:
         try:
             self._finished.emit(key, self.source(*key), None)
         except Exception as error:
@@ -85,9 +93,9 @@ class ParameterFetcher(QtCore.QObject):
         self._pending.discard(key)
         if error is None:
             self.cache[key] = parameters
-            self.fetched.emit(*key, parameters)
+            self.fetched.emit(key, parameters)
         else:
-            self.failed.emit(*key, error)
+            self.failed.emit(key, error)
 
 
 class MotMasterBox(QGroupBox):
@@ -110,16 +118,10 @@ class MotMasterBox(QGroupBox):
         declared: Collection[str] = (),
         linked: bool = False,
     ):
-        mode = ", linked" if linked else ""
-        super().__init__(f"MOTMaster ({script}{mode})", parent)
-        self._mode = mode
-        if linked:
-            self.setToolTip(
-                f"{device} runs {script} in linked mode: one script drives both "
-                "MOTMasters, so the secondary's parameters are set here too"
-            )
+        super().__init__(parent)
         self.setObjectName("EditorGroup")
-        self.device, self.script = device, script
+        self.device, self.script, self.linked = device, script, linked
+        self._show_title()
         self.declared = frozenset(declared)
         self.defaults: dict[str, int | float] = {}
         self.status = QLabel()
@@ -153,8 +155,22 @@ class MotMasterBox(QGroupBox):
         """Run ``script`` instead; its parameters are unknown until :meth:`set_parameters`."""
         self.script = script
         self.defaults = {}
-        self.setTitle(f"MOTMaster ({script}{self._mode})")
+        self._show_title()
         self.set_loading()
+
+    def set_linked(self, linked: bool) -> None:
+        self.linked = linked
+        self._show_title()
+
+    def _show_title(self) -> None:
+        mode = ", linked" if self.linked else ""
+        self.setTitle(f"MOTMaster ({self.script}{mode})")
+        self.setToolTip(
+            f"{self.device} runs {self.script} in linked mode: one script drives "
+            "both MOTMasters, so the secondary's parameters are set here too"
+            if self.linked
+            else ""
+        )
 
     def set_loading(self) -> None:
         self.search.setVisible(False)

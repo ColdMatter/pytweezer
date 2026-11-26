@@ -9,6 +9,7 @@ the `.cs` script root, and the DLLs to load; constructing one starts
 interface is a connected one.
 """
 
+import difflib
 import json
 import numbers
 import pathlib
@@ -146,31 +147,6 @@ def motmaster_controller(config_file: str) -> Any:
     return Activator.GetObject(MOTMaster.Controller, motmaster["remote_path"])
 
 
-def script_names(config_file: str) -> list[str]:
-    """The scripts in the script root of the MOTMaster ``config_file`` names, sorted.
-
-    Read from this PC's disk, without MOTMaster. Where the script root is not
-    on this PC, the folder of the same name in an EDMSuite clone beside this
-    repository is read instead.
-
-    Raises:
-        FileNotFoundError: If neither folder exists.
-    """
-    with open(CONFIG_DIR / config_file) as f:
-        script_root = json.load(f)["script_root_path"]
-    repository = pathlib.Path(__file__).resolve().parents[2]
-    folders = [
-        pathlib.Path(script_root),
-        repository.parent / "EDMSuite" / pathlib.PureWindowsPath(script_root).name,
-    ]
-    for folder in folders:
-        if folder.is_dir():
-            return sorted(path.stem for path in folder.glob("*.cs"))
-    raise FileNotFoundError(
-        f"no MOTMaster script folder at {' or '.join(map(str, folders))}"
-    )
-
-
 class MotMasterInterface:
     def __init__(self, config_file: str, interval: float = 0.1) -> None:
         # ``config_file`` names a JSON file in the package ``configuration/`` dir; an
@@ -299,11 +275,20 @@ class MotMasterInterface:
         if hasattr(self, "stage"):
             self.stage.close()
 
+    def script_names(self) -> list[str]:
+        """The scripts in this MOTMaster's script folder, sorted."""
+        return sorted(path.stem for path in self.script_root.glob("*.cs"))
+
     def set_motmaster_experiment(
         self,
         script: str,
     ):
-        script_path = str(self.script_root.joinpath(f"{script}.cs"))
+        script_path = self.script_root.joinpath(f"{script}.cs")
+        if not script_path.is_file():
+            close = difflib.get_close_matches(script, self.script_names(), n=3)
+            hint = f"; did you mean {close}?" if close else ""
+            raise FileNotFoundError(f"no script {script!r} in {self.script_root}{hint}")
+        script_path = str(script_path)
         self.motmaster.SetScriptPath(script_path)
         self.script = script
         self.script_path = script_path
@@ -874,6 +859,9 @@ class SimulatedMotMasterInterface:
 
     def script_parameters(self, script: str) -> dict[str, Any]:
         return dict(SIMULATED_SCRIPT_PARAMETERS.get(script, _SIMULATED_FALLBACK))
+
+    def script_names(self) -> list[str]:
+        return sorted(SIMULATED_SCRIPT_PARAMETERS)
 
     def set_motmaster_experiment(self, script: str):
         self.script = script

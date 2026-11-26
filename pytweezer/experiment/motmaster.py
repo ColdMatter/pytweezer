@@ -43,13 +43,18 @@ CONFIG key and is reserved along with it::
         mm = MotMaster("CaF MotMaster", script="LinkedTweezerLoad", linked=True)
         tof = MotMasterInteger(100, parameter="tDelay1")
 
-``script_from=`` takes the script from a ``Choice`` argument instead, chosen when
-the task is submitted; it cannot be scanned, since :meth:`MotMasterExperiment.prepare`
-loads the script once::
+``script_from=`` takes the script from a :class:`MotMasterScript` argument
+instead, chosen when the task is submitted; it cannot be scanned, since
+:meth:`MotMasterExperiment.prepare` loads the script once. The Experiments form
+offers the scripts in the MOTMaster's own script folder, asked of the device;
+a name that isn't there is refused in ``prepare``. ``linked_from=`` likewise
+takes linked mode from a ``Bool`` argument, and reserves the secondary whether
+or not the task links it::
 
     class RunScript(MotMasterExperiment):
-        script = Choice(["RbTweezerBasic", "RbTweezerBasic2026"], scannable=False)
-        rb = MotMaster("Rb MotMaster", script_from="script")
+        script = MotMasterScript("MERGE.CaFTweezer")
+        linked = Bool(True, scannable=False)
+        caf = MotMaster("CaF MotMaster", script_from="script", linked_from="linked")
 """
 
 import difflib
@@ -59,10 +64,10 @@ from typing import Any
 from pytweezer.experiment.arguments import (
     Argument,
     Bool,
-    Choice,
     Device,
     Integer,
     Number,
+    Text,
     collect,
 )
 from pytweezer.experiment.client import (
@@ -83,6 +88,7 @@ class MotMaster(Device):
         script: str | None = None,
         script_from: str | None = None,
         linked: bool = False,
+        linked_from: str | None = None,
         iterations: int = 1,
         save: bool = False,
         saved: Iterable[str | dict[str, str]] = (),
@@ -91,10 +97,14 @@ class MotMaster(Device):
         super().__init__(device_name, timeout=timeout)
         if (script is None) == (script_from is None):
             raise TypeError("MotMaster takes one of script= and script_from=")
+        if linked and linked_from is not None:
+            raise TypeError("MotMaster takes at most one of linked= and linked_from=")
         self.script = script
-        #: Name of the ``Choice`` argument the script is read from, or ``None``.
+        #: Name of the :class:`MotMasterScript` argument the script is read from, or ``None``.
         self.script_from = script_from
         self.linked = linked
+        #: Name of the ``Bool`` argument linked mode is read from, or ``None``.
+        self.linked_from = linked_from
         self.iterations = iterations
         self.save = save
         #: ``{script parameter: saved key}``.
@@ -108,7 +118,7 @@ class MotMaster(Device):
         from pytweezer.servers.device_server import resolve_address
 
         reserved = super().reserves()
-        if self.linked:
+        if self.linked or self.linked_from:
             partner = resolve_address(self.device_name).conf.get("linked_partner")
             if not partner:
                 raise ReservationError(
@@ -124,6 +134,7 @@ class MotMaster(Device):
                 "script": self.script,
                 "script_from": self.script_from,
                 "linked": self.linked,
+                "linked_from": self.linked_from,
                 "iterations": self.iterations,
                 "save": self.save,
                 "saved": dict(self.saved),
@@ -182,6 +193,20 @@ class MotMasterInteger(MotMasterParameter, Integer):
     """An integer MOTMaster parameter (sent to .NET as ``Int32``)."""
 
 
+class MotMasterScript(Text):
+    """The name of the script a :class:`MotMaster` declared with ``script_from=`` runs.
+
+    Never scannable. The Experiments form offers the scripts in the MOTMaster's
+    script folder; any other name is refused when the task starts.
+    """
+
+    kind = "motmaster_script"
+
+    def __init__(self, default: str, **kwargs: Any) -> None:
+        kwargs.setdefault("tooltip", "Script in the MOTMaster's script folder")
+        super().__init__(default, scannable=False, **kwargs)
+
+
 class _MotMasterOverride(Number):
     """Placeholder for a script parameter chosen by name; the script gives its real type."""
 
@@ -228,17 +253,26 @@ class MotMasterExperiment(Experiment):
                 )
             targets[parameter] = name
         if sequencers:
-            cls._check_script_from(next(iter(sequencers.values())))
+            cls._check_from_arguments(next(iter(sequencers.values())))
 
     @classmethod
-    def _check_script_from(cls, motmaster: MotMaster) -> None:
-        if motmaster.script_from is None:
-            return
-        argument = cls.arguments().get(motmaster.script_from)
-        if not isinstance(argument, Choice) or argument.scannable:
+    def _check_from_arguments(cls, motmaster: MotMaster) -> None:
+        arguments = cls.arguments()
+        script = arguments.get(motmaster.script_from)
+        if motmaster.script_from is not None and not isinstance(
+            script, MotMasterScript
+        ):
             raise TypeError(
                 f"{cls.__name__}: script_from={motmaster.script_from!r} must name a "
-                "Choice argument declared with scannable=False"
+                "MotMasterScript argument"
+            )
+        linked = arguments.get(motmaster.linked_from)
+        if motmaster.linked_from is not None and (
+            not isinstance(linked, Bool) or linked.scannable
+        ):
+            raise TypeError(
+                f"{cls.__name__}: linked_from={motmaster.linked_from!r} must name a "
+                "Bool argument declared with scannable=False"
             )
 
     @classmethod
@@ -279,6 +313,13 @@ class MotMasterExperiment(Experiment):
             return motmaster.script
         return getattr(self, motmaster.script_from)
 
+    def is_linked(self) -> bool:
+        """Whether this task runs its MOTMaster in linked mode."""
+        motmaster = self.motmaster()[1]
+        if motmaster.linked_from is None:
+            return motmaster.linked
+        return getattr(self, motmaster.linked_from)
+
     def motmaster_parameters(self) -> dict[str, Any]:
         """``{script parameter: value}`` for everything set explicitly."""
         requested = {
@@ -291,9 +332,10 @@ class MotMasterExperiment(Experiment):
         attribute, motmaster = self.motmaster()
         self._linked = False
         client = getattr(self, attribute)
+        linked = self.is_linked()
         # Linked mode persists in MOTMaster, so set it on every task.
-        client.set_linked(motmaster.linked)
-        self._linked = motmaster.linked
+        client.set_linked(linked)
+        self._linked = linked
         client.set_motmaster_experiment(self.script_name())
         client.set_run_until_stopped(False)
         client.set_iterations(motmaster.iterations)

@@ -271,18 +271,27 @@ class FakeLinkableDotNet(FakeDotNet):
         self.go_calls += 1
 
 
-def _driver(fail=False, motmaster=None):
+def _driver(fail=False, motmaster=None, script_root=Path("/scripts"), scripts=()):
+    """A driver on a fake MOTMaster, with ``scripts`` written into ``script_root``."""
     driver = MotMasterInterface.__new__(MotMasterInterface)
     driver.motmaster = motmaster or FakeDotNet(fail)
-    driver.script_root = Path("/scripts")
+    for script in scripts:
+        (script_root / f"{script}.cs").touch()
+    driver.script_root = script_root
     driver.script = driver.script_path = None
     driver.interval = 0
     driver.linked = False
     return driver
 
 
-def test_linked_script_is_not_run_once_the_secondary_takes_back_control(dotnet_types):
-    driver = _driver(motmaster=FakeLinkableDotNet())
+def test_linked_script_is_not_run_once_the_secondary_takes_back_control(
+    dotnet_types, tmp_path
+):
+    driver = _driver(
+        motmaster=FakeLinkableDotNet(),
+        script_root=tmp_path,
+        scripts=["LinkedTweezerLoad"],
+    )
     driver.set_motmaster_experiment("LinkedTweezerLoad")
     driver.set_linked(True)
     driver.start_motmaster_experiment()
@@ -320,24 +329,24 @@ def test_unlinking_a_motmaster_built_before_linked_mode_does_nothing():
     assert driver.linked is False
 
 
-def test_driver_raises_instead_of_printing(dotnet_types):
-    driver = _driver(fail=True)
+def test_driver_raises_instead_of_printing(dotnet_types, tmp_path):
+    driver = _driver(fail=True, script_root=tmp_path, scripts=["broken"])
     with pytest.raises(RuntimeError, match="no such script"):
-        driver.set_motmaster_experiment("missing")
+        driver.set_motmaster_experiment("broken")
     assert driver.script is None
     driver.script = "x"
     with pytest.raises(RuntimeError, match="Go failed"):
         driver.start_motmaster_experiment()
 
 
-def test_script_parameters_leaves_the_selected_script_unchanged():
-    driver = _driver()
+def test_script_parameters_leaves_the_selected_script_unchanged(tmp_path):
+    driver = _driver(script_root=tmp_path, scripts="AB")
     driver.script_parameters("B")
     assert driver.script is None and driver.script_path is None
     driver.set_motmaster_experiment("A")
     assert driver.script_parameters("B") == {"tDelay1": 5, "tPulse": 20e-6}
     assert driver.motmaster.paths[1:] == [
-        str(Path("/scripts") / f"{script}.cs") for script in "ABA"
+        str(tmp_path / f"{script}.cs") for script in "ABA"
     ]
     assert driver.script == "A"
 

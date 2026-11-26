@@ -12,6 +12,7 @@ from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDateTimeEdit,
     QFormLayout,
     QFrame,
@@ -35,9 +36,9 @@ from pytweezer.experiment.task import TaskRequest
 from pytweezer.GUI.components import CompactDoubleSpinBox, set_state
 from pytweezer.GUI.experiments.catalogue_view import doc_summary
 from pytweezer.GUI.experiments.motmaster_params import (
+    DeviceFetcher,
     DeviceParameterSource,
     MotMasterBox,
-    ParameterFetcher,
 )
 
 _INT_LIMIT = 2**31 - 1
@@ -94,6 +95,18 @@ class ValueField(QWidget):
             widget = QComboBox()
             widget.addItems(schema["options"])
             widget.currentTextChanged.connect(self.changed)
+        elif self.kind == "motmaster_script":
+            # Typed names count once committed, so a half-typed one is never
+            # sent to the MOTMaster for its parameters.
+            widget = QComboBox()
+            widget.setEditable(True)
+            widget.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+            widget.completer().setFilterMode(QtCore.Qt.MatchFlag.MatchContains)
+            widget.completer().setCompletionMode(
+                QCompleter.CompletionMode.PopupCompletion
+            )
+            widget.activated.connect(lambda _index: self.changed.emit())
+            widget.lineEdit().editingFinished.connect(self.changed)
         else:
             widget = QLineEdit()
             widget.textChanged.connect(self.changed)
@@ -124,6 +137,8 @@ class ValueField(QWidget):
             return self.widget.isChecked()
         if self.kind == "choice":
             return self.widget.currentText()
+        if self.kind == "motmaster_script":
+            return self.widget.currentText().strip()
         return self.widget.text()
 
     def set_value(self, value):
@@ -135,10 +150,21 @@ class ValueField(QWidget):
             self.widget.setValue(int(value))
         elif self.kind == "bool":
             self.widget.setChecked(bool(value))
-        elif self.kind == "choice":
+        elif self.kind in ("choice", "motmaster_script"):
             self.widget.setCurrentText(value)
+            if self.kind == "motmaster_script":
+                self.changed.emit()
         else:
             self.widget.setText(value)
+
+    def set_options(self, options):
+        """Offer ``options`` in a script field, keeping the name in it."""
+        current = self.widget.currentText()
+        self.widget.blockSignals(True)
+        self.widget.clear()
+        self.widget.addItems(options)
+        self.widget.setCurrentText(current)
+        self.widget.blockSignals(False)
 
     def is_default(self):
         default = self.schema["default"]
@@ -412,10 +438,16 @@ class ArgumentEditor(QWidget):
         self.recipes = []
         self.rows = {}
         self._saved_values = {}
-        self.fetcher = ParameterFetcher(DeviceParameterSource())
+        self.fetcher = DeviceFetcher(DeviceParameterSource())
         self.fetcher.fetched.connect(self._parameters_fetched)
         self.fetcher.failed.connect(self._parameters_failed)
+        self.script_fetcher = DeviceFetcher(
+            lambda device: self.fetcher.source.scripts(device)
+        )
+        self.script_fetcher.fetched.connect(self._scripts_fetched)
+        self.script_fetcher.failed.connect(self._scripts_failed)
         self.motmaster_box = None
+        self._script_row = None
         self._searched = set()
         self.setObjectName("ArgumentEditor")
         layout = QVBoxLayout(self)
@@ -689,6 +721,7 @@ class ArgumentEditor(QWidget):
 
     def _add_motmaster_box(self, schema):
         self.motmaster_box = None
+        self._script_row = None
         self._searched = set()
         sequencer = next(
             (
@@ -706,23 +739,32 @@ class ArgumentEditor(QWidget):
             if "motmaster_parameter" in argument
         }
         script_row = self.rows.get(sequencer["motmaster"].get("script_from"))
+        linked_row = self.rows.get(sequencer["motmaster"].get("linked_from"))
         box = MotMasterBox(
             sequencer["device"],
             script_row.value.value()
             if script_row
             else sequencer["motmaster"]["script"],
             declared=declared | set(schema["arguments"]),
-            linked=sequencer["motmaster"].get("linked", False),
+            linked=linked_row.value.value()
+            if linked_row
+            else sequencer["motmaster"].get("linked", False),
         )
         box.parameter_chosen.connect(self.add_motmaster_row)
         box.retry.clicked.connect(lambda _=False: self._retry(box))
         self.motmaster_box = box
+        self._script_row = script_row
         self.arguments_layout.addWidget(box)
         self.fetcher.request(box.device, box.script)
         if script_row:
+            # Asked afresh each time, so scripts added since show up.
+            self.script_fetcher.forget(box.device)
+            self.script_fetcher.request(box.device)
             script_row.changed.connect(
                 lambda: self._script_chosen(box, script_row.value.value())
             )
+        if linked_row:
+            linked_row.changed.connect(lambda: box.set_linked(linked_row.value.value()))
 
     def _script_chosen(self, box, script):
         if box is not self.motmaster_box or script == box.script:
@@ -733,6 +775,8 @@ class ArgumentEditor(QWidget):
     def _retry(self, box):
         box.set_loading()
         self.fetcher.request(box.device, box.script)
+        if self._script_row:
+            self.script_fetcher.request(box.device)
 
     def add_motmaster_row(self, name, value=None):
         """Add (or return) the row for script parameter ``name``.
@@ -832,10 +876,11 @@ class ArgumentEditor(QWidget):
         row.label.setText(row.name)
         row.label.setToolTip(f"{row.name} in script {script}")
 
-    def _parameters_fetched(self, device, script, parameters):
+    def _parameters_fetched(self, key, parameters):
         box = self.motmaster_box
-        if box is None or (box.device, box.script) != (device, script):
+        if box is None or (box.device, box.script) != key:
             return
+        script = box.script
         box.set_parameters(parameters)
         for name in list(self._searched):
             if name in box.defaults:
@@ -844,10 +889,25 @@ class ArgumentEditor(QWidget):
             else:
                 self._flag_missing(self.rows[name], script)
 
-    def _parameters_failed(self, device, script, error):
+    def _parameters_failed(self, key, error):
         box = self.motmaster_box
-        if box is not None and (box.device, box.script) == (device, script):
+        if box is not None and (box.device, box.script) == key:
             box.set_error(error)
+
+    def _scripts_fetched(self, key, scripts):
+        box = self.motmaster_box
+        if box is not None and self._script_row and (box.device,) == key:
+            self._script_row.value.set_options(scripts)
+            self._script_row.value.widget.setToolTip(
+                f"{len(scripts)} scripts in {box.device}'s script folder"
+            )
+
+    def _scripts_failed(self, key, error):
+        box = self.motmaster_box
+        if box is not None and self._script_row and (box.device,) == key:
+            self._script_row.value.widget.setToolTip(
+                f"Could not list {box.device}'s scripts ({error}); type a name"
+            )
 
     # -- reading ---------------------------------------------------------
 
