@@ -8,7 +8,7 @@ import numpy as np
 
 from pytweezer.drivers.imagemX2 import ImagEMX2Camera
 from pytweezer.drivers.orca import ORCACamera
-from pytweezer.experiment import Device, Number
+from pytweezer.experiment import Device, Integer, Number
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.experiments.load_tweezers import (
     hamcam_roi_argument,
@@ -37,8 +37,8 @@ class MergeCaFTweezer(SlmArray, MotMasterExperiment):
     :func:`~pytweezer.analysis.trap_sites.geometry_to_pixels`. They are separate
     from the Rb ``trap_*`` calibration because the CaF imaging differs. The
     run does not use them; the ``caf_tweezer_sites`` analysis places the sites
-    with them, the ROI origin the camera set (``hamcam_roi_origin``, ``(x0, y0)``)
-    and the arrays on the SLM (``slm_arrays``).
+    with them, the ROI origin the camera set (``hamcam_roi_origin``, ``(x0, y0)``),
+    ``hamcam_binning`` and the arrays on the SLM (``slm_arrays``).
     """
 
     analyses = ("caf_tweezer_sites",)
@@ -54,6 +54,13 @@ class MergeCaFTweezer(SlmArray, MotMasterExperiment):
         min=0,
         group="Camera",
         tooltip="EM-gain sensitivity of the HamCam, set once before the first point",
+        scannable=False,
+    )
+    hamcam_binning = Integer(
+        1,
+        min=1,
+        group="Camera",
+        tooltip="Sensor pixels binned per side on the HamCam, set once before the first point",
         scannable=False,
     )
     hamcam_roi_x0 = hamcam_roi_argument(110, size=False)
@@ -105,6 +112,7 @@ class MergeCaFTweezer(SlmArray, MotMasterExperiment):
                 self.hamcam_roi_y0,
                 self.hamcam_roi_height,
             ),
+            self.hamcam_binning,
         )
         self.record("hamcam_roi_origin", np.array(roi_origin), unit="px")
         self.set_up_cafmot_cam()

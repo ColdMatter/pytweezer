@@ -56,9 +56,11 @@ def main(out_dir: str, rid: int) -> None:
         f"frame median {np.median(wide.offset):+.0f} counts"
     )
     origin_x, origin_y = np.asarray(m.constants["hamcam_roi_origin"], float)
+    binning = args.get("hamcam_binning") or 1
+    sensor_y, sensor_x = centre * binning + (binning - 1) / 2
     print(
         f"array centre: frame px (x {centre[1]:.1f}, y {centre[0]:.1f}), sensor px "
-        f"(x {centre[1] + origin_x:.1f}, y {centre[0] + origin_y:.1f}); "
+        f"(x {sensor_x + origin_x:.1f}, y {sensor_y + origin_y:.1f}); "
         f"sites {labels} (overlapping traps merged)"
     )
     for label, r in (("8-12", wide), ("5-8", tight)):
