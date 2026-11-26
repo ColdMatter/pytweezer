@@ -15,7 +15,6 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-from scipy import ndimage
 
 from pytweezer.analyses.default.tweezer_histogram import point_groups
 from pytweezer.analysis.site_photometry import merge_overlapping, score_sites
@@ -30,8 +29,6 @@ ROI_ORIGIN = "hamcam_roi_origin"
 CALIBRATION = ("site_centre_x", "site_centre_y", "site_scale", "site_angle")
 #: Score above which a shot counts as showing light at a site.
 BRIGHT_Z = 3.0
-#: Gaussian σ, in pixels, of the smoothed mean frame drawn to make faint sites visible.
-SMOOTHING_PX = 1.5
 
 
 @dataclass(frozen=True)
@@ -59,7 +56,6 @@ class SiteAnalysis:
         shots: Shots analysed.
         background_subtracted: Whether each frame had its background frame subtracted.
         mean_image: Mean analysed frame, ``(H, W)``.
-        smoothed_image: ``mean_image`` smoothed by :data:`SMOOTHING_PX`.
         sites: ``(sites, 2)`` positions in the frame, ``(y, x)`` pixels.
         site_traps: For each site, the indices into ``traps_um`` of the traps it holds.
         counts: ``(shots, sites)`` signal at each site, counts.
@@ -77,7 +73,6 @@ class SiteAnalysis:
     shots: int
     background_subtracted: bool
     mean_image: np.ndarray
-    smoothed_image: np.ndarray
     sites: np.ndarray
     site_traps: tuple[tuple[int, ...], ...]
     counts: np.ndarray
@@ -187,7 +182,6 @@ def caf_tweezer_sites(measurement: Measurement, settings: SiteSettings) -> SiteA
         shots=len(frames),
         background_subtracted=subtracted,
         mean_image=mean_image,
-        smoothed_image=ndimage.gaussian_filter(mean_image, SMOOTHING_PX),
         sites=sites,
         site_traps=tuple(site_traps),
         counts=scores.counts,
