@@ -2,7 +2,10 @@
 
 The Analysis dropdown offers "Plot against" for every measurement, then the
 analyses its experiment declares (:mod:`pytweezer.GUI.experiments.analyses`),
-which become available once the measurement finishes.
+which become available once the measurement finishes. An optimiser's run is
+offered "Optimisation" first, its plots as the Optimisers tab draws them, from
+the optimiser's description in the file (or, for a file from before files
+recorded it, the Optimisers tab's catalogue).
 
 Reads files through an archive (:mod:`pytweezer.experiment.archive`): on the
 Experiment Manager's PC directly, elsewhere fetched from the manager over RPC.
@@ -65,6 +68,11 @@ from pytweezer.GUI.theme import (
     PLOT_SYMBOL_SIZE,
     style_plot,
 )
+from pytweezer.GUI.views.optimiser_plots import (
+    OptimiserPlots,
+    live_results,
+    plotted_names,
+)
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.GUI.experiments.results")
@@ -77,6 +85,8 @@ _FALLBACK_POLL_S = 30.0
 _NONE = "(none)"
 _POINT_INDEX = "point index"
 _PLOT_AGAINST = "Plot against"
+_OPTIMISATION = "Optimisation"
+_OPTIMISATION_HINT = "accept its proposals in the Optimisers tab"
 _PLOT_HINT = "mean and standard error over repetitions"
 _CURVE_COLOURS = ["#5b8def", "#f5a623", "#2ecc71", "#c678dd", "#e5c07b", "#56b6c2"]
 
@@ -116,10 +126,24 @@ def _show_file(item, path, status, label):
 
 
 class ResultsPanel(QWidget):
+    """The Results tab.
+
+    Args:
+        root: Data root to read files from directly, instead of the default archive.
+        feed: The manager's published state, for live plotting.
+        archive: Where files are read from.
+        optimiser_schema: ``(module, class_name) -> schema or None``, the
+            catalogue's description of an optimiser, for files that do not record it.
+        parent: Parent widget.
+    """
+
     resubmit_requested = QtCore.pyqtSignal(object)
 
-    def __init__(self, root=None, feed=None, archive=None, parent=None):
+    def __init__(
+        self, root=None, feed=None, archive=None, optimiser_schema=None, parent=None
+    ):
         super().__init__(parent)
+        self._catalogue_schema = optimiser_schema
         if archive is None:
             archive = ResultsArchive(root) if root is not None else default_archive()
         self.archive = archive
@@ -229,6 +253,8 @@ class ResultsPanel(QWidget):
         self.analysis_choice.currentIndexChanged.connect(self._analysis_chosen)
         self.analysis_stack = QStackedWidget()
         self.analysis_stack.addWidget(plot_page)
+        self.optimiser_plots = OptimiserPlots()
+        self.analysis_stack.addWidget(self.optimiser_plots)
         #: Each analysis's view, built the first time it is chosen.
         self._views = {}
         #: The analysis last chosen for each experiment class, this session.
@@ -314,6 +340,7 @@ class ResultsPanel(QWidget):
             self._show_progress()
             self._fill_choices(keep_selection=True)
             self.replot()
+            self._plot_optimisation()
 
     def _live_rows(self):
         """The feed's points for the selected measurement, if it is running."""
@@ -563,6 +590,8 @@ class ResultsPanel(QWidget):
         combo = self.analysis_choice
         combo.blockSignals(True)
         combo.clear()
+        if self._optimiser_schema(m) is not None:
+            combo.addItem(_OPTIMISATION, _OPTIMISATION)
         combo.addItem(_PLOT_AGAINST, None)
         for name in declared_analyses(m):
             entry = ANALYSES.get(name)
@@ -574,7 +603,12 @@ class ResultsPanel(QWidget):
             elif m.status == "running":
                 item.setEnabled(False)
                 item.setToolTip("Available when the measurement finishes")
-        index = combo.findData(self._chosen.get(m.attrs.get("class_name")))
+        class_name = m.attrs.get("class_name")
+        index = (
+            combo.findData(self._chosen[class_name])
+            if class_name in self._chosen
+            else 0
+        )
         if index < 0 or not combo.model().item(index).isEnabled():
             index = 0
         combo.setCurrentIndex(index)
@@ -594,6 +628,11 @@ class ResultsPanel(QWidget):
             self.plot_region.set_hint(_PLOT_HINT)
             self.replot()
             return
+        if name == _OPTIMISATION:
+            self.analysis_stack.setCurrentWidget(self.optimiser_plots)
+            self.plot_region.set_hint(_OPTIMISATION_HINT)
+            self._plot_optimisation()
+            return
         view = self._views.get(name)
         if view is None:
             view = self._views[name] = ANALYSES[name].view()
@@ -602,6 +641,44 @@ class ResultsPanel(QWidget):
         self.plot_region.set_hint("")
         if self.measurement is not None:
             view.set_measurement(self.archive, self.path, self.measurement)
+
+    def _optimiser_schema(self, m):
+        """The schema of the optimiser that made ``m``, or ``None`` if it is not an optimiser's."""
+        recorded = m.attrs.get("optimiser")
+        if recorded:
+            return {"optimiser": json.loads(recorded)}
+        if self._catalogue_schema is None:
+            return None
+        return self._catalogue_schema(m.attrs["experiment"], m.attrs["class_name"])
+
+    def _plot_optimisation(self):
+        if self.analysis_stack.currentWidget() is not self.optimiser_plots:
+            return
+        m, path = self.measurement, self.path
+        schema = None if m is None else self._optimiser_schema(m)
+        if schema is None:
+            self.optimiser_plots.show_run(None)
+            return
+        rows = self._live_rows()
+        if rows is not None:
+            results = live_results(rows, plotted_names(schema))
+            self.optimiser_plots.show_run(path, schema, results)
+            return
+        self._read_in_background(
+            "optimisation",
+            lambda: self._loader.load(path, results=plotted_names(schema)),
+            lambda outcome: self._show_optimisation(m, path, schema, outcome),
+        )
+
+    def _show_optimisation(self, m, path, schema, outcome):
+        if m is not self.measurement:
+            return
+        if isinstance(outcome, Exception):
+            self.optimiser_plots.show_run(path, schema, error=outcome)
+        else:
+            self.optimiser_plots.show_run(
+                path, schema, outcome.results, outcome.constants
+            )
 
     # -- plotting ------------------------------------------------------------
 
