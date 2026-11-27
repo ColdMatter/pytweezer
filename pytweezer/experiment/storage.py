@@ -16,14 +16,17 @@ Layout of ``{data_root}/YYYY/MM/DD/{rid:06d}_{ClassName}.h5``::
     /constants/<name>     recorded from prepare()/finish()
     /source/<module>      experiment source text, attr sha256
     /motmaster/runs/<column>         point, sequence, t: one row per MOTMaster run, in
-                                     the order run; point is -1 outside a point
+                                     the order run; point is -1 outside a point,
+                                     sequence "" if MOTMaster could not record it
     /motmaster/sequences/<sha256>    gzipped JSON of a sequence MOTMaster ran, its
                                      scripts' text replaced by their sha256
     /motmaster/scripts/<sha256>      gzipped text of a script those sequences compiled
 
 ``/motmaster`` exists only once a MOTMaster run is recorded. A sequence's
 record is MOTMaster's own (``SequenceRecord.cs`` in EDMSuite); each distinct
-sequence and script is stored once, keyed by the sha256 of its stored text.
+sequence and script is stored once, keyed by the sha256 of its stored text. A
+linked run whose secondary could not record has ``link.secondary`` null and
+the reason in ``link.secondary_unrecorded``.
 
 Every column under ``/points`` and ``/results`` has one row per *planned*
 point, in execution order, so the first ``n_done`` rows are the ones that ran.
@@ -290,18 +293,24 @@ class MeasurementWriter:
         if np.ndim(data) == 0 and np.dtype(dtype).kind in "biuf":
             self.point_scalars[name] = float(data)
 
-    def record_motmaster_run(self, record: dict[str, Any]) -> str:
+    def record_motmaster_run(self, record: dict[str, Any] | None) -> str:
         """Record one MOTMaster run of the sequence ``record``; return the sequence's sha256.
 
-        ``record`` is what MOTMaster's ``GoCachedRecording`` returned, parsed.
-        The run belongs to the current point, or to none (-1) outside a point.
+        ``record`` is what MOTMaster's ``GoCachedRecording`` returned, parsed,
+        or ``None`` when that MOTMaster could not record it; the run is then
+        listed with sequence ``""``. The run belongs to the current point, or to
+        none (-1) outside a point.
         """
-        sequence, scripts = _split_scripts(record)
         group = self.file.require_group("motmaster")
-        for digest, text in scripts.items():
-            _store_once(group.require_group("scripts"), digest, text)
-        digest = hashlib.sha256(sequence.encode()).hexdigest()
-        _store_once(group.require_group("sequences"), digest, sequence)
+        scripts_group = group.require_group("scripts")
+        sequences_group = group.require_group("sequences")
+        digest = ""
+        if record is not None:
+            sequence, scripts = _split_scripts(record)
+            for script_digest, text in scripts.items():
+                _store_once(scripts_group, script_digest, text)
+            digest = hashlib.sha256(sequence.encode()).hexdigest()
+            _store_once(sequences_group, digest, sequence)
         runs = group.require_group("runs")
         if "point" not in runs:
             for name, dtype in (

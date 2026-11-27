@@ -36,7 +36,8 @@ own values run.
 Every run stores MOTMaster's record of the sequence it built (every event,
 the full parameter set and the script's text) in the measurement file; see
 :mod:`pytweezer.experiment.storage` and ``Dataset.motmaster_sequence``. A
-MOTMaster built without that record fails the run.
+MOTMaster built without that record still runs; the file lists the run as
+unrecorded.
 
 Two machines are run together by MOTMaster's linked mode: the primary claims its
 secondary itself and fires it by TTL, so the experiment declares only the
@@ -435,7 +436,9 @@ class MotMasterExperiment(Experiment):
         }
         sequencer = getattr(self, self.motmaster()[0])
         record = sequencer.start_motmaster_experiment_recorded(sent)
-        self._writer.record_motmaster_run(json.loads(record))
+        self._writer.record_motmaster_run(
+            None if record is None else json.loads(record)
+        )
 
     def run_point(self) -> None:
         self.run_motmaster_sequence()

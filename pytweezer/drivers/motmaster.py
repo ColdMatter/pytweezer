@@ -353,21 +353,27 @@ class MotMasterInterface:
 
     def start_motmaster_experiment_recorded(
         self, parameters: dict | None = None
-    ) -> str:
+    ) -> str | None:
         """Run as :meth:`start_motmaster_experiment` does; return MOTMaster's JSON record of the sequence it ran.
 
         The record (``SequenceRecord.cs`` in EDMSuite) holds every event the
         pattern generators were given, the full parameter set and the script's
         text; a linked run's holds the secondary's record too. Unlike ``Go``,
         MOTMaster throws rather than showing a dialog when the run fails.
+
+        A MOTMaster built without ``GoCachedRecording`` runs the sequence as
+        :meth:`start_motmaster_experiment` does and returns ``None``.
         """
         self._check_runnable()
         go = getattr(self.motmaster, "GoCachedRecording", None)
         if go is None:
-            raise RuntimeError(
-                "this MOTMaster cannot record the sequences it runs "
-                "(no GoCachedRecording); rebuild it from EDMSuite master"
+            logger.warning(
+                "This MOTMaster cannot record the sequences it runs (no "
+                "GoCachedRecording); running without a record. Rebuild it from "
+                "EDMSuite master."
             )
+            self.start_motmaster_experiment(parameters)
+            return None
         return str(go(self.python_to_cs_dict(parameters or {})))
 
     def _check_runnable(self) -> None:

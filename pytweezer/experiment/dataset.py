@@ -65,6 +65,7 @@ class Dataset:
 
         Raises:
             IndexError: If point ``point`` has no run ``run``.
+            LookupError: If MOTMaster could not record that run's sequence.
         """
         runs = self.measurement.motmaster_runs
         digests = [
@@ -75,6 +76,11 @@ class Dataset:
         if not 0 <= run < len(digests):
             raise IndexError(
                 f"point {point} has {len(digests)} MOTMaster run(s), not a run {run}"
+            )
+        if not digests[run]:
+            raise LookupError(
+                f"MOTMaster could not record the sequence of run {run} of point "
+                f"{point}: it was built without GoCachedRecording"
             )
         return self._read_sequence(digests[run])
 

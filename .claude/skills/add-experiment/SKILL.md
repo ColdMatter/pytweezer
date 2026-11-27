@@ -115,7 +115,8 @@ class Tof(MotMasterExperiment):
   from `Scan(repetitions=...)`, one point per shot;
   `run_motmaster_sequence(**overrides)` overrides parameters for one run.
   Every run stores MOTMaster's record of the sequence it built (from its
-  `GoCachedRecording`) under `/motmaster`; a MOTMaster without it fails the run.
+  `GoCachedRecording`) under `/motmaster`; a MOTMaster without it still runs,
+  listed as unrecorded (sequence `""`).
 - `MotMasterInteger`/`MotMasterNumber` must match the script parameter's .NET
   type (`Int32`/`Double`).
 - **Any undeclared identifier is a script parameter**: `submit(Tof,
