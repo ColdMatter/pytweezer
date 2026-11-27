@@ -5,6 +5,7 @@ import pytest
 
 from pytweezer.drivers import camera_base
 from pytweezer.drivers.camera_base import SimulatedCamera
+from tests.helpers import until
 
 
 class Clock:
@@ -137,3 +138,20 @@ def test_live_mode_can_be_left_and_entered_again(camera):
     camera.start_live()
     assert camera.is_live()
     assert camera._acquisition_in_progress()
+
+
+@pytest.fixture
+def software_triggered_camera():
+    camera = SimulatedCamera(timeout=1.0)
+    camera.set_trigger_source("software")
+    yield camera
+    camera.close()
+
+
+def test_live_mode_triggers_a_software_triggered_camera_at_its_frame_rate(
+    software_triggered_camera,
+):
+    camera = software_triggered_camera
+    camera.set_frame_rate(50.0)
+    camera.start_live()
+    assert until(lambda: camera.frames_acquired() >= 3)

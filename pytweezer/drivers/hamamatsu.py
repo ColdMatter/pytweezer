@@ -3,14 +3,13 @@
 import ctypes
 import subprocess
 import sys
-import threading
 from typing import Any
 
 import numpy as np
 from pylablib.devices.DCAM import dcamapi4_lib
 from pylablib.devices.DCAM.DCAM import DCAMCamera, lib, libctl
 
-from pytweezer.drivers.camera_base import LOGGER, Camera, Control, roi_controls
+from pytweezer.drivers.camera_base import Camera, Control, roi_controls
 from pytweezer.drivers.temperature_monitor import TemperatureMonitor
 
 PROBE_TIMEOUT_S = 60
@@ -247,8 +246,9 @@ class HamamatsuCamera(Camera):
     Args:
         serial_number: DCAM serial number of the camera to open. If None, the only
             connected camera whose model starts with :attr:`model_prefix` is opened.
-        external_exposure: Start in :meth:`set_external_exposure_mode`; otherwise
-            the camera keeps DCAM's own trigger mode (internal after power-up).
+        external_exposure: Start in :meth:`set_external_exposure_mode` (the
+            trigger pulse sets each exposure); otherwise the camera starts on the
+            external trigger with DCAM's own trigger activation.
         global_reset: Put a rolling-shutter sensor (the ORCA-Fusion) in global
             reset: every row starts exposing together on the trigger, but rows still
             end in turn as they are read out, so the light must be off by then for
@@ -262,8 +262,8 @@ class HamamatsuCamera(Camera):
 
     model_prefix: str
     default_timeout: float
-    #: Frame rate live mode fires software triggers at, on a camera without
-    #: DCAM's internal frame interval (the ORCA-R2).
+    #: The frame rate of a camera without DCAM's internal frame interval (the
+    #: ORCA-R2), which it can reach only through live mode's software triggers.
     _paced_rate: float = 10.0
 
     def __init__(
@@ -432,28 +432,5 @@ class HamamatsuCamera(Camera):
         with self._lock:
             return float(self._read_attribute("sensor_temperature"))
 
-    def start_live(self, buffer_frames: int = 1000, poll_s: float = 0.05) -> None:
-        was_live = self.is_live()
-        super().start_live(buffer_frames, poll_s)
-        if not was_live and not self._hardware_interval():
-            threading.Thread(
-                target=self._pace_software_triggers,
-                name=f"{type(self).__name__}-pacer",
-                daemon=True,
-            ).start()
-
-    def _pace_software_triggers(self) -> None:
-        stop = self._live_stop
-        while not stop.wait(1.0 / self._paced_rate):
-            if self._kept.get("trigger_source") != "software":
-                continue
-            try:
-                self._backend.send_software_trigger()
-            except Exception:
-                LOGGER.warning(
-                    "%s: software trigger failed", type(self).__name__, exc_info=True
-                )
-
     def trigger(self):
-        """Send a software trigger to the camera."""
         self._backend.send_software_trigger()
