@@ -36,7 +36,7 @@ class CaFMOT(MotMasterExperiment):
 
     analyses = ("cloud_fit", "cloud_temperature")
 
-    caf = MotMaster("CaF MotMaster", script="0. DDSFourSidebands5W_noDDS")
+    caf = MotMaster("CaF MotMaster", script="0. MOT")
     cafmot_cam: ORCACamera = Device("CaFMOT Cam")
 
     iterations = Integer(
