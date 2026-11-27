@@ -114,6 +114,8 @@ class Tof(MotMasterExperiment):
   iterations, save toggle and untriggered mode on every task. Repeats come
   from `Scan(repetitions=...)`, one point per shot;
   `run_motmaster_sequence(**overrides)` overrides parameters for one run.
+  Every run stores MOTMaster's record of the sequence it built (from its
+  `GoCachedRecording`) under `/motmaster`; a MOTMaster without it fails the run.
 - `MotMasterInteger`/`MotMasterNumber` must match the script parameter's .NET
   type (`Int32`/`Double`).
 - **Any undeclared identifier is a script parameter**: `submit(Tof,
@@ -205,8 +207,8 @@ setting them is run-experiments). In an experiment:
 ## Files and the manager
 
 Each measurement is `{data_root}/YYYY/MM/DD/{rid:06d}_{Class}.h5`, with groups
-`/arguments`, `/scan`, `/points`, `/results`, `/recorded`, `/constants` and
-`/source`. Read it with `Dataset` or `fetch_measurement`, never by path from
+`/arguments`, `/scan`, `/points`, `/results`, `/recorded`, `/constants`,
+`/source` and, after a MOTMaster run, `/motmaster`. Read it with `Dataset` or `fetch_measurement`, never by path from
 another PC. **Read [manager.md](manager.md) before working on** the file
 layout, `data_root`, the copier, the results archive, the database rows, or
 the manager itself: its published state, pipelines, device reservations,

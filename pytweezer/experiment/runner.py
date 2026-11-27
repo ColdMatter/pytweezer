@@ -129,7 +129,7 @@ def run_points(
             status = TaskStatus.INTERRUPTED
         return status != TaskStatus.COMPLETED
 
-    experiment._recorder = writer.record
+    experiment._writer = writer
     try:
         experiment.prepare()
         if not stop_requested(control(Progress(0, total))):
@@ -166,7 +166,7 @@ def run_points(
             else:
                 status, error = TaskStatus.FAILED, traceback.format_exc()
         experiment.close_devices()
-        experiment._recorder = None
+        experiment._writer = None
         writer.finalise(status, error)
     return status, error
 

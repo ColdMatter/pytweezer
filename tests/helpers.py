@@ -344,3 +344,18 @@ def in_process_client(manager):
     client = ExperimentManagerClient(endpoint="tcp://127.0.0.1:1")
     client._req = InProcess(manager)
     return client
+
+
+def motmaster_record(parameters, script="fake"):
+    """JSON shaped as MOTMaster's ``GoCachedRecording`` record, with no events."""
+    return json.dumps(
+        {
+            "format": 1,
+            "machine": "fake",
+            "script": {"file": f"{script}.cs", "sha256": script, "text": script},
+            "parameters": dict(parameters or {}),
+            "digital": {},
+            "analog": {},
+            "link": None,
+        }
+    )

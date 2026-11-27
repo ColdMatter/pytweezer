@@ -6,6 +6,7 @@ import pytest
 from pytweezer.experiment import Scan, run_local
 from pytweezer.experiments.caf_fluorescence import CaFFluorescence
 from pytweezer.experiments.caf_mot import LASERS, CaFMOT
+from tests.helpers import motmaster_record
 
 START = {
     "v0": 494.431874,
@@ -101,7 +102,7 @@ class FakeCaFMotMaster:
         self.log.append(("ramp", laser, target))
         self.set_points[laser] = target
 
-    def start_motmaster_experiment(self, parameters):
+    def start_motmaster_experiment_recorded(self, parameters):
         self.log.append(("go", dict(parameters)))
         if len(self.goes()) == self.fail_on_go:
             raise self.failure
@@ -109,6 +110,7 @@ class FakeCaFMotMaster:
             "MOTCoilsCurrentValue", self.get_params()["MOTCoilsCurrentValue"]
         )
         self.camera.catch(self.iterations, field, dict(self.set_points))
+        return motmaster_record(parameters)
 
     def goes(self):
         return [entry[1] for entry in self.log if entry[0] == "go"]

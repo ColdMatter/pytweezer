@@ -6,8 +6,13 @@ from typing import Any, Literal
 
 import numpy as np
 
-from pytweezer.experiment.archive import fetch_measurement
-from pytweezer.experiment.storage import Measurement, find_measurement, load_measurement
+from pytweezer.experiment.archive import default_archive
+from pytweezer.experiment.storage import (
+    Measurement,
+    find_measurement,
+    load_measurement,
+    read_motmaster_sequence,
+)
 from pytweezer.experiment.summary import aggregate, describe, display_value
 
 
@@ -16,7 +21,7 @@ class Dataset:
 
     ``source`` is a rid or a file path; ``results`` limits which results are
     loaded (default all). A rid is looked up under ``root`` if given, and
-    otherwise fetched by :func:`~pytweezer.experiment.archive.fetch_measurement`,
+    otherwise fetched through :func:`~pytweezer.experiment.archive.default_archive`,
     which works from any PC. Any other attribute is the
     underlying :class:`~pytweezer.experiment.storage.Measurement`'s, so
     ``ds.arguments``, ``ds.results``, ``ds.constants``, ``ds.status`` work as there.
@@ -32,18 +37,46 @@ class Dataset:
         results: Iterable[str] | None = None,
         root: str | Path | None = None,
     ):
-        if not isinstance(source, (int, np.integer)):
-            measurement = load_measurement(source, results)
-        elif root is None:
-            measurement = fetch_measurement(int(source), results)
-        else:
-            measurement = load_measurement(find_measurement(int(source), root), results)
-        self.measurement: Measurement = measurement
+        if isinstance(source, (int, np.integer)) and root is None:
+            archive = default_archive()
+            relpath = archive.find(int(source))
+            self.measurement: Measurement = archive.load(relpath, results)
+            self._read_sequence = lambda digest: archive.motmaster_sequence(
+                relpath, digest
+            )
+            return
+        if isinstance(source, (int, np.integer)):
+            source = find_measurement(int(source), root)
+        self.measurement = load_measurement(source, results)
+        self._read_sequence = lambda digest: read_motmaster_sequence(source, digest)
 
     def __getattr__(self, name: str) -> Any:
         if name == "measurement":
             raise AttributeError(name)
         return getattr(self.measurement, name)
+
+    def motmaster_sequence(self, point: int, run: int = 0) -> dict[str, Any]:
+        """The record of the MOTMaster sequence that run ``run`` of point ``point`` ran.
+
+        Runs count from 0 within a point, in the order run; ``point=-1`` picks
+        those outside any point (e.g. from ``prepare()``). The record is
+        MOTMaster's own (``SequenceRecord.cs`` in EDMSuite), scripts' text
+        included; ``motmaster_runs`` lists every run.
+
+        Raises:
+            IndexError: If point ``point`` has no run ``run``.
+        """
+        runs = self.measurement.motmaster_runs
+        digests = [
+            digest
+            for index, digest in zip(runs.get("point", ()), runs.get("sequence", ()))
+            if index == point
+        ]
+        if not 0 <= run < len(digests):
+            raise IndexError(
+                f"point {point} has {len(digests)} MOTMaster run(s), not a run {run}"
+            )
+        return self._read_sequence(digests[run])
 
     def __repr__(self) -> str:
         return (

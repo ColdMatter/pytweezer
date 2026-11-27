@@ -25,6 +25,7 @@ from pytweezer.optimisers.optimise_mot_light import (
     OptimiseMOTLightMinTime,
 )
 from pytweezer.optimisers.optimise_tweezer_imaging import OptimiseTweezerImaging
+from tests.helpers import motmaster_record
 
 #: The default 8x8, 5 µm grid at 2 px/µm, in the pixels of the camera's ROI.
 SITES = [
@@ -66,10 +67,11 @@ class FakeSequencer:
     def get_params(self):
         return dict(SIMULATED_SCRIPT_PARAMETERS["RbTweezerBasic2026_2"])
 
-    def start_motmaster_experiment(self, parameters):
+    def start_motmaster_experiment_recorded(self, parameters):
         if self.fail:
             raise RuntimeError("MOTMaster refused")
         self.goes.append(parameters)
+        return motmaster_record(parameters)
 
 
 class RecordingCamera:
