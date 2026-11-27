@@ -10,6 +10,7 @@ Paths are relative to the data root, ``YYYY/MM/DD/{rid:06d}_{Class}.h5`` as in
 """
 
 import asyncio
+import json
 import os
 import threading
 from pathlib import Path
@@ -27,6 +28,7 @@ from pytweezer.experiment.storage import (
     is_this_pc,
     load_measurement,
     read_header,
+    read_motmaster_sequence,
     read_planned_points,
     read_point_result,
 )
@@ -100,6 +102,10 @@ class ResultsArchive:
         """Point ``index``'s value of result ``name``, without loading the rest."""
         return read_point_result(self._file(path), name, int(index))
 
+    def motmaster_sequence(self, path: str, digest: str) -> dict[str, Any]:
+        """The record of MOTMaster sequence ``digest`` in the file at ``path``."""
+        return read_motmaster_sequence(self._file(path), digest)
+
     def _file(self, path: str) -> Path:
         file = self._inside(path)
         if file.suffix != ".h5":
@@ -154,6 +160,11 @@ class ArchiveTarget:
         value = await asyncio.to_thread(self._archive.point_result, path, name, index)
         return _to_wire(value)
 
+    async def motmaster_sequence(self, path: str, digest: str) -> str:
+        # As JSON text: the record's NaNs and nesting travel unchanged.
+        record = await asyncio.to_thread(self._archive.motmaster_sequence, path, digest)
+        return json.dumps(record)
+
 
 class RemoteArchive:
     """A :class:`ResultsArchive` on the Experiment Manager's PC, over sipyco RPC.
@@ -201,6 +212,9 @@ class RemoteArchive:
 
     def point_result(self, path: str, name: str, index: int) -> Any:
         return _from_wire(self._call("point_result", path, name, int(index)))
+
+    def motmaster_sequence(self, path: str, digest: str) -> dict[str, Any]:
+        return json.loads(self._call("motmaster_sequence", path, digest))
 
     def close(self) -> None:
         with self._lock:
@@ -281,22 +295,25 @@ def _from_wire(value: Any) -> Any:
 
 
 def _measurement_to_wire(measurement: Measurement) -> dict:
-    return _to_wire(
-        {
-            "attrs": measurement.attrs,
-            "arguments": measurement.arguments,
-            "argument_schema": measurement.argument_schema,
-            "scan": measurement.scan.model_dump_json(),
-            "points": measurement.points,
-            "results": measurement.results,
-            "recorded": measurement.recorded,
-            "constants": measurement.constants,
-            "units": measurement.units,
-            "result_shapes": measurement.result_shapes,
-            "result_kinds": measurement.result_kinds,
-            "source": measurement.source,
-        }
-    )
+    wire = {
+        "attrs": measurement.attrs,
+        "arguments": measurement.arguments,
+        "argument_schema": measurement.argument_schema,
+        "scan": measurement.scan.model_dump_json(),
+        "points": measurement.points,
+        "results": measurement.results,
+        "recorded": measurement.recorded,
+        "constants": measurement.constants,
+        "units": measurement.units,
+        "result_shapes": measurement.result_shapes,
+        "result_kinds": measurement.result_kinds,
+        "source": measurement.source,
+    }
+    # Only when there are runs, so a client not yet updated still loads every
+    # file without them.
+    if measurement.motmaster_runs:
+        wire["motmaster_runs"] = measurement.motmaster_runs
+    return _to_wire(wire)
 
 
 def _measurement_from_wire(wire: dict) -> Measurement:

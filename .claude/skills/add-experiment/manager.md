@@ -9,7 +9,9 @@ queue, pipelines, reservations, file layout, copier, archive or database rows.
 experiment, class_name, label, submitter, status, error, times, `n_points`,
 `n_done`, git commit/dirty and `analyses`. Groups: `/arguments`, `/scan`,
 `/points/{index,repetition,<axis>,t_start,t_end}`, `/results`, `/recorded`,
-`/constants`, `/source` (the module's code). Rows are planned points in run
+`/constants`, `/source` (the module's code) and `/motmaster` (every MOTMaster
+run: `runs/{point,sequence,t}`, plus each distinct sequence record and script
+once, by sha256; read lazily by `Dataset.motmaster_sequence`). Rows are planned points in run
 order; only the first `n_done` ran. Never overwritten (mode `"x"`), readable
 mid-run (`locking=False`).
 

@@ -10,6 +10,7 @@ interface is a connected one.
 """
 
 import difflib
+import hashlib
 import json
 import numbers
 import pathlib
@@ -345,6 +346,37 @@ class MotMasterInterface:
         return bool(self.motmaster.IsLinked)
 
     def start_motmaster_experiment(self, parameters: dict | None = None):
+        self._check_runnable()
+        # Go returns once the run, zip included, has finished.
+        go = getattr(self.motmaster, "GoCached", self.motmaster.Go)
+        go(self.python_to_cs_dict(parameters or {}))
+
+    def start_motmaster_experiment_recorded(
+        self, parameters: dict | None = None
+    ) -> str | None:
+        """Run as :meth:`start_motmaster_experiment` does; return MOTMaster's JSON record of the sequence it ran.
+
+        The record (``SequenceRecord.cs`` in EDMSuite) holds every event the
+        pattern generators were given, the full parameter set and the script's
+        text; a linked run's holds the secondary's record too. Unlike ``Go``,
+        MOTMaster throws rather than showing a dialog when the run fails.
+
+        A MOTMaster built without ``GoCachedRecording`` runs the sequence as
+        :meth:`start_motmaster_experiment` does and returns ``None``.
+        """
+        self._check_runnable()
+        go = getattr(self.motmaster, "GoCachedRecording", None)
+        if go is None:
+            logger.warning(
+                "This MOTMaster cannot record the sequences it runs (no "
+                "GoCachedRecording); running without a record. Rebuild it from "
+                "EDMSuite master."
+            )
+            self.start_motmaster_experiment(parameters)
+            return None
+        return str(go(self.python_to_cs_dict(parameters or {})))
+
+    def _check_runnable(self) -> None:
         if self.script is None:
             raise ValueError(
                 "MotMaster script not set. Please call set_motmaster_experiment first."
@@ -358,9 +390,6 @@ class MotMasterInterface:
                 "back control); the linked script was not run. Call "
                 "set_linked(True) to claim the secondary again."
             )
-        # Go returns once the run, zip included, has finished.
-        go = getattr(self.motmaster, "GoCached", self.motmaster.Go)
-        go(self.python_to_cs_dict(parameters or {}))
 
     def _get_parameters(self):
         # The *Cached methods (EDMSuite#23) reuse the compiled script while its text is
@@ -881,3 +910,31 @@ class SimulatedMotMasterInterface:
                     f"{name!r} is an Int32 in script {self.script!r}; got {value!r}"
                 )
         time.sleep(self.sim_run_s)
+
+    def start_motmaster_experiment_recorded(
+        self, parameters: dict | None = None
+    ) -> str:
+        """A record shaped as MOTMaster's, with no events: nothing was built."""
+        self.start_motmaster_experiment(parameters)
+        text = f"// simulated script {self.script}\n"
+        return json.dumps(
+            {
+                "format": 1,
+                "machine": "simulated",
+                "provenance": "simulated",
+                "debug": True,
+                "script": {
+                    "file": f"{self.script}.cs",
+                    "sha256": hashlib.sha256(text.encode()).hexdigest(),
+                    "text": text,
+                },
+                "parameters": {**self.get_params(), **(parameters or {})},
+                "digital_clock_hz": 100_000,
+                "analog_clock_hz": 100_000,
+                "digital": {},
+                "analog": {},
+                "analog_static": {},
+                "dds": None,
+                "link": None,
+            }
+        )

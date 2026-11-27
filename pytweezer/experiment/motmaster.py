@@ -33,6 +33,12 @@ are recorded as the constant ``saved_sequence``, keyed by script parameter.
 With ``use_motmaster_parameter_overrides`` off, none are sent and the script's
 own values run.
 
+Every run stores MOTMaster's record of the sequence it built (every event,
+the full parameter set and the script's text) in the measurement file; see
+:mod:`pytweezer.experiment.storage` and ``Dataset.motmaster_sequence``. A
+MOTMaster built without that record still runs; the file lists the run as
+unrecorded.
+
 Two machines are run together by MOTMaster's linked mode: the primary claims its
 secondary itself and fires it by TTL, so the experiment declares only the
 primary, and every parameter (both machines', plus ``SecondaryTriggerDelay``)
@@ -58,6 +64,7 @@ or not the task links it::
 """
 
 import difflib
+import json
 from collections.abc import Iterable
 from typing import Any
 
@@ -410,8 +417,15 @@ class MotMasterExperiment(Experiment):
         """Run the script once (blocking) with the current parameters plus ``overrides``.
 
         ``overrides`` are keyed by script parameter and beat the form's values,
-        which beat the saved ones.
+        which beat the saved ones. MOTMaster's record of the sequence it ran
+        goes into the measurement file's ``/motmaster`` group, so the file
+        shows exactly what ran whatever later happens to the script.
         """
+        if self._writer is None:
+            raise RuntimeError(
+                "run_motmaster_sequence() only works while the experiment is run "
+                "by run_local() or the experiment manager"
+            )
         requested = self._saved_values | self.motmaster_parameters() | overrides
         # A name that is only scanned reaches the experiment at its first point,
         # after prepare().
@@ -420,7 +434,11 @@ class MotMasterExperiment(Experiment):
             parameter: self._typed(parameter, value)
             for parameter, value in requested.items()
         }
-        getattr(self, self.motmaster()[0]).start_motmaster_experiment(sent)
+        sequencer = getattr(self, self.motmaster()[0])
+        record = sequencer.start_motmaster_experiment_recorded(sent)
+        self._writer.record_motmaster_run(
+            None if record is None else json.loads(record)
+        )
 
     def run_point(self) -> None:
         self.run_motmaster_sequence()

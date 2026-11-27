@@ -16,6 +16,7 @@ from pytweezer.experiment.motmaster import (
     MotMasterInteger,
     MotMasterNumber,
 )
+from tests.helpers import motmaster_record
 
 
 class FakeSequencer:
@@ -47,12 +48,13 @@ class FakeSequencer:
     def get_params(self):
         return dict(self.params)
 
-    def start_motmaster_experiment(self, parameters=None):
+    def start_motmaster_experiment_recorded(self, parameters=None):
         self.log.append((self.name, "start"))
         time.sleep(self.go_delay)
         self.log.append((self.name, "go", parameters))
         if self.fail_go:
             raise RuntimeError(f"{self.name} refused")
+        return motmaster_record(parameters)
 
 
 @pytest.fixture

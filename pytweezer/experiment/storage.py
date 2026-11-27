@@ -15,6 +15,18 @@ Layout of ``{data_root}/YYYY/MM/DD/{rid:06d}_{ClassName}.h5``::
     /recorded/<name>      (n_points,) bool, whether point i recorded <name>
     /constants/<name>     recorded from prepare()/finish()
     /source/<module>      experiment source text, attr sha256
+    /motmaster/runs/<column>         point, sequence, t: one row per MOTMaster run, in
+                                     the order run; point is -1 outside a point,
+                                     sequence "" if MOTMaster could not record it
+    /motmaster/sequences/<sha256>    gzipped JSON of a sequence MOTMaster ran, its
+                                     scripts' text replaced by their sha256
+    /motmaster/scripts/<sha256>      gzipped text of a script those sequences compiled
+
+``/motmaster`` exists only once a MOTMaster run is recorded. A sequence's
+record is MOTMaster's own (``SequenceRecord.cs`` in EDMSuite); each distinct
+sequence and script is stored once, keyed by the sha256 of its stored text. A
+linked run whose secondary could not record has ``link.secondary`` null and
+the reason in ``link.secondary_unrecorded``.
 
 Every column under ``/points`` and ``/results`` has one row per *planned*
 point, in execution order, so the first ``n_done`` rows are the ones that ran.
@@ -281,6 +293,44 @@ class MeasurementWriter:
         if np.ndim(data) == 0 and np.dtype(dtype).kind in "biuf":
             self.point_scalars[name] = float(data)
 
+    def record_motmaster_run(self, record: dict[str, Any] | None) -> str:
+        """Record one MOTMaster run of the sequence ``record``; return the sequence's sha256.
+
+        ``record`` is what MOTMaster's ``GoCachedRecording`` returned, parsed,
+        or ``None`` when that MOTMaster could not record it; the run is then
+        listed with sequence ``""``. The run belongs to the current point, or to
+        none (-1) outside a point.
+        """
+        group = self.file.require_group("motmaster")
+        scripts_group = group.require_group("scripts")
+        sequences_group = group.require_group("sequences")
+        digest = ""
+        if record is not None:
+            sequence, scripts = _split_scripts(record)
+            for script_digest, text in scripts.items():
+                _store_once(scripts_group, script_digest, text)
+            digest = hashlib.sha256(sequence.encode()).hexdigest()
+            _store_once(sequences_group, digest, sequence)
+        runs = group.require_group("runs")
+        if "point" not in runs:
+            for name, dtype in (
+                ("point", np.int64),
+                ("sequence", _STR),
+                ("t", np.float64),
+            ):
+                runs.create_dataset(name, shape=(0,), maxshape=(None,), dtype=dtype)
+        row = runs["point"].shape[0]
+        values = {
+            "point": -1 if self._point is None else self._point.index,
+            "sequence": digest,
+            "t": datetime.now().timestamp(),
+        }
+        for name, value in values.items():
+            runs[name].resize((row + 1,))
+            runs[name][row] = value
+        self.file.flush()
+        return digest
+
     def finalise(self, status: str, error: str | None = None) -> None:
         self.file.attrs.update(status=str(status), error=error or "", t_end=_now_iso())
         self.file.flush()
@@ -288,6 +338,63 @@ class MeasurementWriter:
     def close(self) -> None:
         if self.file.id.valid:
             self.file.close()
+
+
+def _split_scripts(record: dict[str, Any]) -> tuple[str, dict[str, str]]:
+    """Canonical JSON of ``record`` without its scripts' text, and ``{sha256: text}`` of those scripts.
+
+    A linked run's record holds the secondary's record under ``link.secondary``.
+    """
+    record = json.loads(json.dumps(record))
+    scripts = {}
+    part = record
+    while part is not None:
+        script = part["script"]
+        scripts[script["sha256"]] = script.pop("text")
+        part = (part.get("link") or {}).get("secondary")
+    return json.dumps(record, sort_keys=True, separators=(",", ":")), scripts
+
+
+def _join_scripts(record: dict[str, Any], scripts: h5py.Group) -> dict[str, Any]:
+    part = record
+    while part is not None:
+        script = part["script"]
+        script["text"] = _read_text(scripts[script["sha256"]])
+        part = (part.get("link") or {}).get("secondary")
+    return record
+
+
+def _store_once(group: h5py.Group, digest: str, text: str) -> None:
+    if digest in group:
+        return
+    data = np.frombuffer(text.encode(), dtype=np.uint8)
+    group.create_dataset(digest, data=data, compression="gzip", shuffle=True)
+
+
+def _read_text(dataset: h5py.Dataset) -> str:
+    return dataset[()].tobytes().decode()
+
+
+def read_motmaster_sequence(path: Path | str, digest: str) -> dict[str, Any]:
+    """The record of MOTMaster sequence ``digest`` in the file at ``path``, scripts' text included.
+
+    Raises:
+        KeyError: If the file holds no sequence ``digest``.
+    """
+    with h5py.File(path, "r", locking=False) as f:
+        if "motmaster" not in f or digest not in f["motmaster/sequences"]:
+            raise KeyError(f"{path} holds no MOTMaster sequence {digest!r}")
+        record = json.loads(_read_text(f["motmaster/sequences"][digest]))
+        return _join_scripts(record, f["motmaster/scripts"])
+
+
+def _read_motmaster_runs(f: h5py.File) -> dict[str, np.ndarray]:
+    if "motmaster" not in f:
+        return {}
+    return {
+        name: _decode(dataset, dataset[()])
+        for name, dataset in f["motmaster/runs"].items()
+    }
 
 
 def _check_name(name: str) -> None:
@@ -346,6 +453,10 @@ class Measurement:
     #: numpy dtype kind of every result ("O" for text), including those not loaded.
     result_kinds: dict[str, str] = field(default_factory=dict)
     source: dict[str, str] = field(default_factory=dict)
+    #: ``/motmaster/runs``: ``point``, ``sequence`` (sha256) and ``t`` of every
+    #: MOTMaster run, in the order run; empty if there were none. The sequences
+    #: themselves are read on demand (:func:`read_motmaster_sequence`).
+    motmaster_runs: dict[str, np.ndarray] = field(default_factory=dict)
     path: Path | None = None
 
     @property
@@ -445,6 +556,7 @@ def _read(f: h5py.File, path: Path | None, wanted: set[str] | None) -> Measureme
         result_shapes=shapes,
         result_kinds=kinds,
         source={name: ds[()].decode() for name, ds in f["source"].items()},
+        motmaster_runs=_read_motmaster_runs(f),
         path=path,
     )
 

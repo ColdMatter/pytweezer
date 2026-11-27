@@ -55,7 +55,8 @@ class Experiment:
             self.set_argument(name, value)
         self._clients: list[Any] = []
         self._shared_clients: dict[str, Any] = {}
-        self._recorder: Any = None
+        #: The task's MeasurementWriter while it runs, else None.
+        self._writer: Any = None
         #: A :class:`~pytweezer.experiment.simulation.SimulatedDevices` when
         #: running in simulation; devices then come from it instead of RPC.
         self.simulated_devices: Any = None
@@ -174,12 +175,12 @@ class Experiment:
         must have the same shape. From :meth:`prepare` or :meth:`finish` it is
         stored once under ``/constants/<name>``.
         """
-        if self._recorder is None:
+        if self._writer is None:
             raise RuntimeError(
                 "record() only works while the experiment is run by run_local() "
                 "or the experiment manager"
             )
-        self._recorder(name, value, unit)
+        self._writer.record(name, value, unit)
 
     def device(self, name: str, *, fresh: bool = False, timeout: float | None = None):
         """Return an RPC client for the device ``name``, closed when the task ends.

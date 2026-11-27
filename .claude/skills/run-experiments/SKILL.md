@@ -56,6 +56,7 @@ ds = Dataset(rid)  # root=... for another data dir, results=[...] for a subset
 ds.summarise()  # same text as the Results tab's metadata pane
 df = ds.get_data()  # "dataframe" (default) | "dict" | "array"
 ax = ds.plot_scan("atom_number")  # mean ± SEM over repetitions, stamped with the git commit
+seq = ds.motmaster_sequence(point, run=0)  # what MOTMaster ran: events, parameters, script text
 ```
 
 Rows are the points run, in run order: `index`, `repetition`, scanned
