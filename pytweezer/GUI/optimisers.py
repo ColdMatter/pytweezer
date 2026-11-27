@@ -13,8 +13,6 @@ off the GUI thread.
 import importlib
 from dataclasses import dataclass, field
 
-import numpy as np
-import pyqtgraph as pg
 from PyQt6 import QtCore, QtGui
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -60,7 +58,12 @@ from pytweezer.GUI.experiments.arg_editor import ValueField
 from pytweezer.GUI.experiments.catalogue_view import doc_summary
 from pytweezer.GUI.experiments.feed import ExperimentFeed
 from pytweezer.GUI.saved_parameters import display_value, when_text
-from pytweezer.GUI.theme import PLOT_BACKGROUND, plot_title_style, style_plot
+from pytweezer.GUI.views.optimiser_plots import (
+    PLOTTED,
+    OptimiserPlots,
+    live_results,
+    plotted_names,
+)
 from pytweezer.logging_utils import get_logger
 
 logger = get_logger("pytweezer.GUI.optimisers")
@@ -72,15 +75,10 @@ LAST_RUN = "Last run"
 DEFAULTS = "Defaults"
 UNGROUPED = "Measurement"
 _KEY = QtCore.Qt.ItemDataRole.UserRole
-_ACCENT = "#5b8def"
-_POINTS = "#9aa0b4"
 _RUNNING_SHADE = QtGui.QColor("#1f2c45")
 _TOP_HINT = "Pick one to set it up and run it"
 _DISCARDED_KEPT = 200
-_PLOT_COLUMNS = 2
 _LIVE = (TaskStatus.RUNNING, TaskStatus.PAUSED)
-#: Results plotted; per-setting results are added for Bayesian runs.
-_PLOTTED = ["stage", "setting", "objective"]
 
 _ICON_STATE = {
     "queued": "stopped",
@@ -105,17 +103,6 @@ def partial_label(constants: dict) -> str:
             f"{constants['evaluations_total']} evaluations"
         )
     return "partial"
-
-
-def live_results(points: list[dict], names: list[str]) -> dict[str, np.ndarray]:
-    """``{name: one value per point}`` from the feed's points, in point order; NaN where missing."""
-    ordered = sorted(points, key=lambda point: point["index"])
-    return {
-        name: np.array(
-            [float(point.get("scalars", {}).get(name, np.nan)) for point in ordered]
-        )
-        for name in names
-    }
 
 
 def _number(value) -> str:
@@ -274,7 +261,6 @@ class OptimisersPanel(QWidget):
         self._last_requests: dict[tuple[str, str], TaskRequest | None] = {}
         self._versions: dict[str, object] = {}
         self._stale = {"optimisers", "recipes", "saved", "tasks"}
-        self._plots = None
         self._sheet_rid = None
         self._sheet_shown = None
         self._proposed = {}
@@ -296,17 +282,9 @@ class OptimisersPanel(QWidget):
 
         self.settings_region = self._build_settings()
 
-        self.plots = QWidget()
-        self.plots.setObjectName("OptimiserPlots")
-        self.plots_layout = QGridLayout(self.plots)
-        self.plots_layout.setContentsMargins(0, 0, 0, 0)
-        self.plots_layout.setSpacing(16)
-        self.plot_message = QLabel()
-        self.plot_message.setProperty("role", "regionHint")
-        self.plot_message.setWordWrap(True)
+        self.plots = OptimiserPlots()
         self.run_region = Region("well", "Pick an optimiser", "")
         self.run_region.body.addWidget(self.plots, 1)
-        self.run_region.body.addWidget(self.plot_message)
         self.terminate_button = QPushButton("Terminate")
         self.terminate_button.setToolTip(
             "Stop after the current point. What it measured is kept, and a"
@@ -648,7 +626,7 @@ class OptimisersPanel(QWidget):
         if path not in self._reading:
             self._reading.add(path)
             row = self.rows.get((task.experiment, task.class_name))
-            results = _plotted_names(row.schema) if row else _PLOTTED
+            results = plotted_names(row.schema) if row else PLOTTED
             self._reader.start(
                 f"Optimisers read {path}",
                 lambda: self.archive.load(path, results=results),
@@ -673,6 +651,11 @@ class OptimisersPanel(QWidget):
         return self._accepted[rid]
 
     # -- the selected optimiser ----------------------------------------------
+
+    def schema_of(self, module: str, class_name: str) -> dict | None:
+        """The catalogue's schema of optimiser ``module.class_name``, or ``None`` if it lists none."""
+        row = self.rows.get((module, class_name))
+        return None if row is None else row.schema
 
     def select(self, module: str, class_name: str) -> None:
         """Select optimiser ``module.class_name``: its settings, and its latest run."""
@@ -724,7 +707,7 @@ class OptimisersPanel(QWidget):
                 hint += ", stopping after this point"
             self.run_region.set_hint(hint)
             points = self.feed.points(run.rid)
-            self._show_plots(row, run, live_results(points, _plotted_names(row.schema)))
+            self._show_plots(row, run, live_results(points, plotted_names(row.schema)))
             self._show_proposals(
                 None,
                 f"Run {run.rid} is {run.status}; its proposals follow when it ends",
@@ -869,31 +852,10 @@ class OptimisersPanel(QWidget):
 
     def _show_plots(self, row, run, results=None, constants=None, error=None):
         """Plot ``results`` of ``run``, updating the plots in place while the run is the same."""
-        key = (
-            None if run is None or error else (run.rid, row.schema["optimiser"]["kind"])
+        key = None if run is None else (run.rid, row.schema["optimiser"]["kind"])
+        self.plots.show_run(
+            key, None if row is None else row.schema, results, constants, error
         )
-        if self._plots is None or self._plots.key != key:
-            while self.plots_layout.count():
-                widget = self.plots_layout.takeAt(0).widget()
-                if widget is not None:
-                    widget.deleteLater()
-            self._plots = None
-            if key is not None:
-                kind = {"staged": _StagedPlots, "fit": _FitPlots}.get(
-                    key[1], _EvaluationPlots
-                )
-                self._plots = kind(key, row.schema)
-                for index, plot in enumerate(self._plots.widgets):
-                    self.plots_layout.addWidget(
-                        plot, index // _PLOT_COLUMNS, index % _PLOT_COLUMNS
-                    )
-        if error is not None:
-            self.plot_message.setText(f"Its file cannot be read: {error}")
-        elif self._plots is None:
-            self.plot_message.setText("")
-        else:
-            measured = self._plots.update(results or {}, constants or {})
-            self.plot_message.setText("" if measured else "No points measured yet")
 
     # -- settings ------------------------------------------------------------
 
@@ -1234,211 +1196,12 @@ class OptimisersPanel(QWidget):
         super().closeEvent(event)
 
 
-class _StagedPlots:
-    """One plot per stage: objective against its setting, and the value it chose."""
-
-    def __init__(self, key, schema):
-        self.key = key
-        optimiser = schema["optimiser"]
-        self.stages = []
-        self.widgets = []
-        for index, (setting, saved) in enumerate(
-            zip(optimiser["settings"], optimiser["proposes"], strict=True)
-        ):
-            plot = _plot(
-                f"Stage {index + 1}: {setting} → {saved}",
-                setting,
-                optimiser["objective"],
-            )
-            shots = plot.plot(
-                [], [], pen=None, symbol="o", symbolSize=6, symbolBrush=_POINTS
-            )
-            means = plot.plot([], [], pen=pg.mkPen(_POINTS, width=1.5))
-            chosen = plot.plot(
-                [],
-                [],
-                pen=None,
-                symbol="o",
-                symbolSize=10,
-                symbolBrush=_ACCENT,
-                symbolPen=_ACCENT,
-            )
-            line = _chosen_line()
-            plot.addItem(line)
-            self.stages.append((saved, shots, means, chosen, line))
-            self.widgets.append(plot)
-
-    def update(self, results, constants) -> bool:
-        stages = np.asarray(results.get("stage", []))
-        settings = np.asarray(results.get("setting", []), dtype=float)
-        objectives = np.asarray(results.get("objective", []), dtype=float)
-        for index, (saved, shots, means, chosen, line) in enumerate(self.stages):
-            here = stages == index
-            x, y = settings[here], objectives[here]
-            shots.setData(x, y)
-            means_x = np.unique(x)
-            means_y = np.array([np.nanmean(y[x == value]) for value in means_x])
-            means.setData(means_x, means_y)
-            value = constants.get(f"proposed.{saved}")
-            if value is None:
-                chosen.setData([], [])
-                line.setVisible(False)
-                continue
-            value = float(value)
-            at_value = np.isclose(means_x, value)
-            chosen.setData(means_x[at_value], means_y[at_value])
-            line.setValue(value)
-            line.setVisible(True)
-        return len(objectives) > 0
-
-
-class _EvaluationPlots:
-    """The objective per evaluation with the best so far, and against each setting."""
-
-    def __init__(self, key, schema):
-        self.key = key
-        optimiser = schema["optimiser"]
-        self.goal = optimiser["goal"]
-        self.settings = optimiser["settings"]
-        objective = optimiser["objective"]
-        progress = _plot(
-            f"Objective per evaluation; best so far ({self.goal})",
-            "evaluation",
-            objective,
-        )
-        self.shots = progress.plot(
-            [], [], pen=None, symbol="o", symbolSize=6, symbolBrush=_POINTS
-        )
-        self.best = progress.plot([], [], pen=pg.mkPen(_ACCENT, width=2))
-        self.widgets = [progress]
-        self.per_setting = []
-        for setting, saved in zip(
-            optimiser["settings"], optimiser["proposes"], strict=True
-        ):
-            plot = _plot(f"{setting} → {saved}", setting, objective)
-            shots = plot.plot(
-                [], [], pen=None, symbol="o", symbolSize=6, symbolBrush=_POINTS
-            )
-            best = plot.plot(
-                [],
-                [],
-                pen=None,
-                symbol="o",
-                symbolSize=10,
-                symbolBrush=_ACCENT,
-                symbolPen=_ACCENT,
-            )
-            self.per_setting.append((setting, shots, best))
-            self.widgets.append(plot)
-
-    def update(self, results, constants) -> bool:
-        objective = np.asarray(results.get("objective", []), dtype=float)
-        number = np.arange(1, len(objective) + 1)
-        self.shots.setData(number, objective)
-        finite = np.where(np.isfinite(objective), objective, np.nan)
-        best_index = None
-        if np.isfinite(finite).any():
-            accumulate = (
-                np.fmax.accumulate if self.goal == "max" else np.fmin.accumulate
-            )
-            self.best.setData(
-                np.append(number, number[-1] + 1), accumulate(finite), stepMode="center"
-            )
-            choose = np.nanargmax if self.goal == "max" else np.nanargmin
-            best_index = int(choose(finite))
-        else:
-            self.best.setData([], [])
-        for setting, shots, best in self.per_setting:
-            values = np.asarray(results.get(setting, []), dtype=float)
-            shots.setData(values, objective[: len(values)])
-            if best_index is None or best_index >= len(values):
-                best.setData([], [])
-            else:
-                best.setData([values[best_index]], [objective[best_index]])
-        return len(objective) > 0
-
-
-class _FitPlots:
-    """The image a fit was made on, with a square the summing window's size at each site."""
-
-    def __init__(self, key, schema):
-        self.key = key
-        plot = _plot("Fitted trap sites", "x (px)", "y (px)")
-        plot.getViewBox().setAspectLocked(True)
-        plot.getViewBox().invertY(True)
-        self.image = pg.ImageItem(axisOrder="row-major")
-        self.squares = pg.ScatterPlotItem(
-            symbol="s", pxMode=False, brush=None, pen=pg.mkPen(_ACCENT, width=1)
-        )
-        plot.addItem(self.image)
-        plot.addItem(self.squares)
-        self.widgets = [plot]
-
-    def update(self, results, constants) -> bool:
-        images = results.get("calibration_image")
-        sites = results.get("roi_sites")
-        # While the run is live these are the feed's per-point scalars (NaN),
-        # not the recorded image and sites.
-        if (
-            images is None
-            or sites is None
-            or not len(images)
-            or np.ndim(images[-1]) != 2
-            or np.ndim(sites[-1]) != 2
-        ):
-            self.image.clear()
-            self.squares.clear()
-            return False
-        image = np.asarray(images[-1], dtype=float)
-        self.image.setImage(image)
-        # Sites are in pixel-centre coordinates; an ImageItem puts centres at +0.5.
-        height, width = image.shape
-        self.image.setRect(QtCore.QRectF(-0.5, -0.5, width, height))
-        size = float(constants.get("proposed.trap_window_size", 5))
-        rows, columns = np.asarray(sites[-1], dtype=float).T
-        self.squares.setData(x=columns, y=rows, size=size)
-        return True
-
-
-def _plotted_names(schema) -> list[str]:
-    optimiser = schema["optimiser"]
-    if optimiser.get("kind") == "fit":
-        return ["calibration_image", "roi_sites"]
-    if optimiser.get("kind") == "bayesian":
-        return [*_PLOTTED, *optimiser["settings"]]
-    return list(_PLOTTED)
-
-
 #: What :meth:`OptimisersPanel._measurement` gives while the file is being read.
 _READING = object()
 
 
 def _failed(measurement) -> bool:
     return isinstance(measurement, Exception)
-
-
-def _plot(title, x_label, objective):
-    plot = pg.PlotWidget(background=PLOT_BACKGROUND)
-    plot.setMinimumSize(280, 200)
-    plot.setTitle(title, **plot_title_style())
-    style_plot(plot)
-    for axis in ("left", "bottom"):
-        plot.getAxis(axis).enableAutoSIPrefix(False)
-    plot.setLabel("bottom", x_label)
-    plot.setLabel("left", objective or "objective")
-    return plot
-
-
-def _chosen_line():
-    line = pg.InfiniteLine(
-        0.0,
-        angle=90,
-        pen=pg.mkPen(_ACCENT, width=1.5, style=QtCore.Qt.PenStyle.DashLine),
-        label="{value:.4g}",
-        labelOpts={"color": _ACCENT, "position": 0.92},
-    )
-    line.setVisible(False)
-    return line
 
 
 def _monospace():

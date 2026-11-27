@@ -569,3 +569,20 @@ def test_a_bayesian_objective_sees_the_settings_it_scores():
     m = run_local(ShortnessOfX, n_calls=5, n_initial=3)
     assert m.status == "completed", m.attrs["error"]
     assert np.allclose(m.results["objective"], 1 - m.results["x"] / 10)
+
+
+@pytest.mark.parametrize(
+    ("cls", "recorded"),
+    [(DemoStagedScan, True), (DemoResonance, False)],
+    ids=["optimiser", "plain-experiment"],
+)
+def test_an_optimisers_file_records_its_description(cls, recorded):
+    import json
+
+    measurement = run_local(
+        cls, **({"detuning_points": 2, "power_points": 2} if recorded else {})
+    )
+    if recorded:
+        assert json.loads(measurement.attrs["optimiser"]) == cls.optimiser_schema()
+    else:
+        assert "optimiser" not in measurement.attrs

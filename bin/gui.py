@@ -198,7 +198,12 @@ def build_gui(server: bool) -> TabbedGUI:
             experiments.load_request(request)
 
     def make_results():
-        results = ResultsPanel(feed=feed)
+        results = ResultsPanel(
+            feed=feed,
+            optimiser_schema=optimisers.schema_of
+            if isinstance(optimisers, OptimisersPanel)
+            else None,
+        )
         results.resubmit_requested.connect(resubmit)
         return results
 
