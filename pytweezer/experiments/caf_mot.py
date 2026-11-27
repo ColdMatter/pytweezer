@@ -7,7 +7,7 @@ import time
 import numpy as np
 
 from pytweezer.analysis.cloud_fit import SPECIES_MASS_AMU, fit_frames, frame_counts
-from pytweezer.drivers.thorcam import ThorCam
+from pytweezer.drivers.orca import ORCACamera
 from pytweezer.experiment import Bool, Device, Integer, Number
 from pytweezer.experiment.motmaster import MotMaster, MotMasterExperiment
 from pytweezer.logging_utils import get_logger
@@ -20,15 +20,15 @@ LASERS = ("v0", "BX", "v1", "v2", "v3", "TCool")
 
 
 class CaFMOT(MotMasterExperiment):
-    """The CaF MOT on the CaF ThorCam, as the camera sees it: no background subtraction.
+    """The CaF MOT on the CaFMOT Cam (ORCA-Fusion), as the camera sees it: no background subtraction.
 
     ``prepare`` notes every laser's set point, recorded as the constant
-    ``start_set_points`` (``{laser: THz}``). Each shot runs the script's
-    ``iterations`` and reads one ThorCam frame per iteration, with the
-    trigger, binning and gain its CONFIG entry sets. ``counts`` is the mean
+    ``start_set_points`` (``{laser: THz}``), and puts the camera on its
+    external trigger. Each shot runs the script's ``iterations`` and reads one
+    frame per iteration. ``counts`` is the mean
     over the shot's frames of each frame's sum, ``counts_error`` its standard
     error (NaN for a single frame). Each :meth:`measure` also records the
-    Gaussian fit of the cloud in the mean frame as ``thorcam_*``, so
+    Gaussian fit of the cloud in the mean frame as ``cafmot_*``, so
     optimisers built on it record it too. ``finish`` ramps every laser
     :meth:`set_lasers` moved back to its starting set point, whatever
     happened; a laser it never moved is left alone.
@@ -37,14 +37,14 @@ class CaFMOT(MotMasterExperiment):
     analyses = ("cloud_fit", "cloud_temperature")
 
     caf = MotMaster("CaF MotMaster", script="0. DDSFourSidebands5W_noDDS")
-    thorcam: ThorCam = Device("CaF ThorCam")
+    cafmot_cam: ORCACamera = Device("CaFMOT Cam")
 
     iterations = Integer(
         1,
         min=1,
         group="MOTMaster",
         scannable=False,
-        tooltip="Script iterations per shot, with one ThorCam frame read for each",
+        tooltip="Script iterations per shot, with one CaFMOT Cam frame read for each",
     )
     save_mean_image = Bool(
         True,
@@ -69,7 +69,9 @@ class CaFMOT(MotMasterExperiment):
         self.start_set_points = self.caf.laser_set_points_wml()
         self.record("start_set_points", self.start_set_points)
         self.record("cloud_mass_amu", SPECIES_MASS_AMU["CaF"], unit="u")
-        self.thorcam.start_live()
+        self.cafmot_cam.stop_live()
+        self.cafmot_cam.set_trigger_source("ext")
+        self.cafmot_cam.start_live()
 
     def run_point(self) -> None:
         for name, value in self.measure().items():
@@ -80,8 +82,8 @@ class CaFMOT(MotMasterExperiment):
             self.restore_lasers()
         finally:
             try:
-                self.thorcam.start_live()  # does nothing unless a failure left it stopped
-                self.thorcam.end_shots()
+                self.cafmot_cam.start_live()  # does nothing unless a failure left it stopped
+                self.cafmot_cam.end_shots()
             finally:
                 super().finish()
 
@@ -97,7 +99,7 @@ class CaFMOT(MotMasterExperiment):
     ) -> dict[str, float]:
         """Fluorescence counts with the given set points (THz); ``None`` leaves a laser alone.
 
-        Also records the shot's ``thorcam_*`` cloud fit, so it must run inside a point.
+        Also records the shot's ``cafmot_*`` cloud fit, so it must run inside a point.
         """
         self.set_lasers(v0=v0, BX=BX, v1=v1, v2=v2, v3=v3, TCool=TCool)
         frames = self.take_shot()
@@ -106,9 +108,9 @@ class CaFMOT(MotMasterExperiment):
 
     def take_shot(self, **overrides: float) -> np.ndarray:
         """Run the script once with ``overrides`` and return its ``(iterations, H, W)`` frames."""
-        mark = self.thorcam.start_shot({"rid": self.rid})
+        mark = self.cafmot_cam.start_shot({"rid": self.rid})
         self.run_motmaster_sequence(**overrides)
-        return np.asarray(self.thorcam.wait_frames(mark, self.iterations))
+        return np.asarray(self.cafmot_cam.wait_frames(mark, self.iterations))
 
     def set_lasers(self, **set_points: float | None) -> None:
         """Ramp each laser given a set point (THz) to it, then wait ``settle_s``.
@@ -155,10 +157,10 @@ class CaFMOT(MotMasterExperiment):
             ) from next(iter(errors.values()))
 
     def record_cloud_fit(self, frames: np.ndarray) -> None:
-        """Fit the mean of ``frames`` less :attr:`background` and record the cloud as ``thorcam_*``."""
-        pixel_m = get_device_config("CaF ThorCam").get("object_pixel_m")
+        """Fit the mean of ``frames`` less :attr:`background` and record the cloud as ``cafmot_*``."""
+        pixel_m = get_device_config("CaFMOT Cam").get("object_pixel_m")
         # Read from the camera, which may have been set up outside this experiment.
-        binning, (x0, y0) = self.thorcam.frame_geometry()
+        binning, (x0, y0) = self.cafmot_cam.frame_geometry()
         resolution = None if pixel_m is None else (pixel_m * binning,) * 2
         values, mean_image = fit_frames(
             frames, self.background, resolution, (x0 / binning, y0 / binning)
@@ -169,6 +171,6 @@ class CaFMOT(MotMasterExperiment):
             unit = {"angle": "rad", "amplitude": "counts", "offset": "counts"}.get(
                 quantity, "counts" if quantity == "integral" else length
             )
-            self.record(f"thorcam_{field}", value, unit=unit)
+            self.record(f"cafmot_{field}", value, unit=unit)
         if self.save_mean_image:
-            self.record("thorcam_mean_image", mean_image, unit="counts")
+            self.record("cafmot_mean_image", mean_image, unit="counts")

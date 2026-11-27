@@ -14,7 +14,7 @@ and run-experiments (the queue, saved parameters) applies; this skill covers wha
 adds. Device-free examples: `DemoStagedScan`/`DemoBayesian` in
 `optimisers/demo_staged_scan.py`/`demo_bayesian.py` (over
 `experiments/demo_resonance.py`); the real ones are tweezer-array's and
-`OptimiseCaFMOT` (`optimisers/optimise_caf_mot.py`: a span stage per CaF
+`OptimiseCaFMOT` (`optimisers/optimise_caf_mot.py`, on the CaFMOT Cam: a span stage per CaF
 wavemeter-lock laser, centred on the lock's set point, with an `apply` that
 ramps the accepted lasers).
 

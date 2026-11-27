@@ -14,7 +14,7 @@ from pytweezer.optimisers.optimise_caf_mot import (
     create_saved_set_points,
 )
 from tests.helpers import in_process_client
-from tests.test_caf_fluorescence import START, FakeCaFMotMaster, FakeThorCam
+from tests.test_caf_fluorescence import START, FakeCaFMOTCam, FakeCaFMotMaster
 
 MODULE = "pytweezer.optimisers.optimise_caf_mot"
 SPANS = {laser: OptimiseCaFMOT.stages[i].span for i, laser in enumerate(LASERS)}
@@ -34,10 +34,10 @@ def fluorescence(field, set_points, iteration):
 
 @pytest.fixture
 def caf(monkeypatch):
-    camera = FakeThorCam()
+    camera = FakeCaFMOTCam()
     camera.frame = fluorescence
     motmaster = FakeCaFMotMaster(camera)
-    fakes = {"CaF MotMaster": motmaster, "CaF ThorCam": camera}
+    fakes = {"CaF MotMaster": motmaster, "CaFMOT Cam": camera}
     monkeypatch.setattr(
         "pytweezer.experiment.experiment._get_device",
         lambda name, timeout: fakes[name],

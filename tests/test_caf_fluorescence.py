@@ -17,7 +17,7 @@ START = {
 }
 
 
-class FakeThorCam:
+class FakeCaFMOTCam:
     """Catches one frame per MOTMaster iteration, ``frame(field, set_points, iteration)``.
 
     A ``frame`` returning ``None`` is a frame the camera missed.
@@ -34,6 +34,12 @@ class FakeThorCam:
     def close_rpc(self):
         pass
 
+    def stop_live(self):
+        self.calls.append("stop_live")
+
+    def set_trigger_source(self, source):
+        self.calls.append(f"trigger {source}")
+
     def start_live(self):
         self.calls.append("start_live")
 
@@ -44,6 +50,7 @@ class FakeThorCam:
         return 1, (0, 0)
 
     def start_shot(self, header):
+        self.calls.append("start_shot")
         self.headers.append(header)
         return len(self.frames)
 
@@ -121,9 +128,9 @@ class FakeCaFMotMaster:
 
 @pytest.fixture
 def caf(monkeypatch):
-    camera = FakeThorCam()
+    camera = FakeCaFMOTCam()
     motmaster = FakeCaFMotMaster(camera)
-    fakes = {"CaF MotMaster": motmaster, "CaF ThorCam": camera}
+    fakes = {"CaF MotMaster": motmaster, "CaFMOT Cam": camera}
     monkeypatch.setattr(
         "pytweezer.experiment.experiment._get_device",
         lambda name, timeout: fakes[name],
@@ -240,6 +247,13 @@ def test_iterations_set_the_script_iterations_and_the_frames_read(caf):
     assert np.isfinite(measurement.results["counts_error"][0])
 
 
+def test_the_camera_is_on_its_external_trigger_and_live_before_the_first_shot(caf):
+    measurement = run_local(CaFFluorescence)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    first_shot = caf.camera.calls.index("start_shot")
+    assert caf.camera.calls[:first_shot] == ["stop_live", "trigger ext", "start_live"]
+
+
 def gaussian_cloud_frame(field, set_points, iteration):
     """A 100-count cloud on an offset of 20 when the field is on; the offset alone when off."""
     y, x = np.mgrid[:60, :80]
@@ -253,12 +267,12 @@ def test_each_point_records_the_background_subtracted_cloud_fit_of_its_shot(caf)
 
     assert measurement.status == "completed", measurement.attrs["error"]
     results = measurement.results
-    assert results["thorcam_sigma_x"][0] == pytest.approx(6, rel=0.03)
-    assert results["thorcam_sigma_y"][0] == pytest.approx(4, rel=0.03)
+    assert results["cafmot_sigma_x"][0] == pytest.approx(6, rel=0.03)
+    assert results["cafmot_sigma_y"][0] == pytest.approx(4, rel=0.03)
     # The background shot has the offset, so none is left in the fit.
-    assert abs(results["thorcam_offset"][0]) < 2
+    assert abs(results["cafmot_offset"][0]) < 2
     assert results["counts"][0] == pytest.approx(
-        results["thorcam_mean_image"][0].sum(), rel=1e-4
+        results["cafmot_mean_image"][0].sum(), rel=1e-4
     )
     assert measurement.constants["cloud_mass_amu"] == 59.0
 
