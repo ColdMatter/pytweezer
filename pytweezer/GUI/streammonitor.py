@@ -262,9 +262,6 @@ class LogMonitor(QWidget):
         self.table.insertRow(row)
 
         message = str(payload.get("message", ""))
-        traceback = str(payload.get("exception", "")).strip()
-        if traceback:
-            message = f"{message}: {traceback.splitlines()[-1]}"
         level = str(payload.get("level", ""))
         values = [
             _format_timestamp(payload.get("timestamp", "")),
@@ -283,10 +280,6 @@ class LogMonitor(QWidget):
             )
             if col == self.LEVEL_COL and level.upper() in self.LEVEL_STATE:
                 item.setIcon(status_icon(self.LEVEL_STATE[level.upper()]))
-            if col == self.MESSAGE_COL and traceback:
-                item.setData(
-                    QtCore.Qt.ItemDataRole.UserRole, f"{message}\n\n{traceback}"
-                )
             self.table.setItem(row, col, item)
         self.table.setRowHidden(row, not self._matches(level, message))
 
@@ -343,15 +336,9 @@ class LogMonitor(QWidget):
             return
         QApplication.clipboard().setText(item.text())
 
-    def full_message(self, row: int) -> str:
-        """A row's message, with the whole traceback of a logged exception."""
-        item = self.table.item(row, self.MESSAGE_COL)
-        if item is None:
-            return ""
-        return item.data(QtCore.Qt.ItemDataRole.UserRole) or item.text()
-
     def _show_message_dialog(self, row, _column):
-        message = self.full_message(row)
+        item = self.table.item(row, self.MESSAGE_COL)
+        message = item.text() if item else ""
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Log Message")

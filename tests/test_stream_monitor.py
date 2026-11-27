@@ -53,22 +53,6 @@ def test_log_monitor_filters_by_level_and_text(qapp, monkeypatch, tmp_path):
     assert hidden() == [True, False]
 
 
-def test_a_logged_exception_shows_its_error_in_the_row_and_its_traceback_in_full(
-    qapp, monkeypatch, tmp_path
-):
-    monkeypatch.setattr(sm, "MessageClient", FakeStream)
-    monkeypatch.setattr(sm, "get_daily_log_path", lambda: tmp_path / "none.jsonl")
-    monitor = sm.LogMonitor("x")
-    traceback = 'Traceback (most recent call last):\n  File "x.py"\nValueError: bad'
-    monitor.stream.queue.append(
-        ("Logs", {"level": "ERROR", "message": "failed", "exception": traceback})
-    )
-    monitor._update_list()
-    row_text = monitor.table.item(0, monitor.MESSAGE_COL).text()
-    assert row_text == "failed: ValueError: bad"
-    assert monitor.full_message(0) == f"{row_text}\n\n{traceback}"
-
-
 @pytest.mark.parametrize(
     "build",
     [

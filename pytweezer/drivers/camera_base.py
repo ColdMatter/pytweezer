@@ -250,9 +250,6 @@ class Camera(ABC):
     binning: int = 1
     #: Metres per unbinned sensor pixel at the atoms (sensor pitch over magnification); ``None`` if unknown.
     object_pixel_m: float | None = None
-    #: Whether the camera has an external trigger input. It starts on that
-    #: trigger, or on software triggers without one.
-    has_external_trigger: bool = True
     #: Sensor ``(width, height)`` in pixels, as :meth:`_sensor_shape` last read it; ``None`` if unknown.
     _sensor_size: tuple[int, int] | None = None
     #: The hardware's limits on the controls, as :meth:`_control_limits` last read them.
@@ -273,9 +270,6 @@ class Camera(ABC):
     ):
         """Set up broadcasting and autosave, then connect.
 
-        The camera starts on its external trigger, or on software triggers if it
-        has none, never free-running: a free-running camera floods the image server.
-
         Args:
             image_dir: Directory :meth:`save_tiff` writes to.
             timeout: Seconds to wait for frames.
@@ -295,7 +289,6 @@ class Camera(ABC):
         # The live broadcast thread and RPC calls share the backend.
         self._lock = threading.RLock()
         self._live_thread: threading.Thread | None = None
-        self._pacer_thread: threading.Thread | None = None
         self._live_stop = threading.Event()
         self._live_args: tuple[int, float] = (1000, 0.05)
         # (frame number, peak value) of the saturated live frames of this acquisition.
@@ -307,7 +300,6 @@ class Camera(ABC):
         self._kept: dict[str, Any] = {}
         self._connect()
         self._keep_hardware_limits()
-        self.set_trigger_source("ext" if self.has_external_trigger else "software")
 
     # ------------------------------------------------------------------ #
     # Hardware-specific hooks -- implemented by each concrete shim.
@@ -364,12 +356,6 @@ class Camera(ABC):
         A driver keeps the polarity the camera took with :meth:`_keep`.
         """
         raise NotImplementedError(f"{type(self).__name__} has no trigger polarity")
-
-    @abstractmethod
-    def trigger(self) -> None:
-        """Send one software trigger: with the trigger source on ``"software"``,
-        the acquiring camera takes one frame. Live mode sends them at the
-        ``frame_rate`` control's rate."""
 
     @abstractmethod
     def setup_acquisition(self, nframes: int, mode: str = "sequence") -> None:
@@ -489,8 +475,6 @@ class Camera(ABC):
         self.setup_acquisition(1, mode="snap")
         try:
             self.start_acquisition()
-            if self._software_triggered():
-                self.trigger()
             return self.acquire_n_frames(1, broadcast=broadcast)[0]
         finally:
             self.stop_acquisition()
@@ -832,8 +816,7 @@ class Camera(ABC):
     def start_live(self, buffer_frames: int = 1000, poll_s: float = 0.05) -> None:
         """Run free (see :meth:`arm`) and broadcast every new frame on the image stream.
 
-        With the trigger source on ``"software"``, live mode triggers the camera at
-        the ``frame_rate`` control's rate. A camera already live stays as it is.
+        A camera already live stays as it is.
         """
         self.arm(buffer_frames)
         if self.is_live():
@@ -847,12 +830,6 @@ class Camera(ABC):
             daemon=True,
         )
         self._live_thread.start()
-        self._pacer_thread = threading.Thread(
-            target=self._pace_software_triggers,
-            name=f"{type(self).__name__}-pacer",
-            daemon=True,
-        )
-        self._pacer_thread.start()
 
     def stop_live(self) -> None:
         """Stop broadcasting and stop the acquisition."""
@@ -869,32 +846,6 @@ class Camera(ABC):
         if self._live_thread is not None:
             self._live_thread.join(timeout=2.0)
             self._live_thread = None
-        if self._pacer_thread is not None:
-            self._pacer_thread.join(timeout=2.0)
-            self._pacer_thread = None
-
-    def _software_triggered(self) -> bool:
-        return self._kept.get("trigger_source") == "software"
-
-    def _pace_software_triggers(self) -> None:
-        stop = self._live_stop
-        while not stop.wait(1.0 / self._software_trigger_rate()):
-            with self._lock:
-                if not (self._software_triggered() and self._acquisition_in_progress()):
-                    continue
-                try:
-                    self.trigger()
-                except Exception:
-                    LOGGER.warning(
-                        "%s: software trigger failed",
-                        type(self).__name__,
-                        exc_info=True,
-                    )
-
-    def _software_trigger_rate(self) -> float:
-        """Live mode's software triggers per second: the ``frame_rate`` control's value."""
-        rate = self._kept.get("frame_rate")
-        return float(rate) if rate else FRAME_RATE.default
 
     def saturated_frames_since(self, start: int) -> list[tuple[int, int]]:
         """``(frame number, peak value)`` of each live frame from number ``start``
@@ -1021,8 +972,7 @@ class SimulatedCamera(Camera):
     methods (beyond the :class:`Camera` interface) are not defined here; use
     :func:`simulated_camera_for` to auto-stub those for a particular driver.
 
-    While acquiring, frames "arrive" at :attr:`sim_frame_rate` per second, or one per
-    :meth:`trigger` with the trigger source on ``"software"``.
+    While acquiring, frames "arrive" at :attr:`sim_frame_rate` per second.
     """
 
     simulated = True
@@ -1045,7 +995,6 @@ class SimulatedCamera(Camera):
         }
         self._nframes = 1
         self._running = False
-        self._triggers = 0
         self._started = 0.0
         self._rng = np.random.default_rng()
         super().__init__(
@@ -1114,11 +1063,6 @@ class SimulatedCamera(Camera):
         with self._lock:
             self._remember(trigger_polarity=polarity)
 
-    def trigger(self) -> None:
-        with self._lock:
-            if self._running:
-                self._triggers += 1
-
     def set_exposure_time(self, exposure: float) -> None:
         with self._lock:
             self._exposure = float(exposure)
@@ -1140,7 +1084,6 @@ class SimulatedCamera(Camera):
     def start_acquisition(self) -> None:
         self._running = True
         self._started = time.monotonic()
-        self._triggers = 0
 
     def stop_acquisition(self) -> None:
         self._running = False
@@ -1151,8 +1094,6 @@ class SimulatedCamera(Camera):
     def _count_frames(self) -> int:
         if not self._running:
             return 0
-        if self._software_triggered():
-            return self._triggers
         return int((time.monotonic() - self._started) * self.sim_frame_rate)
 
     def _read_range(self, start: int, stop: int) -> np.ndarray:

@@ -32,7 +32,7 @@ class BufferCamera(Camera):
     set_roi = set_trigger_source = set_exposure_time = setup_acquisition = (
         lambda self, *args: None
     )
-    start_acquisition = stop_acquisition = trigger = lambda self: None
+    start_acquisition = stop_acquisition = lambda self: None
 
 
 class RecordingImageClient:
@@ -238,18 +238,3 @@ def test_setup_acquisition_passes_the_mode_only_to_cameras_that_have_one(cls):
 
 def test_catalogue_loads_the_hamcam_driver():
     assert camera_driver("Rb HamCam") is ImagEMX2Camera
-
-
-@pytest.mark.parametrize(
-    ("has_external_trigger", "source"), [(True, "ext"), (False, "software")]
-)
-def test_a_camera_never_starts_free_running(has_external_trigger, source):
-    # A free-running camera floods the image server.
-    cls = type(
-        "Camera",
-        (thorcam.SimulatedThorLabsCamera,),
-        {"has_external_trigger": has_external_trigger},
-    )
-    camera = cls()
-    values = {control["name"]: control["value"] for control in camera.controls()}
-    assert values["trigger_source"] == source

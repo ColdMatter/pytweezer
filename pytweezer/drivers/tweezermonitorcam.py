@@ -17,7 +17,6 @@ class ThorCam(thorcam.ThorCam):
         binning: int | None = None,
         gain_db: float | None = None,
         object_pixel_m: float | None = None,
-        has_external_trigger: bool = True,
     ):
         super().__init__(
             image_dir=image_dir,
@@ -29,7 +28,6 @@ class ThorCam(thorcam.ThorCam):
             binning=binning,
             gain_db=gain_db,
             object_pixel_m=object_pixel_m,
-            has_external_trigger=has_external_trigger,
         )
 
 
