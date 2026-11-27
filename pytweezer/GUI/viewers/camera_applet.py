@@ -47,7 +47,7 @@ from pytweezer.GUI.background import clear_tracebacks
 from pytweezer.GUI.components import set_state
 from pytweezer.GUI.experiments.feed import ExperimentFeed
 from pytweezer.GUI.image_applet import CameraROI, ImageApplet, camera_roi
-from pytweezer.GUI.viewers.camera_sidebar import CameraSidebar
+from pytweezer.GUI.viewers.camera_sidebar import SELF_TRIGGERED, CameraSidebar
 from pytweezer.logging_utils import get_logger
 from pytweezer.servers import Properties, PropertyAttribute
 from pytweezer.servers.device_client import get_device
@@ -518,7 +518,7 @@ class CameraApplet(ImageApplet):
             sidebar.set_state("checking")
         elif self._live:
             notes = []
-            if self._control_value("trigger_source") not in (None, "int"):
+            if self._control_value("trigger_source") not in (None, *SELF_TRIGGERED):
                 notes.append(EXTERNAL_TRIGGER)
             if self._hold_unknown():
                 notes.append(UNKNOWN_HOLD)
