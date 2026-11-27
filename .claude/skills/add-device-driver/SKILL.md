@@ -88,6 +88,13 @@ into sensor pixels.
 `NotImplementedError`); only experiments written for a camera that has them
 call them.
 
+Every camera has a `"software"` trigger source and implements `trigger()`,
+which sends one software trigger; live mode sends them at the `frame_rate`
+control's rate, and `snap()` sends one. A camera never starts free-running,
+which would flood the image server: `Camera.__init__` puts it on `"ext"`, or on
+`"software"` when the class or CONFIG entry sets `has_external_trigger = False`
+(the Tweezer Monitor ThorCam).
+
 A camera declares the settings it offers in `CONTROLS`, a tuple of `Control`
 (`camera_base.py`; shared ones `EXPOSURE`, `BINNING`, `ROI`, `TRIGGER_POLARITY`,
 and the `trigger_source()` and `gain()` factories). `controls()`,
@@ -105,7 +112,7 @@ one overrides `_sensor_shape()`. Limits only the hardware knows come from
 gets `{"choices": [1, 2, 4]}` for a camera that takes only those bin factors
 (the DCAM drivers, from pylablib's probe; the Camera applet shows a
 drop-down) or `{"maximum": n}` (ThorCam); `frame_rate` (`FRAME_RATE`, the
-internal trigger's rate) gets its range. `None` marks a control the camera
+internal trigger's and live software triggers' rate) gets its range. `None` marks a control the camera
 lacks (a DCAM model without `internal_frame_interval`): `controls()` leaves it
 out and `apply_controls()` refuses it. A driver that can
 read each frame's camera-clock time overrides `_read_range_timed`; the live

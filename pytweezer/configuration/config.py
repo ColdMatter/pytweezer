@@ -238,6 +238,8 @@ CONFIG = {
             "host": MACHINES["PH-BEAST"]["address"],
             "port": get_next_port(),
             "simulate": SIMULATING,
+            # A Zelux CS165MU whose firmware (v0.9.6) has no external trigger.
+            "has_external_trigger": False,
             "stream_name": "rb_thorcam2",
             "timeout": 5.0,
             "image_dir": "C:\\Users\\cafmot\\Documents\\TempCameraImages\\Driver",

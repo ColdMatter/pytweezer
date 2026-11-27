@@ -60,10 +60,15 @@ ROI_ROWS = (
     ("y0, height", "roi_y0", "roi_height"),
 )
 
+#: Trigger sources under which the camera triggers itself, so Snap and live
+#: mode need no trigger from outside.
+SELF_TRIGGERED = ("int", "software")
+
 CHOICE_WORDS = {
     "int": "Internal",
     "internal": "Internal",
     "ext": "External",
+    "software": "Software",
     "rise": "Rising",
     "fall": "Falling",
 }
@@ -306,8 +311,8 @@ class CameraSidebar(QFrame):
     """Camera picker, live/snap buttons, status and the camera's settings.
 
     Snap is enabled when the camera is not live, held, checking or unavailable and its
-    ``trigger_source`` control reads ``"int"``; a camera with no such control
-    keeps Snap enabled. Full sensor is enabled only when the ``roi_width`` and
+    ``trigger_source`` control reads ``"int"`` or ``"software"``; a camera with no
+    such control keeps Snap enabled. Full sensor is enabled only when the ``roi_width`` and
     ``roi_height`` controls give a ``maximum``.
 
     Signals:
@@ -765,7 +770,7 @@ class CameraSidebar(QFrame):
         if self._state == "live":
             return "Stop live first"
         trigger = self._fields.get("trigger_source")
-        if trigger is not None and trigger.value != "int":
+        if trigger is not None and trigger.value not in SELF_TRIGGERED:
             return "Snap would wait for the trigger: set the trigger source to Internal"
         return ""
 
