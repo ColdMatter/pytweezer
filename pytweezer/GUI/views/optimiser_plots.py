@@ -6,6 +6,8 @@ plot is drawn from the run's results (the file's, or the feed's while it runs)
 and its ``proposed.*`` constants.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 import pyqtgraph as pg
 from PyQt6 import QtCore
@@ -17,7 +19,7 @@ _ACCENT = "#5b8def"
 _POINTS = "#9aa0b4"
 _PLOT_COLUMNS = 2
 #: Results plotted; per-setting results are added for Bayesian runs.
-PLOTTED = ["stage", "setting", "objective"]
+PLOTTED = ["stage", "setting", "objective", "reference"]
 
 
 def live_results(points: list[dict], names: list[str]) -> dict[str, np.ndarray]:
@@ -87,22 +89,47 @@ class OptimiserPlots(QWidget):
             self.message.setText("" if measured else "No points measured yet")
 
 
+@dataclass
+class _StagePlot:
+    """One stage's plot and the items drawn on it."""
+
+    title: str
+    setting: str
+    saved: str
+    unit: str
+    scale: float
+    saved_unit: str
+    plot: pg.PlotWidget
+    shots: pg.PlotDataItem
+    means: pg.PlotDataItem
+    chosen: pg.PlotDataItem
+    line: pg.InfiniteLine
+
+
 class _StagedPlots:
-    """One plot per stage: objective against its setting, and the value it chose."""
+    """One plot per stage: objective against its setting, and the value it chose.
+
+    The setting is shown in its stage's unit, relative to the points'
+    ``reference`` when they record one, which the title then gives in the
+    saved parameter's unit.
+    """
 
     def __init__(self, key, schema):
         self.key = key
         optimiser = schema["optimiser"]
+        setting_units = optimiser.get("setting_units") or [["", 1.0]] * len(
+            optimiser["settings"]
+        )
         self.stages = []
         self.widgets = []
-        for index, (setting, saved) in enumerate(
-            zip(optimiser["settings"], optimiser["proposes"], strict=True)
-        ):
-            plot = _plot(
-                f"Stage {index + 1}: {setting} → {saved}",
-                setting,
-                optimiser["objective"],
+        for index, (setting, saved, (unit, scale)) in enumerate(
+            zip(
+                optimiser["settings"], optimiser["proposes"], setting_units, strict=True
             )
+        ):
+            title = f"Stage {index + 1}: {setting} → {saved}"
+            plot = _plot(title, setting, optimiser["objective"])
+            plot.setLabel("bottom", setting, units=unit or None)
             shots = plot.plot(
                 [], [], pen=None, symbol="o", symbolSize=6, symbolBrush=_POINTS
             )
@@ -118,31 +145,69 @@ class _StagedPlots:
             )
             line = _chosen_line()
             plot.addItem(line)
-            self.stages.append((saved, shots, means, chosen, line))
+            self.stages.append(
+                _StagePlot(
+                    title,
+                    setting,
+                    saved,
+                    unit,
+                    float(scale),
+                    optimiser.get("units", {}).get(saved, ""),
+                    plot,
+                    shots,
+                    means,
+                    chosen,
+                    line,
+                )
+            )
             self.widgets.append(plot)
 
     def update(self, results, constants) -> bool:
         stages = np.asarray(results.get("stage", []))
         settings = np.asarray(results.get("setting", []), dtype=float)
         objectives = np.asarray(results.get("objective", []), dtype=float)
-        for index, (saved, shots, means, chosen, line) in enumerate(self.stages):
+        references = np.asarray(
+            results.get("reference", np.full(len(settings), np.nan)), dtype=float
+        )
+        for index, stage in enumerate(self.stages):
             here = stages == index
-            x, y = settings[here], objectives[here]
-            shots.setData(x, y)
+            reference = _first_finite(references[here])
+            self._show_reference(stage, reference)
+            origin = 0.0 if reference is None else reference
+            x = (settings[here] - origin) / stage.scale
+            y = objectives[here]
+            stage.shots.setData(x, y)
             means_x = np.unique(x)
             means_y = np.array([np.nanmean(y[x == value]) for value in means_x])
-            means.setData(means_x, means_y)
-            value = constants.get(f"proposed.{saved}")
+            stage.means.setData(means_x, means_y)
+            value = constants.get(f"proposed.{stage.saved}")
             if value is None:
-                chosen.setData([], [])
-                line.setVisible(False)
+                stage.chosen.setData([], [])
+                stage.line.setVisible(False)
                 continue
-            value = float(value)
+            value = (float(value) - origin) / stage.scale
             at_value = np.isclose(means_x, value)
-            chosen.setData(means_x[at_value], means_y[at_value])
-            line.setValue(value)
-            line.setVisible(True)
+            stage.chosen.setData(means_x[at_value], means_y[at_value])
+            stage.line.setValue(value)
+            stage.line.setVisible(True)
         return len(objectives) > 0
+
+    @staticmethod
+    def _show_reference(stage, reference):
+        if reference is None:
+            stage.plot.setTitle(stage.title, **plot_title_style())
+            stage.plot.setLabel("bottom", stage.setting, units=stage.unit or None)
+            return
+        stage.plot.setTitle(
+            f"{stage.title}<br>from {reference:.10g} {stage.saved_unit}".rstrip(),
+            **plot_title_style(),
+        )
+        stage.plot.setLabel("bottom", f"Δ{stage.setting}", units=stage.unit or None)
+
+
+def _first_finite(values: np.ndarray) -> float | None:
+    finite = values[np.isfinite(values)]
+    return float(finite[0]) if len(finite) else None
 
 
 class _EvaluationPlots:

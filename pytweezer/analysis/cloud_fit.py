@@ -518,3 +518,27 @@ def fit_frames(
                 samples.std(ddof=1) / math.sqrt(len(samples))
             )
     return values, mean_image
+
+
+def frame_counts(
+    frames: np.ndarray, background: np.ndarray | None = None
+) -> dict[str, float]:
+    """``counts``, the mean over ``frames`` of each frame's sum, and its standard error.
+
+    Args:
+        frames: ``(n, rows, cols)``.
+        background: frame subtracted from each frame before summing, or ``None``.
+
+    Returns:
+        ``{"counts": ..., "counts_error": ...}``; the error is NaN for a single frame.
+    """
+    frames = np.asarray(frames, dtype=float)
+    if background is not None:
+        frames = frames - np.asarray(background, dtype=float)
+    sums = frames.sum(axis=(1, 2))
+    return {
+        "counts": float(sums.mean()),
+        "counts_error": float(sums.std(ddof=1) / math.sqrt(len(sums)))
+        if len(sums) > 1
+        else math.nan,
+    }

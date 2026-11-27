@@ -47,7 +47,9 @@ class Stage:
     is the value ``save_as`` holds when the run starts unless the run sets it.
     Its best value is proposed for the saved parameter ``save_as``. ``run`` is
     the default of the stage's ``<setting>_run`` argument; a stage switched off
-    is neither scanned nor proposed.
+    is neither scanned nor proposed. ``unit`` and ``scale`` are how the
+    stage's range arguments and its plot show the setting, as an argument's
+    ``unit`` and ``scale``.
     """
 
     setting: str
@@ -58,6 +60,8 @@ class Stage:
     start: float | None = None
     stop: float | None = None
     run: bool = True
+    unit: str = ""
+    scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -167,8 +171,10 @@ class Optimiser:
         """The optimiser's description, for the catalogue and the Optimisers tab.
 
         ``settings[i]`` is the setting whose best value is proposed for
-        ``proposes[i]``; ``objective`` is ``None`` for a class that names none.
-        ``units`` and ``group`` are what an accepted proposal is created with.
+        ``proposes[i]``, and ``setting_units[i]`` its ``[unit, scale]`` in plots
+        (a :class:`Stage`'s; ``["", 1.0]`` otherwise); ``objective`` is
+        ``None`` for a class that names none. ``units`` and ``group`` are what
+        an accepted proposal is created with.
         ``applies`` is true when the class overrides :meth:`apply`.
         """
         return {
@@ -177,6 +183,10 @@ class Optimiser:
             "objective": getattr(cls, "objective", None),
             "proposes": cls.proposes(),
             "settings": [declared.setting for declared in cls.declarations()],
+            "setting_units": [
+                [getattr(declared, "unit", ""), getattr(declared, "scale", 1.0)]
+                for declared in cls.declarations()
+            ],
             "units": {key: cls.proposal_units.get(key, "") for key in cls.proposes()},
             "group": cls.proposal_group,
             "applies": cls.apply.__func__ is not Optimiser.apply.__func__,
@@ -242,9 +252,9 @@ class StagedScan(Optimiser):
     passes to ``measure()``.
 
     Each point records ``stage`` (its index in ``stages``, whether or not the
-    others are enabled), ``setting``, ``objective`` and every result of
-    ``measure()``, so ``measure()`` must not return a result named ``stage``,
-    ``setting`` or ``objective``. :meth:`finish` records ``proposed.<key>`` for
+    others are enabled), ``setting``, ``objective``, ``reference`` if
+    :meth:`reference_of` gives one, and every result of ``measure()``, so
+    ``measure()`` must not return a result of any of those names. :meth:`finish` records ``proposed.<key>`` for
     each finished stage, and ``stages_done`` and ``stages_total`` counting
     enabled stages.
 
@@ -297,6 +307,8 @@ class StagedScan(Optimiser):
         """
         return f"{stage.setting}_centre", Number(
             saved=stage.save_as,
+            unit=stage.unit,
+            scale=stage.scale,
             group=SEARCH,
             tooltip=f"the saved {stage.save_as} unless set",
         )
@@ -304,6 +316,14 @@ class StagedScan(Optimiser):
     def centre_of(self, stage: Stage) -> float:
         """The centre of a span ``stage``'s sweep; called once the run is prepared."""
         return getattr(self, f"{stage.setting}_centre")
+
+    def reference_of(self, stage: Stage) -> float | None:
+        """The value ``stage``'s plot shows its setting relative to, or ``None`` for none.
+
+        Recorded with each of the stage's points as ``reference``; called once
+        the run is prepared.
+        """
+        return None
 
     @classmethod
     def generated_arguments(cls) -> dict[str, Argument]:
@@ -314,14 +334,21 @@ class StagedScan(Optimiser):
                 arguments[f"{stage.setting}_span"] = Number(
                     stage.span,
                     min=0,
+                    unit=stage.unit,
+                    scale=stage.scale,
                     group=SEARCH,
                     tooltip="scanned within this of the centre",
                 )
                 name, argument = cls.centre_argument(stage)
                 arguments[name] = argument
             else:
-                arguments[f"{stage.setting}_start"] = Number(stage.start, group=SEARCH)
-                arguments[f"{stage.setting}_stop"] = Number(stage.stop, group=SEARCH)
+                for end in ("start", "stop"):
+                    arguments[f"{stage.setting}_{end}"] = Number(
+                        getattr(stage, end),
+                        unit=stage.unit,
+                        scale=stage.scale,
+                        group=SEARCH,
+                    )
             arguments[f"{stage.setting}_points"] = Integer(
                 stage.points, min=1, group=SEARCH
             )
@@ -414,6 +441,9 @@ class StagedScan(Optimiser):
         self.record("stage", stage_index)
         self.record("setting", setting)
         self.record("objective", objective)
+        reference = self.reference_of(stage)
+        if reference is not None:
+            self.record("reference", float(reference))
         for name, value in results.items():
             self.record(name, value)
 

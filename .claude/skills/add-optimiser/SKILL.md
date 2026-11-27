@@ -13,7 +13,10 @@ everything in the add-experiment skill (arguments, devices, recording, files)
 and run-experiments (the queue, saved parameters) applies; this skill covers what an optimiser
 adds. Device-free examples: `DemoStagedScan`/`DemoBayesian` in
 `optimisers/demo_staged_scan.py`/`demo_bayesian.py` (over
-`experiments/demo_resonance.py`); the real ones are tweezer-array's.
+`experiments/demo_resonance.py`); the real ones are tweezer-array's and
+`OptimiseCaFMOT` (`optimisers/optimise_caf_mot.py`, on the CaFMOT Cam: a span stage per CaF
+wavemeter-lock laser, centred on the lock's set point, with an `apply` that
+ramps the accepted lasers).
 
 ## Search optimisers
 
@@ -56,6 +59,12 @@ class FindResonance(StagedScan, Resonance):  # or BayesianOptimisation
   overriding `centre_argument(stage)` (the argument's name and declaration) and
   `centre_of(stage)` (its value, read after `prepare()`, so it may use what
   `prepare()` measured).
+- `Stage(..., unit="MHz", scale=1e-6)` shows the stage's range arguments and
+  its plot axis in that unit (as an argument's `unit`/`scale`; the schema's
+  `setting_units`). Overriding `reference_of(stage)` records `reference` with
+  each of the stage's points, and the plot then shows the setting relative to
+  it, with the reference in the title (`OptimiseCaFMOT`: MHz from the lock's
+  starting set point).
 - `Stage(..., run=False)` makes `<setting>_run` default to false; a stage whose
   `_run` is false is not scanned, passes nothing to later stages and proposes nothing
   (`enabled_stages()` lists `(index in stages, stage)` for those that run).
