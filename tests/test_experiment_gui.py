@@ -1776,6 +1776,35 @@ def test_a_fit_run_shows_its_image_with_a_square_at_each_site(qapp):
     assert {point.size() for point in squares.points()} == {5}
 
 
+def test_a_staged_plot_shows_its_setting_from_the_reference_in_the_stages_unit(qapp):
+    from pytweezer.GUI.views.optimiser_plots import _StagedPlots
+
+    schema = {
+        "optimiser": {
+            "kind": "staged",
+            "objective": "counts",
+            "settings": ["v0"],
+            "proposes": ["caf_laser_v0"],
+            "setting_units": [["MHz", 1e-6]],
+            "units": {"caf_laser_v0": "THz"},
+        }
+    }
+    plots = _StagedPlots((1, "staged"), schema)
+    plots.update(
+        {
+            "stage": np.zeros(3),
+            "setting": np.array([494.431873, 494.431874, 494.431876]),
+            "objective": np.array([1.0, 3.0, 2.0]),
+            "reference": np.full(3, 494.431874),
+        },
+        {"proposed.caf_laser_v0": 494.431874},
+    )
+    stage = plots.stages[0]
+    assert list(stage.shots.xData) == pytest.approx([-1.0, 0.0, 2.0])
+    assert stage.line.value() == pytest.approx(0.0, abs=1e-6)
+    assert "from 494.431874 THz" in stage.plot.getPlotItem().titleLabel.text
+
+
 def test_a_live_fit_run_plots_nothing_until_its_file_is_read(qapp):
     from pytweezer.GUI.views.optimiser_plots import _FitPlots, live_results
 

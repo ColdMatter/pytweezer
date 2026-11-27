@@ -57,19 +57,28 @@ def stale_saved_set_points(monkeypatch):
 def test_the_stages_and_defaults_match_the_notebook():
     stages = OptimiseCaFMOT.stages
     assert [stage.setting for stage in stages] == list(LASERS)
-    assert [stage.span for stage in stages] == [
-        10e-6,
-        30e-6,
-        40e-6,
-        150e-6,
-        150e-6,
-        40e-6,
-    ]
+    assert [stage.span for stage in stages] == pytest.approx(
+        [10e-6, 30e-6, 40e-6, 150e-6, 150e-6, 40e-6]
+    )
     assert [stage.points for stage in stages] == [30, 30, 20, 30, 30, 30]
     assert [stage.save_as for stage in stages] == [
         f"caf_laser_{laser}" for laser in LASERS
     ]
     assert {stage.setting for stage in stages if stage.run} == {"v0", "v1", "TCool"}
+
+
+@pytest.mark.parametrize("name", ["v0_span", "v0_offset"])
+def test_spans_and_offsets_are_set_in_mhz(name):
+    argument = OptimiseCaFMOT.schema()["arguments"][name]
+    assert argument["unit"] == "MHz"
+    assert 1.0 * argument["scale"] == pytest.approx(1e-6)  # 1 MHz in THz
+
+
+def test_each_point_records_its_lasers_start_set_point_as_reference(caf):
+    measurement = run_local(OptimiseCaFMOT)
+    assert measurement.status == "completed", measurement.attrs["error"]
+    lasers = [LASERS[int(stage)] for stage in measurement.results["stage"]]
+    assert list(measurement.results["reference"]) == [START[laser] for laser in lasers]
 
 
 class Spying(OptimiseCaFMOT):

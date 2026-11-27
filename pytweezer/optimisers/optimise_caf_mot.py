@@ -19,14 +19,17 @@ LASER_KEYS = {laser: f"caf_laser_{laser}" for laser in LASERS}
 
 LASER_GROUP = "CaF lasers"
 
-#: ``(span in THz, points, scanned by default)`` of each laser's stage.
+#: Set points are in THz.
+MHZ = 1e-6
+
+#: ``(span, points, scanned by default)`` of each laser's stage.
 _SCANS = {
-    "v0": (10e-6, 30, True),
-    "BX": (30e-6, 30, False),
-    "v1": (40e-6, 20, True),
-    "v2": (150e-6, 30, False),
-    "v3": (150e-6, 30, False),
-    "TCool": (40e-6, 30, True),
+    "v0": (10 * MHZ, 30, True),
+    "BX": (30 * MHZ, 30, False),
+    "v1": (40 * MHZ, 20, True),
+    "v2": (150 * MHZ, 30, False),
+    "v3": (150 * MHZ, 30, False),
+    "TCool": (40 * MHZ, 30, True),
 }
 
 
@@ -39,7 +42,8 @@ class OptimiseCaFMOT(StagedScan, CaFFluorescence):
     point with the most ``counts``; later lasers are scanned with the earlier
     ones at their best. v0, v1 and TCool are scanned by default. The saved
     ``caf_laser_*`` are only where a proposal is saved on acceptance; a scan
-    never reads them.
+    never reads them. Spans and offsets are set in MHz, and each stage is
+    plotted in MHz from the set point the lock held when the run started.
 
     Accepting a proposal also ramps that laser to it (:meth:`apply`).
     """
@@ -47,7 +51,15 @@ class OptimiseCaFMOT(StagedScan, CaFFluorescence):
     objective = "counts"
     goal = "max"
     stages: ClassVar[list[Stage]] = [
-        Stage(laser, span=span, points=points, save_as=LASER_KEYS[laser], run=run)
+        Stage(
+            laser,
+            span=span,
+            points=points,
+            save_as=LASER_KEYS[laser],
+            run=run,
+            unit="MHz",
+            scale=MHZ,
+        )
         for laser, (span, points, run) in _SCANS.items()
     ]
     proposal_units: ClassVar[dict[str, str]] = dict.fromkeys(LASER_KEYS.values(), "THz")
@@ -57,7 +69,8 @@ class OptimiseCaFMOT(StagedScan, CaFFluorescence):
     def centre_argument(cls, stage: Stage) -> tuple[str, Argument]:
         return f"{stage.setting}_offset", Number(
             0.0,
-            unit="THz",
+            unit="MHz",
+            scale=MHZ,
             group=SEARCH,
             tooltip="added to the set point the lock held when the run started",
         )
@@ -66,6 +79,9 @@ class OptimiseCaFMOT(StagedScan, CaFFluorescence):
         return self.start_set_points[stage.setting] + getattr(
             self, f"{stage.setting}_offset"
         )
+
+    def reference_of(self, stage: Stage) -> float:
+        return self.start_set_points[stage.setting]
 
     @classmethod
     def apply(cls, proposals: dict[str, float]) -> None:

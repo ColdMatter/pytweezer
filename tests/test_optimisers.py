@@ -423,6 +423,7 @@ def test_the_schema_lists_generated_arguments_and_proposals(
         "objective": "counts",
         "proposes": ["demo_resonance", "demo_power"],
         "settings": ["detuning", "power"],
+        "setting_units": [["", 1.0], ["", 1.0]],
         "units": {"demo_resonance": "", "demo_power": ""},
         "group": "",
         "applies": False,
@@ -547,6 +548,7 @@ def test_the_schema_gives_a_fits_proposals_with_their_units_and_group():
         "objective": None,
         "proposes": ["demo_offset", "demo_grid"],
         "settings": [],
+        "setting_units": [],
         "units": {"demo_offset": "V", "demo_grid": "px"},
         "group": "Demo",
         "applies": False,
@@ -586,3 +588,28 @@ def test_an_optimisers_file_records_its_description(cls, recorded):
         assert json.loads(measurement.attrs["optimiser"]) == cls.optimiser_schema()
     else:
         assert "optimiser" not in measurement.attrs
+
+
+def test_a_stages_range_arguments_take_its_unit():
+    class InMHz(StagedScan, DemoResonance):
+        objective = "counts"
+        stages: ClassVar[list[Stage]] = [
+            Stage(
+                "detuning",
+                start=-5e6,
+                stop=5e6,
+                points=3,
+                save_as="demo_resonance",
+                unit="MHz",
+                scale=1e6,
+            )
+        ]
+
+    arguments = InMHz.schema()["arguments"]
+    assert [
+        (arguments[name]["unit"], arguments[name]["scale"])
+        for name in (
+            "detuning_start",
+            "detuning_stop",
+        )
+    ] == [("MHz", 1e6)] * 2

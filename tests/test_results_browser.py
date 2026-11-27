@@ -469,9 +469,9 @@ def test_an_optimiser_run_opens_on_the_plots_the_optimisers_tab_draws(qapp, tmp_
     assert analysis_items(panel)[:2] == [("Optimisation", True), ("Plot against", True)]
     assert panel.analysis_stack.currentWidget() is panel.optimiser_plots
     stages = panel.optimiser_plots.drawing.stages
-    assert [saved for saved, *_ in stages] == ["demo_resonance", "demo_power"]
+    assert [stage.saved for stage in stages] == ["demo_resonance", "demo_power"]
     proposed = panel.measurement.constants["proposed.demo_resonance"]
-    _, shots, _, _, line = stages[0]
+    shots, line = stages[0].shots, stages[0].line
     assert len(shots.xData) == 5
     assert line.isVisible() and line.value() == pytest.approx(proposed)
 
@@ -522,5 +522,5 @@ def test_a_running_optimisation_is_plotted_from_the_feed(qapp, tmp_path):
     feed.point_received.emit({"rid": 1, **feed.rows[1][-1]})
 
     assert archive.loads == [], "a live optimisation is not re-read"
-    _, shots, _, _, _ = panel.optimiser_plots.drawing.stages[0]
+    shots = panel.optimiser_plots.drawing.stages[0].shots
     assert list(shots.yData) == [3.0, 7.0]
