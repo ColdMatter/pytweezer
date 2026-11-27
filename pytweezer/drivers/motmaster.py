@@ -267,7 +267,6 @@ class MotMasterInterface:
                         print("Too many PicoMotor device detected!")
                 except Exception as e:
                     print(f"Error: {e} encountered")
-        print(self.hardware_controller)
 
     def disconnect(self) -> None:
         self.motmaster = None
