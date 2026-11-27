@@ -444,3 +444,83 @@ def test_resubmission_leaves_arguments_taken_from_saved_parameters_unset(monkeyp
     request = resubmission(run_local(Calibrated, shots=4))
 
     assert request.args == {"blaze": None, "shots": 4}
+
+
+def make_optimiser_file(root, rid=1, *, recorded=True, running=False):
+    from pytweezer.optimisers.demo_staged_scan import DemoStagedScan
+
+    path = root.joinpath("2026", "10", "07", f"{rid:06d}_DemoStagedScan.h5")
+    run_local(DemoStagedScan, path=path, detuning_points=5, power_points=3)
+    with h5py.File(path, "r+") as f:
+        if not recorded:
+            del f.attrs["optimiser"]
+        if running:
+            f.attrs.update(status="running", rid=rid, n_done=0)
+    return relpath(root, path)
+
+
+def test_an_optimiser_run_opens_on_the_plots_the_optimisers_tab_draws(qapp, tmp_path):
+    path = make_optimiser_file(tmp_path)
+    panel = ResultsPanel(root=tmp_path)
+    refreshed(panel, qapp)
+    select(panel, qapp, path)
+    settle(qapp)
+
+    assert analysis_items(panel)[:2] == [("Optimisation", True), ("Plot against", True)]
+    assert panel.analysis_stack.currentWidget() is panel.optimiser_plots
+    stages = panel.optimiser_plots.drawing.stages
+    assert [saved for saved, *_ in stages] == ["demo_resonance", "demo_power"]
+    proposed = panel.measurement.constants["proposed.demo_resonance"]
+    _, shots, _, _, line = stages[0]
+    assert len(shots.xData) == 5
+    assert line.isVisible() and line.value() == pytest.approx(proposed)
+
+
+@pytest.mark.parametrize(
+    ("catalogue", "first"),
+    [(True, "Optimisation"), (False, "Plot against")],
+    ids=["catalogue-knows-it", "catalogue-does-not"],
+)
+def test_a_file_from_before_optimisers_were_recorded_is_drawn_from_the_catalogue(
+    qapp, tmp_path, catalogue, first
+):
+    from pytweezer.optimisers.demo_staged_scan import DemoStagedScan
+
+    path = make_optimiser_file(tmp_path, recorded=False)
+    schemas = {(DemoStagedScan.__module__, "DemoStagedScan"): DemoStagedScan.schema()}
+    panel = ResultsPanel(
+        root=tmp_path,
+        optimiser_schema=lambda module, name: (
+            schemas.get((module, name)) if catalogue else None
+        ),
+    )
+    refreshed(panel, qapp)
+    select(panel, qapp, path)
+
+    assert analysis_items(panel)[0] == (first, True)
+
+
+def test_a_running_optimisation_is_plotted_from_the_feed(qapp, tmp_path):
+    path = make_optimiser_file(tmp_path, running=True)
+    feed = FakeFeed()
+    archive = CountingArchive(tmp_path)
+    panel = ResultsPanel(archive=archive, feed=feed)
+    panel.show_unfinished.setChecked(True)
+    refreshed(panel, qapp)
+    select(panel, qapp, path)
+    settle(qapp)
+    archive.loads.clear()
+
+    feed.rows[1] = [
+        {
+            "index": i,
+            "values": {},
+            "scalars": {"stage": 0, "setting": x, "objective": y},
+        }
+        for i, (x, y) in enumerate([(-1.0, 3.0), (0.0, 7.0)])
+    ]
+    feed.point_received.emit({"rid": 1, **feed.rows[1][-1]})
+
+    assert archive.loads == [], "a live optimisation is not re-read"
+    _, shots, _, _, _ = panel.optimiser_plots.drawing.stages[0]
+    assert list(shots.yData) == [3.0, 7.0]

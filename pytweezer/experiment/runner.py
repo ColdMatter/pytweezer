@@ -65,6 +65,7 @@ def open_writer(
         experiment.simulated_devices = SimulatedDevices()
     from_saved = experiment.resolve_saved_arguments(axis.argument for axis in scan.axes)
     points = experiment.planned_points(scan)
+    optimiser = experiment_cls.schema().get("optimiser")
     writer = MeasurementWriter(
         path,
         header={
@@ -73,6 +74,7 @@ def open_writer(
             **git_provenance(),
             "simulated": simulate,
             "analyses": json.dumps(list(experiment_cls.analyses)),
+            **({"optimiser": json.dumps(optimiser)} if optimiser else {}),
             "saved_arguments": json.dumps(from_saved),
             **header,
         },

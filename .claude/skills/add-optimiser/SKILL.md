@@ -116,8 +116,12 @@ fit view draws the results `calibration_image` and `roi_sites`
   mixin's own arguments (group `SEARCH`) first, starts from the last run's
   arguments, and saves presets as recipes. A running optimiser is plotted from
   the feed's published points; a finished one from its file. **Terminate**
-  under the plots stops the running or paused run after its current point. `analyses` is
-  `()`: optimiser runs are not analysed in the Results tab.
+  under the plots stops the running or paused run after its current point. The
+  plots are `OptimiserPlots` (`GUI/views/optimiser_plots.py`), which the Results
+  tab also shows, as its default "Optimisation" analysis, for any file recording
+  the root attr `optimiser` (the schema's `optimiser` part, written by the
+  runner); older files fall back to the Optimisers tab's catalogue. `analyses`
+  is `()`.
 - Only a `completed` or `terminated` run can be accepted (a terminated staged
   scan proposes the stages it finished). **Accept** saves the ticked values
   with reason `accepted from run <rid>` and that `rid`, all or none; the log

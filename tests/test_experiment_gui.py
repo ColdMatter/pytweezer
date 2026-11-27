@@ -1769,7 +1769,7 @@ def test_accept_creates_missing_keys_with_the_optimisers_units_and_group(qapp):
 
 def test_a_fit_run_shows_its_image_with_a_square_at_each_site(qapp):
     panel = make_fit_panel()
-    image, squares = panel._plots.image, panel._plots.squares
+    image, squares = panel.plots.drawing.image, panel.plots.drawing.squares
     assert image.image.shape == (40, 40)
     centres = sorted((point.pos().y(), point.pos().x()) for point in squares.points())
     assert centres == sorted(map(tuple, FIT_SITES))
@@ -1777,7 +1777,7 @@ def test_a_fit_run_shows_its_image_with_a_square_at_each_site(qapp):
 
 
 def test_a_live_fit_run_plots_nothing_until_its_file_is_read(qapp):
-    from pytweezer.GUI.optimisers import _FitPlots, live_results
+    from pytweezer.GUI.views.optimiser_plots import _FitPlots, live_results
 
     plots = _FitPlots((42, "fit"), FIT)
     live = live_results(
@@ -1999,7 +1999,7 @@ def test_the_evaluations_plot_follows_the_goal(qapp, goal, best_so_far):
         {run_file(40, "DemoBayesian"): bayesian_measurement()},
     )
     panel.select(DEMO, "DemoBayesian")
-    plot = panel.plots_layout.itemAt(0).widget()
+    plot = panel.plots.grid.itemAt(0).widget()
     _, best = plot.getPlotItem().listDataItems()
     assert list(best.yData) == best_so_far
 
@@ -2089,14 +2089,14 @@ def test_a_running_optimiser_is_plotted_point_by_point(qapp):
     ]
     panel.feed.queue_changed.emit({"running": [running], "queue": [], "history": []})
     panel.select(DEMO, "DemoBayesian")
-    progress = panel.plots_layout.itemAt(0).widget()
+    progress = panel.plots.grid.itemAt(0).widget()
     shots, best = progress.getPlotItem().listDataItems()
     assert list(shots.yData) == [300.0, 900.0]
 
     point = {"rid": 70, **live_point(2, 600.0, 2.0, 0.8)}
     panel.feed.rows[70].append(point)
     panel.feed.point_received.emit(point)
-    assert panel.plots_layout.itemAt(0).widget() is progress
+    assert panel.plots.grid.itemAt(0).widget() is progress
     assert list(shots.yData) == [300.0, 900.0, 600.0]
     assert list(best.yData) == [300.0, 900.0, 900.0]
     assert panel.accept_rows == {}
